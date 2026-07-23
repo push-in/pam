@@ -24,7 +24,10 @@ jobs:
         run: |
           sudo add-apt-repository -y ppa:ondrej/php
           sudo apt-get update
-          sudo apt-get install -y libphp8.4-embed php8.4-dev
+          sudo apt-get install -y \
+            libphp8.4-embed php8.4-dev php8.4-bcmath php8.4-curl php8.4-gd \
+            php8.4-intl php8.4-mbstring php8.4-mysql php8.4-pgsql \
+            php8.4-sqlite3 php8.4-xml php8.4-zip
       - uses: Swatinem/rust-cache@v2
       - name: Validate locked Composer dependencies
         run: |
@@ -57,6 +60,20 @@ jobs:
           ./target/debug/pam test compat/composer-smoke --pest
       - name: Build release binary
         run: cargo build --locked --release
+      - name: Smoke test isolated runtime bundle
+        run: |
+          runtime_dist=$(mktemp -d)
+          trap 'rm -rf -- "$runtime_dist"' EXIT
+          ./scripts/package-runtime.sh \
+            target/release/pam ci linux-x86_64 "$runtime_dist"
+          "$runtime_dist/pam-ci-linux-x86_64/bin/pam-run" -r '
+          foreach (["curl", "intl", "mbstring", "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "sockets", "xml", "zip"] as $extension) {
+              if (!extension_loaded($extension)) {
+                  fwrite(STDERR, "Missing bundled extension: {$extension}\n");
+                  exit(1);
+              }
+          }
+          '
       - uses: actions/upload-artifact@v4
         with:
           name: pam-linux-x86_64

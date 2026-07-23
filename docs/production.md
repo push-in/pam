@@ -3,8 +3,9 @@
 ## Instalação do runtime
 
 Hosts que usam uma release oficial não instalam PHP, Composer, Rust ou headers.
-O artefato contém o binário PAM e a `libphp` privada exata usada no build. Para
-uma instalação de sistema:
+O artefato contém o binário PAM, a `libphp` privada exata, extensões comuns e uma
+árvore INI isolada. O host não precisa ter PHP configurado em `/etc/php`. Para uma
+instalação de sistema:
 
 ```bash
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
@@ -17,8 +18,10 @@ pam doctor .
 ```
 
 O instalador detecta x86_64/ARM64, valida SHA-256, rejeita caminhos e symlinks
-inesperados no arquivo e mantém cada versão em um diretório próprio. Somente quem
-compila o PAM a partir do código-fonte precisa do SDK PHP Embed.
+inesperados no arquivo e mantém cada versão em um diretório próprio. O launcher
+define `LD_LIBRARY_PATH`, `PHPRC`, `PHP_INI_SCAN_DIR` e o diretório privado de
+extensões antes de iniciar o runtime. Somente quem compila o PAM a partir do
+código-fonte precisa do SDK PHP Embed.
 
 ## Inicialização
 

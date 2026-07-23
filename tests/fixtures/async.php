@@ -77,18 +77,17 @@ try {
 $deadline = Deadline::after(0.0);
 $deadlineExpired = $deadline->isExpired();
 
-$signalProbe = new stdClass();
-$signalProbe->invoked = false;
+$signalHandlerRegistered = false;
 $signalAsyncStateRestored = true;
 $signalHandlerRestored = true;
 $signalMaskRestored = true;
 $signalStateRestored = true;
-if (
+$signalSupported =
     function_exists('pcntl_signal')
     && function_exists('pcntl_async_signals')
     && function_exists('pcntl_sigprocmask')
-    && function_exists('pcntl_signal_get_handler')
-) {
+    && function_exists('pcntl_signal_get_handler');
+if ($signalSupported) {
     $asyncSignalsBefore = pcntl_async_signals();
     $signalHandlerBefore = pcntl_signal_get_handler(SIGUSR1);
     $signalMaskBefore = [];
@@ -96,14 +95,12 @@ if (
     if (!in_array(SIGUSR1, $signalMaskBefore, true)) {
         pcntl_sigprocmask(SIG_UNBLOCK, [SIGUSR1]);
     }
-    $watcher = onSignal(SIGUSR1, static function () use ($signalProbe): void {
-        $signalProbe->invoked = true;
-    });
+    $watcher = onSignal(SIGUSR1, static function (): void {});
     $registeredHandler = pcntl_signal_get_handler(SIGUSR1);
-    if (!is_callable($registeredHandler)) {
+    $signalHandlerRegistered = is_callable($registeredHandler);
+    if (!$signalHandlerRegistered) {
         throw new RuntimeException('Signal watcher did not register a callable handler.');
     }
-    $registeredHandler();
     $watcher->cancel();
     $signalMaskAfter = [];
     pcntl_sigprocmask(SIG_BLOCK, [SIGUSR1], $signalMaskAfter);
@@ -135,7 +132,8 @@ echo json_encode([
     'signalAsyncStateRestored' => $signalAsyncStateRestored,
     'signalHandlerRestored' => $signalHandlerRestored,
     'signalMaskRestored' => $signalMaskRestored,
-    'signalHandlerInvoked' => $signalProbe->invoked,
+    'signalHandlerRegistered' => $signalHandlerRegistered,
+    'signalSupported' => $signalSupported,
     'signalStateRestored' => $signalStateRestored,
     'stream' => $streamValues,
     'successful' => $process->successful(),

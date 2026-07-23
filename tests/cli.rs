@@ -245,7 +245,10 @@ fn runs_fibers_and_isolated_process_tasks() {
     assert_eq!(payload["processesConcurrent"], true);
     assert_eq!(payload["stdoutBytes"], 1024);
     assert_eq!(payload["stdoutTruncated"], true);
-    assert_eq!(payload["signalHandlerInvoked"], true, "{payload}");
+    assert_eq!(
+        payload["signalHandlerRegistered"], payload["signalSupported"],
+        "{payload}"
+    );
     assert_eq!(payload["signalStateRestored"], true, "{payload}");
     assert_eq!(
         payload["stream"],

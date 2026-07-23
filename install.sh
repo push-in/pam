@@ -50,7 +50,7 @@ EOF
         ;;
 esac
 
-for command_name in curl tar sha256sum mktemp uname awk find grep sed head; do
+for command_name in curl tar sha256sum mktemp uname awk find grep sed head readlink; do
     require_command "${command_name}"
 done
 
@@ -128,7 +128,7 @@ release_directory="${install_root}/${requested_version}-${release_target}"
 
 mkdir -p "${install_root}" "${binary_directory}"
 if test -e "${release_directory}"; then
-    test -x "${release_directory}/bin/pam" ||
+    test -x "${release_directory}/bin/pam-run" ||
         fail "existing installation is incomplete: ${release_directory}"
 else
     mv "${temporary_directory}/${archive_root}" "${release_directory}"
@@ -138,7 +138,7 @@ binary_link="${binary_directory}/pam"
 if test -e "${binary_link}" && test ! -L "${binary_link}"; then
     fail "refusing to replace a non-symlink: ${binary_link}"
 fi
-ln -sfn "${release_directory}/bin/pam" "${binary_link}"
+ln -sfn "${release_directory}/bin/pam-run" "${binary_link}"
 
 "${binary_link}" --version
 printf 'PAM installed at %s\n' "${release_directory}"

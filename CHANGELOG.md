@@ -5,6 +5,9 @@ after the first stable release.
 
 ## Unreleased
 
+- Official Linux archives now ship an isolated PHP Embed runtime, curated common
+  extensions and private INI configuration; installed users do not need system
+  PHP, Composer or Rust.
 - Added validated, least-privilege Composer package releases from the monorepo to
   six read-only distribution mirrors, with isolated histories and immutable tags.
 - Added a rootless, checksum-verifying installer for release bundles that include

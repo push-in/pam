@@ -83,13 +83,18 @@ pam --version
 pam doctor .
 ```
 
-The release contains the PAM binary and its exact private PHP Embed library. End
-users do **not** install PHP, Composer, Rust, `php-config`, development headers or
-an FPM service. The installer verifies the release SHA-256, rejects unsafe archive
-paths and installs without root under `~/.local`.
+The release contains the PAM binary, its exact private PHP Embed library, a
+reviewed set of common PHP extensions, and an isolated INI tree. End users do
+**not** install PHP, Composer, Rust, `php-config`, development headers or an FPM
+service. The installer verifies the release SHA-256, rejects unsafe archive paths
+and installs without root under `~/.local`.
 
 Composer is downloaded and signature-verified inside PAM's Embed SAPI only when a
 project first needs it.
+
+PAM never reads the host PHP configuration for an official release. Extra
+extension configuration can be added explicitly with `PAM_PHP_INI_SCAN_DIR`;
+there is no accidental dependency on `/etc/php`.
 
 <details>
 <summary>Building PAM itself from source</summary>
