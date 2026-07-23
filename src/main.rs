@@ -8,6 +8,7 @@ mod cluster;
 mod commands;
 mod composer;
 mod control_plane;
+mod desktop;
 mod dev;
 mod doctor;
 mod php;
@@ -115,6 +116,10 @@ fn run() -> Result<u8, CliError> {
         let target = raw_args.next().unwrap_or_else(|| OsString::from("."));
         let target = resolve_target(&target)?;
         return doctor::run(&executable, &target).map_err(CliError::Doctor);
+    }
+
+    if script_arg == "desktop" {
+        return desktop::run(&executable, raw_args).map_err(CliError::Commands);
     }
 
     if script_arg == "start" {
@@ -244,7 +249,9 @@ fn run() -> Result<u8, CliError> {
                 }
                 "--template" => {
                     let value = raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--template requires raw, api, or laravel".to_owned())
+                        CliError::Commands(
+                            "--template requires raw, api, laravel, or desktop".to_owned(),
+                        )
                     })?;
                     template = Some(
                         commands::InitTemplate::parse(&value.to_string_lossy())
@@ -426,13 +433,13 @@ fn benchmark_options(
 fn print_usage(executable: &OsStr) {
     let executable = executable.to_string_lossy();
     eprintln!(
-        "Usage: {executable} <script.php> [arguments...]\n       {executable} -r <code> [arguments...]\n       {executable} dev [script.php] [arguments...]\n       {executable} start [script.php] [--workers N] [--max-requests N] [--admin-address IP:PORT]\n       {executable} artisan [arguments...]\n       {executable} exec <script.php> [arguments...]\n       {executable} composer [arguments...]\n       {executable} test [path] [--pest|--phpunit] [arguments...]\n       {executable} routes [index.php]\n       {executable} inspect [index.php]\n       {executable} diagnostics|heap|fibers|connections|profile|trace [index.php]\n       {executable} top [http://127.0.0.1:3010] [--iterations N] [--interval-ms N]\n       {executable} benchmark <http://url> [--requests N] [--concurrency N]\n       {executable} doctor [path]\n       {executable} init [directory] [--template raw|api|laravel] [--socket] [--no-install]\n       {executable} build [directory] [--entry index.php] [--output dist]\n       {executable} --help\n       {executable} --version"
+        "Usage: {executable} <script.php> [arguments...]\n       {executable} -r <code> [arguments...]\n       {executable} dev [script.php] [arguments...]\n       {executable} start [script.php] [--workers N] [--max-requests N] [--admin-address IP:PORT]\n       {executable} artisan [arguments...]\n       {executable} exec <script.php> [arguments...]\n       {executable} composer [arguments...]\n       {executable} test [path] [--pest|--phpunit] [arguments...]\n       {executable} routes [index.php]\n       {executable} inspect [index.php]\n       {executable} diagnostics|heap|fibers|connections|profile|trace [index.php]\n       {executable} top [http://127.0.0.1:3010] [--iterations N] [--interval-ms N]\n       {executable} benchmark <http://url> [--requests N] [--concurrency N]\n       {executable} doctor [path]\n       {executable} desktop <dev|doctor> [path]\n       {executable} init [directory] [--template raw|api|laravel|desktop] [--socket] [--no-install]\n       {executable} build [directory] [--entry index.php] [--output dist]\n       {executable} --help\n       {executable} --version"
     );
 }
 
 fn print_init_usage(executable: &OsStr) {
     eprintln!(
-        "Usage: {} init [directory] [options]\n\nOptions:\n  --template raw|api|laravel  Select a non-interactive preset\n  --socket                    Add Pam Socket support\n  --no-install                Generate files without installing dependencies\n  --no-interaction            Use the API preset when no template is supplied\n\nWithout --template, Pam displays an interactive preset picker in a terminal.",
+        "Usage: {} init [directory] [options]\n\nOptions:\n  --template raw|api|laravel|desktop  Select a non-interactive preset\n  --socket                            Add Pam Socket support\n  --no-install                        Generate files without installing dependencies\n  --no-interaction                    Use the API preset when no template is supplied\n\nWithout --template, Pam displays an interactive preset picker in a terminal.",
         executable.to_string_lossy()
     );
 }

@@ -140,6 +140,7 @@ pub enum InitTemplate {
     Raw,
     Api,
     Laravel,
+    Desktop,
 }
 
 impl InitTemplate {
@@ -148,8 +149,9 @@ impl InitTemplate {
             "raw" | "pure" => Ok(Self::Raw),
             "api" => Ok(Self::Api),
             "laravel" => Ok(Self::Laravel),
+            "desktop" => Ok(Self::Desktop),
             _ => Err(format!(
-                "unknown init template {value:?}; expected raw, api, or laravel"
+                "unknown init template {value:?}; expected raw, api, laravel, or desktop"
             )),
         }
     }
@@ -173,6 +175,12 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     options.template = Some(template);
     options.socket = socket;
 
+    if template == InitTemplate::Desktop && socket {
+        return Err(
+            "the desktop preset does not use --socket; it exposes its own native event system"
+                .to_owned(),
+        );
+    }
     if template == InitTemplate::Laravel {
         return init_laravel(executable, &options);
     }
@@ -191,6 +199,8 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
         .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
     if template == InitTemplate::Raw {
         init_raw(directory, socket)?;
+    } else if template == InitTemplate::Desktop {
+        init_desktop(directory)?;
     } else {
         init_api(directory, socket)?;
     }
@@ -472,6 +482,7 @@ fn choose_template(
     println!("  3) Pam API + Socket");
     println!("  4) Laravel on Pam");
     println!("  5) Laravel on Pam + Socket");
+    println!("  6) Pam Desktop · Servo + PHP");
     print!("\nChoose a preset [2]: ");
     std::io::stdout()
         .flush()
@@ -486,6 +497,7 @@ fn choose_template(
         "3" => Ok((InitTemplate::Api, true)),
         "4" => Ok((InitTemplate::Laravel, false)),
         "5" => Ok((InitTemplate::Laravel, true)),
+        "6" => Ok((InitTemplate::Desktop, false)),
         value => Err(format!("invalid init preset {value:?}")),
     }
 }
@@ -635,6 +647,1697 @@ final class ApplicationTest extends TestCase
 }
 "#,
     )?;
+    Ok(())
+}
+
+fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
+    write_new(
+        &directory.join("resources/inspector.html"),
+        r##"<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#071018">
+    <title>Pam Desktop · Runtime Inspector</title>
+    <link rel="stylesheet" href="/inspector.css">
+    <script src="/_pam/bridge.js" defer></script>
+    <script src="/inspector.js" defer></script>
+</head>
+<body>
+    <main>
+        <header>
+            <div class="identity">
+                <svg viewBox="0 0 32 32" aria-hidden="true">
+                    <path d="M7 23V9h8.1c4.2 0 6.9 2.2 6.9 5.8 0 3.7-2.7 5.9-6.9 5.9h-3.4V23H7Z"/>
+                    <path class="spark" d="m23.8 7.4.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>
+                </svg>
+                <div>
+                    <span>janela secundária</span>
+                    <h1>Runtime Inspector</h1>
+                </div>
+            </div>
+            <button id="hide-button" type="button" aria-label="Ocultar Runtime Inspector">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="m7 7 10 10M17 7 7 17"/>
+                </svg>
+            </button>
+        </header>
+
+        <section class="summary" aria-labelledby="summary-title">
+            <div>
+                <span class="eyebrow">PAM DESKTOP 0.2</span>
+                <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
+            </div>
+            <span class="online"><i aria-hidden="true"></i> worker online</span>
+        </section>
+
+        <section class="metrics" aria-label="Estado da runtime">
+            <article>
+                <span>window id</span>
+                <strong id="window-id">—</strong>
+                <small>isolamento por contexto</small>
+            </article>
+            <article>
+                <span>protocol</span>
+                <strong>IPC v2</strong>
+                <small>contrato tipado</small>
+            </article>
+            <article>
+                <span>renderer</span>
+                <strong>Servo</strong>
+                <small>host Rust nativo</small>
+            </article>
+        </section>
+
+        <section class="event-log" aria-labelledby="events-title">
+            <div class="section-heading">
+                <div>
+                    <span>STREAM</span>
+                    <h2 id="events-title">Eventos da aplicação</h2>
+                </div>
+                <span class="live"><i aria-hidden="true"></i> live</span>
+            </div>
+            <ol id="event-list" aria-live="polite">
+                <li>
+                    <time>agora</time>
+                    <span>inspector.ready</span>
+                    <small>aguardando eventos do PHP</small>
+                </li>
+            </ol>
+        </section>
+    </main>
+</body>
+</html>
+"##,
+    )?;
+    write_new(
+        &directory.join("resources/inspector.css"),
+        r#":root {
+    --ink: #071018;
+    --surface: #0d1b27;
+    --surface-raised: #132737;
+    --text: #f3f7f8;
+    --text-soft: #9fb3be;
+    --text-faint: #718792;
+    --violet: #a69aff;
+    --cyan: #68ded2;
+    --coral: #ff9279;
+    --line: rgba(176, 209, 220, 0.14);
+    --line-strong: rgba(176, 209, 220, 0.26);
+    color: var(--text);
+    background: var(--ink);
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    min-width: 320px;
+    min-height: 100%;
+    background: var(--ink);
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    background:
+        radial-gradient(circle at 78% 10%, rgba(166, 154, 255, 0.13), transparent 24rem),
+        linear-gradient(rgba(104, 222, 210, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(104, 222, 210, 0.025) 1px, transparent 1px),
+        var(--ink);
+    background-size: auto, 36px 36px, 36px 36px, auto;
+}
+
+button {
+    font: inherit;
+    -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+    outline: 3px solid var(--cyan);
+    outline-offset: 4px;
+}
+
+main {
+    width: min(100%, 760px);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 0 clamp(20px, 5vw, 48px) 40px;
+}
+
+header {
+    min-height: 82px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+}
+
+.identity {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.identity svg {
+    width: 32px;
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2;
+    stroke-linejoin: round;
+}
+
+.identity .spark {
+    stroke: var(--cyan);
+    stroke-width: 1.5;
+}
+
+.identity span,
+.eyebrow,
+.section-heading span,
+.metrics span {
+    color: var(--text-faint);
+    font: 600 10px/1.3 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.identity h1 {
+    margin: 3px 0 0;
+    font-size: 16px;
+    letter-spacing: -0.02em;
+}
+
+header button {
+    width: 44px;
+    height: 44px;
+    display: grid;
+    place-items: center;
+    color: var(--text-soft);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(13, 27, 39, 0.7);
+    cursor: pointer;
+    transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
+}
+
+header button:hover {
+    color: var(--text);
+    border-color: var(--line-strong);
+    background: var(--surface-raised);
+}
+
+header button svg {
+    width: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-width: 1.8;
+}
+
+.summary {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 24px;
+    padding: 42px 0 30px;
+}
+
+.summary h2 {
+    margin: 10px 0 0;
+    font-size: clamp(34px, 7vw, 54px);
+    font-weight: 650;
+    line-height: 0.98;
+    letter-spacing: -0.055em;
+}
+
+.summary h2 strong {
+    color: var(--violet);
+    font-weight: inherit;
+}
+
+.online,
+.live {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.online {
+    min-height: 38px;
+    padding: 0 12px;
+    color: var(--cyan);
+    border: 1px solid rgba(104, 222, 210, 0.2);
+    border-radius: 999px;
+    background: rgba(104, 222, 210, 0.06);
+    font: 600 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.online i,
+.live i {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 12px rgba(104, 222, 210, 0.8);
+}
+
+.metrics {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    overflow: hidden;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(13, 27, 39, 0.74);
+}
+
+.metrics article {
+    min-width: 0;
+    padding: 20px;
+}
+
+.metrics article + article {
+    border-left: 1px solid var(--line);
+}
+
+.metrics strong,
+.metrics small {
+    display: block;
+}
+
+.metrics strong {
+    margin-top: 11px;
+    overflow: hidden;
+    font-size: 18px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.metrics small {
+    margin-top: 5px;
+    color: var(--text-faint);
+    font-size: 11px;
+}
+
+.event-log {
+    margin-top: 20px;
+    padding: 22px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(13, 27, 39, 0.58);
+}
+
+.section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.section-heading h2 {
+    margin: 5px 0 0;
+    font-size: 17px;
+}
+
+.section-heading .live {
+    color: var(--cyan);
+}
+
+ol {
+    margin: 20px 0 0;
+    padding: 0;
+    list-style: none;
+}
+
+li {
+    display: grid;
+    grid-template-columns: 54px minmax(0, 1fr);
+    gap: 4px 12px;
+    padding: 13px 0;
+    border-top: 1px solid var(--line);
+}
+
+li time {
+    grid-row: span 2;
+    color: var(--text-faint);
+    font: 500 10px/1.5 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+li span {
+    color: var(--text);
+    font: 600 12px/1.3 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+li small {
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+@media (max-width: 560px) {
+    .summary {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .metrics {
+        grid-template-columns: 1fr;
+    }
+
+    .metrics article + article {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+"#,
+    )?;
+    write_new(
+        &directory.join("resources/inspector.js"),
+        r##"(() => {
+    "use strict";
+
+    const list = document.querySelector("#event-list");
+    const hideButton = document.querySelector("#hide-button");
+    const windowId = document.querySelector("#window-id");
+
+    const appendEvent = (name, detail) => {
+        const item = document.createElement("li");
+        const time = document.createElement("time");
+        const title = document.createElement("span");
+        const description = document.createElement("small");
+
+        time.textContent = new Intl.DateTimeFormat("pt-BR", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+        }).format(new Date());
+        title.textContent = name;
+        description.textContent = detail;
+        item.append(time, title, description);
+        list.prepend(item);
+
+        while (list.children.length > 5) {
+            list.lastElementChild.remove();
+        }
+    };
+
+    if (!window.pam) {
+        appendEvent("bridge.error", "A bridge Pam não foi carregada.");
+        hideButton.disabled = true;
+        return;
+    }
+
+    windowId.textContent = window.pam.windowId;
+    window.pam.on("runtime.ready", ({ protocol }) => {
+        appendEvent("runtime.ready", `IPC v${protocol} conectado`);
+    });
+    window.pam.on("pam.dev.reloaded", ({ kind }) => {
+        appendEvent("pam.dev.reloaded", kind === 1 ? "assets" : "worker PHP");
+    });
+    window.pam.on("pam.dev.error", ({ message }) => {
+        appendEvent("pam.dev.error", message);
+    });
+
+    hideButton.addEventListener("click", async () => {
+        hideButton.disabled = true;
+        try {
+            await window.pam.invoke("inspector.hide", null, { timeout: 3_000 });
+        } catch (error) {
+            appendEvent(
+                "inspector.hide.failed",
+                error instanceof Error ? error.message : "Falha desconhecida",
+            );
+            hideButton.disabled = false;
+        }
+    });
+
+    void window.pam.emit("client.ready", {
+        loadedAt: new Date().toISOString(),
+    }, { timeout: 2_000 }).catch((error) => {
+        appendEvent(
+            "client.ready.failed",
+            error instanceof Error ? error.message : "Falha desconhecida",
+        );
+    });
+})();
+"##,
+    )?;
+    Ok(())
+}
+
+fn init_desktop(directory: &Path) -> Result<(), String> {
+    let mut manifest = serde_json::json!({
+        "name": "app/pam-desktop-project",
+        "description": "A PHP-first desktop application powered by Pam, Rust, and Servo.",
+        "type": "project",
+        "license": "proprietary",
+        "require": {
+            "php": "^8.4",
+            "pam/desktop": "^0.2"
+        },
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/"
+            }
+        },
+        "config": {
+            "platform-check": true,
+            "sort-packages": true
+        },
+        "scripts": {
+            "desktop:dev": "pam desktop dev .",
+            "desktop:doctor": "pam desktop doctor ."
+        }
+    });
+    if let Some(repository) = local_desktop_repository() {
+        manifest["repositories"] = serde_json::json!([repository]);
+    }
+    write_new(
+        &directory.join("composer.json"),
+        &(serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
+            + "\n"),
+    )?;
+    write_new(
+        &directory.join("app.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+use Pam\Desktop\Application;
+use Pam\Desktop\ClientEvent;
+use Pam\Desktop\CommandContext;
+use Pam\Desktop\CommandResult;
+use Pam\Desktop\EventContext;
+use Pam\Desktop\Window;
+use Pam\Desktop\WindowEffect;
+use Pam\Desktop\WindowTheme;
+
+require __DIR__.'/vendor/autoload.php';
+
+$app = Application::create(
+    window: Window::create('Pam Desktop · Hello')
+        ->size(1120, 720)
+        ->minimumSize(720, 520)
+        ->theme(WindowTheme::Dark),
+)
+    ->window(
+        'inspector',
+        Window::create('Pam Desktop · Runtime Inspector')
+            ->entry('resources/inspector.html')
+            ->minimumSize(480, 360)
+            ->size(680, 520)
+            ->visible(false)
+            ->theme(WindowTheme::Dark),
+    )
+    ->commandTimeout(10_000);
+
+$app->command('greet', static function (CommandContext $command): CommandResult {
+    $name = trim((string) $command->string('name', 'mundo'));
+    $name = $name !== '' ? mb_substr($name, 0, 40) : 'mundo';
+
+    return CommandResult::success([
+        'message' => "Olá, {$name}.",
+        'detail' => 'Esta resposta saiu do PHP, atravessou o host Rust e chegou ao Servo.',
+    ])
+        ->effect(WindowEffect::title("Pam Desktop · {$name}", $command->windowId))
+        ->event(new ClientEvent(
+            name: 'hello.completed',
+            payload: ['name' => $name],
+            windowId: $command->windowId,
+        ));
+});
+
+$app->command('inspector.open', static fn (CommandContext $command): CommandResult =>
+    CommandResult::success(['windowId' => 'inspector'])
+        ->effect(WindowEffect::visible(true, 'inspector'))
+        ->effect(WindowEffect::focus('inspector'))
+        ->event(new ClientEvent(
+            name: 'inspector.opened',
+            payload: ['sourceWindowId' => $command->windowId],
+            windowId: $command->windowId,
+        )));
+
+$app->command('inspector.hide', static fn (): CommandResult =>
+    CommandResult::success()
+        ->effect(WindowEffect::visible(false, 'inspector')));
+
+$app->on('client.ready', static fn (EventContext $event): CommandResult =>
+    CommandResult::success()
+        ->event(new ClientEvent(
+            name: 'runtime.ready',
+            payload: ['windowId' => $event->windowId, 'protocol' => 2],
+            windowId: $event->windowId,
+        )));
+
+$app->run();
+"#,
+    )?;
+    write_new(
+        &directory.join(".gitignore"),
+        "/vendor/\n/.pam/\n/target/\n",
+    )?;
+    fs::create_dir_all(directory.join("resources"))
+        .map_err(|error| format!("cannot create desktop resources: {error}"))?;
+    write_new(
+        &directory.join("resources/index.html"),
+        r##"<!doctype html>
+<html lang="pt-BR">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#071018">
+    <title>Pam Desktop · Hello</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/_pam/bridge.js" defer></script>
+    <script src="/app.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
+
+    <div class="app-shell">
+        <header class="topbar" aria-label="Barra da aplicação">
+            <a class="brand" href="/" aria-label="Pam Desktop, início">
+                <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+                    <path d="M7 23V9h8.1c4.2 0 6.9 2.2 6.9 5.8 0 3.7-2.7 5.9-6.9 5.9h-3.4V23H7Z"/>
+                    <path class="brand-spark" d="m23.8 7.4.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>
+                </svg>
+                <span>Pam <strong>Desktop</strong></span>
+            </a>
+
+            <div class="runtime-status" aria-label="Estado da runtime">
+                <span class="status-pulse" aria-hidden="true"></span>
+                <span>runtime online</span>
+                <kbd>0.2</kbd>
+            </div>
+        </header>
+
+        <main id="main-content">
+            <section class="hero" aria-labelledby="hero-title">
+                <div class="hero-copy">
+                    <p class="eyebrow">
+                        <span>PHP</span>
+                        <svg viewBox="0 0 20 10" aria-hidden="true">
+                            <path d="M1 5h16M13 1l4 4-4 4"/>
+                        </svg>
+                        <span>Rust</span>
+                        <svg viewBox="0 0 20 10" aria-hidden="true">
+                            <path d="M1 5h16M13 1l4 4-4 4"/>
+                        </svg>
+                        <span>Servo</span>
+                    </p>
+
+                    <h1 id="hero-title">
+                        PHP na direção.<br>
+                        <span>Rust no ritmo.</span><br>
+                        Servo na tela.
+                    </h1>
+
+                    <p class="hero-description">
+                        Uma aplicação desktop de verdade, com sua lógica em PHP,
+                        isolamento por processo e uma engine web inteira escrita para o futuro.
+                    </p>
+
+                    <form class="hello-form" id="hello-form">
+                        <div class="field">
+                            <label for="name">Como devemos te chamar?</label>
+                            <div class="input-wrap">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <circle cx="12" cy="8" r="4"/>
+                                    <path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6"/>
+                                </svg>
+                                <input
+                                    id="name"
+                                    name="name"
+                                    maxlength="40"
+                                    autocomplete="name"
+                                    placeholder="Seu nome"
+                                    value="David"
+                                >
+                            </div>
+                        </div>
+                        <button id="hello-button" type="submit">
+                            <span>Conversar com o PHP</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 12h13M14 7l5 5-5 5"/>
+                            </svg>
+                        </button>
+                    </form>
+
+                    <div class="demo-actions">
+                        <button id="inspector-button" type="button">
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <rect x="4" y="5" width="16" height="14" rx="2"/>
+                                <path d="M8 9h8M8 13h5"/>
+                            </svg>
+                            <span>Abrir Runtime Inspector</span>
+                        </button>
+                        <span id="event-status" role="status" aria-live="polite">
+                            eventos conectando…
+                        </span>
+                    </div>
+
+                    <div class="response" id="response" role="status" aria-live="polite">
+                        <span class="response-label">aguardando comando</span>
+                        <p id="response-message">
+                            A primeira resposta da sua aplicação vai aparecer aqui.
+                        </p>
+                        <small id="response-detail">
+                            Nenhuma ponte global para Node. Apenas comandos explícitos.
+                        </small>
+                    </div>
+                </div>
+
+                <div class="runtime-visual" aria-label="Fluxo entre Servo, Rust e PHP">
+                    <div class="orbit orbit-outer" aria-hidden="true"></div>
+                    <div class="orbit orbit-middle" aria-hidden="true"></div>
+                    <div class="orbit orbit-inner" aria-hidden="true"></div>
+
+                    <div class="core">
+                        <svg viewBox="0 0 32 32" aria-hidden="true">
+                            <path d="M8 24V8h8.6c4.8 0 7.7 2.5 7.7 6.6 0 4.2-2.9 6.7-7.7 6.7h-3.7V24H8Z"/>
+                        </svg>
+                        <span>PAM</span>
+                    </div>
+
+                    <div class="runtime-node node-servo">
+                        <span class="node-index">01</span>
+                        <strong>Servo</strong>
+                        <small>render</small>
+                    </div>
+                    <div class="runtime-node node-rust">
+                        <span class="node-index">02</span>
+                        <strong>Rust</strong>
+                        <small>host</small>
+                    </div>
+                    <div class="runtime-node node-php">
+                        <span class="node-index">03</span>
+                        <strong>PHP</strong>
+                        <small>logic</small>
+                    </div>
+
+                    <div class="signal signal-a" aria-hidden="true"></div>
+                    <div class="signal signal-b" aria-hidden="true"></div>
+
+                    <aside class="security-note">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/>
+                            <path d="m9 12 2 2 4-4"/>
+                        </svg>
+                        <div>
+                            <strong>Bridge protegido</strong>
+                            <span>origin + token efêmero</span>
+                        </div>
+                    </aside>
+                </div>
+            </section>
+
+            <section class="runtime-strip" aria-label="Componentes da aplicação">
+                <article>
+                    <span>renderer</span>
+                    <strong>Servo 0.4</strong>
+                    <small>HTML, CSS e JavaScript</small>
+                </article>
+                <article>
+                    <span>orchestrator</span>
+                    <strong>Rust host</strong>
+                    <small>janela, IPC e segurança</small>
+                </article>
+                <article>
+                    <span>application</span>
+                    <strong>PHP 8.4</strong>
+                    <small>Composer e domínio</small>
+                </article>
+                <article>
+                    <span>contract</span>
+                    <strong>IPC v2</strong>
+                    <small>tipado e versionado</small>
+                </article>
+            </section>
+        </main>
+
+        <footer>
+            <span>Feito com Pam Desktop</span>
+            <span class="footer-command"><kbd>pam desktop dev .</kbd></span>
+        </footer>
+    </div>
+</body>
+</html>
+"##,
+    )?;
+    write_new(
+        &directory.join("resources/styles.css"),
+        r#":root {
+    --ink: #071018;
+    --ink-soft: #0a151f;
+    --surface: #0d1b27;
+    --surface-raised: #132737;
+    --text: #f3f7f8;
+    --text-soft: #9fb3be;
+    --text-faint: #718792;
+    --violet: #a69aff;
+    --cyan: #68ded2;
+    --coral: #ff9279;
+    --line: rgba(176, 209, 220, 0.14);
+    --line-strong: rgba(176, 209, 220, 0.26);
+    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
+    color: var(--text);
+    background: var(--ink);
+    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    font-synthesis: none;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html {
+    min-width: 320px;
+    min-height: 100%;
+    background: var(--ink);
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    overflow-x: hidden;
+    background:
+        radial-gradient(circle at 77% 39%, rgba(166, 154, 255, 0.11), transparent 28rem),
+        linear-gradient(rgba(104, 222, 210, 0.025) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(104, 222, 210, 0.025) 1px, transparent 1px),
+        var(--ink);
+    background-size: auto, 42px 42px, 42px 42px, auto;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+button,
+a {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.skip-link {
+    position: fixed;
+    z-index: 100;
+    top: 12px;
+    left: 12px;
+    padding: 10px 14px;
+    color: var(--ink);
+    background: var(--cyan);
+    border-radius: 8px;
+    transform: translateY(-160%);
+}
+
+.skip-link:focus {
+    transform: translateY(0);
+}
+
+:focus-visible {
+    outline: 3px solid var(--cyan);
+    outline-offset: 4px;
+}
+
+.app-shell {
+    width: min(100%, 1440px);
+    min-height: 100vh;
+    margin: 0 auto;
+    padding: 0 clamp(24px, 4vw, 64px);
+}
+
+.topbar {
+    height: 84px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--line);
+}
+
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 11px;
+    color: var(--text);
+    text-decoration: none;
+    letter-spacing: -0.02em;
+    font-size: 17px;
+}
+
+.brand strong {
+    font-weight: 650;
+}
+
+.brand-mark {
+    width: 30px;
+    height: 30px;
+    overflow: visible;
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2.1;
+    stroke-linejoin: round;
+}
+
+.brand-mark .brand-spark {
+    stroke: var(--cyan);
+    stroke-width: 1.45;
+}
+
+.runtime-status {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 8px 0 13px;
+    color: var(--text-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: rgba(13, 27, 39, 0.72);
+    font: 500 11px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.04em;
+}
+
+.runtime-status kbd {
+    padding: 7px 9px;
+    color: var(--cyan);
+    border: 1px solid rgba(104, 222, 210, 0.19);
+    border-radius: 999px;
+    background: rgba(104, 222, 210, 0.07);
+    font: inherit;
+}
+
+.status-pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 0 4px rgba(104, 222, 210, 0.1), 0 0 18px rgba(104, 222, 210, 0.8);
+}
+
+.hero {
+    min-height: calc(100vh - 208px);
+    display: grid;
+    grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
+    gap: clamp(48px, 7vw, 110px);
+    align-items: center;
+    padding: clamp(52px, 7vh, 94px) 0;
+}
+
+.hero-copy {
+    position: relative;
+    z-index: 3;
+}
+
+.eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 24px;
+    color: var(--cyan);
+    font: 600 11px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+}
+
+.eyebrow svg {
+    width: 20px;
+    fill: none;
+    stroke: var(--text-faint);
+    stroke-width: 1.2;
+}
+
+h1 {
+    max-width: 720px;
+    margin: 0;
+    color: var(--text);
+    font-size: clamp(46px, 6.1vw, 84px);
+    font-weight: 630;
+    line-height: 0.94;
+    letter-spacing: -0.065em;
+}
+
+h1 span {
+    color: transparent;
+    background: linear-gradient(105deg, var(--violet) 10%, #d7d1ff 54%, var(--cyan));
+    background-clip: text;
+}
+
+.hero-description {
+    max-width: 620px;
+    margin: 30px 0 0;
+    color: var(--text-soft);
+    font-size: 17px;
+    line-height: 1.65;
+}
+
+.hello-form {
+    max-width: 620px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: end;
+    margin-top: 34px;
+}
+
+.field label {
+    display: block;
+    margin: 0 0 9px 2px;
+    color: var(--text-soft);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.input-wrap {
+    height: 54px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: rgba(13, 27, 39, 0.8);
+    transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
+}
+
+.input-wrap:focus-within {
+    border-color: var(--violet);
+    background: var(--surface);
+    box-shadow: 0 0 0 4px rgba(166, 154, 255, 0.1);
+}
+
+.input-wrap svg {
+    width: 19px;
+    flex: 0 0 auto;
+    fill: none;
+    stroke: var(--text-faint);
+    stroke-width: 1.7;
+    stroke-linecap: round;
+}
+
+.input-wrap input {
+    min-width: 0;
+    width: 100%;
+    color: var(--text);
+    border: 0;
+    outline: 0;
+    background: transparent;
+    font-size: 15px;
+}
+
+.input-wrap input::placeholder {
+    color: var(--text-faint);
+}
+
+.hello-form button {
+    min-height: 54px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    padding: 0 20px;
+    color: #10131d;
+    border: 0;
+    border-radius: 12px;
+    background: linear-gradient(120deg, #c4bbff, var(--violet));
+    box-shadow: 0 12px 28px rgba(119, 101, 235, 0.23);
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 700;
+    transition: filter 180ms ease, transform 180ms ease, box-shadow 180ms ease;
+}
+
+.hello-form button:hover {
+    filter: brightness(1.08);
+    box-shadow: 0 16px 34px rgba(119, 101, 235, 0.32);
+    transform: translateY(-1px);
+}
+
+.hello-form button:active {
+    transform: translateY(0);
+}
+
+.hello-form button:disabled {
+    cursor: wait;
+    filter: saturate(0.5);
+    opacity: 0.72;
+    transform: none;
+}
+
+.hello-form button svg {
+    width: 19px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.demo-actions {
+    max-width: 620px;
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-top: 14px;
+}
+
+.demo-actions button {
+    min-height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    padding: 0 15px;
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+    border-radius: 10px;
+    background: rgba(19, 39, 55, 0.72);
+    cursor: pointer;
+    font-size: 12px;
+    font-weight: 650;
+    transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.demo-actions button:hover {
+    border-color: rgba(104, 222, 210, 0.56);
+    background: var(--surface-raised);
+    transform: translateY(-1px);
+}
+
+.demo-actions button:active {
+    transform: translateY(0);
+}
+
+.demo-actions button:disabled {
+    cursor: wait;
+    opacity: 0.6;
+    transform: none;
+}
+
+.demo-actions button svg {
+    width: 18px;
+    fill: none;
+    stroke: var(--cyan);
+    stroke-width: 1.7;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.demo-actions > span {
+    color: var(--text-faint);
+    font: 500 10px/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.response {
+    max-width: 620px;
+    min-height: 112px;
+    margin-top: 16px;
+    padding: 18px 20px;
+    border: 1px solid var(--line);
+    border-left: 2px solid var(--violet);
+    border-radius: 4px 12px 12px 4px;
+    background: rgba(13, 27, 39, 0.58);
+    box-shadow: inset 0 1px rgba(255, 255, 255, 0.02);
+}
+
+.response-label {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--violet);
+    font: 600 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+}
+
+.response p {
+    margin: 0;
+    color: var(--text);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.response small {
+    display: block;
+    margin-top: 5px;
+    color: var(--text-faint);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.response[data-state="success"] {
+    border-left-color: var(--cyan);
+}
+
+.response[data-state="success"] .response-label {
+    color: var(--cyan);
+}
+
+.response[data-state="error"] {
+    border-left-color: var(--coral);
+}
+
+.response[data-state="error"] .response-label {
+    color: var(--coral);
+}
+
+.runtime-visual {
+    position: relative;
+    width: min(100%, 520px);
+    aspect-ratio: 1;
+    justify-self: center;
+    isolation: isolate;
+}
+
+.runtime-visual::before {
+    content: "";
+    position: absolute;
+    inset: 15%;
+    z-index: -2;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(166, 154, 255, 0.13), transparent 66%);
+    filter: blur(18px);
+}
+
+.orbit {
+    position: absolute;
+    inset: 50%;
+    border: 1px solid var(--line);
+    border-radius: 50%;
+    transform: translate(-50%, -50%);
+}
+
+.orbit::before {
+    content: "";
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    top: -4px;
+    left: calc(50% - 4px);
+    border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 16px rgba(104, 222, 210, 0.9);
+}
+
+.orbit-outer {
+    width: 89%;
+    height: 89%;
+    border-style: dashed;
+    border-color: rgba(166, 154, 255, 0.22);
+    animation: orbit-spin 34s linear infinite;
+}
+
+.orbit-middle {
+    width: 66%;
+    height: 66%;
+    animation: orbit-spin 23s linear reverse infinite;
+}
+
+.orbit-inner {
+    width: 39%;
+    height: 39%;
+    border-color: rgba(104, 222, 210, 0.28);
+    animation: orbit-spin 14s linear infinite;
+}
+
+.core {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 112px;
+    height: 112px;
+    display: grid;
+    place-items: center;
+    border: 1px solid rgba(166, 154, 255, 0.32);
+    border-radius: 31px;
+    background: linear-gradient(145deg, rgba(28, 45, 62, 0.98), rgba(10, 21, 31, 0.98));
+    box-shadow:
+        0 22px 50px rgba(0, 0, 0, 0.4),
+        inset 0 1px rgba(255, 255, 255, 0.08),
+        0 0 60px rgba(166, 154, 255, 0.1);
+    transform: translate(-50%, -50%) rotate(-7deg);
+}
+
+.core svg {
+    width: 38px;
+    margin-top: 8px;
+    fill: none;
+    stroke: var(--text);
+    stroke-width: 2;
+    stroke-linejoin: round;
+}
+
+.core span {
+    margin-top: -20px;
+    color: var(--violet);
+    font: 700 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.18em;
+}
+
+.runtime-node {
+    position: absolute;
+    z-index: 2;
+    min-width: 112px;
+    padding: 12px 14px;
+    border: 1px solid var(--line-strong);
+    border-radius: 12px;
+    background: rgba(13, 27, 39, 0.94);
+    box-shadow: var(--shadow);
+}
+
+.runtime-node strong,
+.runtime-node small {
+    display: block;
+}
+
+.runtime-node strong {
+    color: var(--text);
+    font-size: 14px;
+}
+
+.runtime-node small {
+    margin-top: 4px;
+    color: var(--text-faint);
+    font: 500 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.node-index {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    color: var(--text-faint);
+    font: 500 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.node-servo {
+    top: 7%;
+    left: 9%;
+    border-top-color: var(--violet);
+}
+
+.node-rust {
+    top: 25%;
+    right: 0;
+    border-top-color: var(--coral);
+}
+
+.node-php {
+    right: 9%;
+    bottom: 8%;
+    border-top-color: var(--cyan);
+}
+
+.signal {
+    position: absolute;
+    z-index: 1;
+    width: 9px;
+    height: 9px;
+    border: 2px solid var(--cyan);
+    border-radius: 50%;
+    box-shadow: 0 0 14px rgba(104, 222, 210, 0.75);
+}
+
+.signal-a {
+    top: 18%;
+    right: 22%;
+}
+
+.signal-b {
+    bottom: 22%;
+    left: 16%;
+    border-color: var(--violet);
+}
+
+.security-note {
+    position: absolute;
+    bottom: 4%;
+    left: 1%;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 11px 13px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: rgba(7, 16, 24, 0.88);
+    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.3);
+}
+
+.security-note svg {
+    width: 23px;
+    fill: none;
+    stroke: var(--cyan);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.security-note strong,
+.security-note span {
+    display: block;
+}
+
+.security-note strong {
+    font-size: 11px;
+}
+
+.security-note span {
+    margin-top: 3px;
+    color: var(--text-faint);
+    font: 500 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.runtime-strip {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(10, 21, 31, 0.66);
+}
+
+.runtime-strip article {
+    min-width: 0;
+    padding: 18px 20px;
+}
+
+.runtime-strip article + article {
+    border-left: 1px solid var(--line);
+}
+
+.runtime-strip span,
+.runtime-strip strong,
+.runtime-strip small {
+    display: block;
+}
+
+.runtime-strip span {
+    color: var(--text-faint);
+    font: 600 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.runtime-strip strong {
+    margin-top: 9px;
+    color: var(--text);
+    font-size: 13px;
+}
+
+.runtime-strip small {
+    margin-top: 4px;
+    overflow: hidden;
+    color: var(--text-faint);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+footer {
+    min-height: 84px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--text-faint);
+    font-size: 11px;
+}
+
+footer kbd {
+    padding: 7px 10px;
+    color: var(--text-soft);
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--ink-soft);
+    font: 500 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+@keyframes orbit-spin {
+    to {
+        transform: translate(-50%, -50%) rotate(360deg);
+    }
+}
+
+@media (max-width: 980px) {
+    .hero {
+        grid-template-columns: 1fr;
+    }
+
+    .runtime-visual {
+        width: min(82vw, 520px);
+        grid-row: 1;
+    }
+
+    .runtime-strip {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .runtime-strip article:nth-child(3) {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+    }
+
+    .runtime-strip article:nth-child(4) {
+        border-top: 1px solid var(--line);
+    }
+}
+
+@media (max-height: 800px) and (min-width: 981px) {
+    .topbar {
+        height: 68px;
+    }
+
+    .hero {
+        min-height: auto;
+        padding: 30px 0 26px;
+    }
+
+    .eyebrow {
+        margin-bottom: 16px;
+    }
+
+    h1 {
+        font-size: clamp(44px, 5.3vw, 68px);
+    }
+
+    .hero-description {
+        margin-top: 20px;
+        font-size: 15px;
+        line-height: 1.5;
+    }
+
+    .hello-form {
+        margin-top: 20px;
+    }
+
+    .response {
+        min-height: 96px;
+        padding: 14px 18px;
+    }
+
+    footer {
+        min-height: 64px;
+    }
+}
+
+@media (max-width: 620px) {
+    .app-shell {
+        padding: 0 18px;
+    }
+
+    .topbar {
+        height: 72px;
+    }
+
+    .runtime-status > span:not(.status-pulse) {
+        display: none;
+    }
+
+    .hero {
+        gap: 40px;
+        padding: 42px 0;
+    }
+
+    h1 {
+        font-size: clamp(42px, 14vw, 62px);
+    }
+
+    .hello-form {
+        grid-template-columns: 1fr;
+    }
+
+    .demo-actions {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .runtime-visual {
+        width: min(96vw, 440px);
+    }
+
+    .runtime-node {
+        min-width: 96px;
+        padding: 10px 12px;
+    }
+
+    .security-note {
+        display: none;
+    }
+
+    .runtime-strip {
+        grid-template-columns: 1fr;
+    }
+
+    .runtime-strip article + article {
+        border-top: 1px solid var(--line);
+        border-left: 0;
+    }
+
+    footer {
+        align-items: flex-start;
+        flex-direction: column;
+        justify-content: center;
+        gap: 10px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+    }
+}
+"#,
+    )?;
+    write_new(
+        &directory.join("resources/app.js"),
+        r##"(() => {
+    "use strict";
+
+    const form = document.querySelector("#hello-form");
+    const name = document.querySelector("#name");
+    const button = document.querySelector("#hello-button");
+    const response = document.querySelector("#response");
+    const label = response.querySelector(".response-label");
+    const message = document.querySelector("#response-message");
+    const detail = document.querySelector("#response-detail");
+    const inspectorButton = document.querySelector("#inspector-button");
+    const eventStatus = document.querySelector("#event-status");
+
+    const setState = (state, title, body, supportingText) => {
+        response.dataset.state = state;
+        label.textContent = title;
+        message.textContent = body;
+        detail.textContent = supportingText;
+    };
+
+    if (!window.pam) {
+        setState(
+            "error",
+            "bridge indisponível",
+            "A bridge Pam não foi carregada.",
+            "Abra este projeto com `pam desktop dev .`.",
+        );
+        form.querySelectorAll("button, input").forEach((element) => {
+            element.disabled = true;
+        });
+        inspectorButton.disabled = true;
+        return;
+    }
+
+    window.pam.on("runtime.ready", ({ protocol }) => {
+        eventStatus.textContent = `eventos online · IPC v${protocol}`;
+    });
+    window.pam.on("hello.completed", ({ name: completedName }) => {
+        eventStatus.textContent = `hello.completed · ${completedName}`;
+    });
+    window.pam.on("inspector.opened", () => {
+        eventStatus.textContent = "janela inspector aberta";
+    });
+    window.pam.on("pam.dev.reloaded", ({ kind }) => {
+        eventStatus.textContent = kind === 1
+            ? "assets recarregados"
+            : "worker PHP reiniciado";
+    });
+    window.pam.on("pam.dev.error", ({ message: reloadError }) => {
+        eventStatus.textContent = `hot reload falhou · ${reloadError}`;
+    });
+
+    void window.pam.emit("client.ready", {
+        loadedAt: new Date().toISOString(),
+    }, { timeout: 2_000 }).catch((error) => {
+        eventStatus.textContent = error instanceof Error
+            ? error.message
+            : "eventos indisponíveis";
+    });
+
+    inspectorButton.addEventListener("click", async () => {
+        inspectorButton.disabled = true;
+        try {
+            await window.pam.invoke("inspector.open", null, { timeout: 3_000 });
+        } catch (error) {
+            setState(
+                "error",
+                "janela não abriu",
+                error instanceof Error ? error.message : "Não foi possível abrir o inspector.",
+                "O worker continua ativo; tente novamente.",
+            );
+        } finally {
+            inspectorButton.disabled = false;
+        }
+    });
+
+    form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+        setState(
+            "loading",
+            "executando no PHP",
+            "Enviando um comando tipado para o worker…",
+            "O host mantém a interface responsiva durante a operação.",
+        );
+
+        try {
+            const result = await window.pam.invoke("greet", {
+                name: name.value.trim(),
+            }, { timeout: 5_000 });
+            setState("success", "resposta recebida", result.message, result.detail);
+        } catch (error) {
+            setState(
+                "error",
+                "comando interrompido",
+                error instanceof Error ? error.message : "Não foi possível executar o comando.",
+                "Confira o worker PHP e tente novamente.",
+            );
+        } finally {
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
+        }
+    });
+})();
+"##,
+    )?;
+    write_desktop_inspector(directory)?;
     Ok(())
 }
 
@@ -801,6 +2504,33 @@ fn local_packages_repository() -> Option<serde_json::Value> {
         })
 }
 
+fn local_desktop_repository() -> Option<serde_json::Value> {
+    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configured = std::env::var_os("PAM_DESKTOP_PACKAGE_PATH").map(PathBuf::from);
+    let candidates = [
+        configured,
+        Some(manifest_root.join("../pam-desktop/packages/desktop")),
+        Some(manifest_root.join("pam-desktop/packages/desktop")),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|path| path.join("composer.json").is_file())
+        .map(|path| {
+            let path = fs::canonicalize(&path).unwrap_or(path);
+            serde_json::json!({
+                "type": "path",
+                "url": path.to_string_lossy(),
+                "options": {
+                    "symlink": true,
+                    "versions": {
+                        "pam/desktop": "0.2.0"
+                    }
+                }
+            })
+        })
+}
+
 fn run_composer_in(executable: &OsStr, directory: &Path, arguments: &[&str]) -> Result<(), String> {
     let previous = std::env::current_dir()
         .map_err(|error| format!("cannot resolve current directory: {error}"))?;
@@ -826,14 +2556,20 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
         (InitTemplate::Api, true) => "API + Socket",
         (InitTemplate::Laravel, false) => "Laravel",
         (InitTemplate::Laravel, true) => "Laravel + Socket",
-    };
-    let entry = if template == InitTemplate::Laravel {
-        "pam.php"
-    } else {
-        "index.php"
+        (InitTemplate::Desktop, false) => "Desktop",
+        (InitTemplate::Desktop, true) => unreachable!("desktop does not support --socket"),
     };
     println!("Created Pam {preset} project in {}", directory.display());
-    println!("Next: cd {} && pam dev {entry}", directory.display());
+    if template == InitTemplate::Desktop {
+        println!("Next: cd {} && pam desktop dev .", directory.display());
+    } else {
+        let entry = if template == InitTemplate::Laravel {
+            "pam.php"
+        } else {
+            "index.php"
+        };
+        println!("Next: cd {} && pam dev {entry}", directory.display());
+    }
 }
 
 pub fn benchmark(url: &str, requests: usize, concurrency: usize) -> Result<u8, String> {

@@ -352,6 +352,39 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("pam "));
 }
 
+#[cfg(unix)]
+#[test]
+fn delegates_desktop_commands_and_exposes_the_pam_binary() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = temporary_path("desktop-delegation");
+    let desktop = directory.join("pam-desktop");
+    fs::create_dir(&directory).unwrap();
+    fs::write(
+        &desktop,
+        "#!/bin/sh\nprintf 'pam=%s\\n' \"$PAM_BINARY\"\nprintf 'args=%s|%s|%s\\n' \"$1\" \"$2\" \"$3\"\nexit 23\n",
+    )
+    .unwrap();
+    fs::set_permissions(&desktop, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(["desktop", "dev", ".", "--watch"])
+        .env("PAM_DESKTOP_BINARY", &desktop)
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(23));
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("pam="), "{stdout}");
+    assert!(stdout.contains("args=dev|.|--watch"), "{stdout}");
+    assert!(
+        stdout.contains(env!("CARGO_BIN_EXE_pam")),
+        "PAM_BINARY was not propagated: {stdout}",
+    );
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn doctor_uses_embed_without_requiring_a_php_cli() {
     let output = Command::new(env!("CARGO_BIN_EXE_pam"))
@@ -444,6 +477,72 @@ fn initializes_raw_and_socket_presets_without_composer() {
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();
+}
+
+#[test]
+fn initializes_a_servo_desktop_project_with_php_commands() {
+    let directory = temporary_path("init-desktop");
+    let output = run_pam(&[
+        "init",
+        directory.to_str().unwrap(),
+        "--template",
+        "desktop",
+        "--no-install",
+        "--no-interaction",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
+    let application = fs::read_to_string(directory.join("app.php")).unwrap();
+    let html = fs::read_to_string(directory.join("resources/index.html")).unwrap();
+    let styles = fs::read_to_string(directory.join("resources/styles.css")).unwrap();
+    let javascript = fs::read_to_string(directory.join("resources/app.js")).unwrap();
+    let inspector = fs::read_to_string(directory.join("resources/inspector.html")).unwrap();
+    let inspector_styles = fs::read_to_string(directory.join("resources/inspector.css")).unwrap();
+    let inspector_javascript =
+        fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
+
+    assert!(manifest.contains("\"pam/desktop\""));
+    assert!(manifest.contains("\"pam/desktop\": \"^0.2\""));
+    assert!(manifest.contains("pam desktop dev ."));
+    assert!(application.contains("Application::create"));
+    assert!(application.contains("->window("));
+    assert!(application.contains("ClientEvent"));
+    assert!(application.contains("commandTimeout(10_000)"));
+    assert!(application.contains("WindowEffect::title"));
+    assert!(html.contains("/_pam/bridge.js"));
+    assert!(html.contains("aria-live=\"polite\""));
+    assert!(html.contains("IPC v2"));
+    assert!(styles.contains("prefers-reduced-motion"));
+    assert!(styles.contains(":focus-visible"));
+    assert!(javascript.contains("window.pam.invoke(\"greet\""));
+    assert!(javascript.contains("window.pam.on(\"pam.dev.reloaded\""));
+    assert!(javascript.contains("{ timeout: 5_000 }"));
+    assert!(inspector.contains("Runtime Inspector"));
+    assert!(inspector.contains("/_pam/bridge.js"));
+    assert!(inspector_styles.contains("prefers-reduced-motion"));
+    assert!(inspector_javascript.contains("window.pam.windowId"));
+
+    let invalid = run_pam(&[
+        "init",
+        temporary_path("init-desktop-socket").to_str().unwrap(),
+        "--template",
+        "desktop",
+        "--socket",
+        "--no-install",
+    ]);
+    assert!(!invalid.status.success());
+    assert!(
+        String::from_utf8_lossy(&invalid.stderr).contains("does not use --socket"),
+        "{}",
+        String::from_utf8_lossy(&invalid.stderr),
+    );
+
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]

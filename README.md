@@ -60,6 +60,7 @@ The result is a runtime designed for APIs, real-time systems, streaming, backgro
 | `pam/psr-bridge` | PSR-7, PSR-15 and PSR-17 interoperability using the official interfaces |
 | `pam/testing` | Fast in-memory HTTP client and fluent response assertions |
 | `pam/core-api` | Small, versioned contracts for packages that extend Pam |
+| Pam Desktop | Separate Servo host plus a typed Composer package for building desktop applications with PHP |
 | Composer | Normal `composer.json`, `composer.lock`, PSR-4, custom vendor directories, and `vendor/autoload.php` |
 | Production | Master/worker mode, crash recovery, watchdog, graceful drain, worker recycling, generational reload |
 | Operations | Prometheus metrics, health endpoints, structured logs, tracing, profiling, diagnostics, live `pam top` |
@@ -185,6 +186,43 @@ Run `pam init` without a template in a terminal for the interactive preset picke
 Use `--no-install` to generate/download source without resolving dependencies.
 See [Laravel on Pam](docs/laravel.md) for lifecycle and production details.
 
+### Desktop applications with Servo
+
+Pam Desktop lives in its own repository because its release cadence, native
+toolchain and threat model differ from the server runtime. The Pam CLI still
+knows how to create a polished starter:
+
+```bash
+pam init my-desktop-app --template desktop
+cd my-desktop-app
+pam desktop doctor .
+pam desktop dev .
+```
+
+`pam desktop` is the public command; it delegates to the separately distributed
+`pam-desktop` host and identifies the current Pam executable to its PHP worker.
+The 0.2 starter demonstrates multiple windows, bidirectional events, command
+timeouts, crash recovery and development hot reload. Window configuration and
+application policy remain in PHP, local HTML/CSS/JavaScript renders directly
+with Servo, and the Rust host supervises a versioned JSON-lines protocol.
+Browser code can call only commands explicitly registered by the application:
+
+```php
+$app->command('greet', static fn (CommandContext $command): CommandResult =>
+    CommandResult::success([
+        'message' => 'Olá, '.$command->string('name', 'mundo').'.',
+    ])
+);
+```
+
+The local bridge binds to a random loopback port, requires a cryptographically
+random per-process token and matching origin, applies a restrictive CSP, and
+prevents static assets from escaping the project. Deadlined or cancelled
+commands terminate the compromised worker and prepare a fresh generation
+without replaying possible side effects. Pam Desktop is alpha software alongside
+Servo 0.4; it is suited to prototypes and controlled applications, not yet a
+claim of Electron feature parity.
+
 ## A small core, a Composer ecosystem
 
 The split is intentional. Pam's binary plays the role of Node's runtime and standard library. It owns process lifecycle, the event loop, network transports, native I/O, memory boundaries, diagnostics and the PHP Embed ABI. It does **not** own application routing or package installation.
@@ -201,6 +239,7 @@ Composer
 ├── pam/socket       realtime events (the Socket.IO-like layer)
 ├── pam/psr-bridge   standards interoperability
 ├── pam/testing      in-memory application tests
+├── pam/desktop      desktop application model (separate repository)
 └── every existing compatible PHP package
 ```
 
@@ -627,7 +666,8 @@ pam profile|trace [index.php]                       profiling and structured eve
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
-pam init [directory] --template raw|api|laravel     scaffold and install a project
+pam init [directory] --template raw|api|laravel|desktop
+                                                    scaffold and install a project
 pam init [directory] --template api --socket        add native Socket support
 pam init [directory] --no-interaction               accept the default API preset
 pam build [directory] --entry index.php --output dist
