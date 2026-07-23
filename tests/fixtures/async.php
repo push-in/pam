@@ -83,7 +83,10 @@ if (function_exists('pcntl_signal') && function_exists('posix_kill')) {
         $signalReceived = true;
     });
     posix_kill(getmypid(), SIGUSR1);
-    delay(0.001);
+    $signalDeadline = microtime(true) + 1.0;
+    while (!$signalReceived && microtime(true) < $signalDeadline) {
+        delay(0.005);
+    }
     $watcher->cancel();
 }
 
