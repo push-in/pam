@@ -455,7 +455,9 @@ namespace Pam\Async {
     final class SignalWatcher
     {
         private bool $active = true;
+        private bool $previousAsyncSignals;
         private bool $wasBlocked = false;
+        private int|\Closure $previousHandler = SIG_DFL;
 
         public function __construct(public readonly int $signal, callable $handler)
         {
@@ -466,11 +468,22 @@ namespace Pam\Async {
             ) {
                 throw new \LogicException('The pcntl extension is required for signal watchers.');
             }
+            $this->previousAsyncSignals = pcntl_async_signals();
+            if (function_exists('pcntl_signal_get_handler')) {
+                $previousHandler = pcntl_signal_get_handler($signal);
+                $this->previousHandler = is_int($previousHandler)
+                    ? $previousHandler
+                    : \Closure::fromCallable($previousHandler);
+            }
             pcntl_async_signals(true);
-            pcntl_signal($signal, $handler);
+            if (!pcntl_signal($signal, $handler)) {
+                pcntl_async_signals($this->previousAsyncSignals);
+                throw new \RuntimeException("Unable to register signal {$signal}.");
+            }
             $previousMask = [];
             if (!pcntl_sigprocmask(SIG_UNBLOCK, [$signal], $previousMask)) {
-                pcntl_signal($signal, SIG_DFL);
+                pcntl_signal($signal, $this->previousHandler);
+                pcntl_async_signals($this->previousAsyncSignals);
                 throw new \RuntimeException("Unable to unblock signal {$signal}.");
             }
             $this->wasBlocked = in_array($signal, $previousMask, true);
@@ -481,10 +494,11 @@ namespace Pam\Async {
             if (!$this->active) {
                 return;
             }
-            pcntl_signal($this->signal, SIG_DFL);
             if ($this->wasBlocked) {
                 pcntl_sigprocmask(SIG_BLOCK, [$this->signal]);
             }
+            pcntl_signal($this->signal, $this->previousHandler);
+            pcntl_async_signals($this->previousAsyncSignals);
             $this->active = false;
         }
 
