@@ -455,14 +455,25 @@ namespace Pam\Async {
     final class SignalWatcher
     {
         private bool $active = true;
+        private bool $wasBlocked = false;
 
         public function __construct(public readonly int $signal, callable $handler)
         {
-            if (!function_exists('pcntl_signal') || !function_exists('pcntl_async_signals')) {
+            if (
+                !function_exists('pcntl_signal')
+                || !function_exists('pcntl_async_signals')
+                || !function_exists('pcntl_sigprocmask')
+            ) {
                 throw new \LogicException('The pcntl extension is required for signal watchers.');
             }
             pcntl_async_signals(true);
             pcntl_signal($signal, $handler);
+            $previousMask = [];
+            if (!pcntl_sigprocmask(SIG_UNBLOCK, [$signal], $previousMask)) {
+                pcntl_signal($signal, SIG_DFL);
+                throw new \RuntimeException("Unable to unblock signal {$signal}.");
+            }
+            $this->wasBlocked = in_array($signal, $previousMask, true);
         }
 
         public function cancel(): void
@@ -471,6 +482,9 @@ namespace Pam\Async {
                 return;
             }
             pcntl_signal($this->signal, SIG_DFL);
+            if ($this->wasBlocked) {
+                pcntl_sigprocmask(SIG_BLOCK, [$this->signal]);
+            }
             $this->active = false;
         }
 
