@@ -201,10 +201,23 @@ pam desktop dev .
 
 `pam desktop` is the public command; it delegates to the separately distributed
 `pam-desktop` host and identifies the current Pam executable to its PHP worker.
-The 0.2 starter demonstrates multiple windows, bidirectional events, command
-timeouts, crash recovery and development hot reload. Window configuration and
-application policy remain in PHP, local HTML/CSS/JavaScript renders directly
-with Servo, and the Rust host supervises a versioned JSON-lines protocol.
+The 0.3 starter demonstrates multiple windows, bidirectional events, command
+timeouts, crash recovery, development hot reload and explicit native
+capabilities. Window configuration and application policy remain in PHP, local
+HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
+versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
+notifications and drag-and-drop grants are opt-in:
+
+```php
+$app->capabilities(
+    Capabilities::none()
+        ->filesystem(FileSystemRoot::readWrite('data', __DIR__.'/storage'))
+        ->dialogs()
+        ->clipboard()
+        ->notifications()
+        ->dragAndDrop(),
+);
+```
 Browser code can call only commands explicitly registered by the application:
 
 ```php

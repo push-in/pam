@@ -687,7 +687,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
 
         <section class="summary" aria-labelledby="summary-title">
             <div>
-                <span class="eyebrow">PAM DESKTOP 0.2</span>
+                <span class="eyebrow">PAM DESKTOP 0.3</span>
                 <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
             </div>
             <span class="online"><i aria-hidden="true"></i> worker online</span>
@@ -701,7 +701,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
             </article>
             <article>
                 <span>protocol</span>
-                <strong>IPC v2</strong>
+                <strong>IPC v3</strong>
                 <small>contrato tipado</small>
             </article>
             <article>
@@ -1109,7 +1109,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
         "license": "proprietary",
         "require": {
             "php": "^8.4",
-            "pam/desktop": "^0.2"
+            "pam/desktop": "^0.3"
         },
         "autoload": {
             "psr-4": {
@@ -1141,10 +1141,12 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
 declare(strict_types=1);
 
 use Pam\Desktop\Application;
+use Pam\Desktop\Capabilities;
 use Pam\Desktop\ClientEvent;
 use Pam\Desktop\CommandContext;
 use Pam\Desktop\CommandResult;
 use Pam\Desktop\EventContext;
+use Pam\Desktop\FileSystemRoot;
 use Pam\Desktop\Window;
 use Pam\Desktop\WindowEffect;
 use Pam\Desktop\WindowTheme;
@@ -1165,6 +1167,14 @@ $app = Application::create(
             ->size(680, 520)
             ->visible(false)
             ->theme(WindowTheme::Dark),
+    )
+    ->capabilities(
+        Capabilities::none()
+            ->filesystem(FileSystemRoot::readWrite('data', __DIR__.'/storage'))
+            ->dialogs()
+            ->clipboard()
+            ->notifications()
+            ->dragAndDrop(),
     )
     ->commandTimeout(10_000);
 
@@ -1202,7 +1212,7 @@ $app->on('client.ready', static fn (EventContext $event): CommandResult =>
     CommandResult::success()
         ->event(new ClientEvent(
             name: 'runtime.ready',
-            payload: ['windowId' => $event->windowId, 'protocol' => 2],
+            payload: ['windowId' => $event->windowId, 'protocol' => 3],
             windowId: $event->windowId,
         )));
 
@@ -1211,10 +1221,13 @@ $app->run();
     )?;
     write_new(
         &directory.join(".gitignore"),
-        "/vendor/\n/.pam/\n/target/\n",
+        "/vendor/\n/.pam/\n/target/\n/storage/*\n!/storage/.gitkeep\n",
     )?;
     fs::create_dir_all(directory.join("resources"))
         .map_err(|error| format!("cannot create desktop resources: {error}"))?;
+    fs::create_dir_all(directory.join("storage"))
+        .map_err(|error| format!("cannot create desktop storage: {error}"))?;
+    write_new(&directory.join("storage/.gitkeep"), "")?;
     write_new(
         &directory.join("resources/index.html"),
         r##"<!doctype html>
@@ -1245,7 +1258,7 @@ $app->run();
             <div class="runtime-status" aria-label="Estado da runtime">
                 <span class="status-pulse" aria-hidden="true"></span>
                 <span>runtime online</span>
-                <kbd>0.2</kbd>
+                <kbd>0.3</kbd>
             </div>
         </header>
 
@@ -1313,6 +1326,29 @@ $app->run();
                             eventos conectando…
                         </span>
                     </div>
+
+                    <section class="native-lab" aria-labelledby="native-lab-title">
+                        <div class="native-lab-heading">
+                            <div>
+                                <span>CAPABILITIES 0.3</span>
+                                <h2 id="native-lab-title">Native Lab</h2>
+                            </div>
+                            <span class="capability-lock">autorizado no PHP</span>
+                        </div>
+                        <div class="native-actions" aria-label="Demonstrações nativas">
+                            <button id="save-note-button" type="button">Salvar nota</button>
+                            <button id="open-file-button" type="button">Abrir texto</button>
+                            <button id="copy-button" type="button">Copiar olá</button>
+                            <button id="notify-button" type="button">Notificar</button>
+                        </div>
+                        <div id="drop-zone" class="drop-zone" aria-label="Área para soltar arquivos">
+                            <strong>Arraste um arquivo para a janela</strong>
+                            <span>O host entrega um grant temporário, nunca o caminho do sistema.</span>
+                        </div>
+                        <p id="native-status" role="status" aria-live="polite">
+                            Nenhuma capability usada ainda.
+                        </p>
+                    </section>
 
                     <div class="response" id="response" role="status" aria-live="polite">
                         <span class="response-label">aguardando comando</span>
@@ -1387,7 +1423,7 @@ $app->run();
                 </article>
                 <article>
                     <span>contract</span>
-                    <strong>IPC v2</strong>
+                    <strong>IPC v3</strong>
                     <small>tipado e versionado</small>
                 </article>
             </section>
@@ -1764,6 +1800,114 @@ h1 span {
 .demo-actions > span {
     color: var(--text-faint);
     font: 500 10px/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+}
+
+.native-lab {
+    max-width: 620px;
+    margin-top: 18px;
+    padding: 18px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: rgba(13, 27, 39, 0.64);
+}
+
+.native-lab-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.native-lab-heading span {
+    color: var(--cyan);
+    font: 600 9px/1.3 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.native-lab-heading h2 {
+    margin: 5px 0 0;
+    font-size: 18px;
+}
+
+.native-lab-heading .capability-lock {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    padding: 0 10px;
+    color: var(--text-soft);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    letter-spacing: 0.04em;
+    text-transform: none;
+}
+
+.native-actions {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 16px;
+}
+
+.native-actions button {
+    min-height: 44px;
+    padding: 0 10px;
+    color: var(--text);
+    border: 1px solid var(--line-strong);
+    border-radius: 9px;
+    background: var(--surface-raised);
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 650;
+    transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.native-actions button:hover {
+    border-color: var(--cyan);
+    background: rgba(104, 222, 210, 0.09);
+    transform: translateY(-1px);
+}
+
+.native-actions button:disabled {
+    cursor: wait;
+    opacity: 0.55;
+    transform: none;
+}
+
+.drop-zone {
+    min-height: 76px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 10px;
+    padding: 14px;
+    text-align: center;
+    border: 1px dashed var(--line-strong);
+    border-radius: 10px;
+    transition: border-color 180ms ease, background 180ms ease;
+}
+
+.drop-zone strong {
+    font-size: 12px;
+}
+
+.drop-zone span,
+#native-status {
+    color: var(--text-faint);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.drop-zone[data-active="true"] {
+    border-color: var(--cyan);
+    background: rgba(104, 222, 210, 0.07);
+}
+
+#native-status {
+    min-height: 15px;
+    margin: 10px 2px 0;
 }
 
 .response {
@@ -2186,6 +2330,14 @@ footer kbd {
         flex-direction: column;
     }
 
+    .native-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .native-lab-heading {
+        flex-direction: column;
+    }
+
     .runtime-visual {
         width: min(96vw, 440px);
     }
@@ -2242,12 +2394,31 @@ footer kbd {
     const detail = document.querySelector("#response-detail");
     const inspectorButton = document.querySelector("#inspector-button");
     const eventStatus = document.querySelector("#event-status");
+    const nativeStatus = document.querySelector("#native-status");
+    const dropZone = document.querySelector("#drop-zone");
+    const saveNoteButton = document.querySelector("#save-note-button");
+    const openFileButton = document.querySelector("#open-file-button");
+    const copyButton = document.querySelector("#copy-button");
+    const notifyButton = document.querySelector("#notify-button");
 
     const setState = (state, title, body, supportingText) => {
         response.dataset.state = state;
         label.textContent = title;
         message.textContent = body;
         detail.textContent = supportingText;
+    };
+
+    const runNative = async (button, operation) => {
+        button.disabled = true;
+        try {
+            await operation();
+        } catch (error) {
+            nativeStatus.textContent = error instanceof Error
+                ? `Falhou · ${error.message}`
+                : "A operação nativa falhou.";
+        } finally {
+            button.disabled = false;
+        }
     };
 
     if (!window.pam) {
@@ -2281,6 +2452,36 @@ footer kbd {
     window.pam.on("pam.dev.error", ({ message: reloadError }) => {
         eventStatus.textContent = `hot reload falhou · ${reloadError}`;
     });
+    window.pam.on("pam.drag.enter", ({ name }) => {
+        dropZone.dataset.active = "true";
+        nativeStatus.textContent = `Pronto para receber ${name}.`;
+    });
+    window.pam.on("pam.drag.leave", () => {
+        delete dropZone.dataset.active;
+        nativeStatus.textContent = "O arquivo saiu da janela.";
+    });
+    window.pam.on("pam.drag.drop", async ({ files }) => {
+        delete dropZone.dataset.active;
+        const [file] = files;
+        if (!file) return;
+        try {
+            if (file.kind === 1) {
+                const contents = await window.pam.fs.readText(file);
+                nativeStatus.textContent = `${file.name} · ${contents.slice(0, 90)}`;
+            } else {
+                const entries = await window.pam.fs.list(file);
+                nativeStatus.textContent = `${file.name} · ${entries.length} itens`;
+            }
+        } catch (error) {
+            nativeStatus.textContent = error instanceof Error
+                ? `Drop bloqueado · ${error.message}`
+                : "Não foi possível ler o item solto.";
+        }
+    });
+    window.pam.on("pam.drag.error", ({ message: dragError }) => {
+        delete dropZone.dataset.active;
+        nativeStatus.textContent = `Drop bloqueado · ${dragError}`;
+    });
 
     void window.pam.emit("client.ready", {
         loadedAt: new Date().toISOString(),
@@ -2304,6 +2505,50 @@ footer kbd {
         } finally {
             inspectorButton.disabled = false;
         }
+    });
+
+    saveNoteButton.addEventListener("click", () => {
+        void runNative(saveNoteButton, async () => {
+            const target = { root: "data", path: "hello.txt" };
+            const text = `Olá de Pam Desktop em ${new Date().toLocaleString("pt-BR")}.`;
+            await window.pam.fs.writeText(target, text);
+            const persisted = await window.pam.fs.readText(target);
+            nativeStatus.textContent = `storage/hello.txt · ${persisted}`;
+        });
+    });
+
+    openFileButton.addEventListener("click", () => {
+        void runNative(openFileButton, async () => {
+            const file = await window.pam.dialog.openFile({
+                title: "Abrir um texto com Pam Desktop",
+                filters: [{ name: "Texto", extensions: ["txt", "md", "json"] }],
+            });
+            if (!file) {
+                nativeStatus.textContent = "Seleção cancelada.";
+                return;
+            }
+            const contents = await window.pam.fs.readText(file);
+            nativeStatus.textContent = `${file.name} · ${contents.slice(0, 90)}`;
+        });
+    });
+
+    copyButton.addEventListener("click", () => {
+        void runNative(copyButton, async () => {
+            const greeting = `Olá, ${name.value.trim() || "mundo"}!`;
+            await window.pam.clipboard.writeText(greeting);
+            nativeStatus.textContent = `Clipboard · ${greeting}`;
+        });
+    });
+
+    notifyButton.addEventListener("click", () => {
+        void runNative(notifyButton, async () => {
+            await window.pam.notification.show({
+                title: "Pam Desktop",
+                body: "PHP autorizou; Rust entregou.",
+                urgency: 2,
+            });
+            nativeStatus.textContent = "Notificação entregue ao sistema.";
+        });
     });
 
     form.addEventListener("submit", async (event) => {
@@ -2524,7 +2769,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": true,
                     "versions": {
-                        "pam/desktop": "0.2.0"
+                        "pam/desktop": "0.3.0"
                     }
                 }
             })
