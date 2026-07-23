@@ -69,27 +69,44 @@ The result is a runtime designed for APIs, real-time systems, streaming, backgro
 
 ## Quick start
 
-### 1. Build the runtime
+### 1. Install the runtime
 
-Pam currently targets Linux/Unix and PHP 8.4 Embed.
+Pam currently ships prebuilt Linux releases for x86_64 and ARM64.
 
 ```bash
-sudo apt-get install -y build-essential php8.4-dev libphp8.4-embed
-cargo build --locked --release
-sudo install -m 0755 target/release/pam /usr/local/bin/pam
-
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+  --output pam-install.sh \
+  https://github.com/push-in/pam/releases/latest/download/install.sh
+sh pam-install.sh
+rm pam-install.sh
 pam --version
 pam doctor .
 ```
 
-Requirements:
+The release contains the PAM binary and its exact private PHP Embed library. End
+users do **not** install PHP, Composer, Rust, `php-config`, development headers or
+an FPM service. The installer verifies the release SHA-256, rejects unsafe archive
+paths and installs without root under `~/.local`.
 
-- Rust 1.88 or newer;
-- a C compiler and `ar`;
-- `php-config`, PHP development headers, and PHP Embed from the same PHP build;
-- network access the first time `pam composer` downloads its verified Composer PHAR.
+Composer is downloaded and signature-verified inside PAM's Embed SAPI only when a
+project first needs it.
 
-Use `PHP_CONFIG` and `PAM_PHP_LIB_DIR` if PHP is installed in a custom location.
+<details>
+<summary>Building PAM itself from source</summary>
+
+Runtime contributors need Rust 1.88+, a C toolchain, matching PHP 8.4 development
+headers and the Embed library:
+
+```bash
+sudo apt-get install -y build-essential php8.4-dev libphp8.4-embed
+cargo build --locked --release
+```
+
+Use `PHP_CONFIG` and `PAM_PHP_LIB_DIR` for a custom build toolchain. These are
+build-time requirements and are not required on machines using an official PAM
+release.
+
+</details>
 
 ### 2. Create an application
 

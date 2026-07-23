@@ -1,5 +1,25 @@
 # Operação em produção
 
+## Instalação do runtime
+
+Hosts que usam uma release oficial não instalam PHP, Composer, Rust ou headers.
+O artefato contém o binário PAM e a `libphp` privada exata usada no build. Para
+uma instalação de sistema:
+
+```bash
+curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
+  --output pam-install.sh \
+  https://github.com/push-in/pam/releases/latest/download/install.sh
+sudo env PAM_INSTALL_DIR=/opt/pam PAM_BIN_DIR=/usr/local/bin \
+  sh pam-install.sh
+rm pam-install.sh
+pam doctor .
+```
+
+O instalador detecta x86_64/ARM64, valida SHA-256, rejeita caminhos e symlinks
+inesperados no arquivo e mantém cada versão em um diretório próprio. Somente quem
+compila o PAM a partir do código-fonte precisa do SDK PHP Embed.
+
 ## Inicialização
 
 ```bash
@@ -115,9 +135,9 @@ cada resposta; habilite quando a correlação distribuída for necessária.
 
 ## Instalação como serviço ou container
 
-`packaging/pam.service` aplica hardening do systemd e usa usuário dinâmico. Copie
-o binário para `/usr/local/bin/pam`, publique a aplicação legível em
-`/srv/pam/current`, instale a unit e valide antes de iniciar:
+`packaging/pam.service` aplica hardening do systemd e usa usuário dinâmico. Use a
+instalação oficial acima para criar `/usr/local/bin/pam`, publique a aplicação
+legível em `/srv/pam/current`, instale a unit e valide antes de iniciar:
 
 ```bash
 sudo install -d -m 0755 /etc/pam

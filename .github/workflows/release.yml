@@ -76,7 +76,10 @@ jobs:
           chmod 0755 "dist/${package}/bin/pam-run"
           cp LICENSE README.md "dist/${package}/"
           tar -C dist -czf "dist/${package}.tar.gz" "$package"
-          sha256sum "dist/${package}.tar.gz" > "dist/${package}.tar.gz.sha256"
+          (
+            cd dist
+            sha256sum "${package}.tar.gz" > "${package}.tar.gz.sha256"
+          )
       - name: Attest release archive
         uses: actions/attest@v4
         with:
@@ -95,12 +98,28 @@ jobs:
     runs-on: ubuntu-24.04
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           pattern: pam-*
           path: dist
           merge-multiple: true
+      - name: Package the user-mode installer
+        run: |
+          cp install.sh dist/install.sh
+          (
+            cd dist
+            sha256sum install.sh > install.sh.sha256
+          )
+      - name: Attest the installer
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/install.sh
       - name: Publish immutable GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
