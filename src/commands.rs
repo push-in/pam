@@ -687,7 +687,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
 
         <section class="summary" aria-labelledby="summary-title">
             <div>
-                <span class="eyebrow">PAM DESKTOP 0.4</span>
+                <span class="eyebrow">PAM DESKTOP 0.5</span>
                 <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
             </div>
             <span class="online"><i aria-hidden="true"></i> worker online</span>
@@ -701,7 +701,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
             </article>
             <article>
                 <span>protocol</span>
-                <strong>IPC v4</strong>
+                <strong>IPC v5</strong>
                 <small>contrato tipado</small>
             </article>
             <article>
@@ -1109,7 +1109,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
         "license": "proprietary",
         "require": {
             "php": "^8.4",
-            "pam/desktop": "^0.4"
+            "pam/desktop": "^0.5"
         },
         "autoload": {
             "psr-4": {
@@ -1161,7 +1161,7 @@ $app = Application::create(
         ->size(1120, 720)
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
-    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.4.0')
+    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
         ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
         ->publisher('Pushin')
         ->category(ApplicationCategory::Development)
@@ -1220,7 +1220,7 @@ $app->on('client.ready', static fn (EventContext $event): CommandResult =>
     CommandResult::success()
         ->event(new ClientEvent(
             name: 'runtime.ready',
-            payload: ['windowId' => $event->windowId, 'protocol' => 4],
+            payload: ['windowId' => $event->windowId, 'protocol' => 5],
             windowId: $event->windowId,
         )));
 
@@ -1289,7 +1289,7 @@ $app->run();
             <div class="runtime-status" aria-label="Estado da runtime">
                 <span class="status-pulse" aria-hidden="true"></span>
                 <span>runtime online</span>
-                <kbd>0.4</kbd>
+                <kbd>0.5</kbd>
             </div>
         </header>
 
@@ -1381,6 +1381,17 @@ $app->run();
                         </p>
                     </section>
 
+                    <section class="update-console" aria-labelledby="update-title">
+                        <div>
+                            <span>SIGNED UPDATES · 0.5</span>
+                            <h2 id="update-title">Atualizações com rollback</h2>
+                            <p id="update-status" role="status" aria-live="polite">
+                                Desativadas por padrão; a chave pública fica no manifesto PHP.
+                            </p>
+                        </div>
+                        <button id="update-button" type="button">Verificar estado</button>
+                    </section>
+
                     <div class="response" id="response" role="status" aria-live="polite">
                         <span class="response-label">aguardando comando</span>
                         <p id="response-message">
@@ -1454,7 +1465,7 @@ $app->run();
                 </article>
                 <article>
                     <span>contract</span>
-                    <strong>IPC v4</strong>
+                    <strong>IPC v5</strong>
                     <small>tipado e versionado</small>
                 </article>
             </section>
@@ -1939,6 +1950,54 @@ h1 span {
 #native-status {
     min-height: 15px;
     margin: 10px 2px 0;
+}
+
+.update-console {
+    max-width: 620px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    margin-top: 12px;
+    padding: 15px 16px;
+    border: 1px solid rgba(166, 154, 255, 0.24);
+    border-radius: 12px;
+    background: linear-gradient(115deg, rgba(166, 154, 255, 0.09), rgba(104, 222, 210, 0.04));
+}
+
+.update-console span {
+    color: var(--violet);
+    font: 650 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
+    letter-spacing: 0.12em;
+}
+
+.update-console h2 {
+    margin: 6px 0 3px;
+    font-size: 14px;
+}
+
+.update-console p {
+    margin: 0;
+    color: var(--text-faint);
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.update-console button {
+    min-width: 118px;
+    min-height: 40px;
+    color: var(--text);
+    border: 1px solid rgba(166, 154, 255, 0.34);
+    border-radius: 9px;
+    background: rgba(166, 154, 255, 0.1);
+    cursor: pointer;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.update-console button:disabled {
+    cursor: wait;
+    opacity: 0.55;
 }
 
 .response {
@@ -2431,6 +2490,8 @@ footer kbd {
     const openFileButton = document.querySelector("#open-file-button");
     const copyButton = document.querySelector("#copy-button");
     const notifyButton = document.querySelector("#notify-button");
+    const updateButton = document.querySelector("#update-button");
+    const updateStatus = document.querySelector("#update-status");
 
     const setState = (state, title, body, supportingText) => {
         response.dataset.state = state;
@@ -2463,6 +2524,7 @@ footer kbd {
             element.disabled = true;
         });
         inspectorButton.disabled = true;
+        updateButton.disabled = true;
         return;
     }
 
@@ -2512,6 +2574,14 @@ footer kbd {
     window.pam.on("pam.drag.error", ({ message: dragError }) => {
         delete dropZone.dataset.active;
         nativeStatus.textContent = `Drop bloqueado · ${dragError}`;
+    });
+    window.pam.on("pam.update.changed", ({ state, availableVersion }) => {
+        updateStatus.textContent = state === 4
+            ? `Versão ${availableVersion} disponível e assinada.`
+            : `Estado do updater · ${state}`;
+    });
+    window.pam.on("pam.update.error", ({ message: updateError }) => {
+        updateStatus.textContent = `Updater · ${updateError}`;
     });
 
     void window.pam.emit("client.ready", {
@@ -2580,6 +2650,22 @@ footer kbd {
             });
             nativeStatus.textContent = "Notificação entregue ao sistema.";
         });
+    });
+
+    updateButton.addEventListener("click", async () => {
+        updateButton.disabled = true;
+        try {
+            const update = await window.pam.updater.status();
+            updateStatus.textContent = update.state === 1
+                ? "Updater desativado. Configure Updates::from() no manifesto PHP."
+                : `Estado ${update.state} · versão atual ${update.currentVersion}`;
+        } catch (error) {
+            updateStatus.textContent = error instanceof Error
+                ? `Updater · ${error.message}`
+                : "Não foi possível consultar o updater.";
+        } finally {
+            updateButton.disabled = false;
+        }
     });
 
     form.addEventListener("submit", async (event) => {
@@ -2800,7 +2886,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": true,
                     "versions": {
-                        "pam/desktop": "0.4.0"
+                        "pam/desktop": "0.5.0"
                     }
                 }
             })

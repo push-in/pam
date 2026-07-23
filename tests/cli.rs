@@ -507,7 +507,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
         fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
 
     assert!(manifest.contains("\"pam/desktop\""));
-    assert!(manifest.contains("\"pam/desktop\": \"^0.4\""));
+    assert!(manifest.contains("\"pam/desktop\": \"^0.5\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
     assert!(application.contains("Application::create"));
@@ -521,8 +521,9 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(application.contains("WindowEffect::title"));
     assert!(html.contains("/_pam/bridge.js"));
     assert!(html.contains("aria-live=\"polite\""));
-    assert!(html.contains("IPC v4"));
+    assert!(html.contains("IPC v5"));
     assert!(html.contains("Native Lab"));
+    assert!(html.contains("Atualizações com rollback"));
     assert!(styles.contains("prefers-reduced-motion"));
     assert!(styles.contains(":focus-visible"));
     assert!(javascript.contains("window.pam.invoke(\"greet\""));
@@ -533,6 +534,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(javascript.contains("window.pam.clipboard.writeText"));
     assert!(javascript.contains("window.pam.notification.show"));
     assert!(javascript.contains("window.pam.on(\"pam.drag.drop\""));
+    assert!(javascript.contains("window.pam.updater.status"));
     assert!(directory.join("storage/.gitkeep").is_file());
     assert!(directory.join("resources/icon.svg").is_file());
     assert!(inspector.contains("Runtime Inspector"));

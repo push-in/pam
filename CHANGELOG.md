@@ -3,6 +3,13 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
+## Unreleased
+
+- Updated the `pam init --template desktop` starter to protocol 5 and
+  `pam/desktop` 0.5, including a polished signed-update status surface.
+- Documented cross-platform DMG/MSIX packaging, feed signing, automatic updates
+  and rollback while keeping the public workflow under `pam desktop`.
+
 ## 0.1.1 - 2026-07-23
 
 - Rebuilt official x86_64 and ARM64 runtimes on a glibc 2.35 baseline.

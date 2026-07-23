@@ -202,24 +202,26 @@ pam desktop build .
 
 `pam desktop` is the public command; it delegates to the separately distributed
 `pam-desktop` host and identifies the current Pam executable to its PHP worker.
-The 0.4 starter demonstrates multiple windows, bidirectional events, command
+The 0.5 starter demonstrates multiple windows, bidirectional events, command
 timeouts, crash recovery, development hot reload and explicit native
 capabilities. Window configuration and application policy remain in PHP, local
 HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
 versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
 notifications and drag-and-drop grants are opt-in. Application identity,
-category and icon also live in a typed PHP manifest:
+category, icon and signed-update policy also live in a typed PHP manifest:
 
 ```php
-Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.4.0')
+Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
     ->publisher('Pushin')
     ->category(ApplicationCategory::Development);
 ```
 
-`pam desktop build` creates a self-contained Linux directory and portable
-`.tar.gz` with a per-user installer. `--format deb` adds a Debian package. The
-bundle includes the Pam worker, PHP runtime libraries, Servo host, vendored PHP
-application, desktop entry, icon and a SHA-256 integrity manifest.
+`pam desktop build` creates a self-contained, update-ready package for Linux,
+macOS or Windows. `--format deb` adds a Debian package; `--format native`
+creates a DMG or MSIX on its native host. Bundles include the Pam worker, PHP
+runtime libraries, Servo host, vendored PHP application, platform metadata,
+icon and a SHA-256 integrity manifest. Feed signing and automatic updates remain
+behind explicit PHP policy and a pinned Ed25519 public key.
 
 Native capabilities remain explicit:
 
