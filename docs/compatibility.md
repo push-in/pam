@@ -9,9 +9,9 @@ outro diretório.
 | Categoria | Situação |
 | --- | --- |
 | Pacotes pure PHP e PSR-4 | Compatíveis pelo autoloader normal |
-| `pam/api` | Rotas e middleware opcionais instalados pelo Composer |
-| `pam/socket` | Eventos e rooms opcionais sobre o transporte WebSocket nativo |
-| PSR-7, PSR-15 e PSR-17 | Fornecidos por `pam/psr-bridge` com as interfaces oficiais |
+| `pushinbr/pam-api` | Rotas e middleware opcionais instalados pelo Composer |
+| `pushinbr/pam-socket` | Eventos e rooms opcionais sobre o transporte WebSocket nativo |
+| PSR-7, PSR-15 e PSR-17 | Fornecidos por `pushinbr/pam-psr-bridge` com as interfaces oficiais |
 | PSR-3 | Consumido quando `psr/log` está instalado |
 | PHPUnit e Pest | Executados dentro da Embed SAPI por `pam test` |
 | Amp, Revolt e ReactPHP | Carregados e exercitados por timers/futures na suíte smoke |

@@ -1,5 +1,5 @@
 {
-    "name": "pam/psr-bridge",
+    "name": "pushinbr/pam-psr-bridge",
     "description": "PSR-7, PSR-15 and PSR-17 implementations for Pam.",
     "type": "library",
     "license": "MIT",

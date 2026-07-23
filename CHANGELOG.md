@@ -5,6 +5,13 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.2 - 2026-07-23
+
+- Published the first-party Composer packages under the organization-owned
+  `pushinbr/pam-*` namespace.
+- Updated generated projects, compatibility fixtures and package documentation
+  to use the public Packagist coordinates.
+
 - Updated the `pam init --template desktop` starter to stable public API 1,
   protocol 6 and `pam/desktop` 1.0 with PHP plugins, native menus, tray,
   close-to-tray, global shortcuts and supervised background jobs.
@@ -73,9 +80,9 @@ after the first stable release.
   idle snapshot after traffic stops.
 - Added Laravel-aware `pam dev` hot reload and a reproducible, no-benchmark-theater
   comparison protocol for Pam, FrankenPHP, and Swoole.
-- Split application features into optional Composer packages: `pam/api`,
-  `pam/socket`, `pam/psr-bridge`, `pam/testing`, `pam/core-api`, and the
-  `pam/skeleton` project.
+- Split application features into optional Composer packages: `pushinbr/pam-api`,
+  `pushinbr/pam-socket`, `pushinbr/pam-psr-bridge`, `pushinbr/pam-testing`, `pushinbr/pam-core-api`, and the
+  `pushinbr/pam-skeleton` project.
 - Added parameter routing, a precompiled middleware pipeline, bounded rate-limit
   state, safe Composer provider discovery, and in-memory application tests.
 - Added a typed Zend-to-Tokio suspend/resume protocol with concurrent request

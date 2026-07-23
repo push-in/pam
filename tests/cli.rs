@@ -427,7 +427,7 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join("phpunit.xml").is_file());
     assert!(directory.join("tests/ApplicationTest.php").is_file());
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
-    assert!(manifest.contains("\"pam/api\""));
+    assert!(manifest.contains("\"pushinbr/pam-api\""));
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());
@@ -473,7 +473,7 @@ fn initializes_raw_and_socket_presets_without_composer() {
         String::from_utf8_lossy(&output.stderr)
     );
     let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
-    assert!(manifest.contains("pam/socket"));
+    assert!(manifest.contains("pushinbr/pam-socket"));
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();

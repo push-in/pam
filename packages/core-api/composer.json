@@ -1,5 +1,5 @@
 {
-    "name": "pam/core-api",
+    "name": "pushinbr/pam-core-api",
     "description": "Stable PHP contracts for the Pam persistent runtime.",
     "type": "library",
     "license": "MIT",
