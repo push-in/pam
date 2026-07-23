@@ -202,8 +202,9 @@ pam desktop build .
 
 `pam desktop` is the public command; it delegates to the separately distributed
 `pam-desktop` host and identifies the current Pam executable to its PHP worker.
-The 0.6 starter demonstrates multiple windows, bidirectional events, command
-timeouts, crash recovery, development hot reload and explicit native
+The 1.0 starter demonstrates the stable Linux API, multiple windows,
+bidirectional events, command timeouts, crash recovery, development hot reload
+and explicit native
 capabilities. Window configuration and application policy remain in PHP, local
 HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
 versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
@@ -215,7 +216,7 @@ Native Rust plugins remain process-isolated and can be scaffolded with
 `pam desktop plugin new`:
 
 ```php
-Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.6.0')
+Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
     ->publisher('Pushin')
     ->category(ApplicationCategory::Development);
 ```
@@ -254,9 +255,10 @@ The local bridge binds to a random loopback port, requires a cryptographically
 random per-process token and matching origin, applies a restrictive CSP, and
 prevents static assets from escaping the project. Deadlined or cancelled
 commands terminate the compromised worker and prepare a fresh generation
-without replaying possible side effects. Pam Desktop is alpha software alongside
-Servo 0.4; it is suited to prototypes and controlled applications, not yet a
-claim of Electron feature parity.
+without replaying possible side effects. Pam Desktop 1.x freezes public API `1`,
+worker protocol `6` and the Rust plugin SDK `1` for Linux x86-64. Servo 0.4
+continues evolving; stability of PAM's contracts is not a claim of
+feature-for-feature Electron parity.
 
 ## A small core, a Composer ecosystem
 

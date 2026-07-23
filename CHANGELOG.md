@@ -5,14 +5,16 @@ after the first stable release.
 
 ## Unreleased
 
-- Updated the `pam init --template desktop` starter to protocol 6 and
-  `pam/desktop` 0.6 with PHP plugins, native menus, tray, close-to-tray, global
-  shortcuts and supervised background jobs.
+- Updated the `pam init --template desktop` starter to stable public API 1,
+  protocol 6 and `pam/desktop` 1.0 with PHP plugins, native menus, tray,
+  close-to-tray, global shortcuts and supervised background jobs.
 - Added an extension-runtime surface to the starter and documented
   process-isolated Rust plugin scaffolding under `pam desktop plugin`.
 - Focused current desktop generation and package documentation on
   self-contained Linux x86-64 delivery while preserving the public workflow
   under `pam desktop`.
+- Added explicit API-version negotiation to the generated UI and runtime
+  diagnostics so incompatible hosts fail visibly before application calls.
 
 ## 0.1.1 - 2026-07-23
 

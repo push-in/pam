@@ -1064,8 +1064,8 @@ li small {
     }
 
     windowId.textContent = window.pam.windowId;
-    window.pam.on("runtime.ready", ({ protocol }) => {
-        appendEvent("runtime.ready", `IPC v${protocol} conectado`);
+    window.pam.on("runtime.ready", ({ apiVersion, protocol }) => {
+        appendEvent("runtime.ready", `API v${apiVersion} · IPC v${protocol}`);
     });
     window.pam.on("pam.dev.reloaded", ({ kind }) => {
         appendEvent("pam.dev.reloaded", kind === 1 ? "assets" : "worker PHP");
@@ -1109,7 +1109,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
         "license": "proprietary",
         "require": {
             "php": "^8.4",
-            "pam/desktop": "^0.6"
+            "pam/desktop": "^1.0"
         },
         "autoload": {
             "psr-4": {
@@ -1170,7 +1170,7 @@ $app = Application::create(
         ->size(1120, 720)
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
-    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.6.0')
+    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
         ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
         ->publisher('Pushin')
         ->category(ApplicationCategory::Development)
@@ -1261,7 +1261,11 @@ $app->on('client.ready', static fn (EventContext $event): CommandResult =>
     CommandResult::success()
         ->event(new ClientEvent(
             name: 'runtime.ready',
-            payload: ['windowId' => $event->windowId, 'protocol' => 6],
+            payload: [
+                'windowId' => $event->windowId,
+                'apiVersion' => Application::API_VERSION,
+                'protocol' => Application::PROTOCOL_VERSION,
+            ],
             windowId: $event->windowId,
         )));
 
@@ -1392,7 +1396,7 @@ final class HelloPlugin implements Plugin
             <div class="runtime-status" aria-label="Estado da runtime">
                 <span class="status-pulse" aria-hidden="true"></span>
                 <span>runtime online</span>
-                <kbd>0.6</kbd>
+                <kbd>1.0</kbd>
             </div>
         </header>
 
@@ -1486,7 +1490,7 @@ final class HelloPlugin implements Plugin
 
                     <section class="update-console" aria-labelledby="extension-title">
                         <div>
-                            <span>EXTENSION RUNTIME · 0.6</span>
+                            <span>STABLE API · 1.0</span>
                             <h2 id="extension-title">Plugins PHP + Rust isolado</h2>
                             <p id="extension-status" role="status" aria-live="polite">
                                 PHP compõe a aplicação; plugins Rust rodam em processos supervisionados.
@@ -1579,7 +1583,7 @@ final class HelloPlugin implements Plugin
                 </article>
                 <article>
                     <span>contract</span>
-                    <strong>IPC v6</strong>
+                    <strong>API v1 · IPC v6</strong>
                     <small>tipado e versionado</small>
                 </article>
             </section>
@@ -2645,8 +2649,25 @@ footer kbd {
         return;
     }
 
-    window.pam.on("runtime.ready", ({ protocol }) => {
-        eventStatus.textContent = `eventos online · IPC v${protocol}`;
+    if (window.pam.apiVersion !== 1) {
+        setState(
+            "error",
+            "API incompatível",
+            `Esta aplicação requer a API v1; o host entregou v${window.pam.apiVersion}.`,
+            "Instale um host PAM Desktop 1.x para continuar.",
+        );
+        form.querySelectorAll("button, input").forEach((element) => {
+            element.disabled = true;
+        });
+        inspectorButton.disabled = true;
+        extensionButton.disabled = true;
+        updateButton.disabled = true;
+        return;
+    }
+
+    eventStatus.textContent = "API v1 · eventos conectando…";
+    window.pam.on("runtime.ready", ({ apiVersion, protocol }) => {
+        eventStatus.textContent = `API v${apiVersion} · IPC v${protocol} online`;
     });
     window.pam.on("hello.completed", ({ name: completedName }) => {
         eventStatus.textContent = `hello.completed · ${completedName}`;
@@ -3036,7 +3057,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": true,
                     "versions": {
-                        "pam/desktop": "0.6.0"
+                        "pam/desktop": "1.0.0"
                     }
                 }
             })

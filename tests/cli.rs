@@ -508,7 +508,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
         fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
 
     assert!(manifest.contains("\"pam/desktop\""));
-    assert!(manifest.contains("\"pam/desktop\": \"^0.6\""));
+    assert!(manifest.contains("\"pam/desktop\": \"^1.0\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
     assert!(application.contains("Application::create"));
@@ -526,18 +526,21 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(application.contains("GlobalShortcut::create"));
     assert!(application.contains("BackgroundJob::every"));
     assert!(application.contains("new App\\HelloPlugin()"));
-    assert!(application.contains("'protocol' => 6"));
+    assert!(application.contains("Application::API_VERSION"));
+    assert!(application.contains("Application::PROTOCOL_VERSION"));
     assert!(plugin.contains("implements Plugin"));
     assert!(plugin.contains("'runtime.snapshot'"));
     assert!(html.contains("/_pam/bridge.js"));
     assert!(html.contains("aria-live=\"polite\""));
     assert!(html.contains("IPC v6"));
     assert!(html.contains("Native Lab"));
-    assert!(html.contains("EXTENSION RUNTIME · 0.6"));
+    assert!(html.contains("STABLE API · 1.0"));
+    assert!(html.contains("API v1 · IPC v6"));
     assert!(html.contains("Atualizações com rollback"));
     assert!(styles.contains("prefers-reduced-motion"));
     assert!(styles.contains(":focus-visible"));
     assert!(javascript.contains("window.pam.invoke(\"greet\""));
+    assert!(javascript.contains("window.pam.apiVersion !== 1"));
     assert!(javascript.contains("window.pam.on(\"pam.dev.reloaded\""));
     assert!(javascript.contains("{ timeout: 5_000 }"));
     assert!(javascript.contains("window.pam.fs.writeText"));
@@ -555,6 +558,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(inspector.contains("/_pam/bridge.js"));
     assert!(inspector_styles.contains("prefers-reduced-motion"));
     assert!(inspector_javascript.contains("window.pam.windowId"));
+    assert!(inspector_javascript.contains("apiVersion"));
 
     let invalid = run_pam(&[
         "init",
