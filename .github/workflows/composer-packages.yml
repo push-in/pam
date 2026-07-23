@@ -146,7 +146,6 @@ jobs:
 
           remote="git@github.com:${REPOSITORY_OWNER}/${REPOSITORY_NAME}.git"
           git ls-remote "${remote}" HEAD >/dev/null
-          git push "${remote}" "${split_sha}:refs/heads/main"
 
           remote_tag=$(
             git ls-remote "${remote}" "refs/tags/${RELEASE_TAG}*" |
@@ -162,12 +161,11 @@ jobs:
                 "${RELEASE_TAG}" "${remote_tag}" "${split_sha}" >&2
               exit 1
             }
+            git push "${remote}" "${split_sha}:refs/heads/main"
             printf 'Tag %s already points to the expected split.\n' "${RELEASE_TAG}"
             exit 0
           fi
 
-          temporary_tag="package-${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-          git tag -a "${temporary_tag}" "${split_sha}" \
-            -m "${PACKAGE_NAME} ${RELEASE_TAG}"
-          git push "${remote}" \
-            "refs/tags/${temporary_tag}:refs/tags/${RELEASE_TAG}"
+          git push --atomic "${remote}" \
+            "${split_sha}:refs/heads/main" \
+            "${split_sha}:refs/tags/${RELEASE_TAG}"
