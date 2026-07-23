@@ -78,7 +78,24 @@ $deadline = Deadline::after(0.0);
 $deadlineExpired = $deadline->isExpired();
 
 $signalReceived = false;
-if (function_exists('pcntl_signal') && function_exists('posix_kill')) {
+$signalAsyncStateRestored = true;
+$signalHandlerRestored = true;
+$signalMaskRestored = true;
+$signalStateRestored = true;
+if (
+    function_exists('pcntl_signal')
+    && function_exists('pcntl_async_signals')
+    && function_exists('pcntl_sigprocmask')
+    && function_exists('pcntl_signal_get_handler')
+    && function_exists('posix_kill')
+) {
+    $asyncSignalsBefore = pcntl_async_signals();
+    $signalHandlerBefore = pcntl_signal_get_handler(SIGUSR1);
+    $signalMaskBefore = [];
+    pcntl_sigprocmask(SIG_BLOCK, [SIGUSR1], $signalMaskBefore);
+    if (!in_array(SIGUSR1, $signalMaskBefore, true)) {
+        pcntl_sigprocmask(SIG_UNBLOCK, [SIGUSR1]);
+    }
     $watcher = onSignal(SIGUSR1, static function () use (&$signalReceived): void {
         $signalReceived = true;
     });
@@ -88,6 +105,18 @@ if (function_exists('pcntl_signal') && function_exists('posix_kill')) {
         delay(0.005);
     }
     $watcher->cancel();
+    $signalMaskAfter = [];
+    pcntl_sigprocmask(SIG_BLOCK, [SIGUSR1], $signalMaskAfter);
+    if (!in_array(SIGUSR1, $signalMaskAfter, true)) {
+        pcntl_sigprocmask(SIG_UNBLOCK, [SIGUSR1]);
+    }
+    $signalAsyncStateRestored = pcntl_async_signals() === $asyncSignalsBefore;
+    $signalHandlerRestored = pcntl_signal_get_handler(SIGUSR1) === $signalHandlerBefore;
+    $signalMaskRestored = in_array(SIGUSR1, $signalMaskAfter, true)
+        === in_array(SIGUSR1, $signalMaskBefore, true);
+    $signalStateRestored = $signalAsyncStateRestored
+        && $signalHandlerRestored
+        && $signalMaskRestored;
 }
 
 echo json_encode([
@@ -103,7 +132,11 @@ echo json_encode([
     'processesConcurrent' => $processesConcurrent,
     'stdoutBytes' => strlen($largeOutput->stdout),
     'stdoutTruncated' => $largeOutput->stdoutTruncated,
+    'signalAsyncStateRestored' => $signalAsyncStateRestored,
+    'signalHandlerRestored' => $signalHandlerRestored,
+    'signalMaskRestored' => $signalMaskRestored,
     'signalReceived' => $signalReceived,
+    'signalStateRestored' => $signalStateRestored,
     'stream' => $streamValues,
     'successful' => $process->successful(),
     'timedOut' => $timedOut->kind->value,

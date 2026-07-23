@@ -475,18 +475,24 @@ namespace Pam\Async {
                     ? $previousHandler
                     : \Closure::fromCallable($previousHandler);
             }
+            $previousMask = [];
+            if (!pcntl_sigprocmask(SIG_BLOCK, [$signal], $previousMask)) {
+                throw new \RuntimeException("Unable to inspect signal {$signal}.");
+            }
+            $this->wasBlocked = in_array($signal, $previousMask, true);
             pcntl_async_signals(true);
             if (!pcntl_signal($signal, $handler)) {
+                if (!$this->wasBlocked) {
+                    pcntl_sigprocmask(SIG_UNBLOCK, [$signal]);
+                }
                 pcntl_async_signals($this->previousAsyncSignals);
                 throw new \RuntimeException("Unable to register signal {$signal}.");
             }
-            $previousMask = [];
-            if (!pcntl_sigprocmask(SIG_UNBLOCK, [$signal], $previousMask)) {
+            if (!pcntl_sigprocmask(SIG_UNBLOCK, [$signal])) {
                 pcntl_signal($signal, $this->previousHandler);
                 pcntl_async_signals($this->previousAsyncSignals);
                 throw new \RuntimeException("Unable to unblock signal {$signal}.");
             }
-            $this->wasBlocked = in_array($signal, $previousMask, true);
         }
 
         public function cancel(): void
@@ -494,10 +500,10 @@ namespace Pam\Async {
             if (!$this->active) {
                 return;
             }
+            pcntl_signal($this->signal, $this->previousHandler);
             if ($this->wasBlocked) {
                 pcntl_sigprocmask(SIG_BLOCK, [$this->signal]);
             }
-            pcntl_signal($this->signal, $this->previousHandler);
             pcntl_async_signals($this->previousAsyncSignals);
             $this->active = false;
         }
