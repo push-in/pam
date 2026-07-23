@@ -156,12 +156,11 @@ a stateless `GET /api/ping` route. The `Pam\Laravel` host is compiled into the
 binary: Laravel itself remains untouched in `vendor`, boots once, and receives an
 isolated application sandbox for every request.
 
-The executable matrix validates Laravel 11, 12 and 13 with SQLite, MySQL,
+The executable matrix validates Laravel 12 and 13 with SQLite, MySQL,
 PostgreSQL, Redis, database queues, Artisan, Sanctum, Scout, Livewire, Inertia,
-Reverb, Telescope and Pulse. Horizon and Socialite are tested on Laravel 11/12,
-the versions accepted by their current stable Composer constraints. Laravel 11
-is retained only as a legacy regression target; production support follows
-maintained Laravel 12 and current Laravel 13.
+Reverb, Telescope and Pulse. Horizon and Socialite are tested on Laravel 12,
+the version accepted by their current stable Composer constraints. The supported
+contract is maintained Laravel 12 and current Laravel 13.
 
 Artisan runs through Pam with a real CLI SAPI identity, normal arguments, exit
 codes, standard streams, and Laravel's console environment:

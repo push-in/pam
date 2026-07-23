@@ -24,10 +24,10 @@ after the first stable release.
   locked Laravel 13 compatibility contract, and an RSS isolation soak.
 - Added first-class `pam artisan` with CLI SAPI identity, standard streams,
   arguments, exit codes, queue workers and scheduler compatibility.
-- Expanded the Laravel contract to framework 11/12/13, SQLite/MySQL/PostgreSQL,
+- Expanded the Laravel contract to framework 12/13, SQLite/MySQL/PostgreSQL,
   Redis, database queues, Sanctum, Scout, Livewire, Inertia, Reverb and active
   Telescope/Pulse persistence; Horizon and Socialite run on their supported
-  Laravel 11/12 package matrix.
+  Laravel 12 package matrix.
 - Rewired request sandboxes across Events, Eloquent, database connections,
   Bus/Pipeline, validation/translation, notifications, broadcasting, hashing,
   views and routing, with executable request-scoped injection and locale

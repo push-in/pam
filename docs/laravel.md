@@ -7,11 +7,8 @@ depends on Laravel and its ordinary Composer packages.
 ## Executable compatibility matrix
 
 Compatibility is a tested contract, not a claim based only on successful boot.
-The dedicated workflow runs the same PAM binary against Laravel 11, 12 and 13 on
-PHP 8.4 Embed. Laravel 12 and 13 are the maintained production matrix. Laravel
-11 remains a legacy regression contract, but its
-[official security support](https://laravel.com/docs/12.x/releases#support-policy)
-ended on March 12, 2026 and it must not be selected for a new production deployment.
+The dedicated workflow runs the same PAM binary against Laravel 12 and 13 on
+PHP 8.4 Embed. These are the maintained production matrix.
 The matrix exercises:
 
 - HTTP kernel boot, providers, middleware, routing, validation, exceptions and
@@ -30,7 +27,7 @@ The matrix exercises:
 
 The locked Laravel 13 contract installs Inertia, Livewire, Pulse, Reverb,
 Sanctum, Scout and Telescope. Horizon and Socialite are additionally exercised
-on Laravel 11/12 because their current stable Composer constraints do not accept
+on Laravel 12 because their current stable Composer constraints do not accept
 Laravel 13; PAM does not falsify or bypass upstream package constraints.
 
 This matrix defines the technically supported surface. No runtime can truthfully guarantee

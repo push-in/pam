@@ -58,7 +58,7 @@ O projeto `compat/composer-smoke` é o contrato executável e possui lockfile. A
 de ampliar a matriz, faça preflight da versão e compatibilidade e só depois altere
 as dependências.
 
-O segundo contrato, `compat/laravel-smoke`, executa Laravel 11, 12 e 13 no host
+O segundo contrato, `compat/laravel-smoke`, executa Laravel 12 e 13 no host
 persistente `Pam\Laravel`, valida o bridge com PHPStan nível 9 e testa isolamento
 do container e estabilidade de RSS. A matriz cobre SQLite, MySQL, PostgreSQL,
 Redis, fila database, Artisan, scheduler, Eloquent, auth/Sanctum, sessão/CSRF,

@@ -18,9 +18,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - laravel: '11.0'
-            tier: legacy
-            allow_failure: true
           - laravel: '12.0'
             tier: maintained
             allow_failure: false
