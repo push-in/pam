@@ -3,6 +3,15 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
+## 0.1.1 - 2026-07-23
+
+- Rebuilt official x86_64 and ARM64 runtimes on a glibc 2.35 baseline.
+- Bundled the non-system shared-library closure required by PHP Embed and the
+  curated extension set, removing accidental host-library dependencies.
+- Added a portable release validation path and deterministic non-interactive
+  toolchain installation for private repositories.
+- Restricted the supported Laravel matrix to Laravel 12 and 13.
+
 ## 0.1.0 - 2026-07-23
 
 - Official Linux archives now ship an isolated PHP Embed runtime, curated common

@@ -25,7 +25,7 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.0`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.1`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
 **Explore:** [Quick start](#quick-start) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
