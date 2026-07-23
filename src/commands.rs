@@ -687,7 +687,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
 
         <section class="summary" aria-labelledby="summary-title">
             <div>
-                <span class="eyebrow">PAM DESKTOP 0.5</span>
+                <span class="eyebrow">PAM DESKTOP 0.6</span>
                 <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
             </div>
             <span class="online"><i aria-hidden="true"></i> worker online</span>
@@ -701,7 +701,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
             </article>
             <article>
                 <span>protocol</span>
-                <strong>IPC v5</strong>
+                <strong>IPC v6</strong>
                 <small>contrato tipado</small>
             </article>
             <article>
@@ -1109,7 +1109,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
         "license": "proprietary",
         "require": {
             "php": "^8.4",
-            "pam/desktop": "^0.5"
+            "pam/desktop": "^0.6"
         },
         "autoload": {
             "psr-4": {
@@ -1143,13 +1143,22 @@ declare(strict_types=1);
 
 use Pam\Desktop\Application;
 use Pam\Desktop\ApplicationCategory;
+use Pam\Desktop\BackgroundJob;
 use Pam\Desktop\Capabilities;
 use Pam\Desktop\ClientEvent;
 use Pam\Desktop\CommandContext;
 use Pam\Desktop\CommandResult;
 use Pam\Desktop\EventContext;
 use Pam\Desktop\FileSystemRoot;
+use Pam\Desktop\GlobalShortcut;
+use Pam\Desktop\JobContext;
 use Pam\Desktop\Manifest;
+use Pam\Desktop\Menu;
+use Pam\Desktop\MenuItem;
+use Pam\Desktop\Shell;
+use Pam\Desktop\ShellEffect;
+use Pam\Desktop\Tray;
+use Pam\Desktop\TrayCloseBehavior;
 use Pam\Desktop\Window;
 use Pam\Desktop\WindowEffect;
 use Pam\Desktop\WindowTheme;
@@ -1161,7 +1170,7 @@ $app = Application::create(
         ->size(1120, 720)
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
-    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
+    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.6.0')
         ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
         ->publisher('Pushin')
         ->category(ApplicationCategory::Development)
@@ -1183,6 +1192,38 @@ $app = Application::create(
             ->clipboard()
             ->notifications()
             ->dragAndDrop(),
+    )
+    ->shell(
+        Shell::none()
+            ->menu(Menu::create(
+                'application',
+                'Pam Hello',
+                MenuItem::command('app.show', 'Mostrar janela', 'CmdOrCtrl+Shift+KeyP'),
+                MenuItem::command('inspector.show', 'Runtime Inspector'),
+                MenuItem::checkbox('background.enabled', 'Executar em segundo plano', true),
+                MenuItem::separator(),
+                MenuItem::command('app.quit', 'Sair'),
+            ))
+            ->tray(
+                Tray::create('application', 'Pam Desktop · Hello')
+                    ->closeBehavior(TrayCloseBehavior::Hide),
+            )
+            ->shortcut(
+                GlobalShortcut::create('app.show', 'CmdOrCtrl+Shift+KeyP'),
+            ),
+    )
+    ->plugin(new App\HelloPlugin())
+    ->job(
+        'runtime.heartbeat',
+        BackgroundJob::every(30_000)->timeout(3_000),
+        static fn (JobContext $job): CommandResult =>
+            CommandResult::success([
+                'runId' => $job->runId,
+                'startedAtMs' => $job->startedAtMilliseconds,
+            ])->event(new ClientEvent(
+                name: 'runtime.heartbeat',
+                payload: ['runId' => $job->runId],
+            )),
     )
     ->commandTimeout(10_000);
 
@@ -1220,11 +1261,73 @@ $app->on('client.ready', static fn (EventContext $event): CommandResult =>
     CommandResult::success()
         ->event(new ClientEvent(
             name: 'runtime.ready',
-            payload: ['windowId' => $event->windowId, 'protocol' => 5],
+            payload: ['windowId' => $event->windowId, 'protocol' => 6],
             windowId: $event->windowId,
         )));
 
+$app->on('pam.menu.selected', static function (EventContext $event): CommandResult {
+    static $backgroundEnabled = true;
+
+    return match ($event->string('id')) {
+        'app.show' => CommandResult::success()
+            ->effect(WindowEffect::visible(true))
+            ->effect(WindowEffect::focus()),
+        'inspector.show' => CommandResult::success()
+            ->effect(WindowEffect::visible(true, 'inspector'))
+            ->effect(WindowEffect::focus('inspector')),
+        'background.enabled' => CommandResult::success([
+            'enabled' => $backgroundEnabled = !$backgroundEnabled,
+        ])->effect(ShellEffect::menuChecked('background.enabled', $backgroundEnabled)),
+        'app.quit' => CommandResult::success()->effect(WindowEffect::close()),
+        default => CommandResult::success(),
+    };
+});
+
+$app->on('pam.shortcut.changed', static fn (EventContext $event): CommandResult =>
+    $event->integer('state') === 1
+        ? CommandResult::success()
+            ->effect(WindowEffect::visible(true))
+            ->effect(WindowEffect::focus())
+        : CommandResult::success());
+
 $app->run();
+"#,
+    )?;
+    fs::create_dir_all(directory.join("src"))
+        .map_err(|error| format!("cannot create desktop source directory: {error}"))?;
+    write_new(
+        &directory.join("src/HelloPlugin.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use Pam\Desktop\Application;
+use Pam\Desktop\CommandContext;
+use Pam\Desktop\Plugin;
+
+final class HelloPlugin implements Plugin
+{
+    public function identifier(): string
+    {
+        return 'hello.runtime';
+    }
+
+    public function register(Application $application): void
+    {
+        $application->command(
+            'runtime.snapshot',
+            static fn (CommandContext $command): array => [
+                'php' => PHP_VERSION,
+                'os' => PHP_OS_FAMILY,
+                'architecture' => php_uname('m'),
+                'windowId' => $command->windowId,
+                'plugin' => 'hello.runtime',
+            ],
+        );
+    }
+}
 "#,
     )?;
     write_new(
@@ -1289,7 +1392,7 @@ $app->run();
             <div class="runtime-status" aria-label="Estado da runtime">
                 <span class="status-pulse" aria-hidden="true"></span>
                 <span>runtime online</span>
-                <kbd>0.5</kbd>
+                <kbd>0.6</kbd>
             </div>
         </header>
 
@@ -1381,9 +1484,20 @@ $app->run();
                         </p>
                     </section>
 
+                    <section class="update-console" aria-labelledby="extension-title">
+                        <div>
+                            <span>EXTENSION RUNTIME · 0.6</span>
+                            <h2 id="extension-title">Plugins PHP + Rust isolado</h2>
+                            <p id="extension-status" role="status" aria-live="polite">
+                                PHP compõe a aplicação; plugins Rust rodam em processos supervisionados.
+                            </p>
+                        </div>
+                        <button id="extension-button" type="button">Consultar plugin</button>
+                    </section>
+
                     <section class="update-console" aria-labelledby="update-title">
                         <div>
-                            <span>SIGNED UPDATES · 0.5</span>
+                            <span>SIGNED UPDATES</span>
                             <h2 id="update-title">Atualizações com rollback</h2>
                             <p id="update-status" role="status" aria-live="polite">
                                 Desativadas por padrão; a chave pública fica no manifesto PHP.
@@ -1465,7 +1579,7 @@ $app->run();
                 </article>
                 <article>
                     <span>contract</span>
-                    <strong>IPC v5</strong>
+                    <strong>IPC v6</strong>
                     <small>tipado e versionado</small>
                 </article>
             </section>
@@ -2490,6 +2604,8 @@ footer kbd {
     const openFileButton = document.querySelector("#open-file-button");
     const copyButton = document.querySelector("#copy-button");
     const notifyButton = document.querySelector("#notify-button");
+    const extensionButton = document.querySelector("#extension-button");
+    const extensionStatus = document.querySelector("#extension-status");
     const updateButton = document.querySelector("#update-button");
     const updateStatus = document.querySelector("#update-status");
 
@@ -2524,6 +2640,7 @@ footer kbd {
             element.disabled = true;
         });
         inspectorButton.disabled = true;
+        extensionButton.disabled = true;
         updateButton.disabled = true;
         return;
     }
@@ -2544,6 +2661,20 @@ footer kbd {
     });
     window.pam.on("pam.dev.error", ({ message: reloadError }) => {
         eventStatus.textContent = `hot reload falhou · ${reloadError}`;
+    });
+    window.pam.on("pam.menu.selected", ({ id }) => {
+        eventStatus.textContent = `menu nativo · ${id}`;
+    });
+    window.pam.on("pam.tray.activated", ({ button: trayButton }) => {
+        eventStatus.textContent = `tray ativado · botão ${trayButton}`;
+    });
+    window.pam.on("pam.shortcut.changed", ({ id, state }) => {
+        if (state === 1) {
+            eventStatus.textContent = `atalho global · ${id}`;
+        }
+    });
+    window.pam.on("pam.job.completed", ({ id, runId }) => {
+        extensionStatus.textContent = `${id} · execução #${runId} concluída`;
     });
     window.pam.on("pam.drag.enter", ({ name }) => {
         dropZone.dataset.active = "true";
@@ -2650,6 +2781,25 @@ footer kbd {
             });
             nativeStatus.textContent = "Notificação entregue ao sistema.";
         });
+    });
+
+    extensionButton.addEventListener("click", async () => {
+        extensionButton.disabled = true;
+        try {
+            const snapshot = await window.pam.invoke(
+                "runtime.snapshot",
+                null,
+                { timeout: 3_000 },
+            );
+            extensionStatus.textContent =
+                `${snapshot.plugin} · PHP ${snapshot.php} · ${snapshot.os}/${snapshot.architecture}`;
+        } catch (error) {
+            extensionStatus.textContent = error instanceof Error
+                ? `Plugin PHP · ${error.message}`
+                : "Não foi possível consultar o plugin PHP.";
+        } finally {
+            extensionButton.disabled = false;
+        }
     });
 
     updateButton.addEventListener("click", async () => {
@@ -2886,7 +3036,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": true,
                     "versions": {
-                        "pam/desktop": "0.5.0"
+                        "pam/desktop": "0.6.0"
                     }
                 }
             })

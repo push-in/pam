@@ -5,10 +5,14 @@ after the first stable release.
 
 ## Unreleased
 
-- Updated the `pam init --template desktop` starter to protocol 5 and
-  `pam/desktop` 0.5, including a polished signed-update status surface.
-- Documented cross-platform DMG/MSIX packaging, feed signing, automatic updates
-  and rollback while keeping the public workflow under `pam desktop`.
+- Updated the `pam init --template desktop` starter to protocol 6 and
+  `pam/desktop` 0.6 with PHP plugins, native menus, tray, close-to-tray, global
+  shortcuts and supervised background jobs.
+- Added an extension-runtime surface to the starter and documented
+  process-isolated Rust plugin scaffolding under `pam desktop plugin`.
+- Focused current desktop generation and package documentation on
+  self-contained Linux x86-64 delivery while preserving the public workflow
+  under `pam desktop`.
 
 ## 0.1.1 - 2026-07-23
 

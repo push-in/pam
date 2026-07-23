@@ -202,26 +202,31 @@ pam desktop build .
 
 `pam desktop` is the public command; it delegates to the separately distributed
 `pam-desktop` host and identifies the current Pam executable to its PHP worker.
-The 0.5 starter demonstrates multiple windows, bidirectional events, command
+The 0.6 starter demonstrates multiple windows, bidirectional events, command
 timeouts, crash recovery, development hot reload and explicit native
 capabilities. Window configuration and application policy remain in PHP, local
 HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
 versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
 notifications and drag-and-drop grants are opt-in. Application identity,
-category, icon and signed-update policy also live in a typed PHP manifest:
+category, icon and signed-update policy also live in a typed PHP manifest.
+Menus, tray, close-to-tray behavior, global shortcuts, background jobs and
+composable PHP plugins are configured through the same public application API.
+Native Rust plugins remain process-isolated and can be scaffolded with
+`pam desktop plugin new`:
 
 ```php
-Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
+Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.6.0')
     ->publisher('Pushin')
     ->category(ApplicationCategory::Development);
 ```
 
-`pam desktop build` creates a self-contained, update-ready package for Linux,
-macOS or Windows. `--format deb` adds a Debian package; `--format native`
-creates a DMG or MSIX on its native host. Bundles include the Pam worker, PHP
-runtime libraries, Servo host, vendored PHP application, platform metadata,
-icon and a SHA-256 integrity manifest. Feed signing and automatic updates remain
-behind explicit PHP policy and a pinned Ed25519 public key.
+`pam desktop build` creates a self-contained, update-ready Linux package.
+`--format deb` adds a Debian package. Bundles include the Pam worker, PHP
+runtime libraries, Servo host, vendored PHP application and native plugins,
+Linux metadata, icon and a SHA-256 integrity manifest. Feed signing and
+automatic updates remain behind explicit PHP policy and a pinned Ed25519 public
+key. Windows/macOS packager code is preserved upstream, but the current release
+pipeline generates Linux x86-64 artifacts only.
 
 Native capabilities remain explicit:
 

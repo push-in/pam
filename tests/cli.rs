@@ -498,6 +498,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
 
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     let application = fs::read_to_string(directory.join("app.php")).unwrap();
+    let plugin = fs::read_to_string(directory.join("src/HelloPlugin.php")).unwrap();
     let html = fs::read_to_string(directory.join("resources/index.html")).unwrap();
     let styles = fs::read_to_string(directory.join("resources/styles.css")).unwrap();
     let javascript = fs::read_to_string(directory.join("resources/app.js")).unwrap();
@@ -507,7 +508,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
         fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
 
     assert!(manifest.contains("\"pam/desktop\""));
-    assert!(manifest.contains("\"pam/desktop\": \"^0.5\""));
+    assert!(manifest.contains("\"pam/desktop\": \"^0.6\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
     assert!(application.contains("Application::create"));
@@ -519,10 +520,20 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(application.contains("Capabilities::none()"));
     assert!(application.contains("FileSystemRoot::readWrite"));
     assert!(application.contains("WindowEffect::title"));
+    assert!(application.contains("Shell::none()"));
+    assert!(application.contains("MenuItem::command"));
+    assert!(application.contains("TrayCloseBehavior::Hide"));
+    assert!(application.contains("GlobalShortcut::create"));
+    assert!(application.contains("BackgroundJob::every"));
+    assert!(application.contains("new App\\HelloPlugin()"));
+    assert!(application.contains("'protocol' => 6"));
+    assert!(plugin.contains("implements Plugin"));
+    assert!(plugin.contains("'runtime.snapshot'"));
     assert!(html.contains("/_pam/bridge.js"));
     assert!(html.contains("aria-live=\"polite\""));
-    assert!(html.contains("IPC v5"));
+    assert!(html.contains("IPC v6"));
     assert!(html.contains("Native Lab"));
+    assert!(html.contains("EXTENSION RUNTIME · 0.6"));
     assert!(html.contains("Atualizações com rollback"));
     assert!(styles.contains("prefers-reduced-motion"));
     assert!(styles.contains(":focus-visible"));
@@ -535,6 +546,9 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(javascript.contains("window.pam.notification.show"));
     assert!(javascript.contains("window.pam.on(\"pam.drag.drop\""));
     assert!(javascript.contains("window.pam.updater.status"));
+    assert!(javascript.contains("window.pam.invoke(\n                \"runtime.snapshot\""));
+    assert!(javascript.contains("window.pam.on(\"pam.job.completed\""));
+    assert!(javascript.contains("window.pam.on(\"pam.menu.selected\""));
     assert!(directory.join("storage/.gitkeep").is_file());
     assert!(directory.join("resources/icon.svg").is_file());
     assert!(inspector.contains("Runtime Inspector"));
