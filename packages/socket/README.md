@@ -5,7 +5,7 @@ authentication, rooms, broadcasts, acknowledgements and Redis Streams/NATS
 adapters.
 
 ```bash
-composer require pam/socket
+pam composer require pam/socket
 ```
 
 ```php

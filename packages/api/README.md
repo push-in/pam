@@ -5,7 +5,7 @@ a precompiled middleware pipeline, error boundaries and Composer provider
 discovery.
 
 ```bash
-composer require pam/api
+pam composer require pam/api
 ```
 
 ```php

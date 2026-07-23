@@ -3,7 +3,7 @@
 Fast in-memory tests for applications built with `pam/api`.
 
 ```bash
-composer require --dev pam/testing
+pam composer require --dev pam/testing
 ```
 
 ```php
