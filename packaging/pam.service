@@ -1,0 +1,41 @@
+[Unit]
+Description=Pam PHP application runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/srv/pam/current
+Environment=PAM_WORKERS=4
+Environment=PAM_MAX_REQUESTS=10000000
+Environment=PAM_ENTRYPOINT=index.php
+Environment=PAM_LARAVEL_STORAGE_PATH=/var/lib/pam
+EnvironmentFile=-/etc/pam/pam.env
+ExecStart=/usr/local/bin/pam start ${PAM_ENTRYPOINT} --workers ${PAM_WORKERS} --max-requests ${PAM_MAX_REQUESTS} --admin-address 127.0.0.1:3010
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=45s
+Restart=always
+RestartSec=2s
+LimitNOFILE=1048576
+StateDirectory=pam
+StateDirectoryMode=0750
+UMask=0027
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

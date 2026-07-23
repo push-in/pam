@@ -1,0 +1,16 @@
+parameters:
+    level: 9
+    excludePaths:
+        analyse:
+            - ../../runtime/laravel.php
+    paths:
+        - ../../runtime
+        - ../../packages/core-api/src
+        - ../../packages/api/src
+        - ../../packages/socket/src
+        - ../../packages/psr-bridge/src
+        - ../../packages/testing/src
+        - src
+        - tests/ProbeTest.php
+        - tests/HttpClientSecurityTest.php
+        - tests/ApiTest.php

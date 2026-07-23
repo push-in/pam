@@ -1,0 +1,37 @@
+[package]
+name = "pam"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "Pam — PHP, Always in Memory: a persistent PHP runtime powered by Rust and the Embed SAPI"
+license = "MIT"
+build = "build.rs"
+
+[dependencies]
+axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "tokio", "ws"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
+base64 = "0.22.1"
+bytes = "1.12.1"
+futures-util = { version = "0.3.33", features = ["sink"] }
+h3 = "0.0.8"
+h3-quinn = "0.0.10"
+hmac = "0.12.1"
+hyper-util = { version = "0.1.20", features = ["tokio"] }
+http = "1.4.2"
+quinn = { version = "0.11.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
+rustls-pki-types = { version = "1.15.0", features = ["std"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.10.9"
+socket2 = { version = "0.6.5", features = ["all"] }
+tokio = { version = "1.53.1", features = ["macros", "net", "rt", "signal", "sync", "time"] }
+yawc = { version = "0.3.3", default-features = false, features = ["axum"] }
+
+[dev-dependencies]
+tungstenite = "0.29.0"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+panic = "abort"
+strip = "symbols"

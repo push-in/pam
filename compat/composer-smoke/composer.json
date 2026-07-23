@@ -1,0 +1,71 @@
+{
+    "name": "pam/composer-compatibility-smoke",
+    "description": "Executable compatibility contract for Composer packages supported by Pam.",
+    "license": "MIT",
+    "type": "project",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../packages/*",
+            "options": {
+                "symlink": true,
+                "versions": {
+                    "pam/core-api": "0.1.0",
+                    "pam/api": "0.1.0",
+                    "pam/psr-bridge": "0.1.0",
+                    "pam/socket": "0.1.0",
+                    "pam/testing": "0.1.0"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "amphp/amp": "^3.1",
+        "guzzlehttp/guzzle": "^8.0",
+        "illuminate/container": "^13.0",
+        "illuminate/events": "^13.0",
+        "illuminate/pipeline": "^13.0",
+        "monolog/monolog": "^3.10",
+        "open-telemetry/api": "^1.4",
+        "open-telemetry/exporter-otlp": "^1.4",
+        "open-telemetry/sdk": "^1.15",
+        "pam/api": "^0.1",
+        "pam/psr-bridge": "^0.1",
+        "pam/socket": "^0.1",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^2.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/http-server-middleware": "^1.0",
+        "psr/log": "^3.0",
+        "react/event-loop": "^1.6",
+        "revolt/event-loop": "^1.0",
+        "slim/slim": "^4.15",
+        "symfony/http-kernel": "^8.0"
+    },
+    "require-dev": {
+        "pam/testing": "^0.1",
+        "pestphp/pest": "^4.7",
+        "phpstan/phpstan": "^2.2",
+        "phpunit/phpunit": "12.5.30"
+    },
+    "autoload": {
+        "psr-4": {
+            "Pam\\Compatibility\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Pam\\Compatibility\\Tests\\": "tests/"
+        }
+    },
+    "config": {
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
+        },
+        "platform-check": true,
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

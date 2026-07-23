@@ -1,0 +1,12 @@
+/target/
+/.pam-sdk/
+/playground/
+/.idea/
+/.vscode/
+/dist/
+**/.env
+**/*.log
+**/.DS_Store
+/compat/composer-smoke/vendor/
+/compat/composer-smoke/.phpunit.cache/
+/compat/laravel-smoke/vendor/

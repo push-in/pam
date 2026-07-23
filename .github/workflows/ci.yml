@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy,rustfmt
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Install PHP Embed development package
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y libphp8.4-embed php8.4-dev
+      - uses: Swatinem/rust-cache@v2
+      - name: Validate locked Composer dependencies
+        run: |
+          composer validate --strict --working-dir=compat/composer-smoke
+          composer validate --strict --working-dir=compat/laravel-smoke
+      - name: Validate Pam package manifests
+        run: |
+          for package in packages/*/composer.json; do
+            composer validate --strict --no-check-lock --no-check-publish "$package"
+          done
+      - name: Install locked Composer dependencies
+        run: |
+          composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
+          composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
+      - name: Format
+        run: cargo fmt --all -- --check
+      - name: Lint
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - name: Rust and integration tests
+        run: cargo test --locked --all-targets --all-features -- --test-threads=1
+      - name: PHP static analysis
+        run: |
+          compat/composer-smoke/vendor/bin/phpstan analyse -c compat/composer-smoke/phpstan.neon --no-progress
+          compat/laravel-smoke/vendor/bin/phpstan analyse -c compat/laravel-smoke/phpstan.neon --no-progress
+      - name: Composer compatibility tests
+        run: compat/composer-smoke/vendor/bin/phpunit -c compat/composer-smoke/phpunit.xml
+      - name: Embed SAPI compatibility tests
+        run: |
+          ./target/debug/pam test compat/composer-smoke --phpunit -c phpunit.xml
+          ./target/debug/pam test compat/composer-smoke --pest
+      - name: Build release binary
+        run: cargo build --locked --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pam-linux-x86_64
+          path: target/release/pam
+          if-no-files-found: error

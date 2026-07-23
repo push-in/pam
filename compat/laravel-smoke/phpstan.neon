@@ -1,0 +1,14 @@
+parameters:
+    level: 9
+    paths:
+        - ../../runtime/laravel.php
+        - bootstrap/app.php
+        - bootstrap/compatibility.php
+        - database/migrations
+        - routes/api.php
+        - routes/console.php
+        - routes/web.php
+        - pam.php
+    scanFiles:
+        - ../../runtime/async.php
+        - ../../runtime/bootstrap.php

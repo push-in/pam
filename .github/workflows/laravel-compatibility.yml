@@ -1,0 +1,180 @@
+name: Laravel compatibility
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  laravel:
+    name: Laravel ${{ matrix.laravel }} (${{ matrix.tier }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - laravel: '11.0'
+            tier: legacy
+          - laravel: '12.0'
+            tier: maintained
+          - laravel: '13.0'
+            tier: current
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_DATABASE: pam
+          MYSQL_ROOT_PASSWORD: pam
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -ppam"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: pam
+          POSTGRES_PASSWORD: pam
+          POSTGRES_USER: pam
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pam -d pam"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7.4
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Install PHP Embed toolchain
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y \
+            libphp8.4-embed \
+            php8.4-dev \
+            php8.4-mysql \
+            php8.4-pgsql \
+            php8.4-redis
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: laravel-${{ matrix.laravel }}
+      - name: Build PAM for Composer and Artisan lifecycle hooks
+        run: cargo build --locked
+      - name: Resolve the Laravel compatibility matrix
+        working-directory: compat/laravel-smoke
+        env:
+          LARAVEL_VERSION: ${{ matrix.laravel }}
+        run: |
+          composer require "laravel/framework:^${LARAVEL_VERSION}" \
+            --with-all-dependencies \
+            --no-interaction \
+            --no-progress
+          if [ "${LARAVEL_VERSION}" != "13.0" ]; then
+            composer require \
+              "laravel/horizon:^5.48" \
+              "laravel/socialite:^5.29" \
+              --dev \
+              --with-all-dependencies \
+              --no-interaction \
+              --no-progress
+          fi
+          ../../target/debug/pam artisan package:discover
+          composer validate --strict
+      - name: Validate PAM against Laravel
+        run: |
+          cargo fmt --all -- --check
+          cargo test --locked --test laravel -- --nocapture --test-threads=1
+          compat/laravel-smoke/vendor/bin/phpstan analyse \
+            -c compat/laravel-smoke/phpstan.neon \
+            --no-progress
+      - name: Validate MySQL, PostgreSQL, Redis and database queues
+        working-directory: compat/laravel-smoke
+        env:
+          APP_ENV: testing
+          APP_KEY: base64:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+          CACHE_STORE: redis
+          QUEUE_CONNECTION: database
+          REDIS_CLIENT: phpredis
+          REDIS_HOST: 127.0.0.1
+          TELESCOPE_ENABLED: 'false'
+          PULSE_ENABLED: 'false'
+        run: |
+          DB_CONNECTION=mysql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=3306 \
+          DB_DATABASE=pam \
+          DB_USERNAME=root \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan migrate:fresh --force --no-interaction
+          DB_CONNECTION=mysql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=3306 \
+          DB_DATABASE=pam \
+          DB_USERNAME=root \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan pam:queue-seed mysql-compatible
+          DB_CONNECTION=mysql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=3306 \
+          DB_DATABASE=pam \
+          DB_USERNAME=root \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan queue:work database --once --tries=1
+          DB_CONNECTION=mysql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=3306 \
+          DB_DATABASE=pam \
+          DB_USERNAME=root \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan pam:queue-result | grep mysql-compatible
+          DB_CONNECTION=pgsql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=5432 \
+          DB_DATABASE=pam \
+          DB_USERNAME=pam \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan migrate:fresh --force --no-interaction
+          DB_CONNECTION=pgsql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=5432 \
+          DB_DATABASE=pam \
+          DB_USERNAME=pam \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan pam:queue-seed pgsql-compatible
+          DB_CONNECTION=pgsql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=5432 \
+          DB_DATABASE=pam \
+          DB_USERNAME=pam \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan queue:work database --once --tries=1
+          DB_CONNECTION=pgsql \
+          DB_HOST=127.0.0.1 \
+          DB_PORT=5432 \
+          DB_DATABASE=pam \
+          DB_USERNAME=pam \
+          DB_PASSWORD=pam \
+            ../../target/debug/pam artisan pam:queue-result | grep pgsql-compatible
+          ../../target/debug/pam artisan pam:cache-roundtrip redis redis-compatible |
+            grep redis-compatible

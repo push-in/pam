@@ -1,0 +1,28 @@
+{
+    "name": "pam/skeleton",
+    "description": "Production-ready starter application for the Pam runtime.",
+    "type": "project",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "pam/api": "^0.1",
+        "pam/psr-bridge": "^0.1",
+        "pam/socket": "^0.1"
+    },
+    "require-dev": {
+        "pam/testing": "^0.1",
+        "phpunit/phpunit": "^12.5"
+    },
+    "autoload": {
+        "psr-4": {
+            "App\\": "src/"
+        }
+    },
+    "config": {
+        "platform-check": true,
+        "sort-packages": true
+    },
+    "scripts": {
+        "test": "pam test . --phpunit -c phpunit.xml"
+    }
+}

@@ -1,0 +1,25 @@
+{
+    "name": "pam/api",
+    "description": "Elegant HTTP routing and middleware for the Pam runtime.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "pam/core-api": "^0.1"
+    },
+    "suggest": {
+        "pam/psr-bridge": "PSR-7, PSR-15 and PSR-17 interoperability.",
+        "pam/socket": "High-level event and room APIs for Pam WebSockets."
+    },
+    "autoload": {
+        "classmap": [
+            "src/App.php"
+        ],
+        "psr-4": {
+            "Pam\\Api\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

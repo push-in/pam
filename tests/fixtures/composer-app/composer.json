@@ -1,0 +1,13 @@
+{
+    "name": "pam/composer-fixture",
+    "description": "Composer autoload fixture for the PAM runtime test suite.",
+    "license": "MIT",
+    "config": {
+        "vendor-dir": "dependencies"
+    },
+    "autoload": {
+        "psr-4": {
+            "Fixture\\": "src/"
+        }
+    }
+}

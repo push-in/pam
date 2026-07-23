@@ -1,0 +1,21 @@
+{
+    "name": "pam/psr-bridge",
+    "description": "PSR-7, PSR-15 and PSR-17 implementations for Pam.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^2.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/http-server-middleware": "^1.0"
+    },
+    "autoload": {
+        "files": [
+            "src/psr.php"
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

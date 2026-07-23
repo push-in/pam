@@ -1,0 +1,48 @@
+name: Security and soak
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Install PHP Embed development package
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y libphp8.4-embed php8.4-dev valgrind
+      - uses: Swatinem/rust-cache@v2
+      - name: Audit Rust lockfile
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+      - name: Audit Composer lockfile
+        run: |
+          composer audit --working-dir=compat/composer-smoke --locked
+          composer audit --working-dir=compat/laravel-smoke --locked
+      - name: Install locked Composer test dependencies
+        run: |
+          composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
+          composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
+      - name: Memory soak contracts
+        run: |
+          cargo test --locked --test memory -- --nocapture --test-threads=1
+          cargo test --locked --test laravel -- --nocapture --test-threads=1
+      - name: Native shutdown smoke under Valgrind
+        run: |
+          cargo build --locked
+          valgrind --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \
+            --leak-check=full ./target/debug/pam tests/fixtures/hello.php

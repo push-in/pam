@@ -1,0 +1,7 @@
+.git
+.github
+.pam-sdk
+target
+compat/composer-smoke/vendor
+playground
+*.log

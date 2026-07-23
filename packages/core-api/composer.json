@@ -1,0 +1,17 @@
+{
+    "name": "pam/core-api",
+    "description": "Stable PHP contracts for the Pam persistent runtime.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "Pam\\Contracts\\": "src/"
+        }
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
