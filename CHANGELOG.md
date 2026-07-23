@@ -3,7 +3,7 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
-## Unreleased
+## 0.1.0 - 2026-07-23
 
 - Official Linux archives now ship an isolated PHP Embed runtime, curated common
   extensions and private INI configuration; installed users do not need system
