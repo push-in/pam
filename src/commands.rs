@@ -242,7 +242,8 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
     }
     if project.join("composer.json").is_file() && !project.join("vendor/autoload.php").is_file() {
         return Err(
-            "vendor/autoload.php is missing; run composer install before pam build".to_owned(),
+            "vendor/autoload.php is missing; run `pam composer install` before `pam build`"
+                .to_owned(),
         );
     }
 
