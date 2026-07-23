@@ -43,6 +43,28 @@ mkdir -p \
 cp "${pam_binary}" "${package_root}/bin/pam"
 cp "${php_library}" "${package_root}/lib/libphp.so"
 
+copy_dependencies() {
+    ldd "$1" | awk '$2 == "=>" { print $1 "|" $3 }' |
+        while IFS='|' read -r library_name library_path; do
+            case "${library_name}" in
+                libc.so.*|libm.so.*|libpthread.so.*|libdl.so.*|librt.so.*|\
+                libresolv.so.*|libutil.so.*|libanl.so.*|libnss_*.so.*)
+                    continue
+                    ;;
+            esac
+
+            test "${library_path}" != "not" && test -f "${library_path}" || {
+                echo "Runtime dependency not found for $1: ${library_name}" >&2
+                exit 69
+            }
+
+            bundled_library="${package_root}/lib/${library_name}"
+            test -f "${bundled_library}" && continue
+            cp -L "${library_path}" "${bundled_library}"
+            copy_dependencies "${bundled_library}"
+        done
+}
+
 cat > "${package_root}/etc/php.ini" <<'EOF'
 expose_php=Off
 display_errors=Off
@@ -64,10 +86,14 @@ for module in ${modules}; do
     else
         directive="extension=\${PAM_EXTENSION_DIR}/${module}.so"
     fi
+    copy_dependencies "${package_root}/lib/php/extensions/${module}.so"
     printf '%s\n' "${directive}" > \
         "${package_root}/etc/conf.d/$(printf '%02d' "${priority}")-${module}.ini"
     priority=$((priority + 1))
 done
+
+copy_dependencies "${package_root}/bin/pam"
+copy_dependencies "${package_root}/lib/libphp.so"
 
 cat > "${package_root}/bin/pam-run" <<'EOF'
 #!/bin/sh

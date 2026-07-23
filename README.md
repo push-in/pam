@@ -71,7 +71,9 @@ The result is a runtime designed for APIs, real-time systems, streaming, backgro
 
 ### 1. Install the runtime
 
-Pam currently ships prebuilt Linux releases for x86_64 and ARM64.
+Pam currently ships prebuilt Linux releases for x86_64 and ARM64. Official
+archives target glibc 2.35 or newer and bundle non-system shared libraries used
+by the runtime and its reviewed PHP extensions.
 
 ```bash
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
