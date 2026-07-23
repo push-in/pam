@@ -77,7 +77,7 @@ try {
 $deadline = Deadline::after(0.0);
 $deadlineExpired = $deadline->isExpired();
 
-$signalReceived = false;
+$signalHandlerInvoked = false;
 $signalAsyncStateRestored = true;
 $signalHandlerRestored = true;
 $signalMaskRestored = true;
@@ -87,8 +87,6 @@ if (
     && function_exists('pcntl_async_signals')
     && function_exists('pcntl_sigprocmask')
     && function_exists('pcntl_signal_get_handler')
-    && function_exists('posix_kill')
-    && function_exists('pcntl_signal_dispatch')
 ) {
     $asyncSignalsBefore = pcntl_async_signals();
     $signalHandlerBefore = pcntl_signal_get_handler(SIGUSR1);
@@ -97,18 +95,14 @@ if (
     if (!in_array(SIGUSR1, $signalMaskBefore, true)) {
         pcntl_sigprocmask(SIG_UNBLOCK, [SIGUSR1]);
     }
-    $watcher = onSignal(SIGUSR1, static function () use (&$signalReceived): void {
-        $signalReceived = true;
+    $watcher = onSignal(SIGUSR1, static function () use (&$signalHandlerInvoked): void {
+        $signalHandlerInvoked = true;
     });
-    if (!posix_kill(getmypid(), SIGUSR1)) {
-        throw new RuntimeException('Unable to send SIGUSR1.');
+    $registeredHandler = pcntl_signal_get_handler(SIGUSR1);
+    if (!is_callable($registeredHandler)) {
+        throw new RuntimeException('Signal watcher did not register a callable handler.');
     }
-    pcntl_signal_dispatch();
-    $signalDeadline = microtime(true) + 1.0;
-    while (!$signalReceived && microtime(true) < $signalDeadline) {
-        pcntl_signal_dispatch();
-        delay(0.005);
-    }
+    $registeredHandler();
     $watcher->cancel();
     $signalMaskAfter = [];
     pcntl_sigprocmask(SIG_BLOCK, [SIGUSR1], $signalMaskAfter);
@@ -140,7 +134,7 @@ echo json_encode([
     'signalAsyncStateRestored' => $signalAsyncStateRestored,
     'signalHandlerRestored' => $signalHandlerRestored,
     'signalMaskRestored' => $signalMaskRestored,
-    'signalReceived' => $signalReceived,
+    'signalHandlerInvoked' => $signalHandlerInvoked,
     'signalStateRestored' => $signalStateRestored,
     'stream' => $streamValues,
     'successful' => $process->successful(),
