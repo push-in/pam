@@ -8,4 +8,4 @@ native runtime compatibility checks. It does not contain a router or server.
 composer require pam/core-api
 ```
 
-See the repository's [package model](../../docs/packages.md).
+See PAM's [package model](https://github.com/push-in/pam/blob/main/docs/packages.md).

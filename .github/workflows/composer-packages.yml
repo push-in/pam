@@ -1,0 +1,173 @@
+name: Composer packages
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing PAM release tag to split
+        required: true
+        type: string
+      publish:
+        description: Push the validated splits to the package mirrors
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: composer-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate package release
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.packages.outputs.matrix }}
+      release_tag: ${{ steps.release.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Resolve and validate the release tag
+        id: release
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_name }}
+          DISPATCH_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          if [ "${EVENT_NAME}" = "push" ]; then
+            release_tag="${PUSH_TAG}"
+          else
+            release_tag="${DISPATCH_TAG}"
+          fi
+          scripts/package-release.sh validate-tag "${release_tag}"
+          git rev-parse --verify "${release_tag}^{commit}"
+          printf 'tag=%s\n' "${release_tag}" >>"${GITHUB_OUTPUT}"
+      - name: Validate publication metadata
+        run: scripts/package-release.sh validate
+      - name: Build release matrix
+        id: packages
+        run: |
+          printf 'matrix=%s\n' "$(scripts/package-release.sh matrix)" >>"${GITHUB_OUTPUT}"
+
+  split:
+    name: Verify ${{ matrix.name }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.release_tag }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Create and inspect the isolated package history
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          split_sha=$(scripts/package-release.sh split "${PACKAGE_NAME}" "${RELEASE_TAG}")
+          scripts/package-release.sh verify-split "${PACKAGE_NAME}" "${split_sha}"
+          printf '%s -> %s\n' "${PACKAGE_NAME}" "${split_sha}"
+
+  publish:
+    name: Publish ${{ matrix.name }}
+    needs:
+      - prepare
+      - split
+    if: github.event_name == 'push' || inputs.publish
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.release_tag }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Configure the scoped mirror deploy key
+        env:
+          DEPLOY_KEY: ${{ secrets[matrix.deploySecret] }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -n "${DEPLOY_KEY}" || {
+            printf 'Missing Actions secret: %s\n' '${{ matrix.deploySecret }}' >&2
+            exit 1
+          }
+          install -d -m 0700 "${RUNNER_TEMP}/pam-ssh"
+          install -m 0600 /dev/null "${RUNNER_TEMP}/pam-ssh/deploy-key"
+          printf '%s\n' "${DEPLOY_KEY}" >"${RUNNER_TEMP}/pam-ssh/deploy-key"
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' \
+            >"${RUNNER_TEMP}/pam-ssh/known-hosts"
+      - name: Publish immutable package branch and tag
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+          REPOSITORY_OWNER: push-in
+          REPOSITORY_NAME: ${{ matrix.repository }}
+          GIT_SSH_COMMAND: >-
+            ssh -i ${{ runner.temp }}/pam-ssh/deploy-key
+            -o IdentitiesOnly=yes
+            -o UserKnownHostsFile=${{ runner.temp }}/pam-ssh/known-hosts
+            -o StrictHostKeyChecking=yes
+        run: |
+          set -euo pipefail
+          split_sha=$(scripts/package-release.sh split "${PACKAGE_NAME}" "${RELEASE_TAG}")
+          scripts/package-release.sh verify-split "${PACKAGE_NAME}" "${split_sha}"
+
+          remote="git@github.com:${REPOSITORY_OWNER}/${REPOSITORY_NAME}.git"
+          git ls-remote "${remote}" HEAD >/dev/null
+          git push "${remote}" "${split_sha}:refs/heads/main"
+
+          remote_tag=$(
+            git ls-remote "${remote}" "refs/tags/${RELEASE_TAG}*" |
+              awk '
+                $2 ~ /\^\{\}$/ { peeled = $1 }
+                $2 !~ /\^\{\}$/ { direct = $1 }
+                END { print peeled != "" ? peeled : direct }
+              '
+          )
+          if [ -n "${remote_tag}" ]; then
+            test "${remote_tag}" = "${split_sha}" || {
+              printf 'Remote tag %s points to %s, expected %s\n' \
+                "${RELEASE_TAG}" "${remote_tag}" "${split_sha}" >&2
+              exit 1
+            }
+            printf 'Tag %s already points to the expected split.\n' "${RELEASE_TAG}"
+            exit 0
+          fi
+
+          temporary_tag="package-${RELEASE_TAG}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          git tag -a "${temporary_tag}" "${split_sha}" \
+            -m "${PACKAGE_NAME} ${RELEASE_TAG}"
+          git push "${remote}" \
+            "refs/tags/${temporary_tag}:refs/tags/${RELEASE_TAG}"

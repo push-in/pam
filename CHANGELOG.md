@@ -5,6 +5,8 @@ after the first stable release.
 
 ## Unreleased
 
+- Added validated, least-privilege Composer package releases from the monorepo to
+  six read-only distribution mirrors, with isolated histories and immutable tags.
 - Renamed the project and every public prefix to **Pam — PHP, Always in Memory**.
 - Added `pam composer`, including a verified first-run Composer download executed
   by Pam's own Embed SAPI without requiring a system PHP CLI.

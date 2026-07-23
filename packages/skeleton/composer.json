@@ -3,6 +3,17 @@
     "description": "Production-ready starter application for the Pam runtime.",
     "type": "project",
     "license": "MIT",
+    "keywords": [
+        "application",
+        "pam",
+        "php",
+        "skeleton"
+    ],
+    "homepage": "https://github.com/push-in/pam",
+    "support": {
+        "issues": "https://github.com/push-in/pam/issues",
+        "source": "https://github.com/push-in/pam-skeleton"
+    },
     "require": {
         "php": "^8.4",
         "pam/api": "^0.1",

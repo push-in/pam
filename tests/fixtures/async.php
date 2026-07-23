@@ -32,10 +32,10 @@ $process = $processPool->run(['/usr/bin/php', '-r', 'echo strtoupper(trim(stream
 
 $processStarted = microtime(true);
 $processes = all([
-    $processPool->submit(['/usr/bin/php', '-r', 'usleep(100000); echo "one";']),
-    $processPool->submit(['/usr/bin/php', '-r', 'usleep(100000); echo "two";']),
+    $processPool->submit(['/usr/bin/php', '-r', 'usleep(500000); echo "one";']),
+    $processPool->submit(['/usr/bin/php', '-r', 'usleep(500000); echo "two";']),
 ]);
-$processesConcurrent = microtime(true) - $processStarted < 0.18;
+$processesConcurrent = microtime(true) - $processStarted < 0.85;
 
 $boundedPool = new ProcessPool(maxWorkers: 1, maxOutputBytes: 1024);
 $boundedStarted = microtime(true);

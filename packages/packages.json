@@ -1,0 +1,47 @@
+{
+    "owner": "push-in",
+    "packages": [
+        {
+            "name": "pam/core-api",
+            "path": "packages/core-api",
+            "repository": "pam-core-api",
+            "deploySecret": "PAM_CORE_API_DEPLOY_KEY",
+            "description": "Stable PHP contracts for packages that extend the PAM runtime."
+        },
+        {
+            "name": "pam/api",
+            "path": "packages/api",
+            "repository": "pam-api",
+            "deploySecret": "PAM_API_DEPLOY_KEY",
+            "description": "Elegant HTTP routing and middleware for the PAM runtime."
+        },
+        {
+            "name": "pam/socket",
+            "path": "packages/socket",
+            "repository": "pam-socket",
+            "deploySecret": "PAM_SOCKET_DEPLOY_KEY",
+            "description": "Event-oriented socket APIs for PAM WebSockets."
+        },
+        {
+            "name": "pam/psr-bridge",
+            "path": "packages/psr-bridge",
+            "repository": "pam-psr-bridge",
+            "deploySecret": "PAM_PSR_BRIDGE_DEPLOY_KEY",
+            "description": "PSR-7, PSR-15 and PSR-17 interoperability for PAM."
+        },
+        {
+            "name": "pam/testing",
+            "path": "packages/testing",
+            "repository": "pam-testing",
+            "deploySecret": "PAM_TESTING_DEPLOY_KEY",
+            "description": "In-memory HTTP testing utilities for PAM applications."
+        },
+        {
+            "name": "pam/skeleton",
+            "path": "packages/skeleton",
+            "repository": "pam-skeleton",
+            "deploySecret": "PAM_SKELETON_DEPLOY_KEY",
+            "description": "Production-ready starter application for the PAM runtime."
+        }
+    ]
+}

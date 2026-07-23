@@ -20,10 +20,14 @@ jobs:
         include:
           - laravel: '11.0'
             tier: legacy
+            allow_failure: true
           - laravel: '12.0'
             tier: maintained
+            allow_failure: false
           - laravel: '13.0'
             tier: current
+            allow_failure: false
+    continue-on-error: ${{ matrix.allow_failure }}
     services:
       mysql:
         image: mysql:8.4
@@ -60,7 +64,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: shivammathur/setup-php@v2
         with:

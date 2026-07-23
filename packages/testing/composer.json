@@ -3,6 +3,17 @@
     "description": "In-memory HTTP testing utilities for Pam applications.",
     "type": "library",
     "license": "MIT",
+    "keywords": [
+        "http",
+        "pam",
+        "php",
+        "testing"
+    ],
+    "homepage": "https://github.com/push-in/pam",
+    "support": {
+        "issues": "https://github.com/push-in/pam/issues",
+        "source": "https://github.com/push-in/pam-testing"
+    },
     "require": {
         "php": "^8.4",
         "pam/core-api": "^0.1"

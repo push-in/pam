@@ -3,6 +3,18 @@
     "description": "Elegant HTTP routing and middleware for the Pam runtime.",
     "type": "library",
     "license": "MIT",
+    "keywords": [
+        "http",
+        "middleware",
+        "pam",
+        "php",
+        "router"
+    ],
+    "homepage": "https://github.com/push-in/pam",
+    "support": {
+        "issues": "https://github.com/push-in/pam/issues",
+        "source": "https://github.com/push-in/pam-api"
+    },
     "require": {
         "php": "^8.4",
         "pam/core-api": "^0.1"

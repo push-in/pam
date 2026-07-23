@@ -3,6 +3,17 @@
     "description": "Stable PHP contracts for the Pam persistent runtime.",
     "type": "library",
     "license": "MIT",
+    "keywords": [
+        "contracts",
+        "pam",
+        "php",
+        "runtime"
+    ],
+    "homepage": "https://github.com/push-in/pam",
+    "support": {
+        "issues": "https://github.com/push-in/pam/issues",
+        "source": "https://github.com/push-in/pam-core-api"
+    },
     "require": {
         "php": "^8.4"
     },
