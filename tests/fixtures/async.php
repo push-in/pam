@@ -88,6 +88,7 @@ if (
     && function_exists('pcntl_sigprocmask')
     && function_exists('pcntl_signal_get_handler')
     && function_exists('posix_kill')
+    && function_exists('pcntl_signal_dispatch')
 ) {
     $asyncSignalsBefore = pcntl_async_signals();
     $signalHandlerBefore = pcntl_signal_get_handler(SIGUSR1);
@@ -99,9 +100,13 @@ if (
     $watcher = onSignal(SIGUSR1, static function () use (&$signalReceived): void {
         $signalReceived = true;
     });
-    posix_kill(getmypid(), SIGUSR1);
+    if (!posix_kill(getmypid(), SIGUSR1)) {
+        throw new RuntimeException('Unable to send SIGUSR1.');
+    }
+    pcntl_signal_dispatch();
     $signalDeadline = microtime(true) + 1.0;
     while (!$signalReceived && microtime(true) < $signalDeadline) {
+        pcntl_signal_dispatch();
         delay(0.005);
     }
     $watcher->cancel();
