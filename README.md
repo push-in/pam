@@ -197,16 +197,31 @@ pam init my-desktop-app --template desktop
 cd my-desktop-app
 pam desktop doctor .
 pam desktop dev .
+pam desktop build .
 ```
 
 `pam desktop` is the public command; it delegates to the separately distributed
 `pam-desktop` host and identifies the current Pam executable to its PHP worker.
-The 0.3 starter demonstrates multiple windows, bidirectional events, command
+The 0.4 starter demonstrates multiple windows, bidirectional events, command
 timeouts, crash recovery, development hot reload and explicit native
 capabilities. Window configuration and application policy remain in PHP, local
 HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
 versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
-notifications and drag-and-drop grants are opt-in:
+notifications and drag-and-drop grants are opt-in. Application identity,
+category and icon also live in a typed PHP manifest:
+
+```php
+Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.4.0')
+    ->publisher('Pushin')
+    ->category(ApplicationCategory::Development);
+```
+
+`pam desktop build` creates a self-contained Linux directory and portable
+`.tar.gz` with a per-user installer. `--format deb` adds a Debian package. The
+bundle includes the Pam worker, PHP runtime libraries, Servo host, vendored PHP
+application, desktop entry, icon and a SHA-256 integrity manifest.
+
+Native capabilities remain explicit:
 
 ```php
 $app->capabilities(

@@ -687,7 +687,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
 
         <section class="summary" aria-labelledby="summary-title">
             <div>
-                <span class="eyebrow">PAM DESKTOP 0.3</span>
+                <span class="eyebrow">PAM DESKTOP 0.4</span>
                 <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
             </div>
             <span class="online"><i aria-hidden="true"></i> worker online</span>
@@ -701,7 +701,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
             </article>
             <article>
                 <span>protocol</span>
-                <strong>IPC v3</strong>
+                <strong>IPC v4</strong>
                 <small>contrato tipado</small>
             </article>
             <article>
@@ -1109,7 +1109,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
         "license": "proprietary",
         "require": {
             "php": "^8.4",
-            "pam/desktop": "^0.3"
+            "pam/desktop": "^0.4"
         },
         "autoload": {
             "psr-4": {
@@ -1121,6 +1121,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
             "sort-packages": true
         },
         "scripts": {
+            "desktop:build": "pam desktop build .",
             "desktop:dev": "pam desktop dev .",
             "desktop:doctor": "pam desktop doctor ."
         }
@@ -1141,12 +1142,14 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
 declare(strict_types=1);
 
 use Pam\Desktop\Application;
+use Pam\Desktop\ApplicationCategory;
 use Pam\Desktop\Capabilities;
 use Pam\Desktop\ClientEvent;
 use Pam\Desktop\CommandContext;
 use Pam\Desktop\CommandResult;
 use Pam\Desktop\EventContext;
 use Pam\Desktop\FileSystemRoot;
+use Pam\Desktop\Manifest;
 use Pam\Desktop\Window;
 use Pam\Desktop\WindowEffect;
 use Pam\Desktop\WindowTheme;
@@ -1158,6 +1161,11 @@ $app = Application::create(
         ->size(1120, 720)
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
+    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.4.0')
+        ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
+        ->publisher('Pushin')
+        ->category(ApplicationCategory::Development)
+        ->excludeFromBundle('storage/hello.txt'),
 )
     ->window(
         'inspector',
@@ -1212,7 +1220,7 @@ $app->on('client.ready', static fn (EventContext $event): CommandResult =>
     CommandResult::success()
         ->event(new ClientEvent(
             name: 'runtime.ready',
-            payload: ['windowId' => $event->windowId, 'protocol' => 3],
+            payload: ['windowId' => $event->windowId, 'protocol' => 4],
             windowId: $event->windowId,
         )));
 
@@ -1228,6 +1236,29 @@ $app->run();
     fs::create_dir_all(directory.join("storage"))
         .map_err(|error| format!("cannot create desktop storage: {error}"))?;
     write_new(&directory.join("storage/.gitkeep"), "")?;
+    write_new(
+        &directory.join("resources/icon.svg"),
+        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+    <title>Pam Hello</title>
+    <defs>
+        <linearGradient id="background" x1="64" y1="40" x2="448" y2="472" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#16364a"/>
+            <stop offset="0.52" stop-color="#0b1d2a"/>
+            <stop offset="1" stop-color="#071018"/>
+        </linearGradient>
+        <linearGradient id="signal" x1="140" y1="118" x2="378" y2="394" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#9ff5eb"/>
+            <stop offset="1" stop-color="#43b8c5"/>
+        </linearGradient>
+    </defs>
+    <rect x="20" y="20" width="472" height="472" rx="116" fill="url(#background)"/>
+    <rect x="42" y="42" width="428" height="428" rx="96" fill="none" stroke="#68ded2" stroke-opacity=".22" stroke-width="4"/>
+    <path d="M152 386V126h120c72 0 118 40 118 102 0 64-48 106-122 106h-48v52h-68Zm68-112h47c34 0 54-16 54-44 0-27-20-43-54-43h-47v87Z" fill="url(#signal)"/>
+    <circle cx="389" cy="128" r="18" fill="#f6b85f"/>
+    <path d="M389 160v50M357 128h-42M421 128h28" stroke="#f6b85f" stroke-linecap="round" stroke-width="10"/>
+</svg>
+"##,
+    )?;
     write_new(
         &directory.join("resources/index.html"),
         r##"<!doctype html>
@@ -1258,7 +1289,7 @@ $app->run();
             <div class="runtime-status" aria-label="Estado da runtime">
                 <span class="status-pulse" aria-hidden="true"></span>
                 <span>runtime online</span>
-                <kbd>0.3</kbd>
+                <kbd>0.4</kbd>
             </div>
         </header>
 
@@ -1423,7 +1454,7 @@ $app->run();
                 </article>
                 <article>
                     <span>contract</span>
-                    <strong>IPC v3</strong>
+                    <strong>IPC v4</strong>
                     <small>tipado e versionado</small>
                 </article>
             </section>
@@ -2769,7 +2800,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": true,
                     "versions": {
-                        "pam/desktop": "0.3.0"
+                        "pam/desktop": "0.4.0"
                     }
                 }
             })
