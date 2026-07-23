@@ -77,7 +77,8 @@ try {
 $deadline = Deadline::after(0.0);
 $deadlineExpired = $deadline->isExpired();
 
-$signalHandlerInvoked = false;
+$signalProbe = new stdClass();
+$signalProbe->invoked = false;
 $signalAsyncStateRestored = true;
 $signalHandlerRestored = true;
 $signalMaskRestored = true;
@@ -95,8 +96,8 @@ if (
     if (!in_array(SIGUSR1, $signalMaskBefore, true)) {
         pcntl_sigprocmask(SIG_UNBLOCK, [SIGUSR1]);
     }
-    $watcher = onSignal(SIGUSR1, static function () use (&$signalHandlerInvoked): void {
-        $signalHandlerInvoked = true;
+    $watcher = onSignal(SIGUSR1, static function () use ($signalProbe): void {
+        $signalProbe->invoked = true;
     });
     $registeredHandler = pcntl_signal_get_handler(SIGUSR1);
     if (!is_callable($registeredHandler)) {
@@ -134,7 +135,7 @@ echo json_encode([
     'signalAsyncStateRestored' => $signalAsyncStateRestored,
     'signalHandlerRestored' => $signalHandlerRestored,
     'signalMaskRestored' => $signalMaskRestored,
-    'signalHandlerInvoked' => $signalHandlerInvoked,
+    'signalHandlerInvoked' => $signalProbe->invoked,
     'signalStateRestored' => $signalStateRestored,
     'stream' => $streamValues,
     'successful' => $process->successful(),
