@@ -5,7 +5,7 @@ on:
     inputs:
       release_tag:
         description: Existing v* tag to publish
-        required: false
+        required: true
         type: string
   push:
     tags:
