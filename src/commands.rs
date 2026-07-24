@@ -750,7 +750,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
     write_new(
         &directory.join("resources/inspector.html"),
         r##"<!doctype html>
-<html lang="pt-BR">
+<html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -770,11 +770,11 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
                     <path class="spark" d="m23.8 7.4.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>
                 </svg>
                 <div>
-                    <span>janela secundária</span>
+                    <span>secondary window</span>
                     <h1>Runtime Inspector</h1>
                 </div>
             </div>
-            <button id="hide-button" type="button" aria-label="Ocultar Runtime Inspector">
+            <button id="hide-button" type="button" aria-label="Hide Runtime Inspector">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m7 7 10 10M17 7 7 17"/>
                 </svg>
@@ -783,27 +783,27 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
 
         <section class="summary" aria-labelledby="summary-title">
             <div>
-                <span class="eyebrow">PAM DESKTOP 0.6</span>
-                <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
+                <span class="eyebrow">PAM DESKTOP 1.1</span>
+                <h2 id="summary-title">One runtime.<br><strong>Multiple windows.</strong></h2>
             </div>
             <span class="online"><i aria-hidden="true"></i> worker online</span>
         </section>
 
-        <section class="metrics" aria-label="Estado da runtime">
+        <section class="metrics" aria-label="Runtime state">
             <article>
                 <span>window id</span>
                 <strong id="window-id">—</strong>
-                <small>isolamento por contexto</small>
+                <small>context isolation</small>
             </article>
             <article>
                 <span>protocol</span>
                 <strong>IPC v6</strong>
-                <small>contrato tipado</small>
+                <small>typed contract</small>
             </article>
             <article>
                 <span>renderer</span>
                 <strong>Servo</strong>
-                <small>host Rust nativo</small>
+                <small>native Rust host</small>
             </article>
         </section>
 
@@ -811,15 +811,15 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
             <div class="section-heading">
                 <div>
                     <span>STREAM</span>
-                    <h2 id="events-title">Eventos da aplicação</h2>
+                    <h2 id="events-title">Application events</h2>
                 </div>
                 <span class="live"><i aria-hidden="true"></i> live</span>
             </div>
             <ol id="event-list" aria-live="polite">
                 <li>
-                    <time>agora</time>
+                    <time>now</time>
                     <span>inspector.ready</span>
-                    <small>aguardando eventos do PHP</small>
+                    <small>waiting for PHP events</small>
                 </li>
             </ol>
         </section>
@@ -1138,7 +1138,7 @@ li small {
         const title = document.createElement("span");
         const description = document.createElement("small");
 
-        time.textContent = new Intl.DateTimeFormat("pt-BR", {
+        time.textContent = new Intl.DateTimeFormat("en-US", {
             hour: "2-digit",
             minute: "2-digit",
             second: "2-digit",
@@ -1154,7 +1154,7 @@ li small {
     };
 
     if (!window.pam) {
-        appendEvent("bridge.error", "A bridge Pam não foi carregada.");
+        appendEvent("bridge.error", "The Pam bridge did not load.");
         hideButton.disabled = true;
         return;
     }
@@ -1164,7 +1164,7 @@ li small {
         appendEvent("runtime.ready", `API v${apiVersion} · IPC v${protocol}`);
     });
     window.pam.on("pam.dev.reloaded", ({ kind }) => {
-        appendEvent("pam.dev.reloaded", kind === 1 ? "assets" : "worker PHP");
+        appendEvent("pam.dev.reloaded", kind === 1 ? "assets" : "PHP worker");
     });
     window.pam.on("pam.dev.error", ({ message }) => {
         appendEvent("pam.dev.error", message);
@@ -1177,7 +1177,7 @@ li small {
         } catch (error) {
             appendEvent(
                 "inspector.hide.failed",
-                error instanceof Error ? error.message : "Falha desconhecida",
+                error instanceof Error ? error.message : "Unknown failure",
             );
             hideButton.disabled = false;
         }
@@ -1188,7 +1188,7 @@ li small {
     }, { timeout: 2_000 }).catch((error) => {
         appendEvent(
             "client.ready.failed",
-            error instanceof Error ? error.message : "Falha desconhecida",
+            error instanceof Error ? error.message : "Unknown failure",
         );
     });
 })();
@@ -1274,7 +1274,7 @@ $app = Application::make(
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
 )
-    ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
+    ->description('An elegant desktop application orchestrated in PHP.')
     ->publisher('Pushin')
     ->category(ApplicationCategory::Development)
     ->excludeFromBundle('storage/hello.txt')
@@ -1300,11 +1300,11 @@ $app = Application::make(
             ->menu(Menu::create(
                 'application',
                 'Pam Hello',
-                MenuItem::command('app.show', 'Mostrar janela', 'CmdOrCtrl+Shift+KeyP'),
+                MenuItem::command('app.show', 'Show window', 'CmdOrCtrl+Shift+KeyP'),
                 MenuItem::command('inspector.show', 'Runtime Inspector'),
-                MenuItem::checkbox('background.enabled', 'Executar em segundo plano', true),
+                MenuItem::checkbox('background.enabled', 'Run in background', true),
                 MenuItem::separator(),
-                MenuItem::command('app.quit', 'Sair'),
+                MenuItem::command('app.quit', 'Quit'),
             ))
             ->tray(
                 Tray::create('application', 'Pam Desktop · Hello')
@@ -1330,12 +1330,12 @@ $app = Application::make(
     ->commandTimeout(10_000);
 
 $app->command('greet', static function (CommandContext $command): CommandResult {
-    $name = trim((string) $command->string('name', 'mundo'));
-    $name = $name !== '' ? mb_substr($name, 0, 40) : 'mundo';
+    $name = trim((string) $command->string('name', 'world'));
+    $name = $name !== '' ? mb_substr($name, 0, 40) : 'world';
 
     return CommandResult::success([
-        'message' => "Olá, {$name}.",
-        'detail' => 'Esta resposta saiu do PHP, atravessou o host Rust e chegou ao Servo.',
+        'message' => "Hello, {$name}.",
+        'detail' => 'This response left PHP, crossed the Rust host, and reached Servo.',
     ])
         ->effect(WindowEffect::title("Pam Desktop · {$name}", $command->windowId))
         ->event(new ClientEvent(
@@ -2728,8 +2728,8 @@ footer kbd {
             await operation();
         } catch (error) {
             nativeStatus.textContent = error instanceof Error
-                ? `Falhou · ${error.message}`
-                : "A operação nativa falhou.";
+                ? `Failed · ${error.message}`
+                : "The native operation failed.";
         } finally {
             button.disabled = false;
         }
@@ -2738,9 +2738,9 @@ footer kbd {
     if (!window.pam) {
         setState(
             "error",
-            "bridge indisponível",
-            "A bridge Pam não foi carregada.",
-            "Abra este projeto com `pam desktop dev .`.",
+            "bridge unavailable",
+            "The Pam bridge did not load.",
+            "Open this project with composer desktop:dev.",
         );
         form.querySelectorAll("button, input").forEach((element) => {
             element.disabled = true;
@@ -2754,9 +2754,9 @@ footer kbd {
     if (window.pam.apiVersion !== 1) {
         setState(
             "error",
-            "API incompatível",
-            `Esta aplicação requer a API v1; o host entregou v${window.pam.apiVersion}.`,
-            "Instale um host PAM Desktop 1.x para continuar.",
+            "incompatible API",
+            `This application requires API v1; the host provided v${window.pam.apiVersion}.`,
+            "Install a PAM Desktop 1.x host to continue.",
         );
         form.querySelectorAll("button, input").forEach((element) => {
             element.disabled = true;
@@ -2767,7 +2767,7 @@ footer kbd {
         return;
     }
 
-    eventStatus.textContent = "API v1 · eventos conectando…";
+    eventStatus.textContent = "API v1 · events connecting…";
     window.pam.on("runtime.ready", ({ apiVersion, protocol }) => {
         eventStatus.textContent = `API v${apiVersion} · IPC v${protocol} online`;
     });
@@ -2775,37 +2775,37 @@ footer kbd {
         eventStatus.textContent = `hello.completed · ${completedName}`;
     });
     window.pam.on("inspector.opened", () => {
-        eventStatus.textContent = "janela inspector aberta";
+        eventStatus.textContent = "inspector window opened";
     });
     window.pam.on("pam.dev.reloaded", ({ kind }) => {
         eventStatus.textContent = kind === 1
-            ? "assets recarregados"
-            : "worker PHP reiniciado";
+            ? "assets reloaded"
+            : "PHP worker restarted";
     });
     window.pam.on("pam.dev.error", ({ message: reloadError }) => {
-        eventStatus.textContent = `hot reload falhou · ${reloadError}`;
+        eventStatus.textContent = `hot reload failed · ${reloadError}`;
     });
     window.pam.on("pam.menu.selected", ({ id }) => {
-        eventStatus.textContent = `menu nativo · ${id}`;
+        eventStatus.textContent = `native menu · ${id}`;
     });
     window.pam.on("pam.tray.activated", ({ button: trayButton }) => {
-        eventStatus.textContent = `tray ativado · botão ${trayButton}`;
+        eventStatus.textContent = `tray activated · button ${trayButton}`;
     });
     window.pam.on("pam.shortcut.changed", ({ id, state }) => {
         if (state === 1) {
-            eventStatus.textContent = `atalho global · ${id}`;
+            eventStatus.textContent = `global shortcut · ${id}`;
         }
     });
     window.pam.on("pam.job.completed", ({ id, runId }) => {
-        extensionStatus.textContent = `${id} · execução #${runId} concluída`;
+        extensionStatus.textContent = `${id} · run #${runId} completed`;
     });
     window.pam.on("pam.drag.enter", ({ name }) => {
         dropZone.dataset.active = "true";
-        nativeStatus.textContent = `Pronto para receber ${name}.`;
+        nativeStatus.textContent = `Ready to receive ${name}.`;
     });
     window.pam.on("pam.drag.leave", () => {
         delete dropZone.dataset.active;
-        nativeStatus.textContent = "O arquivo saiu da janela.";
+        nativeStatus.textContent = "The file left the window.";
     });
     window.pam.on("pam.drag.drop", async ({ files }) => {
         delete dropZone.dataset.active;
@@ -2817,22 +2817,22 @@ footer kbd {
                 nativeStatus.textContent = `${file.name} · ${contents.slice(0, 90)}`;
             } else {
                 const entries = await window.pam.fs.list(file);
-                nativeStatus.textContent = `${file.name} · ${entries.length} itens`;
+                nativeStatus.textContent = `${file.name} · ${entries.length} items`;
             }
         } catch (error) {
             nativeStatus.textContent = error instanceof Error
-                ? `Drop bloqueado · ${error.message}`
-                : "Não foi possível ler o item solto.";
+                ? `Drop blocked · ${error.message}`
+                : "The dropped item could not be read.";
         }
     });
     window.pam.on("pam.drag.error", ({ message: dragError }) => {
         delete dropZone.dataset.active;
-        nativeStatus.textContent = `Drop bloqueado · ${dragError}`;
+        nativeStatus.textContent = `Drop blocked · ${dragError}`;
     });
     window.pam.on("pam.update.changed", ({ state, availableVersion }) => {
         updateStatus.textContent = state === 4
-            ? `Versão ${availableVersion} disponível e assinada.`
-            : `Estado do updater · ${state}`;
+            ? `Version ${availableVersion} is available and signed.`
+            : `Updater state · ${state}`;
     });
     window.pam.on("pam.update.error", ({ message: updateError }) => {
         updateStatus.textContent = `Updater · ${updateError}`;
@@ -2843,7 +2843,7 @@ footer kbd {
     }, { timeout: 2_000 }).catch((error) => {
         eventStatus.textContent = error instanceof Error
             ? error.message
-            : "eventos indisponíveis";
+            : "events unavailable";
     });
 
     inspectorButton.addEventListener("click", async () => {
@@ -2853,9 +2853,9 @@ footer kbd {
         } catch (error) {
             setState(
                 "error",
-                "janela não abriu",
-                error instanceof Error ? error.message : "Não foi possível abrir o inspector.",
-                "O worker continua ativo; tente novamente.",
+                "window did not open",
+                error instanceof Error ? error.message : "The inspector could not be opened.",
+                "The worker is still running; try again.",
             );
         } finally {
             inspectorButton.disabled = false;
@@ -2865,7 +2865,7 @@ footer kbd {
     saveNoteButton.addEventListener("click", () => {
         void runNative(saveNoteButton, async () => {
             const target = { root: "data", path: "hello.txt" };
-            const text = `Olá de Pam Desktop em ${new Date().toLocaleString("pt-BR")}.`;
+            const text = `Hello from Pam Desktop at ${new Date().toLocaleString("en-US")}.`;
             await window.pam.fs.writeText(target, text);
             const persisted = await window.pam.fs.readText(target);
             nativeStatus.textContent = `storage/hello.txt · ${persisted}`;
@@ -2875,11 +2875,11 @@ footer kbd {
     openFileButton.addEventListener("click", () => {
         void runNative(openFileButton, async () => {
             const file = await window.pam.dialog.openFile({
-                title: "Abrir um texto com Pam Desktop",
-                filters: [{ name: "Texto", extensions: ["txt", "md", "json"] }],
+                title: "Open a text file with Pam Desktop",
+                filters: [{ name: "Text", extensions: ["txt", "md", "json"] }],
             });
             if (!file) {
-                nativeStatus.textContent = "Seleção cancelada.";
+                nativeStatus.textContent = "Selection cancelled.";
                 return;
             }
             const contents = await window.pam.fs.readText(file);
@@ -2889,7 +2889,7 @@ footer kbd {
 
     copyButton.addEventListener("click", () => {
         void runNative(copyButton, async () => {
-            const greeting = `Olá, ${name.value.trim() || "mundo"}!`;
+            const greeting = `Hello, ${name.value.trim() || "world"}!`;
             await window.pam.clipboard.writeText(greeting);
             nativeStatus.textContent = `Clipboard · ${greeting}`;
         });
@@ -2899,10 +2899,10 @@ footer kbd {
         void runNative(notifyButton, async () => {
             await window.pam.notification.show({
                 title: "Pam Desktop",
-                body: "PHP autorizou; Rust entregou.",
+                body: "Authorized by PHP. Delivered by Rust.",
                 urgency: 2,
             });
-            nativeStatus.textContent = "Notificação entregue ao sistema.";
+            nativeStatus.textContent = "Notification delivered to the system.";
         });
     });
 
@@ -2919,7 +2919,7 @@ footer kbd {
         } catch (error) {
             extensionStatus.textContent = error instanceof Error
                 ? `Plugin PHP · ${error.message}`
-                : "Não foi possível consultar o plugin PHP.";
+                : "The PHP plugin could not be queried.";
         } finally {
             extensionButton.disabled = false;
         }
@@ -2930,12 +2930,12 @@ footer kbd {
         try {
             const update = await window.pam.updater.status();
             updateStatus.textContent = update.state === 1
-                ? "Updater desativado. Configure Updates::from() no manifesto PHP."
-                : `Estado ${update.state} · versão atual ${update.currentVersion}`;
+                ? "Updater disabled. Configure Updates::from() in the PHP manifest."
+                : `State ${update.state} · current version ${update.currentVersion}`;
         } catch (error) {
             updateStatus.textContent = error instanceof Error
                 ? `Updater · ${error.message}`
-                : "Não foi possível consultar o updater.";
+                : "The updater could not be queried.";
         } finally {
             updateButton.disabled = false;
         }
@@ -2947,22 +2947,22 @@ footer kbd {
         button.setAttribute("aria-busy", "true");
         setState(
             "loading",
-            "executando no PHP",
-            "Enviando um comando tipado para o worker…",
-            "O host mantém a interface responsiva durante a operação.",
+            "running in PHP",
+            "Sending a typed command to the worker…",
+            "The host keeps the interface responsive during the operation.",
         );
 
         try {
             const result = await window.pam.invoke("greet", {
                 name: name.value.trim(),
             }, { timeout: 5_000 });
-            setState("success", "resposta recebida", result.message, result.detail);
+            setState("success", "response received", result.message, result.detail);
         } catch (error) {
             setState(
                 "error",
-                "comando interrompido",
-                error instanceof Error ? error.message : "Não foi possível executar o comando.",
-                "Confira o worker PHP e tente novamente.",
+                "command interrupted",
+                error instanceof Error ? error.message : "The command could not be executed.",
+                "Check the PHP worker and try again.",
             );
         } finally {
             button.disabled = false;
@@ -2972,6 +2972,16 @@ footer kbd {
 })();
 "##,
     )?;
+    fs::write(
+        directory.join("resources/index.html"),
+        include_str!("templates/desktop/index.html"),
+    )
+    .map_err(|error| format!("cannot write desktop interface: {error}"))?;
+    fs::write(
+        directory.join("resources/styles.css"),
+        include_str!("templates/desktop/styles.css"),
+    )
+    .map_err(|error| format!("cannot write desktop styles: {error}"))?;
     write_desktop_inspector(directory)?;
     Ok(())
 }

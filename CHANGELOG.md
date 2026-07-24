@@ -5,6 +5,15 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.10 - 2026-07-24
+
+- Redesigned the generated desktop starter as a responsive runtime control
+  surface with a clear PHP-to-Rust-to-Servo pipeline.
+- Translated the complete starter experience to English, including PHP
+  responses, native shell labels, runtime states, and the secondary inspector.
+- Added focused tablet and mobile layouts, accessible controls, visible focus
+  states, and reduced-motion support.
+
 ## 0.1.9 - 2026-07-24
 
 - Bundled verified PHP Android runtimes and precompiled PAM Native engines for

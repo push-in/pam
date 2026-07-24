@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#071118">
+    <title>Pam Desktop · Starter</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/_pam/bridge.js" defer></script>
+    <script src="/app.js" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <div class="app-shell">
+        <header class="topbar" aria-label="Application header">
+            <a class="brand" href="/" aria-label="Pam Desktop home">
+                <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
+                    <path d="M7 23V9h8.1c4.2 0 6.9 2.2 6.9 5.8 0 3.7-2.7 5.9-6.9 5.9h-3.4V23H7Z"/>
+                    <path class="brand-spark" d="m23.8 7.4.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>
+                </svg>
+                <span>Pam <strong>Desktop</strong></span>
+            </a>
+
+            <div class="runtime-status" aria-label="Runtime status">
+                <span class="status-pulse" aria-hidden="true"></span>
+                <span>runtime online</span>
+                <kbd>API 1.0</kbd>
+            </div>
+        </header>
+
+        <main id="main-content">
+            <section class="hero" aria-labelledby="hero-title">
+                <div class="hero-copy">
+                    <p class="eyebrow">PHP-FIRST DESKTOP RUNTIME</p>
+                    <h1 id="hero-title">Desktop software,<br><span>written like PHP.</span></h1>
+                    <p class="hero-description">
+                        Keep your application logic expressive. Pam connects PHP to a native
+                        Rust host and renders the interface with Servo.
+                    </p>
+
+                    <form class="hello-form" id="hello-form">
+                        <div class="field">
+                            <label for="name">Your name</label>
+                            <div class="input-wrap">
+                                <svg viewBox="0 0 24 24" aria-hidden="true">
+                                    <circle cx="12" cy="8" r="4"/>
+                                    <path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6"/>
+                                </svg>
+                                <input id="name" name="name" maxlength="40" autocomplete="name"
+                                    placeholder="Enter your name" value="David">
+                            </div>
+                        </div>
+                        <button id="hello-button" type="submit">
+                            <span>Run PHP command</span>
+                            <svg viewBox="0 0 24 24" aria-hidden="true">
+                                <path d="M5 12h13M14 7l5 5-5 5"/>
+                            </svg>
+                        </button>
+                    </form>
+
+                    <div class="response" id="response" role="status" aria-live="polite">
+                        <span class="response-label">ready for input</span>
+                        <p id="response-message">Your first application response will appear here.</p>
+                        <small id="response-detail">No global Node bridge. Only explicit, typed commands.</small>
+                    </div>
+                </div>
+
+                <div class="runtime-panel" aria-label="Pam runtime pipeline">
+                    <div class="panel-heading">
+                        <span>LIVE PIPELINE</span>
+                        <span class="live-badge"><i aria-hidden="true"></i> operational</span>
+                    </div>
+
+                    <div class="pipeline">
+                        <article>
+                            <span class="node-index">01</span>
+                            <div>
+                                <strong>PHP</strong>
+                                <small>application logic</small>
+                            </div>
+                            <kbd>8.4</kbd>
+                        </article>
+                        <div class="connector" aria-hidden="true"><i></i></div>
+                        <article>
+                            <span class="node-index">02</span>
+                            <div>
+                                <strong>Rust</strong>
+                                <small>native host</small>
+                            </div>
+                            <kbd>IPC v6</kbd>
+                        </article>
+                        <div class="connector" aria-hidden="true"><i></i></div>
+                        <article>
+                            <span class="node-index">03</span>
+                            <div>
+                                <strong>Servo</strong>
+                                <small>web renderer</small>
+                            </div>
+                            <kbd>GPU</kbd>
+                        </article>
+                    </div>
+
+                    <div class="security-note">
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/>
+                            <path d="m9 12 2 2 4-4"/>
+                        </svg>
+                        <div>
+                            <strong>Protected bridge</strong>
+                            <span>origin-bound · ephemeral token · typed contract</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="control-grid" aria-label="Desktop runtime controls">
+                <article class="control-card native-lab" aria-labelledby="native-lab-title">
+                    <div class="card-heading">
+                        <div>
+                            <span>NATIVE CAPABILITIES</span>
+                            <h2 id="native-lab-title">Native Lab</h2>
+                        </div>
+                        <span class="capability-lock">authorized in PHP</span>
+                    </div>
+                    <div class="native-actions" aria-label="Native demonstrations">
+                        <button id="save-note-button" type="button">Save note</button>
+                        <button id="open-file-button" type="button">Open text</button>
+                        <button id="copy-button" type="button">Copy hello</button>
+                        <button id="notify-button" type="button">Notify</button>
+                    </div>
+                    <div id="drop-zone" class="drop-zone" aria-label="File drop area">
+                        <strong>Drop a file into this window</strong>
+                        <span>The host grants temporary access without exposing the system path.</span>
+                    </div>
+                    <p id="native-status" role="status" aria-live="polite">No capability used yet.</p>
+                </article>
+
+                <article class="control-card inspector-card" aria-labelledby="inspector-title">
+                    <div class="card-heading">
+                        <div>
+                            <span>EVENT STREAM</span>
+                            <h2 id="inspector-title">Runtime Inspector</h2>
+                        </div>
+                        <kbd>API v1</kbd>
+                    </div>
+                    <p>Open a second native window and inspect events crossing the application boundary.</p>
+                    <button id="inspector-button" class="secondary-button" type="button">
+                        <span>Open inspector</span>
+                        <svg viewBox="0 0 24 24" aria-hidden="true">
+                            <rect x="4" y="5" width="16" height="14" rx="2"/>
+                            <path d="M8 9h8M8 13h5"/>
+                        </svg>
+                    </button>
+                    <span id="event-status" class="console-line" role="status" aria-live="polite">
+                        events connecting…
+                    </span>
+                </article>
+
+                <article class="control-card compact-card" aria-labelledby="extension-title">
+                    <div class="card-heading">
+                        <div>
+                            <span>STABLE API · 1.0</span>
+                            <h2 id="extension-title">PHP + Rust plugins</h2>
+                        </div>
+                    </div>
+                    <p id="extension-status" role="status" aria-live="polite">
+                        PHP composes the app; Rust plugins run in supervised processes.
+                    </p>
+                    <button id="extension-button" class="text-button" type="button">Query plugin →</button>
+                </article>
+
+                <article class="control-card compact-card" aria-labelledby="update-title">
+                    <div class="card-heading">
+                        <div>
+                            <span>SIGNED UPDATES</span>
+                            <h2 id="update-title">Updates with rollback</h2>
+                        </div>
+                    </div>
+                    <p id="update-status" role="status" aria-live="polite">
+                        Disabled by default; the public key stays in the PHP manifest.
+                    </p>
+                    <button id="update-button" class="text-button" type="button">Check status →</button>
+                </article>
+            </section>
+        </main>
+
+        <footer>
+            <span>Built with Pam Desktop</span>
+            <span class="footer-command"><kbd>composer desktop:dev</kbd></span>
+        </footer>
+    </div>
+</body>
+</html>
