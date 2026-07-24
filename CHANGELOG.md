@@ -5,6 +5,15 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.16 - 2026-07-24
+
+- Added the explicit rich-content `Grid` container for images, pressables,
+  nested layouts and custom PAM components.
+- Kept responsive spans, offsets, ordering and independent gutters available
+  through both tags and the typed tree API.
+- Updated the bundled Pam Native Composer package identity from the stale
+  `0.1.1` development version to `0.1.16`.
+
 ## 0.1.15 - 2026-07-24
 
 - Added a native responsive grid engine with configurable column tracks,
