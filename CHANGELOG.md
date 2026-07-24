@@ -5,6 +5,17 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.3 - 2026-07-23
+
+- Centralized all first-party Composer coordinates and added regression checks
+  that reject the retired `pam/*` package names.
+- Blocked binary publication until every matching package version is available
+  and installable from the public Packagist index.
+- Made generated package mirrors converge safely on canonical subtree history
+  while preserving immutable release tags.
+- Added complete generated-manifest assertions and strict publication metadata
+  to new Pam API projects.
+
 ## 0.1.2 - 2026-07-23
 
 - Published the first-party Composer packages under the organization-owned
@@ -13,7 +24,7 @@ after the first stable release.
   to use the public Packagist coordinates.
 
 - Updated the `pam init --template desktop` starter to stable public API 1,
-  protocol 6 and `pam/desktop` 1.0 with PHP plugins, native menus, tray,
+  protocol 6 and `pushinbr/pam-desktop` 1.0 with PHP plugins, native menus, tray,
   close-to-tray, global shortcuts and supervised background jobs.
 - Added an extension-runtime surface to the starter and documented
   process-isolated Rust plugin scaffolding under `pam desktop plugin`.

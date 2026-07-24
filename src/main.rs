@@ -11,6 +11,7 @@ mod control_plane;
 mod desktop;
 mod dev;
 mod doctor;
+mod package_coordinates;
 mod php;
 mod server;
 mod worker_state;

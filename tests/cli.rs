@@ -426,8 +426,28 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join(".env.example").is_file());
     assert!(directory.join("phpunit.xml").is_file());
     assert!(directory.join("tests/ApplicationTest.php").is_file());
-    let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
-    assert!(manifest.contains("\"pushinbr/pam-api\""));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["require"]["pushinbr/pam-api"], "^0.1");
+    assert_eq!(manifest["require-dev"]["pushinbr/pam-testing"], "^0.1");
+    assert_eq!(manifest["license"], "proprietary");
+    assert!(
+        manifest["description"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    for section in ["require", "require-dev"] {
+        assert!(
+            manifest[section]
+                .as_object()
+                .unwrap()
+                .keys()
+                .all(|package| !package.starts_with("pam/")),
+            "legacy Composer coordinate generated in {section}: {}",
+            manifest[section],
+        );
+    }
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());
@@ -472,8 +492,18 @@ fn initializes_raw_and_socket_presets_without_composer() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
-    assert!(manifest.contains("pushinbr/pam-socket"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(api.join("composer.json")).unwrap()).unwrap();
+    assert_eq!(manifest["require"]["pushinbr/pam-api"], "^0.1");
+    assert_eq!(manifest["require"]["pushinbr/pam-socket"], "^0.1");
+    assert_eq!(manifest["require-dev"]["pushinbr/pam-testing"], "^0.1");
+    assert!(
+        manifest["require"]
+            .as_object()
+            .unwrap()
+            .keys()
+            .all(|package| !package.starts_with("pam/"))
+    );
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();
@@ -507,8 +537,8 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     let inspector_javascript =
         fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
 
-    assert!(manifest.contains("\"pam/desktop\""));
-    assert!(manifest.contains("\"pam/desktop\": \"^1.0\""));
+    assert!(manifest.contains("\"pushinbr/pam-desktop\""));
+    assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.0\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
     assert!(application.contains("Application::create"));

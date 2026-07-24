@@ -146,6 +146,11 @@ jobs:
 
           remote="git@github.com:${REPOSITORY_OWNER}/${REPOSITORY_NAME}.git"
           git ls-remote "${remote}" HEAD >/dev/null
+          remote_main=$(
+            git ls-remote "${remote}" "refs/heads/main" |
+              awk 'NR == 1 { print $1 }'
+          )
+          main_lease="--force-with-lease=refs/heads/main:${remote_main}"
 
           remote_tag=$(
             git ls-remote "${remote}" "refs/tags/${RELEASE_TAG}*" |
@@ -156,16 +161,23 @@ jobs:
               '
           )
           if [ -n "${remote_tag}" ]; then
-            test "${remote_tag}" = "${split_sha}" || {
-              printf 'Remote tag %s points to %s, expected %s\n' \
-                "${RELEASE_TAG}" "${remote_tag}" "${split_sha}" >&2
+            remote_tag_ref="refs/pam-remote-tags/${RELEASE_TAG}"
+            git fetch --no-tags "${remote}" \
+              "refs/tags/${RELEASE_TAG}:${remote_tag_ref}"
+            remote_tree=$(git rev-parse "${remote_tag_ref}^{tree}")
+            split_tree=$(git rev-parse "${split_sha}^{tree}")
+            test "${remote_tree}" = "${split_tree}" || {
+              printf 'Immutable remote tag %s has tree %s, expected %s\n' \
+                "${RELEASE_TAG}" "${remote_tree}" "${split_tree}" >&2
               exit 1
             }
-            git push "${remote}" "${split_sha}:refs/heads/main"
-            printf 'Tag %s already points to the expected split.\n' "${RELEASE_TAG}"
+            git push "${main_lease}" "${remote}" \
+              "${split_sha}:refs/heads/main"
+            printf 'Tag %s already contains the expected package tree.\n' \
+              "${RELEASE_TAG}"
             exit 0
           fi
 
-          git push --atomic "${remote}" \
+          git push --atomic "${main_lease}" "${remote}" \
             "${split_sha}:refs/heads/main" \
             "${split_sha}:refs/tags/${RELEASE_TAG}"

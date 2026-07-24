@@ -31,7 +31,9 @@ validate_map() {
     jq -e '
         .owner == "push-in"
         and (.packages | length == 6)
+        and (.runtimePackages | length == 1)
         and ([.packages[].name] | length == (unique | length))
+        and ([.runtimePackages[].name] | length == (unique | length))
         and ([.packages[].path] | length == (unique | length))
         and ([.packages[].repository] | length == (unique | length))
         and ([.packages[].deploySecret] | length == (unique | length))
@@ -43,13 +45,41 @@ validate_map() {
             and (.deploySecret | test("^PAM_[A-Z0-9_]+_DEPLOY_KEY$"))
             and (.description | length > 0)
         )
+        and all(
+            .runtimePackages[];
+            (.name | test("^pushinbr/pam-[a-z0-9-]+$"))
+            and (.constraint | test("^\\^[0-9]+\\.[0-9]+$"))
+            and (.description | length > 0)
+        )
     ' "${package_map}" >/dev/null || fail "packages/packages.json is invalid"
+}
+
+validate_coordinates() {
+    local legacy_pattern
+    legacy_pattern='pam/(api|core-api|desktop|psr-bridge|skeleton|socket|testing)'
+
+    if git -C "${repository_root}" grep -nE "${legacy_pattern}" -- .; then
+        fail "legacy pam/* Composer coordinates remain in tracked files"
+    fi
+
+    jq -e '
+        ([.packages[].name] + [.runtimePackages[].name]) as $packages
+        | all(
+            (.packages + .runtimePackages)[];
+            .name as $name
+            | ($name | startswith("pushinbr/pam-"))
+        )
+        and ($packages | length == ($packages | unique | length))
+    ' "${package_map}" >/dev/null ||
+        fail "first-party Composer coordinates are inconsistent"
 }
 
 validate_packages() {
     require_command composer
+    require_command git
     require_command jq
     validate_map
+    validate_coordinates
 
     local owner
     owner=$(jq -er '.owner' "${package_map}")

@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crate::composer;
+use crate::package_coordinates;
 use crate::php::PhpRuntime;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -538,22 +539,34 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let version = "^0.1";
+    let version = package_coordinates::VERSION_CONSTRAINT;
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.4")),
-        ("pushinbr/pam-api".to_owned(), serde_json::json!(version)),
+        (
+            package_coordinates::API.to_owned(),
+            serde_json::json!(version),
+        ),
     ]);
     if socket {
-        require.insert("pushinbr/pam-socket".to_owned(), serde_json::json!(version));
+        require.insert(
+            package_coordinates::SOCKET.to_owned(),
+            serde_json::json!(version),
+        );
     }
+    let require_dev = serde_json::Map::from_iter([
+        (
+            package_coordinates::TESTING.to_owned(),
+            serde_json::json!(version),
+        ),
+        ("phpunit/phpunit".to_owned(), serde_json::json!("^12.5")),
+    ]);
     let mut manifest = serde_json::json!({
         "name": "app/pam-project",
+        "description": "Application powered by the Pam persistent PHP runtime.",
         "type": "project",
+        "license": "proprietary",
         "require": require,
-        "require-dev": {
-            "pushinbr/pam-testing": version,
-            "phpunit/phpunit": "^12.5"
-        },
+        "require-dev": require_dev,
         "autoload": {"psr-4": {"App\\": "src/"}},
         "config": {"platform-check": true, "sort-packages": true},
         "scripts": {
@@ -1102,15 +1115,19 @@ li small {
 }
 
 fn init_desktop(directory: &Path) -> Result<(), String> {
+    let require = serde_json::Map::from_iter([
+        ("php".to_owned(), serde_json::json!("^8.4")),
+        (
+            package_coordinates::DESKTOP.to_owned(),
+            serde_json::json!(package_coordinates::DESKTOP_VERSION_CONSTRAINT),
+        ),
+    ]);
     let mut manifest = serde_json::json!({
         "name": "app/pam-desktop-project",
         "description": "A PHP-first desktop application powered by Pam, Rust, and Servo.",
         "type": "project",
         "license": "proprietary",
-        "require": {
-            "php": "^8.4",
-            "pam/desktop": "^1.0"
-        },
+        "require": require,
         "autoload": {
             "psr-4": {
                 "App\\": "src/"
@@ -3020,18 +3037,25 @@ fn local_packages_repository() -> Option<serde_json::Value> {
         .join("packages/api/composer.json")
         .is_file()
         .then(|| {
+            let versions = package_coordinates::ALL
+                .into_iter()
+                .filter(|package| {
+                    *package != package_coordinates::SKELETON
+                        && *package != package_coordinates::DESKTOP
+                })
+                .map(|package| {
+                    (
+                        package.to_owned(),
+                        serde_json::json!(package_coordinates::LOCAL_VERSION),
+                    )
+                })
+                .collect::<serde_json::Map<_, _>>();
             serde_json::json!({
                 "type": "path",
                 "url": packages.to_string_lossy(),
                 "options": {
                     "symlink": true,
-                    "versions": {
-                        "pushinbr/pam-core-api": "0.1.0",
-                        "pushinbr/pam-api": "0.1.0",
-                        "pushinbr/pam-psr-bridge": "0.1.0",
-                        "pushinbr/pam-socket": "0.1.0",
-                        "pushinbr/pam-testing": "0.1.0"
-                    }
+                    "versions": versions
                 }
             })
         })
@@ -3057,7 +3081,8 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": true,
                     "versions": {
-                        "pam/desktop": "1.0.0"
+                        package_coordinates::DESKTOP:
+                            package_coordinates::DESKTOP_LOCAL_VERSION
                     }
                 }
             })

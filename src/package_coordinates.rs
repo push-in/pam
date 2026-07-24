@@ -1,0 +1,42 @@
+pub const VERSION_CONSTRAINT: &str = "^0.1";
+pub const LOCAL_VERSION: &str = "0.1.0";
+pub const DESKTOP_VERSION_CONSTRAINT: &str = "^1.0";
+pub const DESKTOP_LOCAL_VERSION: &str = "1.0.1";
+
+pub const CORE_API: &str = "pushinbr/pam-core-api";
+pub const API: &str = "pushinbr/pam-api";
+pub const SOCKET: &str = "pushinbr/pam-socket";
+pub const PSR_BRIDGE: &str = "pushinbr/pam-psr-bridge";
+pub const TESTING: &str = "pushinbr/pam-testing";
+pub const SKELETON: &str = "pushinbr/pam-skeleton";
+pub const DESKTOP: &str = "pushinbr/pam-desktop";
+
+pub const ALL: [&str; 7] = [
+    CORE_API, API, SOCKET, PSR_BRIDGE, TESTING, SKELETON, DESKTOP,
+];
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn coordinates_match_the_publication_manifest() {
+        let manifest: serde_json::Value =
+            serde_json::from_str(include_str!("../packages/packages.json")).unwrap();
+        let published = manifest["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(manifest["runtimePackages"].as_array().unwrap())
+            .map(|package| package["name"].as_str().unwrap())
+            .collect::<BTreeSet<_>>();
+        let runtime = super::ALL.into_iter().collect::<BTreeSet<_>>();
+
+        assert_eq!(runtime, published);
+        assert!(runtime.iter().all(|name| name.starts_with("pushinbr/pam-")));
+        assert_eq!(
+            manifest["runtimePackages"][0]["constraint"],
+            super::DESKTOP_VERSION_CONSTRAINT
+        );
+    }
+}

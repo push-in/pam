@@ -15,6 +15,24 @@ permissions:
   contents: read
 
 jobs:
+  composer-packages:
+    name: Verify public Composer packages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Wait for and install every public package release
+        env:
+          PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          PAM_PACKAGIST_TIMEOUT_SECONDS: 600
+          PAM_PACKAGIST_POLL_SECONDS: 10
+        run: scripts/verify-packagist-release.sh "${PAM_RELEASE_TAG}"
+
   build:
     strategy:
       fail-fast: false
@@ -96,7 +114,9 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))
-    needs: build
+    needs:
+      - build
+      - composer-packages
     runs-on: ubuntu-24.04
     permissions:
       contents: write
