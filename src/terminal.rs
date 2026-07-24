@@ -189,7 +189,7 @@ pub fn print_help(executable: &OsStr) {
         &[
             (
                 "init [directory]",
-                "Create a raw, API, Laravel, or desktop app",
+                "Create a raw, API, Laravel, desktop, or mobile app",
             ),
             (
                 "build [directory]",
@@ -198,6 +198,10 @@ pub fn print_help(executable: &OsStr) {
             (
                 "desktop <command>",
                 "Develop and diagnose a Pam Desktop app",
+            ),
+            (
+                "mobile <command>",
+                "Build, run, profile, and extend a native app",
             ),
         ],
     );
@@ -267,7 +271,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             "Scaffold a production-ready Pam project.",
             "init [directory] [options]",
             &[
-                ("--template PRESET", "raw, api, laravel, or desktop"),
+                (
+                    "--template PRESET",
+                    "raw, api, laravel, desktop, mobile, or mobile-ui",
+                ),
                 ("--socket", "Add Pam Socket support"),
                 ("--no-install", "Create files without installing packages"),
                 ("--no-interaction", "Use API when no preset is supplied"),
@@ -275,7 +282,8 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[
                 "init my-api --template api",
                 "init my-app --template laravel --socket",
-                "init desktop-app --template desktop --no-install",
+                "init native-app --template mobile --no-install",
+                "init polished-app --template mobile-ui --no-install",
             ],
         ),
         "build" => (
@@ -325,6 +333,27 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("--concurrency N", "Parallel request count; default: 10"),
             ],
             &["benchmark http://127.0.0.1:3000/health --requests 1000 --concurrency 32"],
+        ),
+        "mobile" => (
+            "Build native Android applications powered by PHP.",
+            "mobile <command> [project] [options]",
+            &[
+                ("doctor", "Validate Android and Pam Native toolchains"),
+                ("prepare", "Stage the project and generate its Android host"),
+                ("codegen", "Regenerate Kotlin native-module bindings"),
+                ("build | run | dev", "Build, launch, or hot-reload the app"),
+                (
+                    "benchmark | profile",
+                    "Measure performance or create a baseline profile",
+                ),
+                ("plugin:list | plugin:doctor", "Inspect native plugins"),
+                ("make:*", "Generate screens, components, or native views"),
+            ],
+            &[
+                "mobile doctor",
+                "mobile dev .",
+                "mobile make:screen Dashboard .",
+            ],
         ),
         _ => return false,
     };

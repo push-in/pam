@@ -186,6 +186,21 @@ Run `pam init` without a template in a terminal for the interactive preset picke
 Use `--no-install` to generate/download source without resolving dependencies.
 See [Laravel on Pam](docs/laravel.md) for lifecycle and production details.
 
+### Mobile presets
+
+The CLI offers two native mobile starting points:
+
+```bash
+pam init native-core --template mobile
+pam init native-ui --template mobile-ui
+```
+
+`mobile` starts with the explicit PAM Native PHP tree and no component-library
+dependency. `mobile-ui` installs `pushinbr/pam-mobile-ui`, enables its system
+theme and generates a `Hello.pam.php` screen using the official accessible
+components. Both presets render through the same PAM Native element tree, Rust
+diff engine and Android UI-thread commit path.
+
 ### Desktop applications with Servo
 
 Pam Desktop lives in its own repository because its release cadence, native
@@ -703,7 +718,7 @@ pam profile|trace [index.php]                       profiling and structured eve
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
-pam init [directory] --template raw|api|laravel|desktop
+pam init [directory] --template raw|api|laravel|desktop|mobile|mobile-ui
                                                     scaffold and install a project
 pam init [directory] --template api --socket        add native Socket support
 pam init [directory] --no-interaction               accept the default API preset

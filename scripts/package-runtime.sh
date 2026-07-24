@@ -38,10 +38,42 @@ test -d "${extension_directory}" || {
 mkdir -p \
     "${package_root}/bin" \
     "${package_root}/etc/conf.d" \
-    "${package_root}/lib/php/extensions"
+    "${package_root}/lib/php/extensions" \
+    "${package_root}/share/pam/native" \
+    "${package_root}/share/pam/mobile-ui"
 
 cp "${pam_binary}" "${package_root}/bin/pam"
 cp "${php_library}" "${package_root}/lib/libphp.so"
+
+test -f pam-native/Cargo.toml || {
+    echo "Pam Native SDK source is missing from the release checkout." >&2
+    exit 66
+}
+test -f pam-mobile-ui/composer.json || {
+    echo "PAM Mobile UI source is missing from the release checkout." >&2
+    exit 66
+}
+tar \
+    --exclude='./.git' \
+    --exclude='./target' \
+    --exclude='./examples' \
+    --exclude='./runtime-builder' \
+    --exclude='*/build' \
+    --exclude='*/.gradle' \
+    --exclude='*/.kotlin' \
+    --exclude='*/.cxx' \
+    --exclude='*/local.properties' \
+    -C pam-native -cf - . |
+    tar -C "${package_root}/share/pam/native" -xf -
+tar \
+    --exclude='./.git' \
+    --exclude='./.build' \
+    --exclude='./examples' \
+    --exclude='./tools/phpstan/vendor' \
+    --exclude='*/build' \
+    --exclude='*/.gradle' \
+    -C pam-mobile-ui -cf - . |
+    tar -C "${package_root}/share/pam/mobile-ui" -xf -
 
 copy_dependencies() {
     ldd "$1" | awk '$2 == "=>" { print $1 "|" $3 }' |

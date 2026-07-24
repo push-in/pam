@@ -361,6 +361,18 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     assert!(start_help.contains("--admin-address IP:PORT"));
     assert!(start_help.contains("$ pam start index.php --workers 4"));
 
+    let init_help = run_pam(&["init", "--help"]);
+    assert!(init_help.status.success());
+    let init_help = String::from_utf8_lossy(&init_help.stderr);
+    assert!(init_help.contains("mobile, or mobile-ui"));
+    assert!(init_help.contains("--template mobile-ui"));
+
+    let mobile_help = run_pam(&["mobile", "--help"]);
+    assert!(mobile_help.status.success());
+    let mobile_help = String::from_utf8_lossy(&mobile_help.stderr);
+    assert!(mobile_help.contains("PAM / MOBILE"));
+    assert!(mobile_help.contains("make:screen"));
+
     let version = run_pam(&["--version"]);
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("pam "));
@@ -555,6 +567,73 @@ fn initializes_raw_and_socket_presets_without_composer() {
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();
+}
+
+#[test]
+fn initializes_mobile_with_tree_default_and_pam_components_enabled() {
+    let directory = temporary_path("init-mobile");
+    let output = run_pam(&[
+        "init",
+        directory.to_str().unwrap(),
+        "--template",
+        "mobile",
+        "--no-install",
+        "--no-interaction",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
+            .unwrap();
+    let entry = fs::read_to_string(directory.join("index.php")).unwrap();
+    let hello = fs::read_to_string(directory.join("src/Hello.php")).unwrap();
+    assert!(
+        manifest["require"]["pushinbr/pam-native"] == "^0.1"
+            || manifest["require"]["pam/native"] == "^0.1"
+    );
+    assert!(manifest["require"]["pushinbr/pam-mobile-ui"].is_null());
+    assert!(entry.contains("App::components(__DIR__.'/src'"));
+    assert!(entry.contains("App::run(new Hello())"));
+    assert!(hello.contains("public function render(): Element"));
+    assert!(hello.contains("Screen::make("));
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn initializes_mobile_with_the_official_ui_and_single_file_components() {
+    let directory = temporary_path("init-mobile-ui");
+    let output = run_pam(&[
+        "init",
+        directory.to_str().unwrap(),
+        "--template",
+        "mobile-ui",
+        "--no-install",
+        "--no-interaction",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
+            .unwrap();
+    let entry = fs::read_to_string(directory.join("index.php")).unwrap();
+    let hello = fs::read_to_string(directory.join("src/Hello.pam.php")).unwrap();
+    assert_eq!(manifest["require"]["pushinbr/pam-mobile-ui"], "^0.1");
+    assert!(entry.contains("MobileUi::mode(ThemeMode::System)"));
+    assert!(entry.contains("App::run(App::make(Hello::class))"));
+    assert!(hello.contains("#[State]"));
+    assert!(hello.contains("<GluestackUIProvider mode=\"system\">"));
+    assert!(hello.contains("<Button size=\"lg\" on:press=\"increment\">"));
+
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]

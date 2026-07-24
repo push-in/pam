@@ -155,6 +155,8 @@ pub enum InitTemplate {
     Api,
     Laravel,
     Desktop,
+    Mobile,
+    MobileUi,
 }
 
 impl InitTemplate {
@@ -164,8 +166,10 @@ impl InitTemplate {
             "api" => Ok(Self::Api),
             "laravel" => Ok(Self::Laravel),
             "desktop" => Ok(Self::Desktop),
+            "mobile" | "android" | "mobile-pure" => Ok(Self::Mobile),
+            "mobile-ui" | "android-ui" | "mobile+ui" => Ok(Self::MobileUi),
             _ => Err(format!(
-                "unknown init template {value:?}; expected raw, api, laravel, or desktop"
+                "unknown init template {value:?}; expected raw, api, laravel, desktop, mobile, or mobile-ui"
             )),
         }
     }
@@ -189,10 +193,13 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     options.template = Some(template);
     options.socket = socket;
 
-    if template == InitTemplate::Desktop && socket {
+    if matches!(
+        template,
+        InitTemplate::Desktop | InitTemplate::Mobile | InitTemplate::MobileUi
+    ) && socket
+    {
         return Err(
-            "the desktop preset does not use --socket; it exposes its own native event system"
-                .to_owned(),
+            "the selected desktop or mobile preset does not use --socket; it exposes its own native event system".to_owned(),
         );
     }
     if template == InitTemplate::Laravel {
@@ -215,6 +222,8 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
         init_raw(directory, socket)?;
     } else if template == InitTemplate::Desktop {
         init_desktop(directory)?;
+    } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
+        init_mobile(directory, template == InitTemplate::MobileUi)?;
     } else {
         init_api(directory, socket)?;
     }
@@ -544,6 +553,18 @@ fn choose_template(
         ui.heading(format!("{:<25}", "Desktop")),
         ui.muted("Servo shell + PHP")
     );
+    println!(
+        "  {}  {} {}",
+        ui.accent("07"),
+        ui.heading(format!("{:<25}", "Mobile · Core")),
+        ui.muted("Pure PAM Native primitives")
+    );
+    println!(
+        "  {}  {} {}",
+        ui.accent("08"),
+        ui.heading(format!("{:<25}", "Mobile · Official UI")),
+        ui.muted("PAM Mobile UI design system · recommended for apps")
+    );
     print!("\n{} ", ui.command("Choose a preset [02] ›"));
     std::io::stdout()
         .flush()
@@ -559,6 +580,8 @@ fn choose_template(
         "4" => Ok((InitTemplate::Laravel, false)),
         "5" => Ok((InitTemplate::Laravel, true)),
         "6" => Ok((InitTemplate::Desktop, false)),
+        "7" => Ok((InitTemplate::Mobile, false)),
+        "8" => Ok((InitTemplate::MobileUi, false)),
         value => Err(format!("invalid init preset {value:?}")),
     }
 }
@@ -2951,6 +2974,249 @@ footer kbd {
     Ok(())
 }
 
+fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
+    let native_repository = local_native_repository();
+    let native_package = native_repository
+        .as_ref()
+        .map(|repository| repository.package.clone())
+        .unwrap_or_else(|| package_coordinates::NATIVE.to_string());
+    let mut requirements = serde_json::json!({
+        "php": "^8.4"
+    });
+    requirements[&native_package] =
+        serde_json::json!(package_coordinates::NATIVE_VERSION_CONSTRAINT);
+    if with_official_ui {
+        requirements[package_coordinates::MOBILE_UI] =
+            serde_json::json!(package_coordinates::MOBILE_UI_VERSION_CONSTRAINT);
+    }
+    let mut manifest = serde_json::json!({
+        "name": if with_official_ui {
+            "app/pam-mobile-ui-project"
+        } else {
+            "app/pam-native-project"
+        },
+        "description": if with_official_ui {
+            "A native Android application powered by PHP and PAM Mobile UI."
+        } else {
+            "A native Android application powered by persistent PHP."
+        },
+        "type": "project",
+        "license": "proprietary",
+        "require": requirements,
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/"
+            }
+        },
+        "config": {
+            "platform-check": true,
+            "sort-packages": true
+        },
+        "scripts": {
+            "mobile:doctor": "pam mobile doctor .",
+            "mobile:dev": "pam mobile dev .",
+            "mobile:build": "pam mobile build . --release",
+            "mobile:benchmark": "pam mobile benchmark .",
+            "mobile:profile": "pam mobile profile ."
+        }
+    });
+    if with_official_ui && native_package != package_coordinates::NATIVE {
+        // Source checkouts may still expose the legacy package identity while
+        // the public pushinbr namespace migration is being completed.
+        manifest["replace"] = serde_json::json!({
+            package_coordinates::NATIVE: package_coordinates::NATIVE_LOCAL_VERSION
+        });
+    }
+    let mut repositories = Vec::new();
+    if let Some(repository) = native_repository {
+        repositories.push(repository.definition);
+    }
+    if with_official_ui {
+        if let Some(repository) = local_mobile_ui_repository() {
+            repositories.push(repository);
+        }
+    }
+    if !repositories.is_empty() {
+        manifest["repositories"] = serde_json::json!(repositories);
+    }
+    write_new(
+        &directory.join("composer.json"),
+        &(serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
+            + "\n"),
+    )?;
+    write_new(
+        &directory.join("pam-native.json"),
+        &format!(
+            r#"{{
+    "$schema": "vendor/{native_package}/resources/pam-native.schema.json",
+    "version": 1,
+    "applicationId": "app.pam.hello",
+    "name": "Pam Hello",
+    "entry": "index.php",
+    "versionCode": 1,
+    "versionName": "0.1.0",
+    "android": {{
+        "minSdk": 26,
+        "targetSdk": 36,
+        "permissions": []
+    }},
+    "modules": [],
+    "views": []
+}}
+"#,
+        ),
+    )?;
+    let entry = if with_official_ui {
+        r#"<?php
+
+declare(strict_types=1);
+
+use App\Hello;
+use Pam\MobileUi\Enum\ThemeMode;
+use Pam\MobileUi\MobileUi;
+use Pam\Native\App;
+
+require __DIR__.'/vendor/autoload.php';
+
+App::components(__DIR__.'/src', __DIR__.'/.pam-native/components');
+MobileUi::mode(ThemeMode::System);
+App::run(App::make(Hello::class));
+"#
+    } else {
+        r#"<?php
+
+declare(strict_types=1);
+
+use App\Hello;
+use Pam\Native\App;
+
+require __DIR__.'/vendor/autoload.php';
+
+App::components(__DIR__.'/src', __DIR__.'/.pam-native/components');
+App::theme(\Pam\Native\Theme::pamLab());
+App::run(new Hello());
+"#
+    };
+    write_new(&directory.join("index.php"), entry)?;
+    fs::create_dir_all(directory.join("src"))
+        .map_err(|error| format!("cannot create mobile source directory: {error}"))?;
+    let (hello_path, hello) = if with_official_ui {
+        (
+            directory.join("src/Hello.pam.php"),
+            r#"<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use Pam\Native\Attributes\State;
+use Pam\Native\Component;
+
+final class Hello extends Component
+{
+    #[State]
+    public int $count = 0;
+
+    public function increment(): void
+    {
+        $this->count++;
+    }
+}
+?>
+
+<template>
+    <GluestackUIProvider mode="system">
+        <SafeAreaView class="flex-1 ui-surface">
+            <Center class="flex-1 px-6">
+                <Card class="w-full max-w-md gap-6 p-6">
+                    <VStack class="gap-2">
+                        <Badge variant="secondary">
+                            <BadgeText>PAM Mobile UI</BadgeText>
+                        </Badge>
+                        <Heading size="2xl">Build native apps with PHP</Heading>
+                        <Text class="text-muted-foreground">
+                            Accessible official components on the PAM Native renderer.
+                        </Text>
+                    </VStack>
+
+                    <Button size="lg" on:press="increment">
+                        <ButtonText>Native taps: {{ $count }}</ButtonText>
+                    </Button>
+                </Card>
+            </Center>
+        </SafeAreaView>
+    </GluestackUIProvider>
+</template>
+"#,
+        )
+    } else {
+        (
+            directory.join("src/Hello.php"),
+            r#"<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use Pam\Native\Component;
+use Pam\Native\Element;
+use Pam\Native\Style;
+use Pam\Native\UI\Button;
+use Pam\Native\UI\Column;
+use Pam\Native\UI\SafeAreaView;
+use Pam\Native\UI\Screen;
+use Pam\Native\UI\Text;
+
+final class Hello extends Component
+{
+    private int $count = 0;
+
+    public function render(): Element
+    {
+        return Screen::make(
+            SafeAreaView::make(
+                Column::make(
+                    Text::make('Hello from persistent PHP')
+                        ->style(new Style(fontSize: 28)),
+                    Button::make('Native taps: '.$this->count)
+                        ->onPress($this->increment(...)),
+                )->style(new Style(flexGrow: 1, padding: 24, gap: 16)),
+            ),
+        );
+    }
+
+    public function increment(): void
+    {
+        $this->count++;
+    }
+}
+"#,
+        )
+    };
+    write_new(&hello_path, hello)?;
+    write_new(
+        &directory.join(".gitignore"),
+        "/vendor/\n/.pam/\n/.pam-native/\n",
+    )?;
+    fs::create_dir_all(directory.join(".vscode"))
+        .map_err(|error| format!("cannot create VS Code settings directory: {error}"))?;
+    write_new(
+        &directory.join(".vscode/settings.json"),
+        &format!(
+            r#"{{
+    "files.associations": {{
+        "*.pam": "html"
+    }},
+    "html.customData": [
+        "./vendor/{native_package}/resources/pam-native.custom-data.json"
+    ]
+}}
+"#,
+        ),
+    )
+}
+
 fn init_laravel(executable: &OsStr, options: &InitOptions) -> Result<u8, String> {
     let directory = &options.directory;
     if directory.exists()
@@ -3149,6 +3415,85 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
         })
 }
 
+struct LocalComposerRepository {
+    package: String,
+    definition: serde_json::Value,
+}
+
+fn local_native_repository() -> Option<LocalComposerRepository> {
+    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configured = std::env::var_os("PAM_NATIVE_PACKAGE_PATH").map(PathBuf::from);
+    let installed = std::env::current_exe().ok().and_then(|executable| {
+        executable
+            .parent()
+            .map(|binary| binary.join("../share/pam/native/packages/native"))
+    });
+    let candidates = [
+        configured,
+        installed,
+        Some(manifest_root.join("pam-native/packages/native")),
+        Some(manifest_root.join("../pam-native/packages/native")),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|path| path.join("composer.json").is_file())
+        .and_then(|path| {
+            let path = fs::canonicalize(&path).unwrap_or(path);
+            let composer = fs::read(path.join("composer.json")).ok()?;
+            let manifest = serde_json::from_slice::<serde_json::Value>(&composer).ok()?;
+            let package = manifest.get("name")?.as_str()?.to_owned();
+            let definition = serde_json::json!({
+                "type": "path",
+                "url": path.to_string_lossy(),
+                "options": {
+                    "symlink": true,
+                    "versions": {
+                        package.clone(): package_coordinates::NATIVE_LOCAL_VERSION
+                    }
+                }
+            });
+            Some(LocalComposerRepository {
+                package,
+                definition,
+            })
+        })
+}
+
+fn local_mobile_ui_repository() -> Option<serde_json::Value> {
+    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let configured = std::env::var_os("PAM_MOBILE_UI_PACKAGE_PATH").map(PathBuf::from);
+    let installed = std::env::current_exe().ok().and_then(|executable| {
+        executable
+            .parent()
+            .map(|binary| binary.join("../share/pam/mobile-ui"))
+    });
+    let candidates = [
+        configured,
+        installed,
+        Some(manifest_root.join("pam-mobile-ui")),
+        Some(manifest_root.join("../pam-mobile-ui")),
+    ];
+    candidates
+        .into_iter()
+        .flatten()
+        .find(|path| path.join("composer.json").is_file())
+        .map(|path| {
+            let path = fs::canonicalize(&path).unwrap_or(path);
+            serde_json::json!({
+                "type": "path",
+                "url": path.to_string_lossy(),
+                "options": {
+                    "symlink": true,
+                    "versions": {
+                        package_coordinates::MOBILE_UI:
+                            package_coordinates::MOBILE_UI_LOCAL_VERSION
+                    }
+                }
+            })
+        })
+}
+
 fn run_composer_in(executable: &OsStr, directory: &Path, arguments: &[&str]) -> Result<(), String> {
     let previous = std::env::current_dir()
         .map_err(|error| format!("cannot resolve current directory: {error}"))?;
@@ -3176,6 +3521,10 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
         (InitTemplate::Laravel, true) => "Laravel + Socket",
         (InitTemplate::Desktop, false) => "Desktop",
         (InitTemplate::Desktop, true) => unreachable!("desktop does not support --socket"),
+        (InitTemplate::Mobile, false) => "Mobile · Core",
+        (InitTemplate::Mobile, true) => unreachable!("mobile does not support --socket"),
+        (InitTemplate::MobileUi, false) => "Mobile · Official UI",
+        (InitTemplate::MobileUi, true) => unreachable!("mobile UI does not support --socket"),
     };
     let ui = Terminal::stdout();
     println!();
@@ -3193,6 +3542,8 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
     );
     let next = if template == InitTemplate::Desktop {
         format!("cd {} && pam desktop dev .", directory.display())
+    } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
+        format!("cd {} && pam mobile dev .", directory.display())
     } else {
         let entry = if template == InitTemplate::Laravel {
             "pam.php"

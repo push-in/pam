@@ -2,6 +2,10 @@ pub const VERSION_CONSTRAINT: &str = "^0.1";
 pub const LOCAL_VERSION: &str = "0.1.0";
 pub const DESKTOP_VERSION_CONSTRAINT: &str = "^1.0";
 pub const DESKTOP_LOCAL_VERSION: &str = "1.0.1";
+pub const NATIVE_VERSION_CONSTRAINT: &str = "^0.1";
+pub const NATIVE_LOCAL_VERSION: &str = "0.1.1";
+pub const MOBILE_UI_VERSION_CONSTRAINT: &str = "^0.1";
+pub const MOBILE_UI_LOCAL_VERSION: &str = "0.1.0";
 
 pub const CORE_API: &str = "pushinbr/pam-core-api";
 pub const API: &str = "pushinbr/pam-api";
@@ -10,6 +14,8 @@ pub const PSR_BRIDGE: &str = "pushinbr/pam-psr-bridge";
 pub const TESTING: &str = "pushinbr/pam-testing";
 pub const SKELETON: &str = "pushinbr/pam-skeleton";
 pub const DESKTOP: &str = "pushinbr/pam-desktop";
+pub const NATIVE: &str = "pushinbr/pam-native";
+pub const MOBILE_UI: &str = "pushinbr/pam-mobile-ui";
 
 pub const ALL: [&str; 7] = [
     CORE_API, API, SOCKET, PSR_BRIDGE, TESTING, SKELETON, DESKTOP,

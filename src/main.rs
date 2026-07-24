@@ -11,6 +11,7 @@ mod control_plane;
 mod desktop;
 mod dev;
 mod doctor;
+mod mobile;
 mod package_coordinates;
 mod php;
 mod server;
@@ -142,6 +143,10 @@ fn run() -> Result<u8, CliError> {
         let target = raw_args.next().unwrap_or_else(|| OsString::from("."));
         let target = resolve_target(&target)?;
         return doctor::run(&executable, &target).map_err(CliError::Doctor);
+    }
+
+    if script_arg == "mobile" {
+        return mobile::run(raw_args.collect()).map_err(CliError::Commands);
     }
 
     if script_arg == "desktop" {
@@ -276,7 +281,8 @@ fn run() -> Result<u8, CliError> {
                 "--template" => {
                     let value = raw_args.next().ok_or_else(|| {
                         CliError::Commands(
-                            "--template requires raw, api, laravel, or desktop".to_owned(),
+                            "--template requires raw, api, laravel, desktop, mobile, or mobile-ui"
+                                .to_owned(),
                         )
                     })?;
                     template = Some(
