@@ -7,6 +7,10 @@ after the first stable release.
 
 ## 0.1.13 - 2026-07-24
 
+- Fixed mobile bundle traversal so nested generated, hidden, build, test and
+  documentation trees cannot inflate or invalidate production APK assets.
+- Completed responsive PamUI grid, compound control, overlay, list and dark
+  theme hardening validated by 40 physical-device instrumented tests.
 - Propagated Android system appearance through the native runtime and PHP
   window metrics, including live light/dark changes without an app restart.
 - Kept PamUI semantic theme classes, component colors and Android system bars

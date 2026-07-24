@@ -1881,17 +1881,27 @@ fn copy_project_files(
 }
 
 fn ignored_project_path(path: &Path) -> bool {
-    let first = path
-        .components()
-        .next()
-        .and_then(|component| match component {
-            Component::Normal(value) => value.to_str(),
-            _ => None,
-        });
-    matches!(
-        first,
-        Some(".git" | ".pam-native" | "node_modules" | "target" | "dist")
-    )
+    path.components().any(|component| {
+        matches!(
+            component,
+            Component::Normal(value)
+                if value.to_str().is_some_and(|name| {
+                    name.starts_with('.')
+                        || matches!(
+                            name,
+                            ".build"
+                            | "build"
+                            | "dist"
+                            | "docs"
+                            | "examples"
+                            | "node_modules"
+                            | "target"
+                            | "tests"
+                            | "tools"
+                        )
+                })
+        )
+    })
 }
 
 fn directory_digest(root: &Path) -> Result<String, String> {
@@ -2659,6 +2669,37 @@ mod tests {
         assert!(!valid_pascal_name("../Checkout"));
         assert_eq!(kebab_case("CheckoutForm"), "checkout-form");
         assert_eq!(kebab_case("HTTPClient"), "http-client");
+    }
+
+    #[test]
+    fn android_bundle_ignores_hidden_paths_at_every_depth() {
+        assert!(ignored_project_path(Path::new(".env")));
+        assert!(ignored_project_path(Path::new(".pam-native/android")));
+        assert!(ignored_project_path(Path::new(
+            "vendor/package/.build/cache.php"
+        )));
+        assert!(ignored_project_path(Path::new(
+            "vendor/package/resources/.generated/value.php"
+        )));
+        assert!(ignored_project_path(Path::new(
+            "node_modules/package/index.js"
+        )));
+        assert!(ignored_project_path(Path::new("target/release/pam")));
+        assert!(ignored_project_path(Path::new(
+            "vendor/package/android/build/intermediates/classes.jar"
+        )));
+        assert!(ignored_project_path(Path::new(
+            "vendor/package/examples/demo/vendor/autoload.php"
+        )));
+        assert!(!ignored_project_path(Path::new(
+            "vendor/package/src/View.php"
+        )));
+        assert!(!ignored_project_path(Path::new(
+            "vendor/composer/autoload.php"
+        )));
+        assert!(!ignored_project_path(Path::new(
+            "resources/icons/pam-ui.svg"
+        )));
     }
 
     #[test]
