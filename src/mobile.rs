@@ -659,8 +659,9 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
         }
         if !package_root.starts_with(&vendor_directory) {
             return Err(format!(
-                "Composer package {} install path escapes the project vendor directory",
-                package.name
+                "Composer package {} install path escapes the project vendor directory; \
+                 path repositories used by mobile apps must set options.symlink to false",
+                package.name,
             ));
         }
         let descriptor =

@@ -3449,7 +3449,7 @@ fn local_native_repository() -> Option<LocalComposerRepository> {
                 "type": "path",
                 "url": path.to_string_lossy(),
                 "options": {
-                    "symlink": true,
+                    "symlink": false,
                     "versions": {
                         package.clone(): package_coordinates::NATIVE_LOCAL_VERSION
                     }
@@ -3486,7 +3486,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "type": "path",
                 "url": path.to_string_lossy(),
                 "options": {
-                    "symlink": true,
+                    "symlink": false,
                     "versions": {
                         package_coordinates::MOBILE_UI:
                             package_coordinates::MOBILE_UI_LOCAL_VERSION
