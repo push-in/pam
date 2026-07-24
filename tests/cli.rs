@@ -399,6 +399,40 @@ fn delegates_desktop_commands_and_exposes_the_pam_binary() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn discovers_the_composer_desktop_binary_in_the_project() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = temporary_path("desktop-composer-bin");
+    let vendor = directory.join("vendor");
+    let desktop = vendor.join("bin/pam-desktop");
+    fs::create_dir_all(desktop.parent().unwrap()).unwrap();
+    fs::write(directory.join("composer.json"), "{}\n").unwrap();
+    fs::write(vendor.join("autoload.php"), "<?php\n").unwrap();
+    fs::write(
+        &desktop,
+        "#!/bin/sh\nprintf 'composer-desktop=%s|%s\\n' \"$1\" \"$2\"\nexit 19\n",
+    )
+    .unwrap();
+    fs::set_permissions(&desktop, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(["desktop", "dev", "."])
+        .current_dir(&directory)
+        .env_remove("PAM_DESKTOP_BINARY")
+        .output()
+        .unwrap();
+
+    assert_eq!(output.status.code(), Some(19));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "composer-desktop=dev|.\n",
+    );
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn doctor_uses_embed_without_requiring_a_php_cli() {
     let output = Command::new(env!("CARGO_BIN_EXE_pam"))

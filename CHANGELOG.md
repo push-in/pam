@@ -5,6 +5,13 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.5 - 2026-07-23
+
+- Made `pam desktop` discover the Composer-provided `vendor/bin/pam-desktop`
+  launcher from the target project, including custom Composer vendor directories.
+- Improved missing-host guidance so desktop projects can be repaired with
+  `pam composer install` without adding a system PHP, Node or Rust runtime.
+
 ## 0.1.4 - 2026-07-23
 
 - Redesigned the CLI with a cohesive terminal-native visual system, semantic
