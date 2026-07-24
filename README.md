@@ -27,7 +27,7 @@ Pam is **not a framework**, **not a Composer replacement**, and **not a new lang
 > [!IMPORTANT]
 > Pam is currently experimental (`0.1.4`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
-**Explore:** [Quick start](#quick-start) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
+**Explore:** [Quick start](#quick-start) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
 ## Why Pam?
 
@@ -200,6 +200,10 @@ dependency. `mobile-ui` installs `pushinbr/pam-mobile-ui`, enables its system
 theme and generates a `Hello.pam.php` screen using the official accessible
 components. Both presets render through the same PAM Native element tree, Rust
 diff engine and Android UI-thread commit path.
+
+See the complete [PAM Mobile guide](docs/mobile.md) for project structure,
+screen generation, tags, typed PHP trees, reusable components, state, forms,
+navigation, layout rules, builds, and device testing.
 
 ### Desktop applications with Servo
 
