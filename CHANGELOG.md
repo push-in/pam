@@ -5,6 +5,16 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.11 - 2026-07-24
+
+- Rebranded the complete mobile component surface as PamUI while retaining only
+  the third-party notices required by the original MIT license.
+- Hardened Android layout, font scaling, intrinsic measurement, overlays,
+  scrolling, grids, compound inputs, Markdown and retained native rendering.
+- Refined the mobile catalog theme and responsive recipes, and verified the
+  production host with Rust, PHP, Android unit/lint and 40 physical-device
+  instrumented tests under strict UI-thread frame budgets.
+
 ## 0.1.10 - 2026-07-24
 
 - Redesigned the generated desktop starter as a responsive runtime control

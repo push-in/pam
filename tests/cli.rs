@@ -645,7 +645,7 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     assert!(entry.contains("MobileUi::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));
-    assert!(hello.contains("<GluestackUIProvider mode=\"system\">"));
+    assert!(hello.contains("<PamUIProvider mode=\"system\">"));
     assert!(hello.contains("<Button size=\"lg\" on:press=\"increment\">"));
 
     fs::remove_dir_all(directory).unwrap();

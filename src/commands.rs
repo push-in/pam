@@ -3138,7 +3138,7 @@ final class Hello extends Component
 ?>
 
 <template>
-    <GluestackUIProvider mode="system">
+    <PamUIProvider mode="system">
         <SafeAreaView class="flex-1 ui-surface">
             <Center class="flex-1 px-6">
                 <Card class="w-full max-w-md gap-6 p-6">
@@ -3158,7 +3158,7 @@ final class Hello extends Component
                 </Card>
             </Center>
         </SafeAreaView>
-    </GluestackUIProvider>
+    </PamUIProvider>
 </template>
 "#,
         )
