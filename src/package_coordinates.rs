@@ -1,7 +1,7 @@
 pub const VERSION_CONSTRAINT: &str = "^0.1";
 pub const LOCAL_VERSION: &str = "0.1.0";
 pub const DESKTOP_VERSION_CONSTRAINT: &str = "^1.0";
-pub const DESKTOP_LOCAL_VERSION: &str = "1.0.1";
+pub const DESKTOP_LOCAL_VERSION: &str = "1.1.0";
 pub const NATIVE_VERSION_CONSTRAINT: &str = "^0.1";
 pub const NATIVE_LOCAL_VERSION: &str = "0.1.1";
 pub const MOBILE_UI_VERSION_CONSTRAINT: &str = "^0.1";
