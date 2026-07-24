@@ -26,6 +26,7 @@ jobs:
           repository: push-in/pam-mobile-ui
           ref: 0c70a4db1fbf9bbed85c0eb282bb91cad88807e3
           path: pam-mobile-ui
+          ssh-key: ${{ secrets.PAM_MOBILE_UI_READ_KEY }}
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
