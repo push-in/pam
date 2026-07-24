@@ -5,6 +5,11 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.12 - 2026-07-24
+
+- Refreshed the bundled Pam Native showcase lock after the public package
+  identity migration and pinned the release to its fully verified source.
+
 ## 0.1.11 - 2026-07-24
 
 - Rebranded the complete mobile component surface as PamUI while retaining only
