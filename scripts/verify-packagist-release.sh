@@ -98,17 +98,18 @@ done
 
 jq \
     --arg version "${release_version}" \
-    '{
+    '. as $manifest
+    | {
         name: "pushinbr/pam-release-gate",
         description: "Temporary public installation gate for a PAM release.",
         type: "project",
         license: "proprietary",
         require: (
-            reduce .packages[].name as $package (
+            reduce $manifest.packages[].name as $package (
                 {php: "^8.4"};
                 .[$package] = $version
             )
-            | reduce .runtimePackages[] as $package (
+            | reduce $manifest.runtimePackages[] as $package (
                 .;
                 .[$package.name] = $package.constraint
             )
