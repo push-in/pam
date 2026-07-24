@@ -5,6 +5,17 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.15 - 2026-07-24
+
+- Added a native responsive grid engine with configurable column tracks,
+  mobile-first spans, offsets, ordering, horizontal and vertical gutters.
+- Added declarative grid attributes, Bootstrap-style utility classes and the
+  equivalent typed PHP `Style` API.
+- Made rich grid content measure and reflow correctly inside scroll views,
+  orientation changes, tablets, split-screen layouts and foldables.
+- Documented the complete grid and flex authoring model and added synchronized
+  PHP, Rust and Android protocol coverage.
+
 ## 0.1.14 - 2026-07-24
 
 - Added integer `v-for` sources so templates can repeat content directly with
