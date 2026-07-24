@@ -5,7 +5,7 @@ after the first stable release.
 
 ## Unreleased
 
-## 0.1.7 - 2026-07-24
+## 0.1.8 - 2026-07-24
 
 - Updated the desktop starter to the concise `Application::make(...)` DSL.
 - Replaced entry-path terminology in generated windows with the more expressive
