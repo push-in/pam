@@ -5,6 +5,14 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.13 - 2026-07-24
+
+- Propagated Android system appearance through the native runtime and PHP
+  window metrics, including live light/dark changes without an app restart.
+- Kept PamUI semantic theme classes, component colors and Android system bars
+  synchronized while preserving custom light and dark palettes.
+- Cleared the strict PHPStan level 9 findings discovered by the release CI.
+
 ## 0.1.12 - 2026-07-24
 
 - Refreshed the bundled Pam Native showcase lock after the public package
