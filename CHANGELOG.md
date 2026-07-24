@@ -5,6 +5,12 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.18 - 2026-07-24
+
+- Prevented normal hot-reload transport disconnects from opening the fatal
+  Android error overlay when a debug app runs without the dev server.
+- Kept protocol and bundle validation failures visible to developers.
+
 ## 0.1.17 - 2026-07-24
 
 - Added the native animated stack navigator and fluent `Router`.
