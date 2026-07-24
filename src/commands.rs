@@ -1252,7 +1252,6 @@ use Pam\Desktop\EventContext;
 use Pam\Desktop\FileSystemRoot;
 use Pam\Desktop\GlobalShortcut;
 use Pam\Desktop\JobContext;
-use Pam\Desktop\Manifest;
 use Pam\Desktop\Menu;
 use Pam\Desktop\MenuItem;
 use Pam\Desktop\Shell;
@@ -1265,21 +1264,24 @@ use Pam\Desktop\WindowTheme;
 
 require __DIR__.'/vendor/autoload.php';
 
-$app = Application::create(
+$app = Application::make(
+    id: 'com.pushin.pam-hello',
+    name: 'Pam Hello',
+    version: '1.0.0',
     window: Window::create('Pam Desktop · Hello')
+        ->load('resources/index.html')
         ->size(1120, 720)
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
-    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
-        ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
-        ->publisher('Pushin')
-        ->category(ApplicationCategory::Development)
-        ->excludeFromBundle('storage/hello.txt'),
 )
+    ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
+    ->publisher('Pushin')
+    ->category(ApplicationCategory::Development)
+    ->excludeFromBundle('storage/hello.txt')
     ->window(
         'inspector',
         Window::create('Pam Desktop · Runtime Inspector')
-            ->entry('resources/inspector.html')
+            ->load('resources/inspector.html')
             ->minimumSize(480, 360)
             ->size(680, 520)
             ->visible(false)

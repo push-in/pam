@@ -668,8 +668,8 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.0\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
-    assert!(application.contains("Application::create"));
-    assert!(application.contains("Manifest::create"));
+    assert!(application.contains("Application::make"));
+    assert!(application.contains("->load('resources/index.html')"));
     assert!(application.contains("ApplicationCategory::Development"));
     assert!(application.contains("->window("));
     assert!(application.contains("ClientEvent"));

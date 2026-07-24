@@ -5,6 +5,12 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.6 - 2026-07-24
+
+- Updated the desktop starter to the concise `Application::make(...)` DSL.
+- Replaced entry-path terminology in generated windows with the more expressive
+  `Window::load(...)` API while keeping the complete native desktop showcase.
+
 ## 0.1.5 - 2026-07-23
 
 - Made `pam desktop` discover the Composer-provided `vendor/bin/pam-desktop`
