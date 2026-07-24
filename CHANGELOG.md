@@ -5,6 +5,14 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.17 - 2026-07-24
+
+- Added the native animated stack navigator and fluent `Router`.
+- Added push, pop, replace, and reset transitions rendered on Android's UI
+  thread.
+- Added slide, bottom sheet-style, fade, scale, and no-animation presets with
+  RTL mirroring and reduced-motion support.
+
 ## 0.1.16 - 2026-07-24
 
 - Added the explicit rich-content `Grid` container for images, pressables,
