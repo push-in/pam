@@ -5,6 +5,15 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.9 - 2026-07-24
+
+- Bundled verified PHP Android runtimes and precompiled PAM Native engines for
+  `arm64-v8a` and `x86_64` in every release.
+- Added release gates that reject missing Android libraries, headers, provenance
+  metadata or native engines before publication.
+- Fixed official mobile UI resource autolinking so Android generates its
+  localized `R` class and compiles UI-enabled applications.
+
 ## 0.1.8 - 2026-07-24
 
 - Updated the desktop starter to the concise `Application::make(...)` DSL.
