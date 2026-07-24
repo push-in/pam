@@ -5,6 +5,17 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.14 - 2026-07-24
+
+- Added integer `v-for` sources so templates can repeat content directly with
+  `v-for="$item in $count"` and receive one-based loop values.
+- Kept the Android process alive across PHP hot reloads while remounting fresh
+  component state and restoring every native event and module callback.
+- Disabled request execution deadlines for the persistent mobile PHP runtime.
+- Debounced mobile source changes to avoid publishing partial or duplicate hot
+  reload bundles while editors are still writing files.
+- Fixed native clipping and retained layout behavior used by repeated content.
+
 ## 0.1.13 - 2026-07-24
 
 - Fixed mobile bundle traversal so nested generated, hidden, build, test and

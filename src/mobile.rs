@@ -5,7 +5,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,6 +16,7 @@ const MAX_PROJECT_FILES: usize = 10_000;
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_DEV_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
+const HOT_RELOAD_DEBOUNCE: Duration = Duration::from_millis(400);
 const PLUGIN_PROTOCOL_VERSION: u32 = 1;
 const PLUGIN_LOCK_VERSION: u32 = 1;
 const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
@@ -2491,6 +2492,7 @@ fn hot_reload_server(
     let mut fingerprint = project_fingerprint(&project.root)?;
     let mut version = String::new();
     let mut bundle = Vec::new();
+    let mut pending_change: Option<((u64, u128), Instant)> = None;
     refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle)?;
     loop {
         match listener.accept() {
@@ -2502,11 +2504,27 @@ fn hot_reload_server(
         }
         let next = project_fingerprint(&project.root)?;
         if next != fingerprint {
-            fingerprint = next;
-            match refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle) {
-                Ok(()) => println!("Reload ready · {}", &version[..16]),
-                Err(error) => eprintln!("pam mobile dev: {error}"),
+            let stable = pending_change
+                .as_ref()
+                .is_some_and(|(candidate, detected_at)| {
+                    candidate == &next && detected_at.elapsed() >= HOT_RELOAD_DEBOUNCE
+                });
+            if stable {
+                fingerprint = next;
+                pending_change = None;
+                match refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle)
+                {
+                    Ok(()) => println!("Reload ready · {}", &version[..16]),
+                    Err(error) => eprintln!("pam mobile dev: {error}"),
+                }
+            } else if pending_change
+                .as_ref()
+                .is_none_or(|(candidate, _)| candidate != &next)
+            {
+                pending_change = Some((next, Instant::now()));
             }
+        } else {
+            pending_change = None;
         }
         std::thread::sleep(Duration::from_millis(100));
     }

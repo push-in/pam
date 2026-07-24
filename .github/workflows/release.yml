@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: bca937a6739afde6cb4a666258c61cc4c89a32b6
+          ref: 259a80588535ebe86f693f2aef9023fe4b061556
           persist-credentials: false
       - name: Install pinned Android NDK
         run: >-
@@ -112,7 +112,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: bca937a6739afde6cb4a666258c61cc4c89a32b6
+          ref: 259a80588535ebe86f693f2aef9023fe4b061556
           path: pam-native
           persist-credentials: false
       - uses: actions/checkout@v5
