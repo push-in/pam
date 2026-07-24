@@ -224,14 +224,21 @@ capabilities. Window configuration and application policy remain in PHP, local
 HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
 versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
 notifications and drag-and-drop grants are opt-in. Application identity,
-category, icon and signed-update policy also live in a typed PHP manifest.
+category, icon and signed-update policy also live in the typed application DSL.
 Menus, tray, close-to-tray behavior, global shortcuts, background jobs and
 composable PHP plugins are configured through the same public application API.
 Native Rust plugins remain process-isolated and can be scaffolded with
 `pam desktop plugin new`:
 
 ```php
-Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
+$app = Application::make(
+    id: 'com.pushin.pam-hello',
+    name: 'Pam Hello',
+    window: Window::create('Pam Desktop · Hello')
+        ->load('resources/index.html')
+        ->size(1120, 720),
+)
+    ->description('PHP elegante em uma janela nativa.')
     ->publisher('Pushin')
     ->category(ApplicationCategory::Development);
 ```
