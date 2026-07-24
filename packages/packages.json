@@ -3,7 +3,7 @@
     "runtimePackages": [
         {
             "name": "pushinbr/pam-desktop",
-            "constraint": "^1.0",
+            "constraint": "^1.1",
             "description": "PHP-first desktop application API powered by PAM, Rust, and Servo."
         }
     ],

@@ -665,7 +665,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
         fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
 
     assert!(manifest.contains("\"pushinbr/pam-desktop\""));
-    assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.0\""));
+    assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.1\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
     assert!(application.contains("Application::make"));
