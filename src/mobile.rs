@@ -1065,12 +1065,26 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
         command_exists("java"),
         tool_version("java", &["-version"]),
     );
-    healthy &= command_exists("cargo");
-    check(
-        "Rust",
-        command_exists("cargo"),
-        tool_version("rustc", &["--version"]),
-    );
+    let missing_engines = default_abis()
+        .into_iter()
+        .filter(|abi| !engine_ready(&native_home, *abi))
+        .collect::<Vec<_>>();
+    if missing_engines.is_empty() {
+        for abi in default_abis() {
+            check(
+                &format!("Native engine ({})", abi.android()),
+                true,
+                engine_library(&native_home, abi).display().to_string(),
+            );
+        }
+    } else {
+        healthy &= command_exists("cargo");
+        check(
+            "Rust",
+            command_exists("cargo"),
+            tool_version("rustc", &["--version"]),
+        );
+    }
     let sdk = android_sdk();
     healthy &= sdk.is_ok();
     check(
@@ -1099,19 +1113,21 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
                 .to_string(),
         );
     }
-    let installed = installed_rust_targets().unwrap_or_default();
-    for abi in default_abis() {
-        let available = installed.contains(abi.rust_target());
-        healthy &= available;
-        check(
-            &format!("Rust target ({})", abi.rust_target()),
-            available,
-            if available {
-                "installed".to_owned()
-            } else {
-                format!("run: rustup target add {}", abi.rust_target())
-            },
-        );
+    if !missing_engines.is_empty() {
+        let installed = installed_rust_targets().unwrap_or_default();
+        for abi in missing_engines {
+            let available = installed.contains(abi.rust_target());
+            healthy &= available;
+            check(
+                &format!("Rust target ({})", abi.rust_target()),
+                available,
+                if available {
+                    "installed".to_owned()
+                } else {
+                    format!("run: rustup target add {}", abi.rust_target())
+                },
+            );
+        }
     }
     if healthy {
         println!("\nPam Native is ready to build Android applications.");
@@ -2280,6 +2296,9 @@ fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), String> {
 }
 
 fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
+    if engine_ready(native_home, abi) {
+        return Ok(());
+    }
     let installed = installed_rust_targets()?;
     if !installed.contains(abi.rust_target()) {
         return Err(format!(
@@ -2348,6 +2367,17 @@ fn runtime_ready(native_home: &Path, abi: AndroidAbi) -> bool {
     root.join("lib/libphp.a").is_file()
         && root.join("include/php/main/php.h").is_file()
         && root.join("include/php/sapi/embed/php_embed.h").is_file()
+}
+
+fn engine_library(native_home: &Path, abi: AndroidAbi) -> PathBuf {
+    native_home
+        .join("target")
+        .join(abi.rust_target())
+        .join("release/libpam_native_engine.a")
+}
+
+fn engine_ready(native_home: &Path, abi: AndroidAbi) -> bool {
+    engine_library(native_home, abi).is_file()
 }
 
 fn android_sdk() -> Result<PathBuf, String> {

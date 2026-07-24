@@ -24,7 +24,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-mobile-ui
-          ref: 0c70a4db1fbf9bbed85c0eb282bb91cad88807e3
+          ref: 20eb75d2bf55bef1f7de1b11ce442c771606eb69
           path: pam-mobile-ui
           ssh-key: ${{ secrets.PAM_MOBILE_UI_READ_KEY }}
           persist-credentials: false
@@ -75,6 +75,26 @@ jobs:
           ./target/debug/pam test compat/composer-smoke --pest
       - name: Build release binary
         run: cargo build --locked --release
+      - name: Create Android runtime packaging fixture
+        run: |
+          for android_abi in arm64-v8a x86_64; do
+            runtime="pam-native/runtime/android/${android_abi}"
+            mkdir -p \
+              "${runtime}/lib" \
+              "${runtime}/include/php/main" \
+              "${runtime}/include/php/sapi/embed"
+            printf 'fixture\n' > "${runtime}/lib/libphp.a"
+            printf '/* fixture */\n' > "${runtime}/include/php/main/php.h"
+            printf '/* fixture */\n' > \
+              "${runtime}/include/php/sapi/embed/php_embed.h"
+            printf '{"androidAbi":"%s"}\n' "${android_abi}" > \
+              "${runtime}/runtime.json"
+          done
+          for rust_target in aarch64-linux-android x86_64-linux-android; do
+            engine="pam-native/target/${rust_target}/release"
+            mkdir -p "${engine}"
+            printf 'fixture\n' > "${engine}/libpam_native_engine.a"
+          done
       - name: Smoke test isolated runtime bundle
         run: |
           runtime_dist=$(mktemp -d)

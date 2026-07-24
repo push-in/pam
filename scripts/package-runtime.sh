@@ -53,6 +53,34 @@ test -f pam-mobile-ui/composer.json || {
     echo "PAM Mobile UI source is missing from the release checkout." >&2
     exit 66
 }
+for android_abi in arm64-v8a x86_64; do
+    android_runtime="pam-native/runtime/android/${android_abi}"
+    test -s "${android_runtime}/lib/libphp.a" || {
+        echo "PHP Android runtime library is missing for ${android_abi}." >&2
+        exit 66
+    }
+    test -f "${android_runtime}/include/php/main/php.h" || {
+        echo "PHP Android headers are missing for ${android_abi}." >&2
+        exit 66
+    }
+    test -f "${android_runtime}/include/php/sapi/embed/php_embed.h" || {
+        echo "PHP Android Embed headers are missing for ${android_abi}." >&2
+        exit 66
+    }
+    test -f "${android_runtime}/runtime.json" || {
+        echo "PHP Android runtime provenance is missing for ${android_abi}." >&2
+        exit 66
+    }
+    case "${android_abi}" in
+        arm64-v8a) rust_target=aarch64-linux-android ;;
+        x86_64) rust_target=x86_64-linux-android ;;
+    esac
+    engine_library="pam-native/target/${rust_target}/release/libpam_native_engine.a"
+    test -s "${engine_library}" || {
+        echo "Prebuilt Pam Native engine is missing for ${android_abi}." >&2
+        exit 66
+    }
+done
 tar \
     --exclude='./.git' \
     --exclude='./target' \
@@ -65,6 +93,13 @@ tar \
     --exclude='*/local.properties' \
     -C pam-native -cf - . |
     tar -C "${package_root}/share/pam/native" -xf -
+for rust_target in aarch64-linux-android x86_64-linux-android; do
+    engine_directory="${package_root}/share/pam/native/target/${rust_target}/release"
+    mkdir -p "${engine_directory}"
+    cp \
+        "pam-native/target/${rust_target}/release/libpam_native_engine.a" \
+        "${engine_directory}/"
+done
 tar \
     --exclude='./.git' \
     --exclude='./.build' \
