@@ -14,6 +14,7 @@ mod doctor;
 mod package_coordinates;
 mod php;
 mod server;
+mod terminal;
 mod worker_state;
 
 const EX_USAGE: u8 = 64;
@@ -24,7 +25,14 @@ fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            eprintln!("pam: {error}");
+            let ui = terminal::Terminal::stderr();
+            eprintln!("{} {}", ui.danger("× ERROR"), error);
+            if matches!(error, CliError::Usage | CliError::Commands(_)) {
+                eprintln!(
+                    "{}",
+                    ui.muted("  Run `pam --help` to see commands and examples.")
+                );
+            }
             ExitCode::from(error.exit_code())
         }
     }
@@ -73,6 +81,23 @@ fn run() -> Result<u8, CliError> {
 
     if script_arg == "--help" || script_arg == "-h" {
         print_usage(&executable);
+        return Ok(0);
+    }
+
+    if script_arg == "help" {
+        let command = raw_args.next();
+        if let Some(command) = command {
+            let command = command
+                .into_string()
+                .map_err(|_| CliError::Commands("help command must be valid UTF-8".to_owned()))?;
+            if !terminal::print_command_help(&executable, &command) {
+                return Err(CliError::Commands(format!(
+                    "no focused help is available for {command:?}"
+                )));
+            }
+        } else {
+            print_usage(&executable);
+        }
         return Ok(0);
     }
 
@@ -432,24 +457,15 @@ fn benchmark_options(
 }
 
 fn print_usage(executable: &OsStr) {
-    let executable = executable.to_string_lossy();
-    eprintln!(
-        "Usage: {executable} <script.php> [arguments...]\n       {executable} -r <code> [arguments...]\n       {executable} dev [script.php] [arguments...]\n       {executable} start [script.php] [--workers N] [--max-requests N] [--admin-address IP:PORT]\n       {executable} artisan [arguments...]\n       {executable} exec <script.php> [arguments...]\n       {executable} composer [arguments...]\n       {executable} test [path] [--pest|--phpunit] [arguments...]\n       {executable} routes [index.php]\n       {executable} inspect [index.php]\n       {executable} diagnostics|heap|fibers|connections|profile|trace [index.php]\n       {executable} top [http://127.0.0.1:3010] [--iterations N] [--interval-ms N]\n       {executable} benchmark <http://url> [--requests N] [--concurrency N]\n       {executable} doctor [path]\n       {executable} desktop <command> [arguments...]\n       {executable} init [directory] [--template raw|api|laravel|desktop] [--socket] [--no-install]\n       {executable} build [directory] [--entry index.php] [--output dist]\n       {executable} --help\n       {executable} --version"
-    );
+    terminal::print_help(executable);
 }
 
 fn print_init_usage(executable: &OsStr) {
-    eprintln!(
-        "Usage: {} init [directory] [options]\n\nOptions:\n  --template raw|api|laravel|desktop  Select a non-interactive preset\n  --socket                            Add Pam Socket support\n  --no-install                        Generate files without installing dependencies\n  --no-interaction                    Use the API preset when no template is supplied\n\nWithout --template, Pam displays an interactive preset picker in a terminal.",
-        executable.to_string_lossy()
-    );
+    terminal::print_command_help(executable, "init");
 }
 
 fn print_dev_usage(executable: &OsStr) {
-    eprintln!(
-        "Usage: {} dev [script.php] [arguments...]\n\nWatches PHP, Composer, and .env files. The script defaults to index.php.",
-        executable.to_string_lossy()
-    );
+    terminal::print_command_help(executable, "dev");
 }
 
 #[derive(Debug)]

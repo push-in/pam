@@ -13,6 +13,7 @@ use std::time::Instant;
 use crate::composer;
 use crate::package_coordinates;
 use crate::php::PhpRuntime;
+use crate::terminal::Terminal;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -62,16 +63,24 @@ pub fn top(address: &str, iterations: usize, interval: std::time::Duration) -> R
         return Err("top iterations and interval must be positive".to_owned());
     }
     let endpoint = HttpEndpoint::parse(&format!("{}/metrics", address.trim_end_matches('/')))?;
+    let ui = Terminal::stdout();
     for iteration in 0..iterations {
         if iteration > 0 {
             std::thread::sleep(interval);
         }
         let body = endpoint.response_body()?;
-        print!(
-            "\x1b[2J\x1b[HPam top — sample {}/{}\n\n",
-            iteration + 1,
-            iterations
+        ui.clear_screen();
+        println!(
+            "{}  {}",
+            ui.brand("PAM / LIVE TELEMETRY"),
+            ui.muted(format!(
+                "sample {:02}/{:02} · {}",
+                iteration + 1,
+                iterations,
+                address
+            ))
         );
+        println!("{}", ui.rule());
         for line in body.lines().filter(|line| {
             line.starts_with("pam_http_")
                 || line.starts_with("pam_websocket_")
@@ -80,7 +89,11 @@ pub fn top(address: &str, iterations: usize, interval: std::time::Duration) -> R
                 || line.starts_with("pam_php_")
                 || line.starts_with("pam_cluster_")
         }) {
-            println!("{line}");
+            if let Some((metric, value)) = line.split_once(' ') {
+                println!("  {} {}", ui.accent(format!("{metric:<48}")), value);
+            } else {
+                println!("  {}", ui.muted(line));
+            }
         }
     }
     Ok(0)
@@ -322,8 +335,19 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
     )
     .map_err(|error| format!("cannot write build manifest: {error}"))?;
 
-    println!("Built production bundle at {}", output.display());
-    println!("Run: {}/bin/pam-run", output.display());
+    let ui = Terminal::stdout();
+    println!("{}", ui.success("● PRODUCTION BUNDLE READY"));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Output")),
+        output.display()
+    );
+    println!(
+        "  {} {}/bin/pam-run",
+        ui.muted(format!("{:<12}", "Launch")),
+        output.display()
+    );
     Ok(0)
 }
 
@@ -477,14 +501,50 @@ fn choose_template(
         return Ok((InitTemplate::Api, socket));
     }
 
-    println!("Create a Pam project:\n");
-    println!("  1) Raw Pam runtime");
-    println!("  2) Pam API");
-    println!("  3) Pam API + Socket");
-    println!("  4) Laravel on Pam");
-    println!("  5) Laravel on Pam + Socket");
-    println!("  6) Pam Desktop · Servo + PHP");
-    print!("\nChoose a preset [2]: ");
+    let ui = Terminal::stdout();
+    println!("{}", ui.brand("PAM / NEW PROJECT"));
+    println!("{}", ui.rule());
+    println!(
+        "{}",
+        ui.muted("Select the runtime profile that matches what you are shipping.\n")
+    );
+    println!(
+        "  {}  {} {}",
+        ui.accent("01"),
+        ui.heading(format!("{:<25}", "Raw runtime")),
+        ui.muted("Minimal PHP + Embed SAPI")
+    );
+    println!(
+        "  {}  {} {}",
+        ui.accent("02"),
+        ui.heading(format!("{:<25}", "API")),
+        ui.muted("HTTP application starter · recommended")
+    );
+    println!(
+        "  {}  {} {}",
+        ui.accent("03"),
+        ui.heading(format!("{:<25}", "API + Socket")),
+        ui.muted("HTTP and realtime events")
+    );
+    println!(
+        "  {}  {} {}",
+        ui.accent("04"),
+        ui.heading(format!("{:<25}", "Laravel")),
+        ui.muted("Laravel optimized for Pam")
+    );
+    println!(
+        "  {}  {} {}",
+        ui.accent("05"),
+        ui.heading(format!("{:<25}", "Laravel + Socket")),
+        ui.muted("Laravel with realtime events")
+    );
+    println!(
+        "  {}  {} {}",
+        ui.accent("06"),
+        ui.heading(format!("{:<25}", "Desktop")),
+        ui.muted("Servo shell + PHP")
+    );
+    print!("\n{} ", ui.command("Choose a preset [02] ›"));
     std::io::stdout()
         .flush()
         .map_err(|error| format!("cannot display init prompt: {error}"))?;
@@ -3117,17 +3177,35 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
         (InitTemplate::Desktop, false) => "Desktop",
         (InitTemplate::Desktop, true) => unreachable!("desktop does not support --socket"),
     };
-    println!("Created Pam {preset} project in {}", directory.display());
-    if template == InitTemplate::Desktop {
-        println!("Next: cd {} && pam desktop dev .", directory.display());
+    let ui = Terminal::stdout();
+    println!();
+    println!("{}", ui.success("● PROJECT ONLINE"));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Preset")),
+        ui.heading(preset)
+    );
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Directory")),
+        directory.display()
+    );
+    let next = if template == InitTemplate::Desktop {
+        format!("cd {} && pam desktop dev .", directory.display())
     } else {
         let entry = if template == InitTemplate::Laravel {
             "pam.php"
         } else {
             "index.php"
         };
-        println!("Next: cd {} && pam dev {entry}", directory.display());
-    }
+        format!("cd {} && pam dev {entry}", directory.display())
+    };
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Next")),
+        ui.command(next)
+    );
 }
 
 pub fn benchmark(url: &str, requests: usize, concurrency: usize) -> Result<u8, String> {
@@ -3177,16 +3255,50 @@ pub fn benchmark(url: &str, requests: usize, concurrency: usize) -> Result<u8, S
         let index = ((latencies.len().saturating_sub(1)) as f64 * fraction).round() as usize;
         latencies.get(index).copied().unwrap_or_default()
     };
-    println!("requests: {requests}");
-    println!("successful: {successful}");
-    println!("failed: {}", requests - successful);
+    let ui = Terminal::stdout();
+    let failed = requests - successful;
+    println!("{}  {}", ui.brand("PAM / HTTP BENCHMARK"), ui.muted(url));
+    println!("{}", ui.rule());
     println!(
-        "requests/sec: {:.2}",
+        "  {} {:>12}",
+        ui.muted(format!("{:<20}", "Requests")),
+        requests
+    );
+    println!(
+        "  {} {:>12}",
+        ui.muted(format!("{:<20}", "Successful")),
+        ui.success(successful)
+    );
+    println!(
+        "  {} {:>12}",
+        ui.muted(format!("{:<20}", "Failed")),
+        if failed == 0 {
+            ui.success(failed)
+        } else {
+            ui.danger(failed)
+        }
+    );
+    println!(
+        "  {} {:>12.2}",
+        ui.muted(format!("{:<20}", "Throughput / sec")),
         requests as f64 / elapsed.max(f64::EPSILON)
     );
-    println!("latency p50: {:.3} ms", percentile(0.50));
-    println!("latency p95: {:.3} ms", percentile(0.95));
-    println!("latency p99: {:.3} ms", percentile(0.99));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {:>9.3} ms",
+        ui.muted(format!("{:<20}", "Latency p50")),
+        percentile(0.50)
+    );
+    println!(
+        "  {} {:>9.3} ms",
+        ui.muted(format!("{:<20}", "Latency p95")),
+        percentile(0.95)
+    );
+    println!(
+        "  {} {:>9.3} ms",
+        ui.muted(format!("{:<20}", "Latency p99")),
+        percentile(0.99)
+    );
     Ok(u8::from(successful != requests))
 }
 

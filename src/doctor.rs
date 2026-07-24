@@ -6,6 +6,7 @@ use std::process::Command;
 use serde::Deserialize;
 
 use crate::php::PhpRuntime;
+use crate::terminal::Terminal;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -24,22 +25,48 @@ pub fn run(executable: &OsStr, target: &Path) -> Result<u8, String> {
     let embed = runtime.runtime_info()?;
     let composer = runtime.composer().cloned();
     let mut failed = false;
+    let ui = Terminal::stdout();
 
-    println!("Pam doctor\n");
-    println!("[ok] PHP Embed version: {}", embed.php_version);
-    println!("[info] Embed SAPI: {}", embed.sapi);
-    println!("[info] Zend Engine: {}", embed.zend_version);
+    println!("{}", ui.brand("PAM / SYSTEM DIAGNOSTICS"));
+    println!("{}", ui.rule());
     println!(
-        "[info] Embed php.ini: {}",
-        embed.ini_loaded.as_deref().unwrap_or("none")
+        "{}",
+        ui.status("ok", format!("PHP Embed version: {}", embed.php_version))
     );
     println!(
-        "[info] Embed scanned INI files: {}",
-        embed.ini_scanned.len()
+        "{}",
+        ui.status("info", format!("Embed SAPI: {}", embed.sapi))
     );
     println!(
-        "[info] Xdebug={} OPcache={}",
-        embed.xdebug_loaded, embed.opcache_loaded
+        "{}",
+        ui.status("info", format!("Zend Engine: {}", embed.zend_version))
+    );
+    println!(
+        "{}",
+        ui.status(
+            "info",
+            format!(
+                "Embed php.ini: {}",
+                embed.ini_loaded.as_deref().unwrap_or("none")
+            )
+        )
+    );
+    println!(
+        "{}",
+        ui.status(
+            "info",
+            format!("Embed scanned INI files: {}", embed.ini_scanned.len())
+        )
+    );
+    println!(
+        "{}",
+        ui.status(
+            "info",
+            format!(
+                "Xdebug={} · OPcache={}",
+                embed.xdebug_loaded, embed.opcache_loaded
+            )
+        )
     );
 
     match cli_info() {
@@ -73,8 +100,14 @@ pub fn run(executable: &OsStr, target: &Path) -> Result<u8, String> {
                 ),
             );
             println!(
-                "[info] CLI php.ini: {}",
-                cli.ini_loaded.as_deref().unwrap_or("none")
+                "{}",
+                ui.status(
+                    "info",
+                    format!(
+                        "CLI php.ini: {}",
+                        cli.ini_loaded.as_deref().unwrap_or("none")
+                    )
+                )
             );
 
             let embed_extensions = embed.extensions.iter().cloned().collect::<BTreeSet<_>>();
@@ -100,22 +133,43 @@ pub fn run(executable: &OsStr, target: &Path) -> Result<u8, String> {
                 .as_str(),
             );
             if !extra.is_empty() {
-                println!("[info] Embed-only extensions: {}", extra.join(", "));
+                println!(
+                    "{}",
+                    ui.status(
+                        "info",
+                        format!("Embed-only extensions: {}", extra.join(", "))
+                    )
+                );
             }
         }
         Err(error) => {
             println!(
-                "[info] PHP CLI comparison unavailable: {error}. Pam uses PHP Embed directly."
+                "{}",
+                ui.status(
+                    "info",
+                    format!(
+                        "PHP CLI comparison unavailable: {error}. Pam uses PHP Embed directly."
+                    )
+                )
             );
         }
     }
 
     match composer {
         Some(project) => {
-            println!("[info] Composer root: {}", project.root.display());
             println!(
-                "[info] Composer vendor directory: {}",
-                project.vendor_directory.display()
+                "{}",
+                ui.status("info", format!("Composer root: {}", project.root.display()))
+            );
+            println!(
+                "{}",
+                ui.status(
+                    "info",
+                    format!(
+                        "Composer vendor directory: {}",
+                        project.vendor_directory.display()
+                    )
+                )
             );
             check(
                 project.autoload.is_file(),
@@ -137,12 +191,15 @@ pub fn run(executable: &OsStr, target: &Path) -> Result<u8, String> {
             );
             if !generated_platform_check {
                 println!(
-                    "[info] Composer did not generate vendor/composer/platform_check.php; \
-                     run `pam composer check-platform-reqs` for an explicit full check."
+                    "{}",
+                    ui.status(
+                        "info",
+                        "Composer has no generated platform check; run `pam composer check-platform-reqs`."
+                    )
                 );
             }
         }
-        None => println!("[info] Composer project: not found"),
+        None => println!("{}", ui.status("info", "Composer project: not found")),
     }
 
     Ok(if failed { 1 } else { 0 })
@@ -179,18 +236,20 @@ echo json_encode([
 }
 
 fn check(passed: bool, message: &str, failed: &mut bool) {
+    let ui = Terminal::stdout();
     if passed {
-        println!("[ok] {message}");
+        println!("{}", ui.status("ok", message));
     } else {
-        println!("[fail] {message}");
+        println!("{}", ui.status("fail", message));
         *failed = true;
     }
 }
 
 fn optional_check(passed: bool, message: &str) {
+    let ui = Terminal::stdout();
     if passed {
-        println!("[ok] {message}");
+        println!("{}", ui.status("ok", message));
     } else {
-        println!("[warn] {message}");
+        println!("{}", ui.status("warn", message));
     }
 }

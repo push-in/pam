@@ -9,6 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
+use crate::terminal::Terminal;
+
 const WATCH_INTERVAL: Duration = Duration::from_millis(250);
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(150);
 const CHILD_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -33,11 +35,20 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
     let stopped = install_ctrl_c_listener()?;
     let mut files = snapshot(watch_root)?;
     let mut child = Some(spawn_child(&executable, script, arguments)?);
+    let ui = Terminal::stderr();
 
     eprintln!(
-        "Pam dev watching {} (press Ctrl+C to stop)",
-        watch_root.display()
+        "{}  {}",
+        ui.brand("PAM / DEV MATRIX"),
+        ui.muted("hot reload active")
     );
+    eprintln!("{}", ui.rule());
+    eprintln!(
+        "{} {}",
+        ui.status("ok", "Watching"),
+        ui.command(watch_root.display())
+    );
+    eprintln!("{}", ui.muted("  Ctrl+C stops the development runtime."));
 
     while !stopped.load(Ordering::SeqCst) {
         thread::sleep(WATCH_INTERVAL);
@@ -46,7 +57,10 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
         if current_files != files {
             thread::sleep(RELOAD_DEBOUNCE);
             files = snapshot(watch_root)?;
-            eprintln!("\nPam dev reloading after file changes...");
+            eprintln!(
+                "\n{}",
+                ui.status("warn", "Change detected · reloading runtime")
+            );
 
             if let Some(mut running_child) = child.take() {
                 stop_child(&mut running_child);
@@ -60,7 +74,13 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
                 .try_wait()
                 .map_err(|error| format!("cannot inspect the Pam child process: {error}"))?
         {
-            eprintln!("Pam dev child exited with {status}; waiting for a file change...");
+            eprintln!(
+                "{}",
+                ui.status(
+                    "warn",
+                    format!("Runtime exited with {status} · waiting for a file change")
+                )
+            );
             child = None;
         }
     }
@@ -69,7 +89,7 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
         stop_child(&mut running_child);
     }
 
-    eprintln!("Pam dev stopped");
+    eprintln!("{}", ui.status("info", "Development runtime stopped"));
     Ok(0)
 }
 

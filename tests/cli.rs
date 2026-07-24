@@ -346,7 +346,21 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
 
     let help = run_pam(&["--help"]);
     assert!(help.status.success());
-    assert!(String::from_utf8_lossy(&help.stderr).contains("benchmark"));
+    let help_text = String::from_utf8_lossy(&help.stderr);
+    assert!(help_text.contains("PHP ALWAYS IN MEMORY"));
+    assert!(help_text.contains("benchmark"));
+    assert!(
+        !help_text.contains("\x1b["),
+        "captured help must not contain ANSI escapes"
+    );
+
+    let start_help = run_pam(&["help", "start"]);
+    assert!(start_help.status.success());
+    let start_help = String::from_utf8_lossy(&start_help.stderr);
+    assert!(start_help.contains("PAM / START"));
+    assert!(start_help.contains("--admin-address IP:PORT"));
+    assert!(start_help.contains("$ pam start index.php --workers 4"));
+
     let version = run_pam(&["--version"]);
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("pam "));
@@ -645,6 +659,9 @@ fn benchmarks_an_http_endpoint() {
         String::from_utf8_lossy(&output.stderr)
     );
     let report = String::from_utf8_lossy(&output.stdout);
-    assert!(report.contains("successful: 12"), "{report}");
-    assert!(report.contains("latency p95:"), "{report}");
+    assert!(
+        report.contains("Successful") && report.contains("12"),
+        "{report}"
+    );
+    assert!(report.contains("Latency p95"), "{report}");
 }

@@ -37,6 +37,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::php::{self, ServerConfig};
+use crate::terminal::Terminal;
 use crate::worker_state::{
     WorkerLifecycle, WorkerMetricsSnapshot, WorkerStateReporter,
     epoch_millis as worker_epoch_millis,
@@ -665,7 +666,15 @@ async fn run_async(config: ServerConfig) -> Result<(), ServerError> {
         .unwrap_or_default();
     let scheme = if tls_files.is_some() { "https" } else { "http" };
     let http3_label = if http3.is_some() { " http3=true" } else { "" };
-    eprintln!("Pam listening on {scheme}://{address}{worker}{http3_label}");
+    let ui = Terminal::stderr();
+    eprintln!(
+        "{} {} {}{}{}",
+        ui.success("● READY"),
+        ui.heading("Pam listening on"),
+        ui.command(format!("{scheme}://{address}")),
+        ui.muted(worker),
+        ui.muted(http3_label)
+    );
 
     let result = if let Some((certificate, key)) = tls_files {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(certificate, key)

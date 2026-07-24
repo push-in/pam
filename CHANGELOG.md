@@ -5,6 +5,16 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.4 - 2026-07-23
+
+- Redesigned the CLI with a cohesive terminal-native visual system, semantic
+  status indicators and automatic color support that respects `NO_COLOR`.
+- Added grouped command discovery and focused `pam help <command>` documentation
+  with options and executable examples.
+- Upgraded project initialization, diagnostics, hot reload, server startup,
+  telemetry, production builds and benchmark reports with clearer hierarchy and
+  actionable feedback while preserving clean output in pipes and CI.
+
 ## 0.1.3 - 2026-07-23
 
 - Centralized all first-party Composer coordinates and added regression checks
