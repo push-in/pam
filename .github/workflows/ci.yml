@@ -15,6 +15,18 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: d44a2fd47db8b505caa03693906a2a37862cbd8f
+          path: pam-native
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-mobile-ui
+          ref: 0c70a4db1fbf9bbed85c0eb282bb91cad88807e3
+          path: pam-mobile-ui
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy,rustfmt
