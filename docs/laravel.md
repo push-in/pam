@@ -1,8 +1,21 @@
 # Laravel on Pam
 
-Pam runs an unmodified Laravel application in a persistent PHP Embed worker. The
-integration classes live in the Pam binary under `Pam\Laravel`; the project only
-depends on Laravel and its ordinary Composer packages.
+Pam runs an unmodified Laravel application in a persistent PHP Embed worker.
+The binary owns the `Pam\Laravel` host while the optional
+`pushinbr/pam-laravel` Composer package adds production checks, lifecycle
+guards, observability and operational commands without forking the framework.
+
+Install the operations package in an existing application:
+
+```bash
+composer require pushinbr/pam-laravel
+pam artisan pam:install --preset=api
+pam check-production
+```
+
+Use `livewire`, `inertia` or `realtime` instead of `api` to record the
+application preset. Production endpoints default to `/__pam/health` and
+`/__pam/metrics`; metrics can require a bearer token.
 
 ## Executable compatibility matrix
 

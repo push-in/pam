@@ -185,6 +185,9 @@ pam init realtime-laravel --template laravel --socket
 Run `pam init` without a template in a terminal for the interactive preset picker.
 Use `--no-install` to generate/download source without resolving dependencies.
 See [Laravel on Pam](docs/laravel.md) for lifecycle and production details.
+Existing applications can add `pushinbr/pam-laravel` for production checks,
+bounded observability, request-state guards, process manifests and atomic
+deploy/rollback commands.
 
 ### Mobile presets
 

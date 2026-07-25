@@ -1,0 +1,15 @@
+[Unit]
+Description=PAM Laravel application
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/srv/app/current
+ExecStart=/usr/local/bin/pam serve --host=127.0.0.1 --port=3010
+Restart=always
+RestartSec=2
+User=www-data
+Environment=APP_ENV=production
+
+[Install]
+WantedBy=multi-user.target

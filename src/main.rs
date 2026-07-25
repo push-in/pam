@@ -171,6 +171,36 @@ fn run() -> Result<u8, CliError> {
         return run_script(&executable, &script, arguments);
     }
 
+    if matches!(
+        script_arg.to_string_lossy().as_ref(),
+        "up" | "status"
+            | "restart"
+            | "stop"
+            | "check-production"
+            | "health"
+            | "leaks"
+            | "capacity"
+            | "deploy"
+    ) {
+        let command = script_arg.to_string_lossy();
+        let mut arguments = if matches!(command.as_ref(), "up" | "status" | "restart" | "stop") {
+            vec![
+                OsString::from("pam:process"),
+                OsString::from(command.as_ref()),
+            ]
+        } else {
+            vec![OsString::from(format!("pam:{command}"))]
+        };
+        arguments.extend(raw_args);
+        let script = resolve_script(OsStr::new("artisan"))?;
+        // SAFETY: Artisan owns this single-threaded PHP lifecycle before worker startup.
+        unsafe {
+            env::set_var("PAM_CLI_MODE", "1");
+            env::set_var("APP_RUNNING_IN_CONSOLE", "true");
+        }
+        return run_script(&executable, &script, arguments);
+    }
+
     if script_arg == "exec" {
         let script = raw_args
             .next()

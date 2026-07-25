@@ -216,6 +216,14 @@ fn runs_artisan_with_real_cli_identity_and_arguments() {
     );
     let commands = String::from_utf8_lossy(&commands.stdout);
     for command in [
+        "pam:capacity",
+        "pam:check-production",
+        "pam:deploy",
+        "pam:health",
+        "pam:install",
+        "pam:leaks",
+        "pam:migrate-from-octane",
+        "pam:process",
         "livewire:publish",
         "pulse:check",
         "reverb:start",

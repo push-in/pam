@@ -3267,6 +3267,18 @@ fn init_laravel(executable: &OsStr, options: &InitOptions) -> Result<u8, String>
         fs::copy(directory.join(".env.example"), directory.join(".env"))
             .map_err(|error| format!("cannot create Laravel .env: {error}"))?;
     }
+    if options.install {
+        run_composer_in(
+            executable,
+            directory,
+            &[
+                "require",
+                "pushinbr/pam-laravel:^0.1",
+                "--no-interaction",
+                "--no-progress",
+            ],
+        )?;
+    }
 
     let socket_setup = if options.socket {
         r#"

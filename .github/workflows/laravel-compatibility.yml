@@ -101,6 +101,11 @@ jobs:
               --no-progress
           fi
           ../../target/debug/pam artisan package:discover
+          ../../target/debug/pam artisan list --raw | grep pam:check-production
+          ../../target/debug/pam artisan route:list --name=pam --json |
+            grep __pam/health
+          ../../target/debug/pam artisan pam:capacity --memory-mb=512 --worker-mb=96
+          ../../target/debug/pam artisan pam:migrate-from-octane --json
           composer validate --strict
       - name: Validate PAM against Laravel
         run: |

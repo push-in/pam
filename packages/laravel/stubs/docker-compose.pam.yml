@@ -1,0 +1,12 @@
+services:
+  app:
+    image: ghcr.io/push-in/pam:latest
+    command: ["pam", "serve", "--host=0.0.0.0", "--port=3010"]
+    ports: ["3010:3010"]
+    volumes: [".:/app"]
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://127.0.0.1:3010/__pam/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 3

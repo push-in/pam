@@ -13,12 +13,13 @@ pub const SOCKET: &str = "pushinbr/pam-socket";
 pub const PSR_BRIDGE: &str = "pushinbr/pam-psr-bridge";
 pub const TESTING: &str = "pushinbr/pam-testing";
 pub const SKELETON: &str = "pushinbr/pam-skeleton";
+pub const LARAVEL: &str = "pushinbr/pam-laravel";
 pub const DESKTOP: &str = "pushinbr/pam-desktop";
 pub const NATIVE: &str = "pushinbr/pam-native";
 pub const MOBILE_UI: &str = "pushinbr/pam-mobile-ui";
 
-pub const ALL: [&str; 7] = [
-    CORE_API, API, SOCKET, PSR_BRIDGE, TESTING, SKELETON, DESKTOP,
+pub const ALL: [&str; 8] = [
+    CORE_API, API, SOCKET, PSR_BRIDGE, TESTING, SKELETON, LARAVEL, DESKTOP,
 ];
 
 #[cfg(test)]

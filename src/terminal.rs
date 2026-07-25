@@ -155,6 +155,18 @@ pub fn print_help(executable: &OsStr) {
                 "artisan [args...]",
                 "Run the Laravel console inside Embed SAPI",
             ),
+            (
+                "up | status | restart | stop",
+                "Manage a Laravel PAM process manifest",
+            ),
+            (
+                "check-production | health | leaks",
+                "Run Laravel production diagnostics",
+            ),
+            (
+                "capacity | deploy",
+                "Plan capacity or activate an atomic Laravel release",
+            ),
             ("exec <script.php>", "Execute a PHP script explicitly"),
             ("composer [args...]", "Run the embedded Composer toolchain"),
             ("test [path]", "Run Pest or PHPUnit inside Pam"),

@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "8ab2066b5eddf0e385616046276a8391",
+    "content-hash": "87549500f25b0a0757a6e00db9fbba9e",
     "packages": [
         {
             "name": "brick/math",
@@ -2902,6 +2902,56 @@
                 "source": "https://github.com/php-fig/simple-cache/tree/3.0.0"
             },
             "time": "2021-10-29T13:26:27+00:00"
+        },
+        {
+            "name": "pushinbr/pam-laravel",
+            "version": "dev-main",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/laravel",
+                "reference": "2ff1250c4119dd3b8a20974c0fff75be0e0a587b"
+            },
+            "require": {
+                "illuminate/console": "^12.0 || ^13.0",
+                "illuminate/contracts": "^12.0 || ^13.0",
+                "illuminate/database": "^12.0 || ^13.0",
+                "illuminate/http": "^12.0 || ^13.0",
+                "illuminate/support": "^12.0 || ^13.0",
+                "php": "^8.4"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Pam\\Laravel\\PamServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Laravel\\": "src/"
+                }
+            },
+            "license": [
+                "MIT"
+            ],
+            "description": "Production tooling, lifecycle safety, observability and deployment for Laravel applications running on PAM.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "laravel",
+                "observability",
+                "pam",
+                "php",
+                "production"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-laravel"
+            },
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
         },
         {
             "name": "ralouphie/getallheaders",
@@ -7326,7 +7376,9 @@
     ],
     "aliases": [],
     "minimum-stability": "stable",
-    "stability-flags": {},
+    "stability-flags": {
+        "pushinbr/pam-laravel": 20
+    },
     "prefer-stable": true,
     "prefer-lowest": false,
     "platform": {

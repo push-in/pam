@@ -5,7 +5,8 @@
     "license": "MIT",
     "require": {
         "php": "^8.4",
-        "laravel/framework": "^13.0"
+        "laravel/framework": "^13.0",
+        "pushinbr/pam-laravel": "dev-main"
     },
     "require-dev": {
         "inertiajs/inertia-laravel": "^3.1",
@@ -22,5 +23,14 @@
         "sort-packages": true
     },
     "minimum-stability": "stable",
-    "prefer-stable": true
+    "prefer-stable": true,
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../packages/laravel",
+            "options": {
+                "symlink": false
+            }
+        }
+    ]
 }

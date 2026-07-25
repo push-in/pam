@@ -1,0 +1,16 @@
+{
+    "processes": {
+        "http": {
+            "command": ["pam", "serve", "--host=127.0.0.1", "--port=3010"],
+            "instances": 2
+        },
+        "queue": {
+            "command": ["pam", "artisan", "queue:work", "--sleep=1", "--tries=3"],
+            "instances": 1
+        },
+        "scheduler": {
+            "command": ["pam", "artisan", "schedule:work"],
+            "instances": 1
+        }
+    }
+}

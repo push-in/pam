@@ -66,7 +66,8 @@ uploads, Flysystem, Blade, Livewire, Inertia, Scout, Reverb e gravação real de
 Telescope/Pulse. Também valida injeção request-scoped em Events/Bus, locale,
 serialização segura por worker, streaming progressivo, cancelamento por
 desconexão, limites de resposta, downloads `Range` e `HEAD`. As classes de
-integração pertencem ao binário; nenhum fork ou pacote `pam/laravel` substitui
+integração pertencem ao binário; o pacote oficial `pushinbr/pam-laravel`
+complementa o host com ferramentas operacionais, sem substituir
 código do framework.
 
 ## Event loops de terceiros

@@ -30,7 +30,7 @@ package_field() {
 validate_map() {
     jq -e '
         .owner == "push-in"
-        and (.packages | length == 6)
+        and (.packages | length == 7)
         and (.runtimePackages | length == 1)
         and ([.packages[].name] | length == (unique | length))
         and ([.runtimePackages[].name] | length == (unique | length))
@@ -165,7 +165,7 @@ verify_split() (
     local package_name=$1
     local split_ref=$2
     local expected_files
-    expected_files='^(LICENSE|README\.md|composer\.json|src/|tests/|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
+    expected_files='^(LICENSE|README\.md|composer\.json|config/|src/|stubs/|tests/|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
 
     local temporary_directory
     temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/pam-package.XXXXXX")

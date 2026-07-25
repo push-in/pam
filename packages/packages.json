@@ -49,6 +49,13 @@
             "repository": "pam-skeleton",
             "deploySecret": "PAM_SKELETON_DEPLOY_KEY",
             "description": "Production-ready starter application for the PAM runtime."
+        },
+        {
+            "name": "pushinbr/pam-laravel",
+            "path": "packages/laravel",
+            "repository": "pam-laravel",
+            "deploySecret": "PAM_LARAVEL_DEPLOY_KEY",
+            "description": "Production tooling, lifecycle safety, observability and deployment for Laravel on PAM."
         }
     ]
 }

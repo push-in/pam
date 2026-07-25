@@ -1,6 +1,6 @@
 [package]
 name = "pam"
-version = "0.1.22"
+version = "0.1.23"
 edition = "2024"
 rust-version = "1.88"
 description = "Pam — PHP, Always in Memory: a persistent PHP runtime powered by Rust and the Embed SAPI"

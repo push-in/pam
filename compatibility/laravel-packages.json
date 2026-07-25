@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "updated": "2026-07-25",
+  "runtime": "pam",
+  "php": ["8.4"],
+  "laravel": {
+    "12": {"status": 1, "label": "maintained", "ci": true},
+    "13": {"status": 1, "label": "current", "ci": true}
+  },
+  "packages": [
+    {"name": "laravel/framework", "status": 1, "notes": "HTTP, console, queues, scheduler and database lifecycle"},
+    {"name": "laravel/horizon", "status": 1, "notes": "Runs as an isolated managed process"},
+    {"name": "laravel/reverb", "status": 1, "notes": "Runs as an isolated managed process"},
+    {"name": "laravel/sanctum", "status": 1, "notes": "Covered by framework boot and request tests"},
+    {"name": "livewire/livewire", "status": 1, "notes": "Covered by package discovery matrix"},
+    {"name": "inertiajs/inertia-laravel", "status": 1, "notes": "Covered by package discovery matrix"}
+  ],
+  "status_enum": {
+    "1": "compatible",
+    "2": "experimental",
+    "3": "incompatible"
+  }
+}
