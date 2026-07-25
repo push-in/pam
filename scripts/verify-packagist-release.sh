@@ -46,15 +46,19 @@ cleanup() {
 trap cleanup EXIT HUP INT TERM
 
 deadline=$(( $(date +%s) + timeout_seconds ))
+poll_attempt=0
 while :; do
+    poll_attempt=$((poll_attempt + 1))
     unavailable=
     while IFS= read -r package_name; do
         metadata="${temporary_directory}/$(printf '%s' "${package_name}" | tr / _).json"
+        metadata_url="https://repo.packagist.org/p2/${package_name}.json"
+        metadata_url="${metadata_url}?pam_release=${release_tag}&attempt=${poll_attempt}"
         if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
             --location \
             --header 'User-Agent: PAM-Release-Gate/1.0' \
             --output "${metadata}" \
-            "https://repo.packagist.org/p2/${package_name}.json"; then
+            "${metadata_url}"; then
             unavailable="${unavailable} ${package_name}"
             continue
         fi
@@ -71,11 +75,13 @@ EOF
 
     while IFS= read -r package_name; do
         metadata="${temporary_directory}/$(printf '%s' "${package_name}" | tr / _).json"
+        metadata_url="https://repo.packagist.org/p2/${package_name}.json"
+        metadata_url="${metadata_url}?pam_release=${release_tag}&attempt=${poll_attempt}"
         if ! curl --proto '=https' --tlsv1.2 --fail --silent --show-error \
             --location \
             --header 'User-Agent: PAM-Release-Gate/1.0' \
             --output "${metadata}" \
-            "https://repo.packagist.org/p2/${package_name}.json"; then
+            "${metadata_url}"; then
             unavailable="${unavailable} ${package_name}"
             continue
         fi
