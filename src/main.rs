@@ -195,6 +195,18 @@ fn run() -> Result<u8, CliError> {
             | "forge-script"
     ) {
         let command = script_arg.to_string_lossy();
+        let remaining_arguments = raw_args.collect::<Vec<_>>();
+        if remaining_arguments
+            .first()
+            .is_some_and(|argument| argument == "--help" || argument == "-h")
+        {
+            if terminal::print_command_help(&executable, command.as_ref()) {
+                return Ok(0);
+            }
+            return Err(CliError::Commands(format!(
+                "no focused help is available for {command:?}"
+            )));
+        }
         let mut arguments = if matches!(command.as_ref(), "up" | "status" | "restart" | "stop") {
             vec![
                 OsString::from("pam:process"),
@@ -211,7 +223,7 @@ fn run() -> Result<u8, CliError> {
         } else {
             vec![OsString::from(format!("pam:{command}"))]
         };
-        arguments.extend(raw_args);
+        arguments.extend(remaining_arguments);
         let script = resolve_script(OsStr::new("artisan"))?;
         // SAFETY: Artisan owns this single-threaded PHP lifecycle before worker startup.
         unsafe {

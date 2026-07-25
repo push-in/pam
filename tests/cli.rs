@@ -373,6 +373,22 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     assert!(mobile_help.contains("PAM / MOBILE"));
     assert!(mobile_help.contains("make:screen"));
 
+    let compatibility_help = run_pam(&["help", "compatibility"]);
+    assert!(compatibility_help.status.success());
+    let compatibility_help = String::from_utf8_lossy(&compatibility_help.stderr);
+    assert!(compatibility_help.contains("PAM / COMPATIBILITY"));
+    assert!(compatibility_help.contains("--refresh"));
+
+    let autoscale_help = run_pam(&["autoscale", "--help"]);
+    assert!(autoscale_help.status.success());
+    let autoscale_help = String::from_utf8_lossy(&autoscale_help.stderr);
+    assert!(autoscale_help.contains("PAM / AUTOSCALE"));
+    assert!(autoscale_help.contains("--metrics-url URL"));
+
+    let mcp_help = run_pam(&["mcp", "--help"]);
+    assert!(mcp_help.status.success());
+    assert!(String::from_utf8_lossy(&mcp_help.stderr).contains("MCP stdio"));
+
     let version = run_pam(&["--version"]);
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("pam "));

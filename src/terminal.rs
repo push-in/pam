@@ -336,6 +336,184 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[],
             &["doctor", "doctor ./my-project"],
         ),
+        "up" => (
+            "Start every process in the Laravel PAM manifest.",
+            "up [name]",
+            &[],
+            &["up", "up web"],
+        ),
+        "status" => (
+            "Inspect processes in the Laravel PAM manifest.",
+            "status [name]",
+            &[],
+            &["status", "status queue"],
+        ),
+        "restart" => (
+            "Restart processes in the Laravel PAM manifest.",
+            "restart [name]",
+            &[],
+            &["restart", "restart web"],
+        ),
+        "stop" => (
+            "Stop processes in the Laravel PAM manifest.",
+            "stop [name]",
+            &[],
+            &["stop", "stop queue"],
+        ),
+        "check-production" => (
+            "Validate a Laravel application before production deployment.",
+            "check-production [--json]",
+            &[("--json", "Print a machine-readable report")],
+            &["check-production", "check-production --json"],
+        ),
+        "compatibility" => (
+            "Certify the Laravel runtime or inspect a package contract.",
+            "compatibility [package] [options]",
+            &[
+                ("--refresh", "Run a fresh compatibility probe"),
+                ("--json", "Print a machine-readable report"),
+            ],
+            &[
+                "compatibility",
+                "compatibility laravel/nightwatch --refresh --json",
+            ],
+        ),
+        "health" => (
+            "Run the Laravel application health checks.",
+            "health",
+            &[],
+            &["health"],
+        ),
+        "leaks" => (
+            "Inspect persistent-worker leak diagnostics.",
+            "leaks [--json]",
+            &[("--json", "Print a machine-readable report")],
+            &["leaks", "leaks --json"],
+        ),
+        "capacity" => (
+            "Estimate safe worker capacity for the available memory.",
+            "capacity [options]",
+            &[
+                ("--memory-mb N", "Total memory budget; default: 512"),
+                ("--worker-mb N", "Expected memory per worker; default: 96"),
+                (
+                    "--reserve-percent N",
+                    "Reserved memory percentage; default: 20",
+                ),
+            ],
+            &["capacity --memory-mb 2048 --worker-mb 128"],
+        ),
+        "deploy" => (
+            "Deploy locally, to PAM Cloud, or through Laravel Forge.",
+            "deploy [destination] [options]",
+            &[
+                ("--rollback", "Restore the previous release"),
+                ("--local", "Treat destination as a local release directory"),
+                ("--release ID", "Deploy a specific remote release"),
+            ],
+            &[
+                "deploy production",
+                "deploy ./release --local",
+                "deploy production --rollback",
+            ],
+        ),
+        "remote" => (
+            "Operate PAM Cloud or Laravel Forge targets.",
+            "remote <action> [target] [options]",
+            &[
+                ("--process NAME", "Process to scale"),
+                ("--instances N", "Desired process count, from 1 to 128"),
+                ("--release ID", "Release identifier for deploy"),
+                ("--lines N", "Log line count; default: 200"),
+                ("--json", "Print a machine-readable response"),
+            ],
+            &[
+                "remote status production",
+                "remote logs production --lines 500",
+                "remote scale production --process queue --instances 4",
+            ],
+        ),
+        "rollback" => (
+            "Roll back a remote deployment target.",
+            "rollback [target] [--json]",
+            &[("--json", "Print a machine-readable response")],
+            &["rollback production"],
+        ),
+        "logs" => (
+            "Read logs from a remote deployment target.",
+            "logs [target] [options]",
+            &[
+                ("--lines N", "Log line count; default: 200"),
+                ("--json", "Print a machine-readable response"),
+            ],
+            &["logs production --lines 500"],
+        ),
+        "workers" => (
+            "Inspect workers on a remote deployment target.",
+            "workers [target] [--json]",
+            &[("--json", "Print a machine-readable response")],
+            &["workers production"],
+        ),
+        "queues" => (
+            "Inspect queues on a remote deployment target.",
+            "queues [target] [--json]",
+            &[("--json", "Print a machine-readable response")],
+            &["queues production"],
+        ),
+        "scheduler" => (
+            "Inspect the scheduler on a remote deployment target.",
+            "scheduler [target] [--json]",
+            &[("--json", "Print a machine-readable response")],
+            &["scheduler production"],
+        ),
+        "scale" => (
+            "Scale a remote PAM process.",
+            "scale [target] --process NAME --instances N",
+            &[
+                ("--process NAME", "Process to scale"),
+                ("--instances N", "Desired process count, from 1 to 128"),
+            ],
+            &["scale production --process queue --instances 4"],
+        ),
+        "nightwatch" => (
+            "Validate and configure Laravel Nightwatch for PAM workers.",
+            "nightwatch [options]",
+            &[
+                (
+                    "--install-process",
+                    "Add the Nightwatch agent to the process manifest",
+                ),
+                ("--json", "Print a machine-readable report"),
+            ],
+            &["nightwatch", "nightwatch --install-process --json"],
+        ),
+        "autoscale" => (
+            "Reconcile local worker capacity against live metrics.",
+            "autoscale [process] [options]",
+            &[
+                ("--cpu N", "Current average CPU percentage"),
+                ("--p95 N", "Current p95 latency in milliseconds"),
+                ("--metrics-url URL", "Live JSON metrics endpoint"),
+                ("--watch", "Reconcile continuously"),
+                ("--interval N", "Watch interval in seconds; default: 15"),
+            ],
+            &[
+                "autoscale queue --cpu 75 --p95 120",
+                "autoscale queue --metrics-url http://127.0.0.1:3010/metrics --watch",
+            ],
+        ),
+        "mcp" => (
+            "Serve diagnostics and controlled operations over MCP stdio.",
+            "mcp",
+            &[],
+            &["mcp"],
+        ),
+        "forge-script" => (
+            "Generate a Laravel Forge deployment script.",
+            "forge-script [--output FILE]",
+            &[("--output FILE", "Write the script to a file")],
+            &["forge-script", "forge-script --output deploy.sh"],
+        ),
         "top" => (
             "Display live metrics from a Pam cluster control plane.",
             "top [admin-url] [options]",
