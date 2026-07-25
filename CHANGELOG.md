@@ -5,6 +5,11 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.21 - 2026-07-24
+
+- Fixed image and decorative child touches inside nested `Pressable` cards,
+  while preserving horizontal scrolling and independently interactive controls.
+
 ## 0.1.20 - 2026-07-24
 
 - Added rich-content virtual lists and 12-column virtual grids with stable,
