@@ -5,6 +5,11 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.22 - 2026-07-25
+
+- Staged incoming navigation routes before the first rendered transition frame,
+  removing destination flashes while keeping animations and back navigation smooth.
+
 ## 0.1.21 - 2026-07-24
 
 - Fixed image and decorative child touches inside nested `Pressable` cards,
