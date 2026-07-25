@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Laravel\Services;
 
+use Pam\Laravel\Support\ConfigValue;
 use RuntimeException;
 
 final readonly class AtomicDeployer
@@ -11,9 +12,9 @@ final readonly class AtomicDeployer
     public function prepare(string $release): void
     {
         $realRelease = $this->validateRelease($release);
-        $binary = (string) config('pam.deploy.binary', 'pam');
+        $binary = ConfigValue::string('pam.deploy.binary', 'pam');
         $this->run([$binary, 'artisan', 'optimize'], $realRelease);
-        if ((bool) config('pam.deploy.migrate', true)) {
+        if (ConfigValue::bool('pam.deploy.migrate', true)) {
             $this->run([$binary, 'artisan', 'migrate', '--force', '--no-interaction'], $realRelease);
         }
     }
@@ -21,9 +22,9 @@ final readonly class AtomicDeployer
     public function activate(string $release): string
     {
         $realRelease = $this->validateRelease($release);
-        $root = (string) realpath((string) config('pam.deploy.root'));
+        $root = (string) realpath(ConfigValue::string('pam.deploy.root'));
 
-        $current = (string) config('pam.deploy.current');
+        $current = ConfigValue::string('pam.deploy.current');
         $previous = $this->previousTarget($current);
         $temporary = $current.'.next-'.getmypid();
         @unlink($temporary);
@@ -40,8 +41,8 @@ final readonly class AtomicDeployer
 
     public function ready(): bool
     {
-        $url = (string) config('pam.deploy.readiness_url');
-        $timeout = max(1, (int) config('pam.deploy.readiness_timeout_seconds', 30));
+        $url = ConfigValue::string('pam.deploy.readiness_url');
+        $timeout = max(1, ConfigValue::int('pam.deploy.readiness_timeout_seconds', 30));
         $deadline = microtime(true) + $timeout;
         do {
             $context = stream_context_create(['http' => ['timeout' => 1, 'ignore_errors' => true]]);
@@ -58,7 +59,7 @@ final readonly class AtomicDeployer
 
     public function rollback(): string
     {
-        $root = realpath((string) config('pam.deploy.root'));
+        $root = realpath(ConfigValue::string('pam.deploy.root'));
         $previous = $root === false ? '' : trim((string) @file_get_contents($root.'/.pam-previous'));
         if ($previous === '' || !is_dir($previous)) {
             throw new RuntimeException('No valid previous release is recorded.');
@@ -77,7 +78,7 @@ final readonly class AtomicDeployer
     private function validateRelease(string $release): string
     {
         $realRelease = realpath($release);
-        $root = realpath((string) config('pam.deploy.root'));
+        $root = realpath(ConfigValue::string('pam.deploy.root'));
         if ($realRelease === false || !is_dir($realRelease) || $root === false) {
             throw new RuntimeException('Release and deploy root must exist.');
         }

@@ -25,9 +25,9 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.4`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.24`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
-**Explore:** [Quick start](#quick-start) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
+**Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
 ## Why Pam?
 
@@ -188,6 +188,9 @@ See [Laravel on Pam](docs/laravel.md) for lifecycle and production details.
 Existing applications can add `pushinbr/pam-laravel` for production checks,
 bounded observability, request-state guards, process manifests and atomic
 deploy/rollback commands.
+The executable [SaaS API reference](examples/laravel-saas-api) demonstrates the
+recommended controller, request, service, repository, resource, enum, migration
+and endpoint-test boundaries.
 
 ### Mobile presets
 

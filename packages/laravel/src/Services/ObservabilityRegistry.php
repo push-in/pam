@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Laravel\Services;
 
 use Pam\Laravel\Enums\JobEventType;
+use Pam\Laravel\Support\ConfigValue;
 
 final class ObservabilityRegistry
 {
@@ -49,16 +50,16 @@ final class ObservabilityRegistry
     {
         ++$this->queries;
         $this->queryNanoseconds += (int) round($milliseconds * 1_000_000);
-        if ($milliseconds >= (float) config('pam.observability.slow_query_ms', 100)) {
+        if ($milliseconds >= ConfigValue::float('pam.observability.slow_query_ms', 100)) {
             $this->slowQueries[] = ['sql' => $sql, 'milliseconds' => $milliseconds];
-            $limit = max(1, (int) config('pam.observability.query_limit', 128));
+            $limit = max(1, ConfigValue::int('pam.observability.query_limit', 128));
             if (count($this->slowQueries) > $limit) {
                 array_shift($this->slowQueries);
             }
         }
         $shape = preg_replace(["/'[^']*'/", '/\\b\\d+\\b/'], ['?', '?'], $sql) ?: $sql;
         $this->requestQueryShapes[$shape] = ($this->requestQueryShapes[$shape] ?? 0) + 1;
-        $threshold = max(2, (int) config('pam.observability.n_plus_one_threshold', 8));
+        $threshold = max(2, ConfigValue::int('pam.observability.n_plus_one_threshold', 8));
         if ($this->requestQueryShapes[$shape] === $threshold) {
             $this->stateViolation('n-plus-one', "Query shape repeated {$threshold} times: {$shape}");
         }
@@ -101,9 +102,34 @@ final class ObservabilityRegistry
         ];
     }
 
+    public function memoryBytes(): int
+    {
+        return memory_get_usage(true);
+    }
+
+    public function peakMemoryBytes(): int
+    {
+        return memory_get_peak_usage(true);
+    }
+
+    public function stateViolationCount(): int
+    {
+        return count($this->stateViolations);
+    }
+
+    public function slowQueryCount(): int
+    {
+        return count($this->slowQueries);
+    }
+
+    public function hasStateViolations(): bool
+    {
+        return $this->stateViolations !== [];
+    }
+
     private function trimRoutes(): void
     {
-        $limit = max(1, (int) config('pam.observability.route_limit', 256));
+        $limit = max(1, ConfigValue::int('pam.observability.route_limit', 256));
         if (count($this->routes) <= $limit) {
             return;
         }

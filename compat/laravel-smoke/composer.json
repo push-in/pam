@@ -10,13 +10,16 @@
     },
     "require-dev": {
         "inertiajs/inertia-laravel": "^3.1",
+        "laravel/octane": "^2.18",
         "laravel/pulse": "^1.7",
         "laravel/reverb": "^1.11",
         "laravel/sanctum": "^4.3",
         "laravel/scout": "^11.4",
         "laravel/telescope": "^5.21",
         "livewire/livewire": "^4.3",
-        "phpstan/phpstan": "^2.2"
+        "phpstan/phpstan": "^2.2",
+        "spiral/roadrunner-http": "^3.6",
+        "spiral/roadrunner-worker": "^3.6"
     },
     "config": {
         "platform-check": true,

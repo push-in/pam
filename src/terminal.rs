@@ -164,8 +164,16 @@ pub fn print_help(executable: &OsStr) {
                 "Run Laravel production diagnostics",
             ),
             (
-                "capacity | deploy",
-                "Plan capacity or activate an atomic Laravel release",
+                "capacity | deploy | remote",
+                "Plan capacity and operate local or remote Laravel releases",
+            ),
+            (
+                "rollback | logs | workers | queues | scheduler | scale",
+                "Use concise PAM Cloud operation aliases",
+            ),
+            (
+                "nightwatch | compatibility | autoscale | mcp",
+                "Certify, observe, scale, and expose controlled Laravel AI tooling",
             ),
             ("exec <script.php>", "Execute a PHP script explicitly"),
             ("composer [args...]", "Run the embedded Composer toolchain"),

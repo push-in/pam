@@ -169,3 +169,6 @@ compat/laravel-smoke/vendor/bin/phpstan analyse \
 ```
 
 See [the benchmark protocol](../benchmarks/README.md) before comparing runtimes.
+For the complete operational surface, continue with the [PAM Laravel production
+platform](laravel-platform.md): OTLP, Nightwatch, Cloud and Forge, autoscaling,
+MCP, package certification and public benchmark automation.

@@ -114,6 +114,9 @@ jobs:
           compat/laravel-smoke/vendor/bin/phpstan analyse \
             -c compat/laravel-smoke/phpstan.neon \
             --no-progress
+          php compat/laravel-smoke/telemetry-smoke.php
+          php compat/laravel-smoke/remote-smoke.php
+          php compat/laravel-smoke/process-supervisor-smoke.php
       - name: Validate MySQL, PostgreSQL, Redis and database queues
         working-directory: compat/laravel-smoke
         env:

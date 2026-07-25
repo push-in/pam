@@ -44,7 +44,11 @@ pam artisan pam:process up
 pam artisan pam:process status
 pam artisan pam:process restart queue
 pam artisan pam:deploy /srv/app/releases/20260725-120000
-pam artisan pam:deploy --rollback
+pam artisan pam:deploy --local --rollback
+pam remote status production
+pam nightwatch
+pam autoscale queue --cpu=80 --p95=400
+pam mcp
 ```
 
 The default endpoints are:
@@ -73,8 +77,8 @@ keeps arguments unambiguous and avoids manifest command injection:
 {
   "processes": {
     "http": {
-      "command": ["pam", "serve", "--host=127.0.0.1", "--port=3010"],
-      "instances": 2
+      "command": ["pam", "start", "pam.php", "--workers", "2"],
+      "instances": 1
     }
   }
 }
@@ -90,3 +94,8 @@ load before opting into more aggressive concurrency.
 The compatibility matrix tests PHP 8.4 with the maintained Laravel 12 release
 and the current Laravel 13 release. The public compatibility registry lives in
 the main PAM repository.
+
+See the full [production platform
+guide](https://github.com/push-in/pam/blob/main/docs/laravel-platform.md) for
+OTLP traces, Nightwatch, PAM Cloud and Forge operations, autoscaling, MCP,
+package certification and reproducible benchmarks.

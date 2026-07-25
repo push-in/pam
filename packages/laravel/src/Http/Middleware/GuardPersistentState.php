@@ -8,6 +8,7 @@ use Closure;
 use Illuminate\Http\Request;
 use Pam\Laravel\Services\ObservabilityRegistry;
 use Pam\Laravel\Services\StateGuard;
+use Pam\Laravel\Support\ConfigValue;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -31,7 +32,7 @@ final readonly class GuardPersistentState
                 $this->observability->stateViolation('transaction', $violation);
             }
 
-            if ($violations !== [] && (bool) config('pam.state_guard.strict', false)) {
+            if ($violations !== [] && ConfigValue::bool('pam.state_guard.strict')) {
                 throw new RuntimeException(implode(' ', $violations));
             }
         }

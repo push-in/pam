@@ -6,6 +6,7 @@ namespace Pam\Laravel\Services;
 
 use Illuminate\Foundation\Application;
 use Pam\Laravel\Enums\CheckStatus;
+use Pam\Laravel\Support\ConfigValue;
 use Pam\Laravel\ValueObjects\CheckResult;
 
 final readonly class ProductionChecker
@@ -19,7 +20,7 @@ final readonly class ProductionChecker
     {
         $results = [
             $this->boolean('environment', $this->app->environment() === 'production', 'APP_ENV is production.', 'Set APP_ENV=production.'),
-            $this->boolean('debug', !(bool) config('app.debug'), 'Debug mode is disabled.', 'Set APP_DEBUG=false.'),
+            $this->boolean('debug', !ConfigValue::bool('app.debug'), 'Debug mode is disabled.', 'Set APP_DEBUG=false.'),
             $this->keyCheck(),
             $this->boolean(
                 'config-cache',
@@ -33,8 +34,8 @@ final readonly class ProductionChecker
                 'Route cache policy is satisfied.',
                 'Run `pam artisan route:cache` or disable PAM_REQUIRE_ROUTE_CACHE.',
             ),
-            $this->driverCheck('cache', (string) config('cache.default'), $this->required('distributed_cache')),
-            $this->driverCheck('session', (string) config('session.driver'), $this->required('distributed_session')),
+            $this->driverCheck('cache', ConfigValue::string('cache.default'), $this->required('distributed_cache')),
+            $this->driverCheck('session', ConfigValue::string('session.driver'), $this->required('distributed_session')),
             $this->queueCheck(),
             $this->boolean('storage', is_writable(storage_path()), 'Storage is writable.', 'Set PAM_LARAVEL_STORAGE_PATH to a writable persistent directory.'),
             $this->pathCheck('bootstrap-cache', base_path('bootstrap/cache')),
@@ -42,13 +43,10 @@ final readonly class ProductionChecker
             $this->sapiCheck(),
         ];
 
-        foreach ((array) config('pam.production.required_extensions', []) as $extension) {
-            if (!is_string($extension)) {
-                continue;
-            }
+        foreach (ConfigValue::stringList('pam.production.required_extensions') as $extension) {
             $results[] = $this->boolean(
                 'extension-'.$extension,
-                extension_loaded((string) $extension),
+                extension_loaded($extension),
                 "Extension {$extension} is loaded.",
                 "Install or enable ext-{$extension} in the PAM runtime.",
             );
@@ -59,17 +57,17 @@ final readonly class ProductionChecker
 
     private function required(string $key): bool
     {
-        return (bool) config("pam.production.{$key}", false);
+        return ConfigValue::bool("pam.production.{$key}");
     }
 
     private function keyCheck(): CheckResult
     {
-        $key = (string) config('app.key');
+        $key = ConfigValue::string('app.key');
         $valid = $key !== '';
         if ($valid) {
             try {
                 $decoded = str_starts_with($key, 'base64:') ? base64_decode(substr($key, 7), true) : $key;
-                $expectedLength = match (strtolower((string) config('app.cipher'))) {
+                $expectedLength = match (strtolower(ConfigValue::string('app.cipher'))) {
                     'aes-128-cbc', 'aes-128-gcm' => 16,
                     'aes-256-cbc', 'aes-256-gcm' => 32,
                     default => 0,
@@ -98,8 +96,8 @@ final readonly class ProductionChecker
 
     private function queueCheck(): CheckResult
     {
-        $driver = (string) config('queue.default');
-        $allowed = (bool) config('pam.production.queue_sync_allowed', false);
+        $driver = ConfigValue::string('queue.default');
+        $allowed = ConfigValue::bool('pam.production.queue_sync_allowed');
 
         return $this->boolean(
             'queue-driver',

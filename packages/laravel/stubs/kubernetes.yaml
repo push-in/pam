@@ -13,12 +13,16 @@ spec:
       containers:
         - name: app
           image: ghcr.io/push-in/pam:latest
-          args: ["pam", "serve", "--host=0.0.0.0", "--port=3010"]
+          command: ["pam"]
+          args: ["pam.php"]
+          env:
+            - name: PORT
+              value: "3010"
           ports: [{containerPort: 3010}]
           readinessProbe:
             httpGet: {path: /__pam/health, port: 3010}
           livenessProbe:
             httpGet: {path: /__pam/health, port: 3010}
           resources:
-            requests: {cpu: 100m, memory: 128Mi}
-            limits: {cpu: "1", memory: 512Mi}
+            requests: {cpu: 250m, memory: 256Mi}
+            limits: {cpu: "1", memory: 1Gi}

@@ -177,15 +177,35 @@ fn run() -> Result<u8, CliError> {
             | "restart"
             | "stop"
             | "check-production"
+            | "compatibility"
             | "health"
             | "leaks"
             | "capacity"
             | "deploy"
+            | "remote"
+            | "rollback"
+            | "logs"
+            | "workers"
+            | "queues"
+            | "scheduler"
+            | "scale"
+            | "nightwatch"
+            | "autoscale"
+            | "mcp"
+            | "forge-script"
     ) {
         let command = script_arg.to_string_lossy();
         let mut arguments = if matches!(command.as_ref(), "up" | "status" | "restart" | "stop") {
             vec![
                 OsString::from("pam:process"),
+                OsString::from(command.as_ref()),
+            ]
+        } else if matches!(
+            command.as_ref(),
+            "rollback" | "logs" | "workers" | "queues" | "scheduler" | "scale"
+        ) {
+            vec![
+                OsString::from("pam:remote"),
                 OsString::from(command.as_ref()),
             ]
         } else {

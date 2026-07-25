@@ -1,8 +1,8 @@
 {
     "processes": {
         "http": {
-            "command": ["pam", "serve", "--host=127.0.0.1", "--port=3010"],
-            "instances": 2
+            "command": ["pam", "start", "pam.php", "--workers", "2", "--admin-address", "127.0.0.1:3011"],
+            "instances": 1
         },
         "queue": {
             "command": ["pam", "artisan", "queue:work", "--sleep=1", "--tries=3"],

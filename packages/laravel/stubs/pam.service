@@ -5,11 +5,12 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=/srv/app/current
-ExecStart=/usr/local/bin/pam serve --host=127.0.0.1 --port=3010
+ExecStart=/usr/local/bin/pam start pam.php --workers 2 --admin-address 127.0.0.1:3011
 Restart=always
 RestartSec=2
 User=www-data
 Environment=APP_ENV=production
+Environment=PORT=3010
 
 [Install]
 WantedBy=multi-user.target

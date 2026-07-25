@@ -18,13 +18,13 @@ final class LeaksCommand extends Command
         if ($this->option('json')) {
             $this->line((string) json_encode($snapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
         } else {
-            $this->components->twoColumnDetail('Current memory', $this->formatBytes((int) $snapshot['memoryBytes']));
-            $this->components->twoColumnDetail('Peak memory', $this->formatBytes((int) $snapshot['peakMemoryBytes']));
-            $this->components->twoColumnDetail('State violations', (string) count($snapshot['stateViolations']));
-            $this->components->twoColumnDetail('Slow queries retained', (string) count($snapshot['slowQueries']));
+            $this->components->twoColumnDetail('Current memory', $this->formatBytes($registry->memoryBytes()));
+            $this->components->twoColumnDetail('Peak memory', $this->formatBytes($registry->peakMemoryBytes()));
+            $this->components->twoColumnDetail('State violations', (string) $registry->stateViolationCount());
+            $this->components->twoColumnDetail('Slow queries retained', (string) $registry->slowQueryCount());
         }
 
-        return $snapshot['stateViolations'] === [] ? self::SUCCESS : self::FAILURE;
+        return $registry->hasStateViolations() ? self::FAILURE : self::SUCCESS;
     }
 
     private function formatBytes(int $bytes): string

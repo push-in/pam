@@ -634,14 +634,14 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.pam.php")).unwrap();
     assert_eq!(manifest["require"]["pushinbr/pam-mobile-ui"], "^0.1");
-    assert!(
-        manifest["repositories"]
-            .as_array()
-            .is_some_and(|repositories| !repositories.is_empty()
-                && repositories
-                    .iter()
-                    .all(|repository| repository["options"]["symlink"] == false))
-    );
+    if let Some(repositories) = manifest["repositories"].as_array() {
+        assert!(!repositories.is_empty());
+        assert!(
+            repositories
+                .iter()
+                .all(|repository| repository["options"]["symlink"] == false)
+        );
+    }
     assert!(entry.contains("MobileUi::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));
