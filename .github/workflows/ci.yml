@@ -18,7 +18,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 6af6783e70a53a94ae3d9e70edad239c4de0b8e2
+          ref: e379855f12ee37518b16b6c4e25821b7d4d63f4c
           path: pam-native
           persist-credentials: false
       - uses: actions/checkout@v5

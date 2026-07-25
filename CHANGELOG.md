@@ -5,6 +5,14 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.19 - 2026-07-24
+
+- Connected Android's system back button and back gesture to `Navigator`
+  automatically.
+- Pop the native stack from secondary routes and close the Activity normally
+  from its root route.
+- Added opt-out support for applications with a custom back handler.
+
 ## 0.1.18 - 2026-07-24
 
 - Prevented normal hot-reload transport disconnects from opening the fatal
