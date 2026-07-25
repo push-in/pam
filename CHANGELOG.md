@@ -5,6 +5,19 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.20 - 2026-07-24
+
+- Added rich-content virtual lists and 12-column virtual grids with stable,
+  granular RecyclerView updates for images, controls and arbitrary components.
+- Added event coalescing, portable bundle verification, boot-safe lifecycle
+  queues, performance CI budgets and physical-device baseline evidence.
+- Added typed route parameters, deep links, stack operations, new shared-axis
+  transitions and hardened Android back behavior.
+- Added the debug-only on-device DevTools overlay and `pam mobile devtools`
+  command with live FPS, mount/decode cost, commit and heap metrics.
+- Hardened PamUI grids, tabs, overlays, inputs and accessibility across Android
+  12 and Android 16, and removed the remaining legacy UI nomenclature.
+
 ## 0.1.19 - 2026-07-24
 
 - Connected Android's system back button and back gesture to `Navigator`

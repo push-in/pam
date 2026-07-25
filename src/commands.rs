@@ -3029,7 +3029,8 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
             "mobile:dev": "pam mobile dev .",
             "mobile:build": "pam mobile build . --release",
             "mobile:benchmark": "pam mobile benchmark .",
-            "mobile:profile": "pam mobile profile ."
+            "mobile:profile": "pam mobile profile .",
+            "mobile:devtools": "pam mobile devtools ."
         }
     });
     if with_official_ui && native_package != package_coordinates::NATIVE {

@@ -354,6 +354,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         }
         "benchmark" => benchmark(parse_project_only(arguments)?),
         "profile" => baseline_profile(parse_project_only(arguments)?),
+        "devtools" => toggle_devtools(parse_project_only(arguments)?),
         "plugin:list" => list_plugins(parse_project_only(arguments)?),
         "plugin:doctor" => doctor_plugins(parse_project_only(arguments)?),
         "make:screen" => generate_screen(parse_generator(arguments)?),
@@ -1951,10 +1952,11 @@ fn files_in(root: &Path) -> Result<Vec<PathBuf>, String> {
     }
     let mut files = Vec::new();
     visit(root, &mut files)?;
-    files.sort_by(|left, right| {
-        left.strip_prefix(root)
-            .unwrap_or(left)
-            .cmp(right.strip_prefix(root).unwrap_or(right))
+    files.sort_by_key(|file| {
+        file.strip_prefix(root)
+            .unwrap_or(file)
+            .to_string_lossy()
+            .replace('\\', "/")
     });
     Ok(files)
 }
@@ -2034,6 +2036,35 @@ fn baseline_profile(project_path: PathBuf) -> Result<u8, String> {
         "dev.pam.nativeapp.benchmark.BaselineProfileGenerator",
         "Baseline Profile",
     )
+}
+
+fn toggle_devtools(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let application_id = format!("{}.debug", project.manifest.application_id);
+    let running = Command::new("adb")
+        .args(["shell", "pidof", &application_id])
+        .output()
+        .map_err(|error| format!("cannot query Android device: {error}"))?;
+    if !running.status.success() || running.stdout.is_empty() {
+        return Err(format!(
+            "{application_id} is not running; start it with `pam mobile dev {}` first",
+            project.root.display()
+        ));
+    }
+    command_status(
+        "adb",
+        &[
+            "shell",
+            "am",
+            "broadcast",
+            "-a",
+            "dev.pam.nativeapp.action.TOGGLE_DEVTOOLS",
+            "-p",
+            &application_id,
+        ],
+    )?;
+    println!("Toggled Pam Native DevTools in {application_id}");
+    Ok(0)
 }
 
 fn run_android_performance_suite(
@@ -2718,6 +2749,45 @@ mod tests {
         assert!(!ignored_project_path(Path::new(
             "resources/icons/pam-ui.svg"
         )));
+    }
+
+    #[test]
+    fn android_bundle_digest_uses_portable_path_order() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-mobile-digest-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("vendor/pam/native")).expect("pam package");
+        fs::create_dir_all(root.join("vendor/pam-community/plugin")).expect("community package");
+        fs::write(root.join("vendor/pam/native/file.php"), "native").expect("native file");
+        fs::write(
+            root.join("vendor/pam-community/plugin/file.php"),
+            "community",
+        )
+        .expect("community file");
+
+        let files = files_in(&root).expect("files");
+        let relative = files
+            .iter()
+            .map(|file| {
+                file.strip_prefix(&root)
+                    .expect("relative")
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            relative,
+            [
+                "vendor/pam-community/plugin/file.php",
+                "vendor/pam/native/file.php",
+            ]
+        );
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]
