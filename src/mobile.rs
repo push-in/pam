@@ -3224,10 +3224,10 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 }
-    #[test]
-    fn installed_sdk_versions_accept_stable_and_composer_dev_lines() {
-        assert_eq!(parse_installed_sdk_version("0.2.1"), Ok((0, 2, 1)));
-        assert_eq!(parse_installed_sdk_version("0.2.x-dev"), Ok((0, 2, 0)));
-        assert!(parse_installed_sdk_version("dev-main").is_err());
-        assert!(parse_release_version("0.2.x-dev").is_err());
-    }
+#[test]
+fn installed_sdk_versions_accept_stable_and_composer_dev_lines() {
+    assert_eq!(parse_installed_sdk_version("0.2.1"), Ok((0, 2, 1)));
+    assert_eq!(parse_installed_sdk_version("0.2.x-dev"), Ok((0, 2, 0)));
+    assert!(parse_installed_sdk_version("dev-main").is_err());
+    assert!(parse_release_version("0.2.x-dev").is_err());
+}
