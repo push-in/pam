@@ -3,6 +3,13 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
+## 0.1.35 - 2026-07-26
+
+- Added public GitHub artifact attestation for the standalone Android runtime
+  bundle before it enters the Linux runtime builds or release assets.
+- Granted the Android packaging job only the OIDC and attestation permissions
+  required to publish that provenance record.
+
 ## 0.1.34 - 2026-07-26
 
 - Added atomic durable-workflow claims with expiring owner leases, bounded
