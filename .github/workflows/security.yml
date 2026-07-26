@@ -41,6 +41,11 @@ jobs:
         run: |
           cargo test --locked --test memory -- --nocapture --test-threads=1
           cargo test --locked --test laravel -- --nocapture --test-threads=1
+      - name: Kernel sandbox, replay and signed bundle contracts
+        run: |
+          cargo test --locked --test cli enforces_kernel_capabilities_for_untrusted_php -- --nocapture
+          cargo test --locked --test cli signs_and_verifies_a_production_bundle_with_external_ed25519_trust -- --nocapture
+          cargo test --locked --test server records_bounded_redacted_http_interactions -- --nocapture
       - name: Native shutdown smoke under Valgrind
         run: |
           cargo build --locked

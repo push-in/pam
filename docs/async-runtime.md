@@ -23,6 +23,36 @@ DNS usa o resolver Tokio, arquivos usam a fila bloqueante do runtime, processos
 recebem argv sem shell e output limitado, e sinais usam o watcher nativo. Todas as
 operações respeitam o menor valor entre seu timeout e o deadline da requisição.
 
+## Concorrência estruturada
+
+`TaskGroup` cria uma vida lexical para tarefas filhas. O grupo só retorna quando
+todas terminam; a primeira falha ou o deadline compartilhado cancela irmãs ainda
+ativas e injeta `CancelledException` na Fiber, executando seus blocos `finally`.
+
+```php
+use Pam\Async\Deadline;
+
+use function Pam\Async\concurrently;
+use function Pam\Async\delay;
+
+$results = concurrently([
+    'profile' => static fn () => loadProfile(),
+    'orders' => static function () {
+        try {
+            delay(0.01);
+            return loadOrders();
+        } finally {
+            releaseOrderLease();
+        }
+    },
+], Deadline::after(2.0));
+```
+
+Para controle incremental, instancie `TaskGroup`, use `spawn($key, $operation)` e
+finalize com `join()`. Chaves duplicadas e novos filhos depois de `join()` são
+erros. Destruir um grupo não finalizado cancela seus filhos; tarefas não ficam
+órfãs entre requisições.
+
 ## Streams e backpressure
 
 ```php

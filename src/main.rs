@@ -14,6 +14,7 @@ mod doctor;
 mod mobile;
 mod package_coordinates;
 mod php;
+mod sandbox;
 mod server;
 mod terminal;
 mod worker_state;
@@ -241,6 +242,32 @@ fn run() -> Result<u8, CliError> {
         return run_script(&executable, &script, raw_args.collect());
     }
 
+    if script_arg == "sandbox" {
+        let manifest = raw_args.next().ok_or_else(|| {
+            CliError::Commands("sandbox requires a capability manifest".to_owned())
+        })?;
+        if manifest == "--help" || manifest == "-h" {
+            terminal::print_command_help(&executable, "sandbox");
+            return Ok(0);
+        }
+        let separator = raw_args.next().ok_or_else(|| {
+            CliError::Commands("sandbox requires `-- <script.php> [arguments...]`".to_owned())
+        })?;
+        if separator != "--" {
+            return Err(CliError::Commands(
+                "sandbox requires `--` before the PHP entry point".to_owned(),
+            ));
+        }
+        let script = raw_args
+            .next()
+            .ok_or_else(|| CliError::Commands("sandbox requires a PHP entry point".to_owned()))?;
+        let manifest = resolve_script(&manifest)?;
+        let script = resolve_script(&script)?;
+        let policy = sandbox::Policy::load(&manifest).map_err(CliError::Commands)?;
+        policy.apply().map_err(CliError::Commands)?;
+        return run_script(&executable, &script, raw_args.collect());
+    }
+
     if script_arg == "routes" || script_arg == "inspect" {
         let script = commands::default_script(raw_args.next());
         let script = resolve_script(script.as_os_str())?;
@@ -263,6 +290,148 @@ fn run() -> Result<u8, CliError> {
             resolve_target(OsStr::new("."))?
         };
         return commands::test(&executable, &target, arguments).map_err(CliError::Commands);
+    }
+
+    if script_arg == "record" {
+        let mut script = OsString::from("index.php");
+        let mut output = PathBuf::from(".pam/recordings/latest.jsonl");
+        let mut max_body_bytes = None;
+        let mut max_bytes = None;
+        let mut positional = false;
+        let mut script_arguments = Vec::new();
+        let mut passthrough = false;
+        while let Some(argument) = raw_args.next() {
+            if passthrough {
+                script_arguments.push(argument);
+                continue;
+            }
+            match argument.to_string_lossy().as_ref() {
+                "--help" | "-h" => {
+                    terminal::print_command_help(&executable, "record");
+                    return Ok(0);
+                }
+                "--" => passthrough = true,
+                "--output" => {
+                    output = PathBuf::from(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--output requires a JSONL file".to_owned())
+                    })?);
+                }
+                "--max-body-bytes" => {
+                    let value = raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--max-body-bytes requires an integer".to_owned())
+                    })?;
+                    let parsed = value.to_string_lossy().parse::<u64>().map_err(|_| {
+                        CliError::Commands(
+                            "--max-body-bytes requires a positive integer".to_owned(),
+                        )
+                    })?;
+                    if parsed == 0 {
+                        return Err(CliError::Commands(
+                            "--max-body-bytes requires a positive integer".to_owned(),
+                        ));
+                    }
+                    max_body_bytes = Some(value);
+                }
+                "--max-bytes" => {
+                    let value = raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--max-bytes requires an integer".to_owned())
+                    })?;
+                    let parsed = value.to_string_lossy().parse::<u64>().map_err(|_| {
+                        CliError::Commands("--max-bytes requires a positive integer".to_owned())
+                    })?;
+                    if parsed == 0 {
+                        return Err(CliError::Commands(
+                            "--max-bytes requires a positive integer".to_owned(),
+                        ));
+                    }
+                    max_bytes = Some(value);
+                }
+                option if option.starts_with('-') => {
+                    return Err(CliError::Commands(format!(
+                        "unknown record option: {option}"
+                    )));
+                }
+                _ if !positional => {
+                    script = argument;
+                    positional = true;
+                }
+                _ => {
+                    return Err(CliError::Commands(
+                        "put PHP script arguments after `--`".to_owned(),
+                    ));
+                }
+            }
+        }
+        let script = resolve_script(&script)?;
+        let recording =
+            commands::prepare_recording(&output, &script).map_err(CliError::Commands)?;
+        // SAFETY: recorder configuration is finalized before PHP or Tokio starts.
+        unsafe {
+            env::set_var("PAM_RECORD_PATH", &recording);
+            if let Some(value) = max_body_bytes {
+                env::set_var("PAM_RECORD_MAX_BODY_BYTES", value);
+            }
+            if let Some(value) = max_bytes {
+                env::set_var("PAM_RECORD_MAX_BYTES", value);
+            }
+        }
+        eprintln!("Pam flight recorder writing to {}", recording.display());
+        return run_script(&executable, &script, script_arguments);
+    }
+
+    if script_arg == "replay" {
+        let mut recording = None;
+        let mut url = OsString::from("http://127.0.0.1:3000");
+        let mut secrets = std::collections::BTreeMap::new();
+        while let Some(argument) = raw_args.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--help" | "-h" => {
+                    terminal::print_command_help(&executable, "replay");
+                    return Ok(0);
+                }
+                "--url" => {
+                    url = raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--url requires an HTTP base URL".to_owned())
+                    })?;
+                }
+                "--secret-env" => {
+                    let mapping = raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--secret-env requires NAME=ENV_VAR".to_owned())
+                    })?;
+                    let mapping = mapping.to_string_lossy();
+                    let (name, environment) = mapping.split_once('=').ok_or_else(|| {
+                        CliError::Commands("--secret-env requires NAME=ENV_VAR".to_owned())
+                    })?;
+                    if name.is_empty() || environment.is_empty() {
+                        return Err(CliError::Commands(
+                            "--secret-env requires NAME=ENV_VAR".to_owned(),
+                        ));
+                    }
+                    let value = env::var(environment).map_err(|_| {
+                        CliError::Commands(format!(
+                            "environment variable {environment:?} is not set"
+                        ))
+                    })?;
+                    secrets.insert(name.to_owned(), value);
+                }
+                option if option.starts_with('-') => {
+                    return Err(CliError::Commands(format!(
+                        "unknown replay option: {option}"
+                    )));
+                }
+                _ if recording.is_none() => recording = Some(argument),
+                _ => {
+                    return Err(CliError::Commands(
+                        "replay accepts one recording file".to_owned(),
+                    ));
+                }
+            }
+        }
+        let recording = recording
+            .ok_or_else(|| CliError::Commands("replay requires a recording file".to_owned()))?;
+        let recording = resolve_target(&recording)?;
+        return commands::replay(&recording, &url.to_string_lossy(), &secrets)
+            .map_err(CliError::Commands);
     }
 
     if matches!(
@@ -391,6 +560,7 @@ fn run() -> Result<u8, CliError> {
         let mut target = OsString::from(".");
         let mut output = OsString::from("dist");
         let mut entry = OsString::from("index.php");
+        let mut signing_key = None;
         let mut positional = false;
         while let Some(argument) = raw_args.next() {
             match argument.to_string_lossy().as_ref() {
@@ -403,6 +573,11 @@ fn run() -> Result<u8, CliError> {
                     entry = raw_args.next().ok_or_else(|| {
                         CliError::Commands("--entry requires a PHP file".to_owned())
                     })?;
+                }
+                "--signing-key" => {
+                    signing_key = Some(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--signing-key requires an Ed25519 key".to_owned())
+                    })?);
                 }
                 option if option.starts_with('-') => {
                     return Err(CliError::Commands(format!(
@@ -426,7 +601,48 @@ fn run() -> Result<u8, CliError> {
         } else {
             target.join(output)
         };
-        return commands::build(&target, &output, Path::new(&entry)).map_err(CliError::Commands);
+        let signing_key = signing_key.as_deref().map(resolve_script).transpose()?;
+        return commands::build(&target, &output, Path::new(&entry), signing_key.as_deref())
+            .map_err(CliError::Commands);
+    }
+
+    if script_arg == "verify" {
+        let mut target = OsString::from("dist");
+        let mut positional = false;
+        let mut public_key = None;
+        let mut require_signature = false;
+        while let Some(argument) = raw_args.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--help" | "-h" => {
+                    terminal::print_command_help(&executable, "verify");
+                    return Ok(0);
+                }
+                "--public-key" => {
+                    public_key = Some(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--public-key requires an Ed25519 key".to_owned())
+                    })?);
+                }
+                "--require-signature" => require_signature = true,
+                option if option.starts_with('-') => {
+                    return Err(CliError::Commands(format!(
+                        "unknown verify option: {option}"
+                    )));
+                }
+                _ if !positional => {
+                    target = argument;
+                    positional = true;
+                }
+                _ => {
+                    return Err(CliError::Commands(
+                        "verify accepts one bundle directory".to_owned(),
+                    ));
+                }
+            }
+        }
+        let target = resolve_target(&target)?;
+        let public_key = public_key.as_deref().map(resolve_script).transpose()?;
+        return commands::verify_bundle(&target, public_key.as_deref(), require_signature)
+            .map_err(CliError::Commands);
     }
 
     if script_arg == "benchmark" {

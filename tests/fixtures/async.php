@@ -9,6 +9,7 @@ use Pam\Async\FiberContext;
 
 use function Pam\Async\all;
 use function Pam\Async\async;
+use function Pam\Async\concurrently;
 use function Pam\Async\delay;
 use function Pam\Async\onSignal;
 use function Pam\Async\read;
@@ -77,6 +78,40 @@ try {
 $deadline = Deadline::after(0.0);
 $deadlineExpired = $deadline->isExpired();
 
+$groupStarted = microtime(true);
+$groupValues = concurrently([
+    'first' => static function (): string {
+        delay(0.02);
+        return 'one';
+    },
+    'second' => static function (): string {
+        delay(0.02);
+        return 'two';
+    },
+]);
+$groupConcurrent = microtime(true) - $groupStarted < 0.038;
+
+$cancelledSiblingCleaned = false;
+try {
+    concurrently([
+        'failure' => static function (): never {
+            delay(0.01);
+            throw new RuntimeException('task failed');
+        },
+        'sibling' => static function () use (&$cancelledSiblingCleaned): void {
+            try {
+                delay(2.0);
+            } finally {
+                $cancelledSiblingCleaned = true;
+            }
+        },
+    ]);
+} catch (RuntimeException $error) {
+    if ($error->getMessage() !== 'task failed') {
+        throw $error;
+    }
+}
+
 $signalHandlerRegistered = false;
 $signalAsyncStateRestored = true;
 $signalHandlerRestored = true;
@@ -124,6 +159,9 @@ echo json_encode([
     'context' => $context,
     'deadlineExpired' => $deadlineExpired,
     'dns' => $addresses,
+    'groupConcurrent' => $groupConcurrent,
+    'groupValues' => $groupValues,
+    'cancelledSiblingCleaned' => $cancelledSiblingCleaned,
     'process' => $process->stdout,
     'processes' => array_map(static fn ($result): string => $result->stdout, $processes),
     'processesConcurrent' => $processesConcurrent,

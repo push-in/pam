@@ -176,6 +176,10 @@ pub fn print_help(executable: &OsStr) {
                 "Certify, observe, scale, and expose controlled Laravel AI tooling",
             ),
             ("exec <script.php>", "Execute a PHP script explicitly"),
+            (
+                "sandbox <manifest>",
+                "Execute PHP under Landlock/seccomp capabilities",
+            ),
             ("composer [args...]", "Run the embedded Composer toolchain"),
             ("test [path]", "Run Pest or PHPUnit inside Pam"),
         ],
@@ -199,6 +203,14 @@ pub fn print_help(executable: &OsStr) {
                 "Inspect one diagnostics subsystem",
             ),
             ("profile | trace", "Capture profiling or trace diagnostics"),
+            (
+                "record [index.php]",
+                "Record redacted HTTP interactions for deterministic replay",
+            ),
+            (
+                "replay <recording>",
+                "Replay and verify recorded HTTP interactions",
+            ),
             ("top [admin-url]", "Stream live runtime metrics"),
             ("benchmark <url>", "Measure throughput and latency"),
         ],
@@ -214,6 +226,10 @@ pub fn print_help(executable: &OsStr) {
             (
                 "build [directory]",
                 "Build a self-contained production bundle",
+            ),
+            (
+                "verify [bundle]",
+                "Verify every file in a production bundle",
             ),
             (
                 "desktop <command>",
@@ -315,10 +331,75 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "Application entry point; default: index.php",
                 ),
                 ("--output DIR", "New bundle directory; default: dist"),
+                (
+                    "--signing-key FILE",
+                    "Sign manifest with an Ed25519 private key",
+                ),
             ],
             &[
                 "build .",
                 "build . --entry public/index.php --output release",
+            ],
+        ),
+        "verify" => (
+            "Verify the integrity and completeness of a production bundle.",
+            "verify [bundle] [options]",
+            &[
+                (
+                    "--public-key FILE",
+                    "Trusted Ed25519 public key for signature verification",
+                ),
+                ("--require-signature", "Reject unsigned production bundles"),
+            ],
+            &[
+                "verify dist",
+                "verify ./release --public-key release.pub --require-signature",
+            ],
+        ),
+        "record" => (
+            "Run an application with the bounded, redacting HTTP flight recorder.",
+            "record [index.php] [options] [-- script-arguments...]",
+            &[
+                (
+                    "--output FILE",
+                    "JSONL output; default: .pam/recordings/latest.jsonl",
+                ),
+                (
+                    "--max-body-bytes N",
+                    "Maximum captured bytes per body; default: 65536",
+                ),
+                (
+                    "--max-bytes N",
+                    "Maximum total recording size; default: 67108864",
+                ),
+            ],
+            &[
+                "record index.php",
+                "record public/index.php --output .pam/incidents/checkout.jsonl",
+            ],
+        ),
+        "sandbox" => (
+            "Run untrusted PHP with fail-closed kernel-enforced capabilities.",
+            "sandbox <pam.capabilities.json> -- <script.php> [arguments...]",
+            &[],
+            &["sandbox pam.capabilities.json -- plugin.php"],
+        ),
+        "replay" => (
+            "Replay a recording against a live runtime and detect divergence.",
+            "replay <recording.jsonl> [options]",
+            &[
+                (
+                    "--url URL",
+                    "Runtime base URL; default: http://127.0.0.1:3000",
+                ),
+                (
+                    "--secret-env NAME=ENV_VAR",
+                    "Inject a redacted input from an environment variable",
+                ),
+            ],
+            &[
+                "replay .pam/recordings/latest.jsonl",
+                "PAM_TEST_TOKEN=value replay incident.jsonl --secret-env token=PAM_TEST_TOKEN",
             ],
         ),
         "test" => (

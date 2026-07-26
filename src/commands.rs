@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::IsTerminal;
@@ -14,7 +14,8 @@ use crate::composer;
 use crate::package_coordinates;
 use crate::php::PhpRuntime;
 use crate::terminal::Terminal;
-use serde::Serialize;
+use base64::Engine;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub fn inspect(executable: &OsStr, script: &Path, arguments: &[OsString]) -> Result<u8, String> {
@@ -235,24 +236,75 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     Ok(0)
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BuildManifest {
-    pam_version: &'static str,
+    pam_version: String,
     target: String,
     entry: String,
     php_library: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<BuildSignature>,
     files: Vec<BuildFile>,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BuildSignature {
+    algorithm: u8,
+    key_id: String,
+    file: String,
+}
+
+#[derive(Deserialize, Serialize)]
 struct BuildFile {
     path: String,
     bytes: u64,
     sha256: String,
 }
 
-pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> {
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CycloneDxBom {
+    bom_format: &'static str,
+    spec_version: &'static str,
+    version: u8,
+    metadata: CycloneDxMetadata,
+    components: Vec<CycloneDxComponent>,
+}
+
+#[derive(Serialize)]
+struct CycloneDxMetadata {
+    component: CycloneDxComponent,
+}
+
+#[derive(Serialize)]
+struct CycloneDxComponent {
+    #[serde(rename = "type")]
+    component_type: &'static str,
+    name: String,
+    version: String,
+    purl: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    licenses: Vec<CycloneDxLicenseChoice>,
+}
+
+#[derive(Serialize)]
+struct CycloneDxLicenseChoice {
+    license: CycloneDxLicense,
+}
+
+#[derive(Serialize)]
+struct CycloneDxLicense {
+    id: String,
+}
+
+pub fn build(
+    project: &Path,
+    output: &Path,
+    entry: &Path,
+    signing_key: Option<&Path>,
+) -> Result<u8, String> {
     if output.exists() {
         return Err(format!(
             "refusing to overwrite build output {}; choose a new --output directory",
@@ -311,6 +363,8 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
     fs::copy(&php_library, library_directory.join(php_library_name))
         .map_err(|error| format!("cannot copy {}: {error}", php_library.display()))?;
 
+    write_sbom(project, output)?;
+
     let entry = entry.to_string_lossy();
     if entry.contains('\'') {
         return Err("build entry cannot contain a single quote".to_owned());
@@ -330,11 +384,13 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
             .map_err(|error| format!("cannot mark launcher executable: {error}"))?;
     }
 
+    let signature = signing_key.map(signature_metadata).transpose()?;
     let manifest = BuildManifest {
-        pam_version: env!("CARGO_PKG_VERSION"),
+        pam_version: env!("CARGO_PKG_VERSION").to_owned(),
         target: std::env::consts::ARCH.to_owned() + "-" + std::env::consts::OS,
         entry: entry.into_owned(),
         php_library: format!("lib/{}", php_library_name.to_string_lossy()),
+        signature,
         files: build_files(output)?,
     };
     fs::write(
@@ -343,6 +399,13 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
             .map_err(|error| format!("cannot serialize build manifest: {error}"))?,
     )
     .map_err(|error| format!("cannot write build manifest: {error}"))?;
+    if let Some(key) = signing_key {
+        sign_manifest(
+            &output.join("manifest.json"),
+            key,
+            &output.join("manifest.sig"),
+        )?;
+    }
 
     let ui = Terminal::stdout();
     println!("{}", ui.success("● PRODUCTION BUNDLE READY"));
@@ -358,6 +421,480 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
         output.display()
     );
     Ok(0)
+}
+
+pub fn verify_bundle(
+    bundle: &Path,
+    public_key: Option<&Path>,
+    require_signature: bool,
+) -> Result<u8, String> {
+    let manifest_path = bundle.join("manifest.json");
+    let manifest_contents = fs::read(&manifest_path)
+        .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
+    let manifest: BuildManifest = serde_json::from_slice(&manifest_contents)
+        .map_err(|error| format!("invalid build manifest: {error}"))?;
+    match (&manifest.signature, public_key) {
+        (Some(signature), Some(key)) => {
+            if signature.algorithm != 1 || signature.file != "manifest.sig" {
+                return Err("unsupported bundle signature contract".to_owned());
+            }
+            let actual_key_id = public_key_id(key)?;
+            if actual_key_id != signature.key_id {
+                return Err(format!(
+                    "trusted public key does not match bundle key ID {}",
+                    signature.key_id
+                ));
+            }
+            verify_manifest_signature(&manifest_path, key, &bundle.join(&signature.file))?;
+        }
+        (Some(_), None) => {
+            return Err("bundle is signed; --public-key is required to establish trust".to_owned());
+        }
+        (None, _) if require_signature => {
+            return Err("bundle is unsigned and --require-signature was requested".to_owned());
+        }
+        (None, _) => {}
+    }
+    let expected = manifest
+        .files
+        .iter()
+        .map(|file| file.path.as_str())
+        .collect::<HashSet<_>>();
+    if expected.len() != manifest.files.len() {
+        return Err("build manifest contains duplicate file paths".to_owned());
+    }
+
+    for file in &manifest.files {
+        let relative = Path::new(&file.path);
+        if relative.is_absolute()
+            || relative.components().any(|component| {
+                !matches!(
+                    component,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            })
+        {
+            return Err(format!(
+                "build manifest contains unsafe path {:?}",
+                file.path
+            ));
+        }
+        let path = bundle.join(relative);
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| format!("missing bundle file {}: {error}", path.display()))?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "bundle entry is not a regular file: {}",
+                path.display()
+            ));
+        }
+        if metadata.len() != file.bytes {
+            return Err(format!(
+                "bundle size mismatch for {}: expected {}, got {}",
+                file.path,
+                file.bytes,
+                metadata.len()
+            ));
+        }
+        let contents =
+            fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        let digest = format!("{:x}", Sha256::digest(contents));
+        if digest != file.sha256 {
+            return Err(format!("bundle digest mismatch for {}", file.path));
+        }
+    }
+
+    let actual = build_files(bundle)?;
+    let extras = actual
+        .iter()
+        .filter(|file| !expected.contains(file.path.as_str()))
+        .map(|file| file.path.as_str())
+        .collect::<Vec<_>>();
+    if !extras.is_empty() {
+        return Err(format!(
+            "bundle contains untracked files: {}",
+            extras.join(", ")
+        ));
+    }
+
+    let ui = Terminal::stdout();
+    println!("{}", ui.success("● BUNDLE VERIFIED"));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Runtime")),
+        manifest.pam_version
+    );
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Target")),
+        manifest.target
+    );
+    println!(
+        "  {} {} files",
+        ui.muted(format!("{:<12}", "Integrity")),
+        manifest.files.len()
+    );
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Signature")),
+        manifest
+            .signature
+            .as_ref()
+            .map(|signature| format!("Ed25519 · {}", signature.key_id))
+            .unwrap_or_else(|| "not present".to_owned())
+    );
+    Ok(0)
+}
+
+fn signature_metadata(key: &Path) -> Result<BuildSignature, String> {
+    Ok(BuildSignature {
+        algorithm: 1,
+        key_id: private_key_id(key)?,
+        file: "manifest.sig".to_owned(),
+    })
+}
+
+fn private_key_id(key: &Path) -> Result<String, String> {
+    let output = Command::new("openssl")
+        .args(["pkey", "-in"])
+        .arg(key)
+        .args(["-pubout", "-outform", "DER"])
+        .output()
+        .map_err(|error| format!("cannot inspect Ed25519 signing key: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "invalid signing key: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(format!("{:x}", Sha256::digest(output.stdout)))
+}
+
+fn public_key_id(key: &Path) -> Result<String, String> {
+    let output = Command::new("openssl")
+        .args(["pkey", "-pubin", "-in"])
+        .arg(key)
+        .args(["-pubout", "-outform", "DER"])
+        .output()
+        .map_err(|error| format!("cannot inspect trusted public key: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "invalid trusted public key: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(format!("{:x}", Sha256::digest(output.stdout)))
+}
+
+fn sign_manifest(manifest: &Path, key: &Path, signature: &Path) -> Result<(), String> {
+    let output = Command::new("openssl")
+        .args(["pkeyutl", "-sign", "-rawin", "-inkey"])
+        .arg(key)
+        .arg("-in")
+        .arg(manifest)
+        .arg("-out")
+        .arg(signature)
+        .output()
+        .map_err(|error| format!("cannot sign bundle manifest: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot sign bundle manifest with Ed25519: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+fn verify_manifest_signature(manifest: &Path, key: &Path, signature: &Path) -> Result<(), String> {
+    let output = Command::new("openssl")
+        .args(["pkeyutl", "-verify", "-pubin", "-rawin", "-inkey"])
+        .arg(key)
+        .arg("-in")
+        .arg(manifest)
+        .arg("-sigfile")
+        .arg(signature)
+        .output()
+        .map_err(|error| format!("cannot verify bundle signature: {error}"))?;
+    if !output.status.success() {
+        return Err("bundle Ed25519 signature verification failed".to_owned());
+    }
+    Ok(())
+}
+
+pub fn prepare_recording(path: &Path, protected: &Path) -> Result<PathBuf, String> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent = fs::canonicalize(parent)
+        .map_err(|error| format!("cannot resolve {}: {error}", parent.display()))?;
+    let name = path
+        .file_name()
+        .ok_or_else(|| "recording output must name a file".to_owned())?;
+    let normalized = parent.join(name);
+    if normalized == protected {
+        return Err("recording output cannot overwrite the PHP entry point".to_owned());
+    }
+    fs::write(path, b"")
+        .map_err(|error| format!("cannot initialize recording {}: {error}", path.display()))?;
+    fs::canonicalize(&normalized)
+        .map_err(|error| format!("cannot resolve recording {}: {error}", path.display()))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct FlightRecord {
+    schema_version: u8,
+    kind: u8,
+    sequence: u64,
+    request: RecordedRequest,
+    response: RecordedResponse,
+}
+
+#[derive(Deserialize)]
+struct RecordedRequest {
+    method: String,
+    target: String,
+    headers: BTreeMap<String, Vec<String>>,
+    body: RecordedBody,
+}
+
+#[derive(Deserialize)]
+struct RecordedResponse {
+    status: u16,
+    body: RecordedBody,
+}
+
+#[derive(Deserialize)]
+struct RecordedBody {
+    encoding: String,
+    data: String,
+    sha256: String,
+    truncated: bool,
+}
+
+pub fn replay(
+    recording: &Path,
+    base_url: &str,
+    secrets: &BTreeMap<String, String>,
+) -> Result<u8, String> {
+    let contents = fs::read_to_string(recording)
+        .map_err(|error| format!("cannot read {}: {error}", recording.display()))?;
+    let endpoint = HttpEndpoint::parse(base_url)?;
+    let mut replayed = 0_usize;
+    for (line_index, line) in contents.lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let record: FlightRecord = serde_json::from_str(line).map_err(|error| {
+            format!(
+                "invalid flight record at {}:{}: {error}",
+                recording.display(),
+                line_index + 1
+            )
+        })?;
+        if record.schema_version != 1 || record.kind != 1 {
+            return Err(format!(
+                "unsupported flight record schema/kind at sequence {}",
+                record.sequence
+            ));
+        }
+        if record.request.body.truncated {
+            return Err(format!(
+                "cannot replay sequence {} because its request body was truncated",
+                record.sequence
+            ));
+        }
+        let target = inject_secrets(&record.request.target, secrets)?;
+        let request_body = decode_recorded_body(&record.request.body)?;
+        let request_body = inject_secrets(&request_body, secrets)?;
+        let mut headers = Vec::new();
+        for (name, values) in &record.request.headers {
+            if matches!(
+                name.as_str(),
+                "host" | "connection" | "content-length" | "transfer-encoding"
+            ) {
+                continue;
+            }
+            for value in values {
+                headers.push((name.clone(), inject_secrets(value, secrets)?));
+            }
+        }
+        let response = endpoint.send(
+            &record.request.method,
+            &target,
+            &headers,
+            request_body.as_bytes(),
+        )?;
+        if response.status != record.response.status {
+            return Err(format!(
+                "replay diverged at sequence {}: expected HTTP {}, got {}",
+                record.sequence, record.response.status, response.status
+            ));
+        }
+        let digest = format!("{:x}", Sha256::digest(&response.body));
+        if digest != record.response.body.sha256 {
+            return Err(format!(
+                "replay diverged at sequence {}: response body digest differs",
+                record.sequence
+            ));
+        }
+        replayed += 1;
+    }
+    if replayed == 0 {
+        return Err("recording contains no HTTP interactions".to_owned());
+    }
+
+    let ui = Terminal::stdout();
+    println!("{}", ui.success("● REPLAY MATCHED"));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {} HTTP interactions",
+        ui.muted(format!("{:<12}", "Verified")),
+        replayed
+    );
+    Ok(0)
+}
+
+fn decode_recorded_body(body: &RecordedBody) -> Result<String, String> {
+    match body.encoding.as_str() {
+        "utf8" => Ok(body.data.clone()),
+        "base64" => {
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(&body.data)
+                .map_err(|error| format!("invalid base64 recorded body: {error}"))?;
+            String::from_utf8(bytes).map_err(|_| {
+                "binary request bodies are not replayable over this CLI yet".to_owned()
+            })
+        }
+        encoding => Err(format!("unsupported recorded body encoding {encoding:?}")),
+    }
+}
+
+fn inject_secrets(value: &str, secrets: &BTreeMap<String, String>) -> Result<String, String> {
+    let mut output = value.to_owned();
+    let mut offset = 0;
+    while let Some(relative) = output[offset..].find("[REDACTED:") {
+        let start = offset + relative;
+        let Some(relative_end) = output[start..].find(']') else {
+            return Err("recording contains an invalid redaction placeholder".to_owned());
+        };
+        let end = start + relative_end;
+        let key = &output[start + 10..end];
+        let secret = secrets.get(key).ok_or_else(|| {
+            format!("replay requires --secret-env {key}=ENV_VAR for a redacted input")
+        })?;
+        output.replace_range(start..=end, secret);
+        offset = start + secret.len();
+    }
+    for (key, secret) in secrets {
+        let encoded = format!("%5BREDACTED%3A{}%5D", key.replace(' ', "%20"));
+        output = output.replace(&encoded, secret);
+    }
+    if output.contains("%5BREDACTED%3A") {
+        return Err("replay requires a --secret-env mapping for a redacted query input".to_owned());
+    }
+    Ok(output)
+}
+
+struct HttpReplayResponse {
+    status: u16,
+    body: Vec<u8>,
+}
+
+fn write_sbom(project: &Path, output: &Path) -> Result<(), String> {
+    let mut components = vec![
+        CycloneDxComponent {
+            component_type: "application",
+            name: "pam-runtime".to_owned(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            purl: format!("pkg:cargo/pam@{}", env!("CARGO_PKG_VERSION")),
+            licenses: vec![CycloneDxLicenseChoice {
+                license: CycloneDxLicense {
+                    id: "MIT".to_owned(),
+                },
+            }],
+        },
+        CycloneDxComponent {
+            component_type: "framework",
+            name: "php".to_owned(),
+            version: "8.4".to_owned(),
+            purl: "pkg:generic/php@8.4".to_owned(),
+            licenses: Vec::new(),
+        },
+    ];
+    let lock_path = project.join("composer.lock");
+    if lock_path.is_file() {
+        let contents = fs::read(&lock_path)
+            .map_err(|error| format!("cannot read {}: {error}", lock_path.display()))?;
+        let lock: serde_json::Value = serde_json::from_slice(&contents)
+            .map_err(|error| format!("invalid {}: {error}", lock_path.display()))?;
+        for section in ["packages", "packages-dev"] {
+            for package in lock[section].as_array().into_iter().flatten() {
+                let Some(name) = package["name"].as_str() else {
+                    return Err(format!("{section} contains a package without a name"));
+                };
+                let Some(version) = package["version"].as_str() else {
+                    return Err(format!("{name} has no locked version"));
+                };
+                let licenses = package["license"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(serde_json::Value::as_str)
+                    .map(|id| CycloneDxLicenseChoice {
+                        license: CycloneDxLicense { id: id.to_owned() },
+                    })
+                    .collect();
+                components.push(CycloneDxComponent {
+                    component_type: "library",
+                    name: name.to_owned(),
+                    version: version.to_owned(),
+                    purl: format!("pkg:composer/{name}@{version}"),
+                    licenses,
+                });
+            }
+        }
+    }
+    components.sort_by(|left, right| {
+        left.purl
+            .cmp(&right.purl)
+            .then_with(|| left.version.cmp(&right.version))
+    });
+    let bom = CycloneDxBom {
+        bom_format: "CycloneDX",
+        spec_version: "1.6",
+        version: 1,
+        metadata: CycloneDxMetadata {
+            component: CycloneDxComponent {
+                component_type: "application",
+                name: project
+                    .file_name()
+                    .and_then(OsStr::to_str)
+                    .unwrap_or("pam-application")
+                    .to_owned(),
+                version: "0.0.0".to_owned(),
+                purl: "pkg:generic/pam-application@0.0.0".to_owned(),
+                licenses: Vec::new(),
+            },
+        },
+        components,
+    };
+    let path = output.join("sbom.cdx.json");
+    fs::write(
+        &path,
+        serde_json::to_vec_pretty(&bom)
+            .map_err(|error| format!("cannot serialize CycloneDX SBOM: {error}"))?,
+    )
+    .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 fn linked_php_library(executable: &Path) -> Result<PathBuf, String> {
@@ -470,13 +1007,20 @@ fn build_files(root: &Path) -> Result<Vec<BuildFile>, String> {
         for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
-            if entry
-                .file_type()
-                .map_err(|error| error.to_string())?
-                .is_dir()
-            {
+            let file_type = entry.file_type().map_err(|error| error.to_string())?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "bundle integrity does not permit symbolic links: {}",
+                    path.display()
+                ));
+            }
+            if file_type.is_dir() {
                 visit(root, &path, files)?;
-            } else if path.file_name() != Some(OsStr::new("manifest.json")) && path.is_file() {
+            } else if !matches!(
+                path.file_name().and_then(OsStr::to_str),
+                Some("manifest.json" | "manifest.sig")
+            ) && path.is_file()
+            {
                 let contents = fs::read(&path)
                     .map_err(|error| format!("cannot hash {}: {error}", path.display()))?;
                 files.push(BuildFile {
@@ -3773,6 +4317,107 @@ impl HttpEndpoint {
             .map_err(|error| error.to_string())?;
         Ok(response)
     }
+
+    fn send(
+        &self,
+        method: &str,
+        target: &str,
+        headers: &[(String, String)],
+        body: &[u8],
+    ) -> Result<HttpReplayResponse, String> {
+        if method.is_empty()
+            || !method
+                .bytes()
+                .all(|byte| byte.is_ascii_uppercase() || byte == b'-')
+        {
+            return Err(format!("recording contains invalid HTTP method {method:?}"));
+        }
+        if !target.starts_with('/') || target.contains('\r') || target.contains('\n') {
+            return Err("recording contains an unsafe HTTP target".to_owned());
+        }
+        let mut stream = TcpStream::connect((self.host.as_str(), self.port))
+            .map_err(|error| format!("cannot connect to replay target: {error}"))?;
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(30)))
+            .map_err(|error| error.to_string())?;
+        write!(
+            stream,
+            "{method} {target} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {}\r\n",
+            self.host,
+            body.len()
+        )
+        .map_err(|error| error.to_string())?;
+        for (name, value) in headers {
+            if name.contains('\r')
+                || name.contains('\n')
+                || value.contains('\r')
+                || value.contains('\n')
+            {
+                return Err("recording contains an unsafe HTTP header".to_owned());
+            }
+            write!(stream, "{name}: {value}\r\n").map_err(|error| error.to_string())?;
+        }
+        stream
+            .write_all(b"\r\n")
+            .and_then(|()| stream.write_all(body))
+            .map_err(|error| error.to_string())?;
+        let mut response = Vec::new();
+        stream
+            .read_to_end(&mut response)
+            .map_err(|error| error.to_string())?;
+        let boundary = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .ok_or("HTTP replay response has no header boundary")?;
+        let head = std::str::from_utf8(&response[..boundary])
+            .map_err(|_| "HTTP replay response headers are not UTF-8")?;
+        let status = head
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .ok_or("HTTP replay response status is missing")?
+            .parse::<u16>()
+            .map_err(|_| "HTTP replay response status is invalid")?;
+        let mut body = response[boundary + 4..].to_vec();
+        if head.lines().any(|line| {
+            line.split_once(':').is_some_and(|(name, value)| {
+                name.eq_ignore_ascii_case("transfer-encoding")
+                    && value.trim().eq_ignore_ascii_case("chunked")
+            })
+        }) {
+            body = decode_chunked_body(&body)?;
+        }
+        Ok(HttpReplayResponse { status, body })
+    }
+}
+
+fn decode_chunked_body(input: &[u8]) -> Result<Vec<u8>, String> {
+    let mut output = Vec::new();
+    let mut offset = 0;
+    loop {
+        let line_end = input[offset..]
+            .windows(2)
+            .position(|window| window == b"\r\n")
+            .map(|position| offset + position)
+            .ok_or("invalid chunked replay response")?;
+        let size_text = std::str::from_utf8(&input[offset..line_end])
+            .map_err(|_| "invalid chunk size")?
+            .split(';')
+            .next()
+            .unwrap_or("");
+        let size = usize::from_str_radix(size_text, 16).map_err(|_| "invalid HTTP chunk size")?;
+        offset = line_end + 2;
+        if size == 0 {
+            break;
+        }
+        let end = offset.checked_add(size).ok_or("HTTP chunk size overflow")?;
+        if end + 2 > input.len() || &input[end..end + 2] != b"\r\n" {
+            return Err("truncated chunked replay response".to_owned());
+        }
+        output.extend_from_slice(&input[offset..end]);
+        offset = end + 2;
+    }
+    Ok(output)
 }
 
 pub fn default_script(target: Option<OsString>) -> PathBuf {

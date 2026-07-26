@@ -187,12 +187,19 @@ pam fibers index.php
 pam connections index.php
 pam profile index.php
 PAM_TRACE=1 pam trace index.php
+pam record index.php --output .pam/incidents/latest.jsonl
+pam replay .pam/incidents/latest.jsonl --url http://127.0.0.1:3000
 ```
 
 Os comandos locais carregam a aplicação e mostram memória/GC, resources, Fibers,
 conexões, perfis e o ring buffer de eventos. `top` lê apenas o control plane e não
 entra na Zend Engine. Trace e profile são opt-in para não adicionar trabalho ao
 caminho crítico normal.
+
+O flight recorder também é opt-in, limitado e faz redaction antes da gravação.
+Use `pam sandbox pam.capabilities.json -- plugin.php` para código de pacote não
+confiável; Landlock e seccomp aplicam o manifesto no kernel. Veja
+[Sandbox, replay e bundles confiáveis](security-and-replay.md).
 
 ## Gate de release
 
@@ -209,6 +216,15 @@ compat/composer-smoke/vendor/bin/phpunit -c compat/composer-smoke/phpunit.xml
 ./target/debug/pam composer audit --working-dir=compat/laravel-smoke --locked
 cargo audit
 pam doctor .
+```
+
+Bundles destinados a produção devem adicionar o gate de assinatura:
+
+```bash
+pam build . --output dist --signing-key /run/secrets/pam-release.key
+pam verify dist \
+  --public-key packaging/pam-release.pub \
+  --require-signature
 ```
 
 O workflow semanal repete auditoria, soak de RSS e smoke de shutdown sob Valgrind.

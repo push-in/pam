@@ -25,7 +25,7 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.26`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.27`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
 **Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
@@ -715,6 +715,8 @@ pam fibers index.php
 pam connections index.php
 pam profile index.php
 PAM_TRACE=1 pam trace index.php
+pam record index.php --output .pam/incidents/latest.jsonl
+pam replay .pam/incidents/latest.jsonl --url http://127.0.0.1:3000
 ```
 
 ## CLI
@@ -732,6 +734,9 @@ pam inspect [index.php]                             inspect PHP, INI, ABI, and e
 pam diagnostics [index.php]                         complete runtime snapshot
 pam heap|fibers|connections [index.php]             focused diagnostic views
 pam profile|trace [index.php]                       profiling and structured events
+pam record [index.php] --output recording.jsonl     bounded redacted flight recorder
+pam replay recording.jsonl --url http://host        replay and detect divergence
+pam sandbox policy.json -- plugin.php               kernel capability sandbox
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
@@ -739,7 +744,8 @@ pam init [directory] --template raw|api|laravel|desktop|mobile|mobile-ui
                                                     scaffold and install a project
 pam init [directory] --template api --socket        add native Socket support
 pam init [directory] --no-interaction               accept the default API preset
-pam build [directory] --entry index.php --output dist
+pam build [directory] --entry index.php --output dist [--signing-key key]
+pam verify [bundle] [--public-key key] [--require-signature]
 ```
 
 `pam dev` watches PHP files, `.env`, `composer.json`, and `composer.lock`, while ignoring heavy/generated directories. A syntax error does not kill the watcher; fix the file and save again.
@@ -780,7 +786,8 @@ count, hardware and response contract have been measured under that protocol.
 
 ```bash
 pam composer install --no-dev --classmap-authoritative
-pam build . --entry index.php --output dist
+pam build . --entry index.php --output dist --signing-key release.key
+pam verify dist --public-key release.pub --require-signature
 ./dist/bin/pam-run
 ```
 
@@ -792,10 +799,15 @@ dist/
 ├── bin/pam         optimized runtime
 ├── bin/pam-run     isolated launcher
 ├── lib/libphp*.so    exact linked PHP Embed ABI
-└── manifest.json     size and SHA-256 for every packaged file
+├── manifest.json     size and SHA-256 for every packaged file
+├── manifest.sig      optional Ed25519 signature
+└── sbom.cdx.json     deterministic CycloneDX 1.6 inventory
 ```
 
-The builder refuses to overwrite its destination, escape the project through `..`, package unsafe symlinks, include the output recursively, or bundle a Composer project without an installed autoloader.
+The builder refuses to overwrite its destination, escape the project through `..`, package unsafe symlinks, include the output recursively, or bundle a Composer project without an installed autoloader. `pam verify` also rejects missing, extra, modified, duplicate and symlinked files. Signed bundles require an external trusted public key; they do not trust a key carried inside the artifact.
+
+Read [Kernel sandbox, flight recorder and trusted bundles](docs/security-and-replay.md)
+for the integer capability manifest, redaction/replay contract and Ed25519 key flow.
 
 Bundles are relocatable, but the target still needs a compatible Linux system ABI and the native dependencies required by PHP and its enabled extensions. Use the provided `Dockerfile` when you need a controlled userspace as well.
 

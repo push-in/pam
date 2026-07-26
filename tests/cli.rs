@@ -107,7 +107,18 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(bundle.join("manifest.json").is_file());
+    assert!(bundle.join("sbom.cdx.json").is_file());
+    let sbom: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle.join("sbom.cdx.json")).unwrap()).unwrap();
+    assert_eq!(sbom["bomFormat"], "CycloneDX");
+    assert_eq!(sbom["specVersion"], "1.6");
     assert!(bundle.join("lib").read_dir().unwrap().next().is_some());
+    let verified = run_pam(&["verify", bundle.to_str().unwrap()]);
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
     let bundled = Command::new(bundle.join("bin/pam-run")).output().unwrap();
     assert!(
         bundled.status.success(),
@@ -118,8 +129,170 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
         String::from_utf8_lossy(&bundled.stdout),
         "Hello from PHP!\n"
     );
+    fs::write(bundle.join("app/index.php"), "<?php echo 'tampered';").unwrap();
+    let rejected = run_pam(&["verify", bundle.to_str().unwrap()]);
+    assert!(!rejected.status.success());
+    assert!(
+        String::from_utf8_lossy(&rejected.stderr).contains("mismatch"),
+        "{}",
+        String::from_utf8_lossy(&rejected.stderr)
+    );
     fs::remove_dir_all(project).unwrap();
     fs::remove_dir_all(bundle).unwrap();
+}
+
+#[test]
+fn signs_and_verifies_a_production_bundle_with_external_ed25519_trust() {
+    let project = temporary_path("signed-build-project");
+    let bundle = temporary_path("signed-build-bundle");
+    let private_key = temporary_path("signed-build-private.pem");
+    let public_key = temporary_path("signed-build-public.pem");
+    fs::create_dir(&project).unwrap();
+    fs::copy(fixture("hello.php"), project.join("index.php")).unwrap();
+    let generated = Command::new("openssl")
+        .args(["genpkey", "-algorithm", "ED25519", "-out"])
+        .arg(&private_key)
+        .output()
+        .unwrap();
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+    let exported = Command::new("openssl")
+        .args(["pkey", "-in"])
+        .arg(&private_key)
+        .args(["-pubout", "-out"])
+        .arg(&public_key)
+        .output()
+        .unwrap();
+    assert!(
+        exported.status.success(),
+        "{}",
+        String::from_utf8_lossy(&exported.stderr)
+    );
+
+    let built = run_pam(&[
+        "build",
+        project.to_str().unwrap(),
+        "--output",
+        bundle.to_str().unwrap(),
+        "--signing-key",
+        private_key.to_str().unwrap(),
+    ]);
+    assert!(
+        built.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&built.stdout),
+        String::from_utf8_lossy(&built.stderr)
+    );
+    assert!(bundle.join("manifest.sig").is_file());
+
+    let untrusted = run_pam(&["verify", bundle.to_str().unwrap()]);
+    assert!(!untrusted.status.success());
+    assert!(
+        String::from_utf8_lossy(&untrusted.stderr).contains("--public-key"),
+        "{}",
+        String::from_utf8_lossy(&untrusted.stderr)
+    );
+    let trusted = run_pam(&[
+        "verify",
+        bundle.to_str().unwrap(),
+        "--public-key",
+        public_key.to_str().unwrap(),
+        "--require-signature",
+    ]);
+    assert!(
+        trusted.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&trusted.stdout),
+        String::from_utf8_lossy(&trusted.stderr)
+    );
+
+    let manifest_path = bundle.join("manifest.json");
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["pamVersion"] = serde_json::json!("9.9.9");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+    let tampered = run_pam(&[
+        "verify",
+        bundle.to_str().unwrap(),
+        "--public-key",
+        public_key.to_str().unwrap(),
+    ]);
+    assert!(!tampered.status.success());
+    assert!(
+        String::from_utf8_lossy(&tampered.stderr).contains("signature verification failed"),
+        "{}",
+        String::from_utf8_lossy(&tampered.stderr)
+    );
+
+    fs::remove_dir_all(project).unwrap();
+    fs::remove_dir_all(bundle).unwrap();
+    fs::remove_file(private_key).unwrap();
+    fs::remove_file(public_key).unwrap();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn enforces_kernel_capabilities_for_untrusted_php() {
+    let directory = temporary_path("kernel-sandbox");
+    fs::create_dir(&directory).unwrap();
+    fs::write(directory.join("allowed.txt"), "allowed").unwrap();
+    fs::write(
+        directory.join("pam.capabilities.json"),
+        r#"{
+  "schemaVersion": 1,
+  "capabilities": [
+    {"kind": 1, "resources": ["."]},
+    {"kind": 5, "resources": ["PAM_ALLOWED_TEST"]}
+  ]
+}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.join("plugin.php"),
+        r#"<?php
+echo json_encode([
+    'allowedFile' => file_get_contents(__DIR__ . '/allowed.txt'),
+    'deniedFile' => @file_get_contents('/etc/passwd') === false,
+    'allowedEnvironment' => getenv('PAM_ALLOWED_TEST'),
+    'hiddenEnvironment' => getenv('PAM_HIDDEN_TEST') === false,
+    'networkDenied' => @stream_socket_client('tcp://127.0.0.1:9') === false,
+    'processDenied' => @proc_open(['/bin/true'], [], $pipes) === false,
+], JSON_THROW_ON_ERROR);
+"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .arg("sandbox")
+        .arg(directory.join("pam.capabilities.json"))
+        .arg("--")
+        .arg(directory.join("plugin.php"))
+        .env("PAM_ALLOWED_TEST", "visible")
+        .env("PAM_HIDDEN_TEST", "must-not-leak")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(contract["allowedFile"], "allowed");
+    assert_eq!(contract["deniedFile"], true);
+    assert_eq!(contract["allowedEnvironment"], "visible");
+    assert_eq!(contract["hiddenEnvironment"], true);
+    assert_eq!(contract["networkDenied"], true);
+    assert_eq!(contract["processDenied"], true);
+
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[cfg(unix)]
@@ -235,6 +408,12 @@ fn runs_fibers_and_isolated_process_tasks() {
     );
     assert_eq!(payload["context"], "fiber-context");
     assert_eq!(payload["deadlineExpired"], true);
+    assert_eq!(payload["groupConcurrent"], true);
+    assert_eq!(
+        payload["groupValues"],
+        serde_json::json!({"first": "one", "second": "two"})
+    );
+    assert_eq!(payload["cancelledSiblingCleaned"], true);
     assert!(
         payload["dns"]
             .as_array()

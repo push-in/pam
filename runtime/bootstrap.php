@@ -969,6 +969,7 @@ namespace Pam\Internal {
             $response = new Response();
             $temporaryUploads = [];
             $outputLevel = ob_get_level();
+            $recordStarted = (int) hrtime(true);
 
             try {
                 $path = parse_url($target, PHP_URL_PATH) ?: '/';
@@ -1123,6 +1124,15 @@ namespace Pam\Internal {
                 unset($request, $response, $handler, $result, $psrResponse);
             }
 
+            \Pam\Replay\FlightRecorder::captureHttp(
+                is_string($profileRequestId ?? null) ? $profileRequestId : '',
+                $method,
+                $target,
+                is_array($headers ?? null) ? $headers : [],
+                $body,
+                $serialized,
+                $recordStarted,
+            );
             return $serialized;
         }
 

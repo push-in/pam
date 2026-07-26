@@ -5,6 +5,19 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.27 - 2026-07-26
+
+- Added Linux kernel-enforced package capabilities with Landlock filesystem
+  rules, seccomp network/process denial and explicit environment allowlists.
+- Added a bounded, redacting HTTP flight recorder and deterministic replay
+  command with secret reinjection and response divergence detection.
+- Added structured PHP task groups with shared deadlines, sibling cancellation
+  and Fiber cleanup guarantees.
+- Added deterministic CycloneDX 1.6 SBOM generation, complete bundle
+  verification and externally trusted Ed25519 manifest signatures.
+- Expanded the strict integration gate to 52 tests across the runtime, Laravel,
+  cluster, memory, HTTP/2/3, WebSocket, sandbox, replay and supply chain.
+
 ## 0.1.22 - 2026-07-25
 
 - Staged incoming navigation routes before the first rendered transition frame,
