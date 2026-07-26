@@ -14,6 +14,7 @@ mod doctor;
 mod mobile;
 mod package_coordinates;
 mod php;
+mod protocol;
 mod rpc;
 mod sandbox;
 mod server;

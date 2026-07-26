@@ -13,6 +13,7 @@ use std::time::Instant;
 use crate::composer;
 use crate::package_coordinates;
 use crate::php::PhpRuntime;
+use crate::protocol::{MAX_HTTP_RESPONSE_BYTES, decode_chunked_body};
 use crate::terminal::Terminal;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -5197,11 +5198,7 @@ impl HttpEndpoint {
             self.target, self.host
         )
         .map_err(|error| error.to_string())?;
-        let mut response = Vec::new();
-        stream
-            .read_to_end(&mut response)
-            .map_err(|error| error.to_string())?;
-        Ok(response)
+        read_bounded_http_response(&mut stream)
     }
 
     fn send(
@@ -5247,10 +5244,7 @@ impl HttpEndpoint {
             .write_all(b"\r\n")
             .and_then(|()| stream.write_all(body))
             .map_err(|error| error.to_string())?;
-        let mut response = Vec::new();
-        stream
-            .read_to_end(&mut response)
-            .map_err(|error| error.to_string())?;
+        let response = read_bounded_http_response(&mut stream)?;
         let boundary = response
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -5271,39 +5265,27 @@ impl HttpEndpoint {
                     && value.trim().eq_ignore_ascii_case("chunked")
             })
         }) {
-            body = decode_chunked_body(&body)?;
+            body = decode_chunked_body(&body, MAX_HTTP_RESPONSE_BYTES)?;
         }
         Ok(HttpReplayResponse { status, body })
     }
 }
 
-fn decode_chunked_body(input: &[u8]) -> Result<Vec<u8>, String> {
-    let mut output = Vec::new();
-    let mut offset = 0;
-    loop {
-        let line_end = input[offset..]
-            .windows(2)
-            .position(|window| window == b"\r\n")
-            .map(|position| offset + position)
-            .ok_or("invalid chunked replay response")?;
-        let size_text = std::str::from_utf8(&input[offset..line_end])
-            .map_err(|_| "invalid chunk size")?
-            .split(';')
-            .next()
-            .unwrap_or("");
-        let size = usize::from_str_radix(size_text, 16).map_err(|_| "invalid HTTP chunk size")?;
-        offset = line_end + 2;
-        if size == 0 {
-            break;
-        }
-        let end = offset.checked_add(size).ok_or("HTTP chunk size overflow")?;
-        if end + 2 > input.len() || &input[end..end + 2] != b"\r\n" {
-            return Err("truncated chunked replay response".to_owned());
-        }
-        output.extend_from_slice(&input[offset..end]);
-        offset = end + 2;
+fn read_bounded_http_response(stream: &mut TcpStream) -> Result<Vec<u8>, String> {
+    let limit = u64::try_from(MAX_HTTP_RESPONSE_BYTES)
+        .map_err(|_| "HTTP response limit is unsupported on this platform")?;
+    let mut response = Vec::new();
+    stream
+        .take(limit + 1)
+        .read_to_end(&mut response)
+        .map_err(|error| error.to_string())?;
+    if response.len() > MAX_HTTP_RESPONSE_BYTES {
+        return Err(format!(
+            "HTTP response exceeds {} bytes",
+            MAX_HTTP_RESPONSE_BYTES
+        ));
     }
-    Ok(output)
+    Ok(response)
 }
 
 pub fn default_script(target: Option<OsString>) -> PathBuf {
