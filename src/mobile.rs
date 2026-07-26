@@ -2059,7 +2059,7 @@ fn build(options: MobileOptions) -> Result<BuiltApk, String> {
 fn benchmark(project_path: PathBuf) -> Result<u8, String> {
     run_android_performance_suite(
         project_path,
-        "dev.pam.nativeapp.benchmark.PamNativeBenchmark",
+        "dev.pam.nativeapp.benchmark.PamNativeBenchmark#startup",
         "Benchmark",
     )
 }
