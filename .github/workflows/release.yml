@@ -21,6 +21,8 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -55,6 +57,11 @@ jobs:
             target/x86_64-linux-android/release/libpam_native_engine.a
           sha256sum pam-android-runtime.tar.gz > \
             pam-android-runtime.tar.gz.sha256
+      - name: Attest Android runtime bundle
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest@v4
+        with:
+          subject-path: pam-android-runtime.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: pam-android-runtime
