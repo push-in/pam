@@ -127,17 +127,21 @@ impl Default for AndroidOptions {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NativeModule {
     name: String,
     class: String,
+    #[serde(default)]
+    ios_class: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct NativeView {
     name: String,
     class: String,
+    #[serde(default)]
+    ios_class: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -192,6 +196,8 @@ struct PluginManifest {
     #[serde(default)]
     android: PluginAndroid,
     #[serde(default)]
+    ios: PluginIos,
+    #[serde(default)]
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
@@ -240,6 +246,27 @@ struct PluginAndroid {
     consumer_rules: Option<PathBuf>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PluginIos {
+    #[serde(default = "default_ios_version")]
+    minimum_version: String,
+    #[serde(default)]
+    source_dirs: Vec<PathBuf>,
+    #[serde(default)]
+    resource_dirs: Vec<PathBuf>,
+}
+
+impl Default for PluginIos {
+    fn default() -> Self {
+        Self {
+            minimum_version: default_ios_version(),
+            source_dirs: Vec::new(),
+            resource_dirs: Vec::new(),
+        }
+    }
+}
+
 #[derive(Debug)]
 struct NativePlugin {
     package: String,
@@ -273,6 +300,10 @@ struct PluginLockEntry<'a> {
 
 fn default_min_sdk() -> u32 {
     26
+}
+
+fn default_ios_version() -> String {
+    "15.0".to_owned()
 }
 
 fn default_target_sdk() -> u32 {
@@ -330,7 +361,13 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             configure_android(&project, &native_home, &workspace, &default_abis())?;
             generate_modules(&project, &workspace)?;
             generate_views(&project, &workspace)?;
-            println!("Generated Android bindings for {}", project.manifest.name);
+            let ios_workspace = sync_ios_host(&project, &native_home)?;
+            generate_ios_modules(&project, &ios_workspace)?;
+            generate_ios_views(&project, &ios_workspace)?;
+            println!(
+                "Generated Android and iOS bindings for {}",
+                project.manifest.name,
+            );
             Ok(0)
         }
         "build" => {
@@ -815,11 +852,26 @@ fn validate_plugin_manifest(
     for path in plugin_paths(&manifest.android) {
         validate_plugin_path(package, root, path)?;
     }
+    if !valid_ios_version(&manifest.ios.minimum_version) {
+        return Err(format!(
+            "plugin {package} has invalid ios.minimumVersion {:?}",
+            manifest.ios.minimum_version,
+        ));
+    }
+    for path in plugin_ios_paths(&manifest.ios) {
+        validate_plugin_path(package, root, path)?;
+    }
     for binding in &manifest.modules {
         validate_binding(package, "module", &binding.name, &binding.class)?;
+        if let Some(class) = &binding.ios_class {
+            validate_ios_binding(package, "module", &binding.name, class)?;
+        }
     }
     for binding in &manifest.views {
         validate_binding(package, "view", &binding.name, &binding.class)?;
+        if let Some(class) = &binding.ios_class {
+            validate_ios_binding(package, "view", &binding.name, class)?;
+        }
     }
     Ok(())
 }
@@ -866,6 +918,38 @@ fn plugin_paths(android: &PluginAndroid) -> Vec<&PathBuf> {
     paths.extend(android.manifest.iter());
     paths.extend(android.consumer_rules.iter());
     paths
+}
+
+fn plugin_ios_paths(ios: &PluginIos) -> Vec<&PathBuf> {
+    ios.source_dirs.iter().chain(&ios.resource_dirs).collect()
+}
+
+fn valid_ios_version(value: &str) -> bool {
+    let mut parts = value.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next()),
+        (Some(major), Some(minor), None)
+            if major.parse::<u32>().is_ok() && minor.parse::<u32>().is_ok()
+    )
+}
+
+fn validate_ios_binding(package: &str, kind: &str, name: &str, class: &str) -> Result<(), String> {
+    if class.is_empty()
+        || class.len() > 255
+        || !class.split('.').all(|segment| {
+            let mut characters = segment.chars();
+            characters
+                .next()
+                .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
+                && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
+        })
+    {
+        return Err(format!(
+            "plugin {package} {kind} {name:?} has invalid iOS class {class:?}",
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_plugin_path(package: &str, root: &Path, path: &Path) -> Result<(), String> {
@@ -1286,6 +1370,9 @@ fn prepare(project: &Project, native_home: &Path, abis: &[AndroidAbi]) -> Result
     generate_modules(project, &workspace)?;
     generate_views(project, &workspace)?;
     stage_project(project, &workspace)?;
+    let ios_workspace = sync_ios_host(project, native_home)?;
+    generate_ios_modules(project, &ios_workspace)?;
+    generate_ios_views(project, &ios_workspace)?;
     Ok(workspace)
 }
 
@@ -1304,6 +1391,32 @@ fn sync_android_host(project: &Project, native_home: &Path) -> Result<PathBuf, S
         &destination,
         &[".gradle", "build", ".cxx", "local.properties"],
     )?;
+    Ok(destination)
+}
+
+fn sync_ios_host(project: &Project, native_home: &Path) -> Result<PathBuf, String> {
+    let source = native_home.join("ios");
+    let destination = project.root.join(".pam-native/ios");
+    fs::create_dir_all(&destination)
+        .map_err(|error| format!("cannot create {}: {error}", destination.display()))?;
+    prune_tree(&source, &destination, &[".build"])?;
+    copy_tree(&source, &destination, &[".build"])?;
+
+    let plugins_root = destination.join("Sources/PamNative/Plugins");
+    fs::create_dir_all(&plugins_root)
+        .map_err(|error| format!("cannot create {}: {error}", plugins_root.display()))?;
+    for (index, plugin) in project.plugins.iter().enumerate() {
+        for (source_index, relative) in plugin.manifest.ios.source_dirs.iter().enumerate() {
+            let plugin_source = plugin.root.join(relative);
+            let plugin_destination =
+                plugins_root.join(format!("plugin-{index}/source-{source_index}"));
+            fs::create_dir_all(&plugin_destination).map_err(|error| {
+                format!("cannot create {}: {error}", plugin_destination.display())
+            })?;
+            copy_tree(&plugin_source, &plugin_destination, &[])?;
+        }
+    }
+
     Ok(destination)
 }
 
@@ -1819,6 +1932,50 @@ fn generate_views(project: &Project, workspace: &Path) -> Result<(), String> {
         source.push_str("        context.applicationContext\n");
     }
     source.push_str("    }\n}\n");
+    write_atomic(&target, source.as_bytes())
+}
+
+fn generate_ios_modules(project: &Project, workspace: &Path) -> Result<(), String> {
+    let target = workspace.join("Sources/PamNative/Modules/GeneratedPamModules.swift");
+    let mut source = String::from(
+        "import Foundation\n\n\
+         public enum GeneratedPamModules {\n\
+         \x20   public static func create() -> [String: NativeModule] {\n\
+         \x20       return [\n",
+    );
+    for module in project.manifest.modules.iter().chain(
+        project
+            .plugins
+            .iter()
+            .flat_map(|plugin| plugin.manifest.modules.iter()),
+    ) {
+        if let Some(class) = &module.ios_class {
+            source.push_str(&format!("            {:?}: {}(),\n", module.name, class));
+        }
+    }
+    source.push_str("        ]\n    }\n}\n");
+    write_atomic(&target, source.as_bytes())
+}
+
+fn generate_ios_views(project: &Project, workspace: &Path) -> Result<(), String> {
+    let target = workspace.join("Sources/PamNative/Views/GeneratedPamViews.swift");
+    let mut source = String::from(
+        "import Foundation\nimport UIKit\n\n\
+         public enum GeneratedPamViews {\n\
+         \x20   public static func create() -> [String: NativeViewFactory] {\n\
+         \x20       return [\n",
+    );
+    for view in project.manifest.views.iter().chain(
+        project
+            .plugins
+            .iter()
+            .flat_map(|plugin| plugin.manifest.views.iter()),
+    ) {
+        if let Some(class) = &view.ios_class {
+            source.push_str(&format!("            {:?}: {}(),\n", view.name, class));
+        }
+    }
+    source.push_str("        ]\n    }\n}\n");
     write_atomic(&target, source.as_bytes())
 }
 
@@ -3084,9 +3241,32 @@ mod tests {
         let native_package = root.join("vendor/pushinbr/pam-native");
         let composer = root.join("vendor/composer");
         let source = package.join("android/src/main/kotlin");
+        let ios_source = package.join("ios/Sources/Example");
         fs::create_dir_all(&source).expect("plugin source");
+        fs::create_dir_all(&ios_source).expect("plugin iOS source");
         fs::create_dir_all(&native_package).expect("native package");
+        fs::create_dir_all(native_package.join("ios/Sources/PamNative/Modules"))
+            .expect("native iOS modules");
+        fs::create_dir_all(native_package.join("ios/Sources/PamNative/Views"))
+            .expect("native iOS views");
         fs::create_dir_all(&composer).expect("composer");
+        fs::write(
+            ios_source.join("ExampleFactories.swift"),
+            "final class ExampleBadgeFactory {}\n",
+        )
+        .expect("plugin Swift source");
+        fs::write(native_package.join("ios/Package.swift"), "// package\n")
+            .expect("native iOS package");
+        fs::write(
+            native_package.join("ios/Sources/PamNative/Modules/GeneratedPamModules.swift"),
+            "// generated\n",
+        )
+        .expect("native iOS modules registry");
+        fs::write(
+            native_package.join("ios/Sources/PamNative/Views/GeneratedPamViews.swift"),
+            "// generated\n",
+        )
+        .expect("native iOS views registry");
         fs::write(root.join("vendor/autoload.php"), "<?php\n").expect("autoload");
         fs::write(root.join("index.php"), "<?php\n").expect("entry");
         fs::write(
@@ -3137,13 +3317,19 @@ mod tests {
                     "permissions": ["android.permission.CAMERA"],
                     "dependencies": ["androidx.core:core-ktx:1.17.0"]
                 },
+                "ios": {
+                    "minimumVersion": "15.0",
+                    "sourceDirs": ["ios/Sources/Example"]
+                },
                 "modules": [{
                     "name": "community.echo",
-                    "class": "community.example.EchoModule"
+                    "class": "community.example.EchoModule",
+                    "iosClass": "ExampleEchoModule"
                 }],
                 "views": [{
                     "name": "community.badge",
-                    "class": "community.example.BadgeFactory"
+                    "class": "community.example.BadgeFactory",
+                    "iosClass": "ExampleBadgeFactory"
                 }]
             }"#,
         )
@@ -3161,6 +3347,9 @@ mod tests {
         generate_plugin_projects(&project, &workspace).expect("autolink");
         generate_modules(&project, &workspace).expect("module codegen");
         generate_views(&project, &workspace).expect("view codegen");
+        let ios_workspace = sync_ios_host(&project, &native_package).expect("iOS autolink");
+        generate_ios_modules(&project, &ios_workspace).expect("iOS module codegen");
+        generate_ios_views(&project, &ios_workspace).expect("iOS view codegen");
         write_plugin_lock(&project).expect("plugin lock");
 
         let build = fs::read_to_string(workspace.join("pam-plugins/plugin-0/build.gradle.kts"))
@@ -3172,6 +3361,21 @@ mod tests {
         )
         .expect("generated modules");
         assert!(modules.contains("community.example.EchoModule(context)"));
+        let ios_modules = fs::read_to_string(
+            ios_workspace.join("Sources/PamNative/Modules/GeneratedPamModules.swift"),
+        )
+        .expect("generated iOS modules");
+        assert!(ios_modules.contains("\"community.echo\": ExampleEchoModule()"));
+        let ios_views = fs::read_to_string(
+            ios_workspace.join("Sources/PamNative/Views/GeneratedPamViews.swift"),
+        )
+        .expect("generated iOS views");
+        assert!(ios_views.contains("\"community.badge\": ExampleBadgeFactory()"));
+        assert!(
+            ios_workspace
+                .join("Sources/PamNative/Plugins/plugin-0/source-0/ExampleFactories.swift")
+                .is_file()
+        );
         let lock =
             fs::read_to_string(root.join(".pam-native/plugins.lock.json")).expect("generated lock");
         assert!(lock.contains("\"package\": \"community/example\""));
