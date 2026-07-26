@@ -22,7 +22,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: 5d45425103f4d2fa81cbfb6f801542ae84205a1b
@@ -55,7 +55,7 @@ jobs:
             target/x86_64-linux-android/release/libpam_native_engine.a
           sha256sum pam-android-runtime.tar.gz > \
             pam-android-runtime.tar.gz.sha256
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-android-runtime
           path: |
@@ -67,7 +67,7 @@ jobs:
     name: Verify public Composer packages
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - uses: shivammathur/setup-php@v2
@@ -106,23 +106,23 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             ca-certificates curl git gnupg software-properties-common sudo \
             unzip zstd
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: 5d45425103f4d2fa81cbfb6f801542ae84205a1b
           path: pam-native
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-mobile-ui
           ref: 68f3bcca094b2aecd08797064a50384dfac0740c
           path: pam-mobile-ui
           ssh-key: ${{ secrets.PAM_MOBILE_UI_READ_KEY }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pam-android-runtime
           path: android-runtime
@@ -183,7 +183,7 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: dist/*.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-${{ matrix.target }}
           path: |
@@ -202,11 +202,11 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: pam-*
           path: dist

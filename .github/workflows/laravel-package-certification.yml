@@ -23,7 +23,7 @@ jobs:
     outputs:
       packages: ${{ steps.matrix.outputs.packages }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - id: matrix
         run: |
           printf 'packages=%s\n' "$(
@@ -54,7 +54,7 @@ jobs:
       matrix: ${{ fromJSON(needs.matrix.outputs.packages) }}
     name: ${{ matrix.package }} / Laravel ${{ matrix.laravel }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.97.1
       - uses: shivammathur/setup-php@v2
         with:
@@ -99,7 +99,7 @@ jobs:
               }' >"${PAM_CERTIFICATION_RESULTS}/${{ strategy.job-index }}-failed.json"
           fi
           exit "${certification_status}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: certification-${{ strategy.job-index }}
@@ -111,7 +111,7 @@ jobs:
     if: always()
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: certification-*
           path: certification-results
@@ -121,7 +121,7 @@ jobs:
           find certification-results -type f -name '*.json' -print0 |
             sort -z |
             xargs -0 jq -s 'sort_by(.package, .laravel)' > certification-results.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: laravel-package-certification
           path: certification-results.json

@@ -14,14 +14,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: e379855f12ee37518b16b6c4e25821b7d4d63f4c
           path: pam-native
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-mobile-ui
           ref: 20eb75d2bf55bef1f7de1b11ce442c771606eb69
@@ -117,7 +117,7 @@ jobs:
               }
           }
           '
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-linux-x86_64
           path: target/release/pam

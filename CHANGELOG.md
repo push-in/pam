@@ -10,6 +10,8 @@ after the first stable release.
 - Raised the pinned Rust production toolchain to 1.97.1 and extended the
   Packagist propagation gate so a slow mirror cannot race an otherwise valid
   release.
+- Upgraded GitHub artifact and checkout actions to their Node 24 lines, with
+  fail-closed digest verification for downloaded release artifacts.
 - Added denied-by-default WASI Preview 1 execution with explicit filesystem and
   environment grants, bounded input/output, fuel, memory and joined wall-clock
   deadline interruption.
