@@ -14,10 +14,12 @@ mod doctor;
 mod mobile;
 mod package_coordinates;
 mod php;
+mod rpc;
 mod sandbox;
 mod server;
 mod supply_chain;
 mod terminal;
+mod wasi;
 mod worker_state;
 
 const EX_USAGE: u8 = 64;
@@ -340,6 +342,32 @@ fn run() -> Result<u8, CliError> {
             },
         )
         .map_err(CliError::Commands);
+    }
+
+    if script_arg == "wasi" {
+        let arguments = raw_args.collect::<Vec<_>>();
+        if arguments
+            .iter()
+            .take(2)
+            .any(|argument| argument == "--help" || argument == "-h")
+        {
+            terminal::print_command_help(&executable, "wasi");
+            return Ok(0);
+        }
+        return wasi::run(arguments).map_err(CliError::Commands);
+    }
+
+    if script_arg == "rpc" {
+        let arguments = raw_args.collect::<Vec<_>>();
+        if arguments
+            .iter()
+            .take(2)
+            .any(|argument| argument == "--help" || argument == "-h")
+        {
+            terminal::print_command_help(&executable, "rpc");
+            return Ok(0);
+        }
+        return rpc::run(arguments).map_err(CliError::Commands);
     }
 
     if script_arg == "contracts" {

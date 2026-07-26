@@ -10,7 +10,7 @@ Write elegant PHP. Keep Composer. Serve HTTP, WebSockets, and asynchronous I/O f
 
 ![Status](https://img.shields.io/badge/status-experimental-f59e0b?style=flat-square)
 ![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
-![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?style=flat-square&logo=rust&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.94%2B-000000?style=flat-square&logo=rust&logoColor=white)
 ![HTTP](https://img.shields.io/badge/HTTP-1.1%20%7C%202%20%7C%203-2563eb?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-22c55e?style=flat-square)
 
@@ -25,9 +25,9 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.31`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.32`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
-**Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
+**Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [WASI and typed RPC](docs/wasi-and-rpc.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
 ## Why Pam?
 
@@ -102,7 +102,7 @@ there is no accidental dependency on `/etc/php`.
 <details>
 <summary>Building PAM itself from source</summary>
 
-Runtime contributors need Rust 1.88+, a C toolchain, matching PHP 8.4 development
+Runtime contributors need Rust 1.94+, a C toolchain, matching PHP 8.4 development
 headers and the Embed library:
 
 ```bash
@@ -509,6 +509,9 @@ idempotent starts, resumable timers and reverse-order compensation.
 Use [Typed contracts](docs/typed-contracts.md) to generate JSON Schema, OpenAPI,
 TypeScript, Kotlin, mobile, form, migration, MCP and reference artifacts from
 PHP DTOs and sequential integer enums.
+Use [WASI and typed RPC](docs/wasi-and-rpc.md) to run capability-denied
+WebAssembly modules, validate requests and responses against those contracts,
+and generate TypeScript, Python and Rust SDKs.
 
 ## Streaming and backpressure
 
@@ -768,6 +771,8 @@ pam contracts [index.php] --output generated/contracts
                                                     generate typed boundary artifacts
 pam snapshot create|verify|run                      integrity-checked cold starts
 pam supply-chain [directory] --policy policy.json  Composer trust/policy gate
+pam wasi run module.wasm [capability options]       bounded denied-by-default WASI
+pam rpc validate|generate|wasi [arguments]          typed SDK and WASI RPC boundary
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
@@ -920,11 +925,12 @@ The integration suite starts real servers and covers CLI behavior, hot reload, m
 
 Latest local release gate:
 
-- **38 Rust and end-to-end tests passed**;
+- **62 Rust and end-to-end tests passed**;
 - **PHPStan level 9 passed with no errors**;
 - **PHPUnit passed inside the Embed SAPI with 7 tests and 43 assertions; Pest passed inside Embed**;
+- **generated TypeScript, Python and Rust RPC SDK syntax gates passed**;
 - **Composer audit reported no known advisories in either locked contract**;
-- **Cargo audit reported no known vulnerabilities across 193 locked dependencies**.
+- **Cargo audit reported no known vulnerabilities across 283 locked dependencies**.
 
 The optimized 10,000-request runtime soak measured a `51 MiB` post-warmup baseline
 and high-water mark with `0 MiB` sustained growth. The mixed Laravel/package soak

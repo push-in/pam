@@ -190,6 +190,14 @@ pub fn print_help(executable: &OsStr) {
                 "supply-chain [path]",
                 "Audit Composer provenance, policy and capabilities",
             ),
+            (
+                "wasi run <module.wasm>",
+                "Run WebAssembly with denied-by-default WASI capabilities",
+            ),
+            (
+                "rpc validate|generate|wasi",
+                "Validate typed RPC and execute bounded WASI services",
+            ),
         ],
     );
     command_group(
@@ -412,6 +420,34 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "contracts bootstrap/contracts.php --output generated/api",
             ],
         ),
+        "rpc" => (
+            "Validate typed service boundaries, generate SDKs, and invoke capability-safe WASI guests.",
+            "rpc <validate|generate|wasi> [arguments] [options]",
+            &[
+                (
+                    "--contracts FILE",
+                    "Generated contracts.mobile.json catalog",
+                ),
+                (
+                    "--output DIR",
+                    "Generated TypeScript, Python, Rust, manifest and docs directory",
+                ),
+                ("--fuel N", "Maximum WASI instructions for one RPC call"),
+                (
+                    "--memory-bytes N",
+                    "Maximum linear memory for one WASI RPC guest",
+                ),
+                (
+                    "--request-id ID",
+                    "Stable correlation/idempotency identifier for a WASI call",
+                ),
+            ],
+            &[
+                "rpc validate pam.rpc.json --contracts generated/contracts/contracts.mobile.json",
+                "rpc generate pam.rpc.json --contracts generated/contracts/contracts.mobile.json --output generated/rpc",
+                "rpc wasi pam.rpc.json service.wasm createOrder request.json --contracts generated/contracts/contracts.mobile.json",
+            ],
+        ),
         "snapshot" => (
             "Create, verify, or run a deterministic integrity-checked PHP source snapshot.",
             "snapshot <create|verify|run> [arguments] [options]",
@@ -454,6 +490,37 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[
                 "supply-chain . --policy pam.supply-chain.json",
                 "supply-chain package --capabilities package/pam.capabilities.json --offline",
+            ],
+        ),
+        "wasi" => (
+            "Run a WASIp1 module with bounded resources and denied-by-default capabilities.",
+            "wasi run <module.wasm> [options] [-- guest-arguments...]",
+            &[
+                ("--stdin FILE", "Provide bounded binary stdin from a file"),
+                (
+                    "--env NAME",
+                    "Expose one selected host environment variable",
+                ),
+                (
+                    "--read-dir HOST=GUEST",
+                    "Preopen one host directory read-only",
+                ),
+                (
+                    "--write-dir HOST=GUEST",
+                    "Preopen one host directory with write access",
+                ),
+                ("--fuel N", "Instruction budget; default: 100000000"),
+                ("--memory-bytes N", "Linear-memory limit; default: 67108864"),
+                (
+                    "--max-output-bytes N",
+                    "Per-stream output limit; default: 8388608",
+                ),
+                ("--timeout-ms N", "Wall deadline; default: 30000"),
+            ],
+            &[
+                "wasi run plugin.wasm",
+                "wasi run transform.wasm --stdin request.json -- --compact",
+                "wasi run report.wasm --read-dir ./data=data --memory-bytes 134217728",
             ],
         ),
         "replay" => (

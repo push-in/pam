@@ -1,8 +1,8 @@
 [package]
 name = "pam"
-version = "0.1.31"
+version = "0.1.32"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.94"
 description = "Pam — PHP, Always in Memory: a persistent PHP runtime powered by Rust and the Embed SAPI"
 license = "MIT"
 build = "build.rs"
@@ -26,9 +26,12 @@ sha2 = "0.10.9"
 socket2 = { version = "0.6.5", features = ["all"] }
 tokio = { version = "1.53.1", features = ["macros", "net", "rt", "signal", "sync", "time"] }
 yawc = { version = "0.3.3", default-features = false, features = ["axum"] }
+wasmtime = { version = "47.0.2", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime-wasi = { version = "47.0.2", default-features = false, features = ["p1"] }
 
 [dev-dependencies]
 tungstenite = "0.29.0"
+wat = "1.252.0"
 
 [profile.release]
 codegen-units = 1

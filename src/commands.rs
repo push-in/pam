@@ -4476,10 +4476,8 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
     if let Some(repository) = native_repository {
         repositories.push(repository.definition);
     }
-    if with_official_ui {
-        if let Some(repository) = local_mobile_ui_repository() {
-            repositories.push(repository);
-        }
+    if with_official_ui && let Some(repository) = local_mobile_ui_repository() {
+        repositories.push(repository);
     }
     if !repositories.is_empty() {
         manifest["repositories"] = serde_json::json!(repositories);

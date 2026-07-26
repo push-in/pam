@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::thread;
 use std::time::Duration;
@@ -27,6 +27,34 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
+}
+
+fn write_wasi_stdout_module(path: &Path, output: &[u8]) {
+    let escaped = output
+        .iter()
+        .map(|byte| format!("\\{byte:02x}"))
+        .collect::<String>();
+    fs::write(
+        path,
+        wat::parse_str(format!(
+            r#"(module
+                (import "wasi_snapshot_preview1" "fd_write"
+                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 16) "{escaped}")
+                (func (export "_start")
+                    (i32.store (i32.const 0) (i32.const 16))
+                    (i32.store (i32.const 4) (i32.const {length}))
+                    (drop (call $fd_write
+                        (i32.const 1)
+                        (i32.const 0)
+                        (i32.const 1)
+                        (i32.const 8)))))"#,
+            length = output.len()
+        ))
+        .unwrap(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -546,6 +574,181 @@ fn generates_portable_contracts_from_php_dtos_and_integer_enums() {
 }
 
 #[test]
+fn validates_generates_and_executes_typed_rpc_through_wasi() {
+    let root = temporary_path("typed-rpc");
+    fs::create_dir(&root).unwrap();
+    let contracts = root.join("contracts");
+    let generated = run_pam(&[
+        "contracts",
+        fixture("contracts.php").to_str().unwrap(),
+        "--output",
+        contracts.to_str().unwrap(),
+    ]);
+    assert!(
+        generated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generated.stderr)
+    );
+
+    let manifest = root.join("pam.rpc.json");
+    fs::write(
+        &manifest,
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schemaVersion": 1,
+            "service": "Orders",
+            "version": "1.0.0",
+            "methods": [{
+                "kind": 1,
+                "name": "createOrder",
+                "input": "CreateOrder",
+                "output": "CreateOrder",
+                "timeoutMs": 1000,
+                "idempotent": true
+            }]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let mobile_contracts = contracts.join("contracts.mobile.json");
+    let validation = run_pam(&[
+        "rpc",
+        "validate",
+        manifest.to_str().unwrap(),
+        "--contracts",
+        mobile_contracts.to_str().unwrap(),
+    ]);
+    assert!(
+        validation.status.success(),
+        "{}",
+        String::from_utf8_lossy(&validation.stderr)
+    );
+    assert!(String::from_utf8_lossy(&validation.stdout).contains("TYPED RPC VALID"));
+
+    let sdk = root.join("sdk");
+    let generation = run_pam(&[
+        "rpc",
+        "generate",
+        manifest.to_str().unwrap(),
+        "--contracts",
+        mobile_contracts.to_str().unwrap(),
+        "--output",
+        sdk.to_str().unwrap(),
+    ]);
+    assert!(
+        generation.status.success(),
+        "{}",
+        String::from_utf8_lossy(&generation.stderr)
+    );
+    for file in [
+        "pam-rpc.manifest.json",
+        "pam-rpc.ts",
+        "pam_rpc.py",
+        "pam_rpc.rs",
+        "RPC.md",
+    ] {
+        assert!(
+            sdk.join(file).is_file(),
+            "missing generated RPC file {file}"
+        );
+    }
+    assert!(
+        fs::read_to_string(sdk.join("pam-rpc.ts"))
+            .unwrap()
+            .contains("class OrdersClient")
+    );
+    assert!(
+        fs::read_to_string(sdk.join("pam_rpc.py"))
+            .unwrap()
+            .contains("async def create_order")
+    );
+    assert!(
+        fs::read_to_string(sdk.join("pam_rpc.rs"))
+            .unwrap()
+            .contains("pub fn create_order")
+    );
+
+    let request = serde_json::json!({
+        "id": "10000000-0000-4000-8000-000000000001",
+        "quantity": 2,
+        "shipping": null,
+        "status": 1,
+        "tags": ["fast", "typed"]
+    });
+    let request_path = root.join("request.json");
+    fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
+    let response = serde_json::json!({
+        "protocolVersion": 1,
+        "id": "rpc-test-1",
+        "kind": 2,
+        "result": request,
+    });
+    let response_bytes = response.to_string() + "\n";
+    let module = root.join("orders.wasm");
+    write_wasi_stdout_module(&module, response_bytes.as_bytes());
+    let invocation = run_pam(&[
+        "rpc",
+        "wasi",
+        manifest.to_str().unwrap(),
+        module.to_str().unwrap(),
+        "createOrder",
+        request_path.to_str().unwrap(),
+        "--contracts",
+        mobile_contracts.to_str().unwrap(),
+        "--request-id",
+        "rpc-test-1",
+    ]);
+    assert!(
+        invocation.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&invocation.stdout),
+        String::from_utf8_lossy(&invocation.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&invocation.stdout).unwrap();
+    assert_eq!(result["quantity"], 2);
+    assert_eq!(result["status"], 1);
+
+    let mut unexpected_response = response;
+    unexpected_response
+        .as_object_mut()
+        .unwrap()
+        .insert("debug".to_owned(), serde_json::json!(true));
+    write_wasi_stdout_module(&module, (unexpected_response.to_string() + "\n").as_bytes());
+    let unexpected = run_pam(&[
+        "rpc",
+        "wasi",
+        manifest.to_str().unwrap(),
+        module.to_str().unwrap(),
+        "createOrder",
+        request_path.to_str().unwrap(),
+        "--contracts",
+        mobile_contracts.to_str().unwrap(),
+        "--request-id",
+        "rpc-test-1",
+    ]);
+    assert!(!unexpected.status.success());
+    assert!(String::from_utf8_lossy(&unexpected.stderr).contains("unknown fields"));
+
+    fs::write(
+        &request_path,
+        br#"{"id":"10000000-0000-4000-8000-000000000001","status":1,"tags":[],"shipping":null}"#,
+    )
+    .unwrap();
+    let invalid = run_pam(&[
+        "rpc",
+        "wasi",
+        manifest.to_str().unwrap(),
+        module.to_str().unwrap(),
+        "createOrder",
+        request_path.to_str().unwrap(),
+        "--contracts",
+        mobile_contracts.to_str().unwrap(),
+    ]);
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("$request.quantity is required"));
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn coordinates_cluster_discovery_leases_limits_breakers_queues_and_presence() {
     let output = run_pam(&[fixture("cluster-services.php").to_str().unwrap()]);
     assert!(
@@ -844,6 +1047,146 @@ fn audits_composer_supply_chain_policy_and_integer_capabilities() {
     assert!(!overwrite.status.success());
     assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
     fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
+fn runs_wasi_with_bounded_output_memory_fuel_and_deadlines() {
+    let directory = temporary_path("wasi");
+    fs::create_dir(&directory).unwrap();
+    let hello = directory.join("hello.wasm");
+    fs::write(
+        &hello,
+        wat::parse_str(
+            r#"(module
+                (import "wasi_snapshot_preview1" "fd_write"
+                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
+                (memory (export "memory") 1)
+                (data (i32.const 16) "PAM-WASI\n")
+                (func (export "_start")
+                    (i32.store (i32.const 0) (i32.const 16))
+                    (i32.store (i32.const 4) (i32.const 9))
+                    (drop (call $fd_write
+                        (i32.const 1)
+                        (i32.const 0)
+                        (i32.const 1)
+                        (i32.const 8)))))"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let output = run_pam(&[
+        "wasi",
+        "run",
+        hello.to_str().unwrap(),
+        "--fuel",
+        "100000",
+        "--memory-bytes",
+        "65536",
+        "--max-output-bytes",
+        "64",
+        "--timeout-ms",
+        "1000",
+        "--",
+        "typed-guest-argument",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"PAM-WASI\n");
+    let output_limit = run_pam(&[
+        "wasi",
+        "run",
+        hello.to_str().unwrap(),
+        "--max-output-bytes",
+        "4",
+    ]);
+    assert!(!output_limit.status.success());
+    assert!(
+        String::from_utf8_lossy(&output_limit.stderr).contains("stdout exceeded"),
+        "{}",
+        String::from_utf8_lossy(&output_limit.stderr)
+    );
+    let unsafe_mapping = run_pam(&[
+        "wasi",
+        "run",
+        hello.to_str().unwrap(),
+        "--read-dir",
+        &format!("{}=../escape", directory.display()),
+    ]);
+    assert!(!unsafe_mapping.status.success());
+    assert!(
+        String::from_utf8_lossy(&unsafe_mapping.stderr).contains("safe HOST=GUEST"),
+        "{}",
+        String::from_utf8_lossy(&unsafe_mapping.stderr)
+    );
+
+    let exit = directory.join("exit.wasm");
+    fs::write(
+        &exit,
+        wat::parse_str(
+            r#"(module
+                (import "wasi_snapshot_preview1" "proc_exit"
+                    (func $proc_exit (param i32)))
+                (memory (export "memory") 1)
+                (func (export "_start")
+                    (call $proc_exit (i32.const 23))))"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let exited = run_pam(&["wasi", "run", exit.to_str().unwrap()]);
+    assert_eq!(exited.status.code(), Some(23));
+
+    let oversized = directory.join("oversized.wasm");
+    fs::write(
+        &oversized,
+        wat::parse_str(r#"(module (memory 2) (func (export "_start")))"#).unwrap(),
+    )
+    .unwrap();
+    let memory = run_pam(&[
+        "wasi",
+        "run",
+        oversized.to_str().unwrap(),
+        "--memory-bytes",
+        "65536",
+    ]);
+    assert!(!memory.status.success());
+    assert!(
+        String::from_utf8_lossy(&memory.stderr).contains("memory"),
+        "{}",
+        String::from_utf8_lossy(&memory.stderr)
+    );
+
+    let spin = directory.join("spin.wasm");
+    fs::write(
+        &spin,
+        wat::parse_str(
+            r#"(module
+                (func (export "_start")
+                    (loop $spin
+                        (br $spin))))"#,
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let deadline = run_pam(&[
+        "wasi",
+        "run",
+        spin.to_str().unwrap(),
+        "--fuel",
+        "18446744073709551615",
+        "--timeout-ms",
+        "20",
+    ]);
+    assert!(!deadline.status.success());
+    assert!(
+        String::from_utf8_lossy(&deadline.stderr).contains("deadline"),
+        "{}",
+        String::from_utf8_lossy(&deadline.stderr)
+    );
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]

@@ -5,6 +5,17 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.32 - 2026-07-26
+
+- Raised the pinned Rust production toolchain to 1.97.1 and extended the
+  Packagist propagation gate so a slow mirror cannot race an otherwise valid
+  release.
+- Added denied-by-default WASI Preview 1 execution with explicit filesystem and
+  environment grants, bounded input/output, fuel, memory and joined wall-clock
+  deadline interruption.
+- Added PAM RPC protocol 1 with recursive DTO validation, sequential integer
+  message kinds, WASI invocation and generated TypeScript, Python and Rust SDKs.
+
 ## 0.1.31 - 2026-07-26
 
 - Added authenticated control-plane `POST /reload` and `POST /drain` actions

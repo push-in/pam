@@ -28,7 +28,7 @@ jobs:
           path: pam-mobile-ui
           ssh-key: ${{ secrets.PAM_MOBILE_UI_READ_KEY }}
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.97.1
         with:
           components: clippy,rustfmt
       - uses: shivammathur/setup-php@v2
@@ -63,6 +63,8 @@ jobs:
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Rust and integration tests
         run: cargo test --locked --all-targets --all-features -- --test-threads=1
+      - name: Validate generated RPC SDK syntax
+        run: scripts/check-generated-rpc.sh
       - name: PHP static analysis
         run: |
           compat/composer-smoke/vendor/bin/phpstan analyse -c compat/composer-smoke/phpstan.neon --no-progress
