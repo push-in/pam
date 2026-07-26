@@ -13,6 +13,7 @@ namespace Pam\Diagnostics {
         case IoEnd = 6;
         case Cleanup = 7;
         case Error = 8;
+        case WorkflowTransition = 9;
     }
 
     final readonly class Event

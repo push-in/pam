@@ -25,7 +25,7 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.27`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.28`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
 **Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
@@ -504,6 +504,11 @@ Subprocesses receive their own Unix process group. On timeout, Pam sends `TERM`,
 Amp Futures can be passed to `Pam\Async\await()`. Revolt remains driven by the package's own driver for compatibility; use Pam's native operations on the hottest paths.
 
 See [Async runtime](docs/async-runtime.md) for the execution model.
+Use [Durable workflows](docs/durable-workflows.md) for persisted retries,
+idempotent starts, resumable timers and reverse-order compensation.
+Use [Typed contracts](docs/typed-contracts.md) to generate JSON Schema, OpenAPI,
+TypeScript, Kotlin, mobile, form, migration, MCP and reference artifacts from
+PHP DTOs and sequential integer enums.
 
 ## Streaming and backpressure
 
@@ -737,6 +742,8 @@ pam profile|trace [index.php]                       profiling and structured eve
 pam record [index.php] --output recording.jsonl     bounded redacted flight recorder
 pam replay recording.jsonl --url http://host        replay and detect divergence
 pam sandbox policy.json -- plugin.php               kernel capability sandbox
+pam contracts [index.php] --output generated/contracts
+                                                    generate typed boundary artifacts
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark

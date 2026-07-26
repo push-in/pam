@@ -5,6 +5,14 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.28 - 2026-07-26
+
+- Added versioned SQLite-backed durable workflows with idempotent starts,
+  persisted retries/timers, process-independent resume and reverse compensation.
+- Added attributed PHP DTO and sequential integer enum contracts that generate
+  JSON Schema, OpenAPI, TypeScript, Kotlin, mobile, forms, migrations, MCP and
+  reference documentation through `pam contracts`.
+
 ## 0.1.27 - 2026-07-26
 
 - Added Linux kernel-enforced package capabilities with Landlock filesystem

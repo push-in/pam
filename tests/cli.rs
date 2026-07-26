@@ -439,6 +439,112 @@ fn runs_fibers_and_isolated_process_tasks() {
 }
 
 #[test]
+fn resumes_idempotent_durable_workflows_and_compensates_failures() {
+    let directory = temporary_path("durable-workflows");
+    fs::create_dir(&directory).unwrap();
+    let database = directory.join("workflows.sqlite");
+    let marker = directory.join("retry.marker");
+    let output = run_pam(&[
+        fixture("workflows.php").to_str().unwrap(),
+        database.to_str().unwrap(),
+        marker.to_str().unwrap(),
+    ]);
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(contract["waitingState"], 3);
+    assert_eq!(contract["completedState"], 4);
+    assert_eq!(
+        contract["completedResult"],
+        serde_json::json!({
+            "charge": "charged-42",
+            "receipt": "receipt-charged-42",
+        })
+    );
+    assert_eq!(contract["deduplicatedId"], contract["originalId"]);
+    assert_eq!(contract["compensatedState"], 7);
+    assert_eq!(contract["compensations"][0][1], "reservation-1");
+    assert!(database.is_file());
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn generates_portable_contracts_from_php_dtos_and_integer_enums() {
+    let directory = temporary_path("typed-contracts");
+    let output = run_pam(&[
+        "contracts",
+        fixture("contracts.php").to_str().unwrap(),
+        "--output",
+        directory.to_str().unwrap(),
+    ]);
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    for name in [
+        "contracts.schema.json",
+        "openapi.components.json",
+        "contracts.mobile.json",
+        "contracts.forms.json",
+        "contracts.mcp.json",
+        "contracts.migrations.json",
+        "contracts.ts",
+        "Contracts.kt",
+        "CONTRACTS.md",
+    ] {
+        assert!(directory.join(name).is_file(), "missing generated {name}");
+    }
+
+    let schema: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.join("contracts.schema.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        schema["$defs"]["OrderStatus"]["enum"],
+        serde_json::json!([1, 2, 3])
+    );
+    assert_eq!(
+        schema["$defs"]["CreateOrder"]["properties"]["shipping"]["anyOf"][0]["$ref"],
+        "#/$defs/Address"
+    );
+    assert_eq!(
+        schema["$defs"]["CreateOrder"]["properties"]["tags"]["items"]["type"],
+        "string"
+    );
+
+    let openapi: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.join("openapi.components.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        openapi["components"]["schemas"]["CreateOrder"]["properties"]["status"]["$ref"],
+        "#/components/schemas/OrderStatus"
+    );
+
+    let typescript = fs::read_to_string(directory.join("contracts.ts")).unwrap();
+    let kotlin = fs::read_to_string(directory.join("Contracts.kt")).unwrap();
+    assert!(typescript.contains("export interface CreateOrder"));
+    assert!(typescript.contains("Pending = 1"));
+    assert!(kotlin.contains("data class CreateOrder"));
+    assert!(kotlin.contains("Pending(1)"));
+
+    let second = run_pam(&[
+        "contracts",
+        fixture("contracts.php").to_str().unwrap(),
+        "--output",
+        directory.to_str().unwrap(),
+    ]);
+    assert!(!second.status.success());
+    assert!(String::from_utf8_lossy(&second.stderr).contains("refusing to overwrite"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn handles_bounded_adapter_queues_and_fragmented_nats_frames() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();

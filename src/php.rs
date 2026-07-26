@@ -24,6 +24,8 @@ const SCOPE_BOOTSTRAP: &str = include_str!("../runtime/scope.php");
 const NATIVE_BOOTSTRAP: &str = include_str!("../runtime/native.php");
 const DIAGNOSTICS_BOOTSTRAP: &str = include_str!("../runtime/diagnostics.php");
 const FLIGHT_RECORDER_BOOTSTRAP: &str = include_str!("../runtime/flight_recorder.php");
+const WORKFLOWS_BOOTSTRAP: &str = include_str!("../runtime/workflows.php");
+const CONTRACTS_BOOTSTRAP: &str = include_str!("../runtime/contracts.php");
 const LARAVEL_BOOTSTRAP: &str = include_str!("../runtime/laravel.php");
 const EX_SOFTWARE: c_int = 70;
 pub const NATIVE_ABI_VERSION: u32 = 1;
@@ -45,6 +47,7 @@ unsafe extern "C" {
     fn pam_php_runtime_metrics(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
     fn pam_php_runtime_diagnostics(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
     fn pam_php_routes_info(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
+    fn pam_php_contracts_info(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
     fn pam_php_dispatch_http(
         method: *const c_char,
         method_length: usize,
@@ -336,6 +339,12 @@ impl PhpRuntime {
                     b"Pam flight recorder bootstrap\0",
                 )
             })
+            .and_then(|()| {
+                evaluate_runtime_source(WORKFLOWS_BOOTSTRAP, b"Pam workflows bootstrap\0")
+            })
+            .and_then(|()| {
+                evaluate_runtime_source(CONTRACTS_BOOTSTRAP, b"Pam contracts bootstrap\0")
+            })
             .and_then(|()| evaluate_runtime_source(BOOTSTRAP, b"Pam runtime bootstrap\0"))
             .and_then(|()| evaluate_runtime_source(LARAVEL_BOOTSTRAP, b"Pam Laravel bootstrap\0"))
         {
@@ -418,6 +427,15 @@ impl PhpRuntime {
             unsafe { pam_php_routes_info(output, length) }
         })?;
         serde_json::from_str(&json).map_err(|error| format!("invalid route information: {error}"))
+    }
+
+    pub fn contracts_info(&mut self) -> Result<serde_json::Value, String> {
+        ensure_owner()?;
+        let json = call_for_string(|output, length| {
+            // SAFETY: PHP is active on its owner thread and output pointers are valid.
+            unsafe { pam_php_contracts_info(output, length) }
+        })?;
+        serde_json::from_str(&json).map_err(|error| format!("invalid contract catalog: {error}"))
     }
 
     pub fn runtime_diagnostics(&mut self) -> Result<serde_json::Value, String> {

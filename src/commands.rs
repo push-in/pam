@@ -810,6 +810,583 @@ struct HttpReplayResponse {
     body: Vec<u8>,
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ContractCatalog {
+    schema_version: u8,
+    contracts: Vec<ContractDescriptor>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContractDescriptor {
+    kind: u8,
+    name: String,
+    php_class: String,
+    description: String,
+    #[serde(default)]
+    properties: Vec<ContractProperty>,
+    #[serde(default)]
+    cases: Vec<ContractCase>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ContractProperty {
+    name: String,
+    kind: u8,
+    #[serde(rename = "type")]
+    type_name: String,
+    nullable: bool,
+    description: String,
+    format: Option<String>,
+    item_type: Option<String>,
+    minimum: Option<serde_json::Number>,
+    maximum: Option<serde_json::Number>,
+}
+
+#[derive(Deserialize, Serialize)]
+struct ContractCase {
+    name: String,
+    value: i64,
+}
+
+pub fn contracts(
+    executable: &OsStr,
+    script: &Path,
+    arguments: &[OsString],
+    output: &Path,
+) -> Result<u8, String> {
+    if output.exists()
+        && output
+            .read_dir()
+            .map_err(|error| format!("cannot read {}: {error}", output.display()))?
+            .next()
+            .is_some()
+    {
+        return Err(format!(
+            "refusing to overwrite non-empty contract output {}",
+            output.display()
+        ));
+    }
+    let mut runtime = loaded_runtime(executable, script, arguments)?;
+    let catalog: ContractCatalog = serde_json::from_value(runtime.contracts_info()?)
+        .map_err(|error| format!("invalid typed contract catalog: {error}"))?;
+    if catalog.schema_version != 1 {
+        return Err(format!(
+            "unsupported typed contract schema {}",
+            catalog.schema_version
+        ));
+    }
+    validate_contract_catalog(&catalog)?;
+    fs::create_dir_all(output)
+        .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
+
+    let schemas = contract_schemas(&catalog, "#/$defs/");
+    let openapi_schemas = contract_schemas(&catalog, "#/components/schemas/");
+    write_json(
+        &output.join("contracts.schema.json"),
+        &serde_json::json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "https://pam.dev/contracts.schema.json",
+            "$defs": schemas,
+        }),
+    )?;
+    write_json(
+        &output.join("openapi.components.json"),
+        &serde_json::json!({
+            "openapi": "3.1.0",
+            "info": {"title": "PAM generated contracts", "version": "1.0.0"},
+            "paths": {},
+            "components": {"schemas": openapi_schemas},
+        }),
+    )?;
+    write_json(
+        &output.join("contracts.mobile.json"),
+        &serde_json::to_value(&catalog.contracts)
+            .map_err(|error| format!("cannot serialize mobile contracts: {error}"))?,
+    )?;
+    write_json(
+        &output.join("contracts.forms.json"),
+        &form_contracts(&catalog),
+    )?;
+    write_json(
+        &output.join("contracts.mcp.json"),
+        &serde_json::json!({
+            "schemaVersion": 1,
+            "resources": catalog.contracts.iter().map(|contract| serde_json::json!({
+                "uri": format!("pam://contracts/{}", contract.name),
+                "name": contract.name,
+                "mimeType": "application/schema+json",
+                "schema": schemas.get(&contract.name),
+            })).collect::<Vec<_>>(),
+        }),
+    )?;
+    write_json(
+        &output.join("contracts.migrations.json"),
+        &migration_contracts(&catalog),
+    )?;
+    fs::write(output.join("contracts.ts"), typescript_contracts(&catalog))
+        .map_err(|error| format!("cannot write TypeScript contracts: {error}"))?;
+    fs::write(output.join("Contracts.kt"), kotlin_contracts(&catalog))
+        .map_err(|error| format!("cannot write Kotlin contracts: {error}"))?;
+    fs::write(output.join("CONTRACTS.md"), markdown_contracts(&catalog))
+        .map_err(|error| format!("cannot write contract documentation: {error}"))?;
+
+    let ui = Terminal::stdout();
+    println!("{}", ui.success("● TYPED CONTRACTS GENERATED"));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {} contracts",
+        ui.muted(format!("{:<12}", "Catalog")),
+        catalog.contracts.len()
+    );
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Output")),
+        output.display()
+    );
+    Ok(0)
+}
+
+fn validate_contract_catalog(catalog: &ContractCatalog) -> Result<(), String> {
+    let mut names = HashSet::new();
+    let mut classes = HashSet::new();
+    for contract in &catalog.contracts {
+        if !is_contract_identifier(&contract.name) {
+            return Err(format!(
+                "invalid generated contract name {:?}",
+                contract.name
+            ));
+        }
+        if !names.insert(contract.name.as_str()) || !classes.insert(contract.php_class.as_str()) {
+            return Err(format!("duplicate generated contract {}", contract.name));
+        }
+        match contract.kind {
+            1 if contract.cases.is_empty() => {}
+            2 if contract.properties.is_empty() && !contract.cases.is_empty() => {
+                let values = contract
+                    .cases
+                    .iter()
+                    .map(|case| case.value)
+                    .collect::<Vec<_>>();
+                if values != (1..=i64::try_from(values.len()).unwrap_or(0)).collect::<Vec<_>>() {
+                    return Err(format!(
+                        "contract enum {} is not sequential from 1",
+                        contract.name
+                    ));
+                }
+            }
+            kind => {
+                return Err(format!(
+                    "invalid generated contract kind {kind} for {}",
+                    contract.name
+                ));
+            }
+        }
+        let mut properties = HashSet::new();
+        for property in &contract.properties {
+            if !is_property_identifier(&property.name) || !properties.insert(property.name.as_str())
+            {
+                return Err(format!(
+                    "invalid or duplicate property {}.{}",
+                    contract.name, property.name
+                ));
+            }
+            if !(1..=7).contains(&property.kind) {
+                return Err(format!(
+                    "invalid property kind {} on {}.{}",
+                    property.kind, contract.name, property.name
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn is_contract_identifier(value: &str) -> bool {
+    value
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_uppercase())
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn is_property_identifier(value: &str) -> bool {
+    value
+        .bytes()
+        .next()
+        .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+}
+
+fn contract_schemas(
+    catalog: &ContractCatalog,
+    reference_prefix: &str,
+) -> serde_json::Map<String, serde_json::Value> {
+    let names = catalog
+        .contracts
+        .iter()
+        .map(|contract| (contract.php_class.as_str(), contract.name.as_str()))
+        .collect::<BTreeMap<_, _>>();
+    catalog
+        .contracts
+        .iter()
+        .map(|contract| {
+            let schema = if contract.kind == 2 {
+                serde_json::json!({
+                    "type": "integer",
+                    "description": contract.description,
+                    "enum": contract.cases.iter().map(|case| case.value).collect::<Vec<_>>(),
+                    "x-enumNames": contract.cases.iter().map(|case| case.name.as_str()).collect::<Vec<_>>(),
+                })
+            } else {
+                let properties = contract
+                    .properties
+                    .iter()
+                    .map(|property| {
+                        (
+                            property.name.clone(),
+                            property_schema(property, &names, reference_prefix),
+                        )
+                    })
+                    .collect::<serde_json::Map<_, _>>();
+                let required = contract
+                    .properties
+                    .iter()
+                    .filter(|property| !property.nullable)
+                    .map(|property| property.name.as_str())
+                    .collect::<Vec<_>>();
+                serde_json::json!({
+                    "type": "object",
+                    "description": contract.description,
+                    "additionalProperties": false,
+                    "properties": properties,
+                    "required": required,
+                })
+            };
+            (contract.name.clone(), schema)
+        })
+        .collect()
+}
+
+fn property_schema(
+    property: &ContractProperty,
+    names: &BTreeMap<&str, &str>,
+    reference_prefix: &str,
+) -> serde_json::Value {
+    let mut schema = match property.kind {
+        1 => serde_json::json!({"type": "string"}),
+        2 => serde_json::json!({"type": "integer"}),
+        3 => serde_json::json!({"type": "number"}),
+        4 => serde_json::json!({"type": "boolean"}),
+        5 | 7 => serde_json::json!({
+            "$ref": format!(
+                "{}{}",
+                reference_prefix,
+                names.get(property.type_name.as_str()).copied().unwrap_or(&property.type_name)
+            )
+        }),
+        6 => serde_json::json!({
+            "type": "array",
+            "items": type_schema(
+                property.item_type.as_deref().unwrap_or("mixed"),
+                names,
+                reference_prefix
+            ),
+        }),
+        _ => serde_json::json!({}),
+    };
+    if let Some(object) = schema.as_object_mut() {
+        if !property.description.is_empty() {
+            object.insert(
+                "description".to_owned(),
+                serde_json::Value::String(property.description.clone()),
+            );
+        }
+        if let Some(format) = &property.format {
+            object.insert(
+                "format".to_owned(),
+                serde_json::Value::String(format.clone()),
+            );
+        }
+        if let Some(minimum) = &property.minimum {
+            object.insert(
+                "minimum".to_owned(),
+                serde_json::Value::Number(minimum.clone()),
+            );
+        }
+        if let Some(maximum) = &property.maximum {
+            object.insert(
+                "maximum".to_owned(),
+                serde_json::Value::Number(maximum.clone()),
+            );
+        }
+    }
+    if property.nullable {
+        serde_json::json!({"anyOf": [schema, {"type": "null"}]})
+    } else {
+        schema
+    }
+}
+
+fn type_schema(
+    type_name: &str,
+    names: &BTreeMap<&str, &str>,
+    reference_prefix: &str,
+) -> serde_json::Value {
+    match type_name {
+        "string" => serde_json::json!({"type": "string"}),
+        "int" => serde_json::json!({"type": "integer"}),
+        "float" => serde_json::json!({"type": "number"}),
+        "bool" => serde_json::json!({"type": "boolean"}),
+        _ => serde_json::json!({
+            "$ref": format!(
+                "{}{}",
+                reference_prefix,
+                names.get(type_name).copied().unwrap_or(type_name)
+            )
+        }),
+    }
+}
+
+fn form_contracts(catalog: &ContractCatalog) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "forms": catalog.contracts.iter().filter(|contract| contract.kind == 1).map(|contract| {
+            serde_json::json!({
+                "name": contract.name,
+                "fields": contract.properties.iter().map(|property| serde_json::json!({
+                    "name": property.name,
+                    "control": match property.kind {
+                        4 => "checkbox",
+                        2 | 3 => "number",
+                        7 => "select",
+                        _ => "text",
+                    },
+                    "required": !property.nullable,
+                    "description": property.description,
+                    "format": property.format,
+                    "minimum": property.minimum,
+                    "maximum": property.maximum,
+                })).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn migration_contracts(catalog: &ContractCatalog) -> serde_json::Value {
+    serde_json::json!({
+        "schemaVersion": 1,
+        "advisory": true,
+        "tables": catalog.contracts.iter().filter(|contract| contract.kind == 1).map(|contract| {
+            serde_json::json!({
+                "source": contract.name,
+                "suggestedTable": to_snake_case(&contract.name),
+                "columns": contract.properties.iter().map(|property| serde_json::json!({
+                    "name": to_snake_case(&property.name),
+                    "type": match property.kind {
+                        2 | 7 => "integer",
+                        3 => "decimal",
+                        4 => "boolean",
+                        5 | 6 => "json",
+                        _ => "string",
+                    },
+                    "nullable": property.nullable,
+                })).collect::<Vec<_>>(),
+            })
+        }).collect::<Vec<_>>(),
+    })
+}
+
+fn typescript_contracts(catalog: &ContractCatalog) -> String {
+    let names = contract_name_map(catalog);
+    let mut output = String::from("// Generated by `pam contracts`. Do not edit.\n\n");
+    for contract in &catalog.contracts {
+        if contract.kind == 2 {
+            output.push_str(&format!("export enum {} {{\n", contract.name));
+            for case in &contract.cases {
+                output.push_str(&format!("  {} = {},\n", case.name, case.value));
+            }
+            output.push_str("}\n\n");
+            continue;
+        }
+        output.push_str(&format!("export interface {} {{\n", contract.name));
+        for property in &contract.properties {
+            let kind = language_type(property, &names, Language::TypeScript);
+            output.push_str(&format!(
+                "  readonly {}: {}{};\n",
+                property.name,
+                kind,
+                if property.nullable { " | null" } else { "" }
+            ));
+        }
+        output.push_str("}\n\n");
+    }
+    output
+}
+
+fn kotlin_contracts(catalog: &ContractCatalog) -> String {
+    let names = contract_name_map(catalog);
+    let mut output = String::from(
+        "// Generated by `pam contracts`. Do not edit.\npackage dev.pam.contracts\n\n",
+    );
+    for contract in &catalog.contracts {
+        if contract.kind == 2 {
+            output.push_str(&format!(
+                "enum class {}(val value: Int) {{\n",
+                contract.name
+            ));
+            for (index, case) in contract.cases.iter().enumerate() {
+                output.push_str(&format!(
+                    "    {}({}){}\n",
+                    case.name,
+                    case.value,
+                    if index + 1 == contract.cases.len() {
+                        ";"
+                    } else {
+                        ","
+                    }
+                ));
+            }
+            output.push_str("}\n\n");
+            continue;
+        }
+        output.push_str(&format!("data class {}(\n", contract.name));
+        for (index, property) in contract.properties.iter().enumerate() {
+            output.push_str(&format!(
+                "    val {}: {}{}{}\n",
+                property.name,
+                language_type(property, &names, Language::Kotlin),
+                if property.nullable { "?" } else { "" },
+                if index + 1 == contract.properties.len() {
+                    ""
+                } else {
+                    ","
+                }
+            ));
+        }
+        output.push_str(")\n\n");
+    }
+    output
+}
+
+#[derive(Clone, Copy)]
+enum Language {
+    TypeScript,
+    Kotlin,
+}
+
+fn language_type(
+    property: &ContractProperty,
+    names: &BTreeMap<&str, &str>,
+    language: Language,
+) -> String {
+    let scalar = match (language, property.kind) {
+        (Language::TypeScript, 1) => "string",
+        (Language::TypeScript, 2 | 3) => "number",
+        (Language::TypeScript, 4) => "boolean",
+        (Language::Kotlin, 1) => "String",
+        (Language::Kotlin, 2) => "Long",
+        (Language::Kotlin, 3) => "Double",
+        (Language::Kotlin, 4) => "Boolean",
+        (_, 5 | 7) => names
+            .get(property.type_name.as_str())
+            .copied()
+            .unwrap_or(&property.type_name),
+        (_, 6) => {
+            let item = property.item_type.as_deref().unwrap_or("mixed");
+            let item = match language {
+                Language::TypeScript => match item {
+                    "string" => "string",
+                    "int" | "float" => "number",
+                    "bool" => "boolean",
+                    _ => names.get(item).copied().unwrap_or(item),
+                },
+                Language::Kotlin => match item {
+                    "string" => "String",
+                    "int" => "Long",
+                    "float" => "Double",
+                    "bool" => "Boolean",
+                    _ => names.get(item).copied().unwrap_or(item),
+                },
+            };
+            return match language {
+                Language::TypeScript => format!("ReadonlyArray<{item}>"),
+                Language::Kotlin => format!("List<{item}>"),
+            };
+        }
+        _ => match language {
+            Language::TypeScript => "unknown",
+            Language::Kotlin => "Any",
+        },
+    };
+    scalar.to_owned()
+}
+
+fn contract_name_map(catalog: &ContractCatalog) -> BTreeMap<&str, &str> {
+    catalog
+        .contracts
+        .iter()
+        .map(|contract| (contract.php_class.as_str(), contract.name.as_str()))
+        .collect()
+}
+
+fn markdown_contracts(catalog: &ContractCatalog) -> String {
+    let mut output = String::from("# Generated contracts\n\n");
+    for contract in &catalog.contracts {
+        output.push_str(&format!(
+            "## `{}`\n\n{}\n\n",
+            contract.name, contract.description
+        ));
+        if contract.kind == 2 {
+            output.push_str("| Case | Value |\n| --- | ---: |\n");
+            for case in &contract.cases {
+                output.push_str(&format!("| `{}` | `{}` |\n", case.name, case.value));
+            }
+            output.push('\n');
+            continue;
+        }
+        output
+            .push_str("| Field | PHP type | Nullable | Description |\n| --- | --- | --- | --- |\n");
+        for property in &contract.properties {
+            output.push_str(&format!(
+                "| `{}` | `{}` | {} | {} |\n",
+                property.name,
+                property.type_name,
+                if property.nullable { "yes" } else { "no" },
+                property.description.replace('|', "\\|")
+            ));
+        }
+        output.push('\n');
+    }
+    output
+}
+
+fn to_snake_case(value: &str) -> String {
+    let mut output = String::new();
+    for (index, character) in value.chars().enumerate() {
+        if character.is_uppercase() && index > 0 {
+            output.push('_');
+        }
+        output.extend(character.to_lowercase());
+    }
+    output
+}
+
+fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    fs::write(
+        path,
+        serde_json::to_vec_pretty(value)
+            .map_err(|error| format!("cannot serialize {}: {error}", path.display()))?,
+    )
+    .map_err(|error| format!("cannot write {}: {error}", path.display()))
+}
+
 fn write_sbom(project: &Path, output: &Path) -> Result<(), String> {
     let mut components = vec![
         CycloneDxComponent {

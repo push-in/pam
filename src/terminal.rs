@@ -195,6 +195,10 @@ pub fn print_help(executable: &OsStr) {
             ("inspect [index.php]", "Print runtime capabilities as JSON"),
             ("routes [index.php]", "Print registered routes as JSON"),
             (
+                "contracts [index.php]",
+                "Generate schemas, clients, mobile bindings and docs",
+            ),
+            (
                 "diagnostics [index.php]",
                 "Print the complete runtime snapshot",
             ),
@@ -383,6 +387,18 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             "sandbox <pam.capabilities.json> -- <script.php> [arguments...]",
             &[],
             &["sandbox pam.capabilities.json -- plugin.php"],
+        ),
+        "contracts" => (
+            "Generate every external contract from attributed PHP DTOs and enums.",
+            "contracts [index.php] [--output DIR]",
+            &[(
+                "--output DIR",
+                "Generated artifact directory; default: generated/contracts",
+            )],
+            &[
+                "contracts index.php",
+                "contracts bootstrap/contracts.php --output generated/api",
+            ],
         ),
         "replay" => (
             "Replay a recording against a live runtime and detect divergence.",

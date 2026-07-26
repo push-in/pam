@@ -279,6 +279,41 @@ fn run() -> Result<u8, CliError> {
         };
     }
 
+    if script_arg == "contracts" {
+        let mut script = OsString::from("index.php");
+        let mut output = PathBuf::from("generated/contracts");
+        let mut positional = false;
+        while let Some(argument) = raw_args.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--help" | "-h" => {
+                    terminal::print_command_help(&executable, "contracts");
+                    return Ok(0);
+                }
+                "--output" => {
+                    output = PathBuf::from(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--output requires a directory".to_owned())
+                    })?);
+                }
+                option if option.starts_with('-') => {
+                    return Err(CliError::Commands(format!(
+                        "unknown contracts option: {option}"
+                    )));
+                }
+                _ if !positional => {
+                    script = argument;
+                    positional = true;
+                }
+                _ => {
+                    return Err(CliError::Commands(
+                        "contracts accepts one PHP entry point".to_owned(),
+                    ));
+                }
+            }
+        }
+        let script = resolve_script(&script)?;
+        return commands::contracts(&executable, &script, &[], &output).map_err(CliError::Commands);
+    }
+
     if script_arg == "test" {
         let mut arguments = raw_args.collect::<Vec<_>>();
         let target = if arguments

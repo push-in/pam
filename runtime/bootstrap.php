@@ -824,6 +824,14 @@ namespace Pam\Internal {
             return json_encode($routes, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         }
 
+        public static function contractsInfo(): string
+        {
+            return json_encode(
+                \Pam\Contract\Compiler::discover(),
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
+            );
+        }
+
         public static function beginHttpDispatch(
             string $method,
             string $target,

@@ -23,6 +23,7 @@ static zend_function *pam_runtime_info_function = NULL;
 static zend_function *pam_runtime_metrics_function = NULL;
 static zend_function *pam_runtime_diagnostics_function = NULL;
 static zend_function *pam_routes_info_function = NULL;
+static zend_function *pam_contracts_info_function = NULL;
 static zend_function *pam_begin_http_dispatch_function = NULL;
 static zend_function *pam_resume_http_dispatch_function = NULL;
 static zend_function *pam_cancel_http_dispatch_function = NULL;
@@ -117,6 +118,7 @@ static void pam_reset_runtime_cache(void)
     pam_runtime_metrics_function = NULL;
     pam_runtime_diagnostics_function = NULL;
     pam_routes_info_function = NULL;
+    pam_contracts_info_function = NULL;
     pam_begin_http_dispatch_function = NULL;
     pam_resume_http_dispatch_function = NULL;
     pam_cancel_http_dispatch_function = NULL;
@@ -206,6 +208,9 @@ static zend_function *pam_runtime_function(const char *method)
     } else if (strcmp(method, "routesInfo") == 0) {
         cache = &pam_routes_info_function;
         normalized = "routesinfo";
+    } else if (strcmp(method, "contractsInfo") == 0) {
+        cache = &pam_contracts_info_function;
+        normalized = "contractsinfo";
     } else if (strcmp(method, "beginHttpDispatch") == 0) {
         cache = &pam_begin_http_dispatch_function;
         normalized = "beginhttpdispatch";
@@ -538,6 +543,27 @@ int pam_php_routes_info(char **output, size_t *output_length)
 
     zend_first_try {
         if (pam_runtime_call("routesInfo", 0, NULL, &result) == SUCCESS) {
+            status = pam_copy_string_result(&result, output, output_length);
+        }
+    } zend_catch {
+        status = FAILURE;
+    } zend_end_try();
+
+    if (!Z_ISUNDEF(result)) {
+        zval_ptr_dtor(&result);
+    }
+
+    return status;
+}
+
+int pam_php_contracts_info(char **output, size_t *output_length)
+{
+    int status = FAILURE;
+    zval result;
+    ZVAL_UNDEF(&result);
+
+    zend_first_try {
+        if (pam_runtime_call("contractsInfo", 0, NULL, &result) == SUCCESS) {
             status = pam_copy_string_result(&result, output, output_length);
         }
     } zend_catch {
