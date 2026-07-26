@@ -25,7 +25,7 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.28`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.29`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
 **Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
@@ -647,6 +647,11 @@ curl --fail http://127.0.0.1:3010/metrics
 
 Do not expose the admin listener directly to the public Internet.
 
+For multiple hosts, [Distributed cluster services](docs/cluster-services.md)
+adds Redis-backed discovery, mTLS, fenced locks, singleton cron, shared rate
+limits, circuit breakers, bounded queues and expiring presence. Redis Streams
+and NATS continue to provide multi-node WebSocket pub/sub.
+
 ## TLS, HTTP/3, and security controls
 
 ```php
@@ -744,6 +749,7 @@ pam replay recording.jsonl --url http://host        replay and detect divergence
 pam sandbox policy.json -- plugin.php               kernel capability sandbox
 pam contracts [index.php] --output generated/contracts
                                                     generate typed boundary artifacts
+pam snapshot create|verify|run                      integrity-checked cold starts
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
@@ -815,6 +821,8 @@ The builder refuses to overwrite its destination, escape the project through `..
 
 Read [Kernel sandbox, flight recorder and trusted bundles](docs/security-and-replay.md)
 for the integer capability manifest, redaction/replay contract and Ed25519 key flow.
+Read [Bootstrap source snapshots](docs/bootstrap-snapshots.md) for deterministic,
+optionally signed cold-start integrity and its explicit Embed/OPcache boundary.
 
 Bundles are relocatable, but the target still needs a compatible Linux system ABI and the native dependencies required by PHP and its enabled extensions. Use the provided `Dockerfile` when you need a controlled userspace as well.
 

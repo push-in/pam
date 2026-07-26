@@ -545,6 +545,206 @@ fn generates_portable_contracts_from_php_dtos_and_integer_enums() {
 }
 
 #[test]
+fn coordinates_cluster_discovery_leases_limits_breakers_queues_and_presence() {
+    let output = run_pam(&[fixture("cluster-services.php").to_str().unwrap()]);
+    assert!(
+        output.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(contract["initialNodeStates"], serde_json::json!([1, 2]));
+    assert_eq!(contract["remainingNode"], "node-b");
+    assert_eq!(contract["contended"], true);
+    assert_eq!(contract["renewedFence"], 1);
+    assert_eq!(contract["forgedRelease"], false);
+    assert_eq!(contract["newFence"], 2);
+    assert_eq!(contract["singleton"], true);
+    assert_eq!(
+        contract["rates"],
+        serde_json::json!([true, true, false, true])
+    );
+    assert_eq!(
+        contract["circuits"],
+        serde_json::json!([1, 1, 2, false, 3, false, 1])
+    );
+    assert_eq!(contract["queueLength"], 2);
+    assert_eq!(contract["queue"], serde_json::json!(["b", "c", null]));
+    assert_eq!(
+        contract["presenceInitial"],
+        serde_json::json!(["alice", "bob"])
+    );
+    assert_eq!(contract["presenceAfterExpiry"], serde_json::json!(["bob"]));
+    assert_eq!(contract["presenceAfterLeave"], serde_json::json!([]));
+}
+
+#[test]
+fn creates_verifies_runs_and_invalidates_bootstrap_snapshots() {
+    let project = temporary_path("bootstrap-snapshot");
+    fs::create_dir(&project).unwrap();
+    fs::write(
+        project.join("index.php"),
+        "<?php require __DIR__ . '/library.php'; echo snapshot_message(), \"\\n\";\n",
+    )
+    .unwrap();
+    fs::write(
+        project.join("library.php"),
+        "<?php function snapshot_message(): string { return 'snapshot-ready'; }\n",
+    )
+    .unwrap();
+    let manifest = project.join(".pam/bootstrap.snapshot.json");
+
+    let created = run_pam(&["snapshot", "create", project.to_str().unwrap()]);
+    assert!(
+        created.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&created.stdout),
+        String::from_utf8_lossy(&created.stderr),
+    );
+    assert!(manifest.is_file());
+
+    let unsigned = run_pam(&[
+        "snapshot",
+        "verify",
+        manifest.to_str().unwrap(),
+        "--project",
+        project.to_str().unwrap(),
+        "--require-signature",
+    ]);
+    assert!(!unsigned.status.success());
+    assert!(String::from_utf8_lossy(&unsigned.stderr).contains("snapshot is unsigned"));
+
+    let verified = run_pam(&[
+        "snapshot",
+        "verify",
+        manifest.to_str().unwrap(),
+        "--project",
+        project.to_str().unwrap(),
+    ]);
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+
+    let executed = run_pam(&[
+        "snapshot",
+        "run",
+        manifest.to_str().unwrap(),
+        "--project",
+        project.to_str().unwrap(),
+    ]);
+    assert!(
+        executed.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&executed.stdout),
+        String::from_utf8_lossy(&executed.stderr),
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&executed.stdout),
+        "snapshot-ready\n"
+    );
+
+    fs::write(
+        project.join("library.php"),
+        "<?php function snapshot_message(): string { return 'changed'; }\n",
+    )
+    .unwrap();
+    let stale = run_pam(&[
+        "snapshot",
+        "verify",
+        manifest.to_str().unwrap(),
+        "--project",
+        project.to_str().unwrap(),
+    ]);
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("does not match current PHP files"));
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
+fn signs_bootstrap_snapshots_with_external_ed25519_trust() {
+    let project = temporary_path("signed-snapshot");
+    let private_key = temporary_path("snapshot-private.pem");
+    let public_key = temporary_path("snapshot-public.pem");
+    fs::create_dir(&project).unwrap();
+    fs::write(project.join("index.php"), "<?php echo 'trusted';\n").unwrap();
+    let generated = Command::new("openssl")
+        .args(["genpkey", "-algorithm", "ED25519", "-out"])
+        .arg(&private_key)
+        .output()
+        .unwrap();
+    assert!(generated.status.success());
+    let exported = Command::new("openssl")
+        .args(["pkey", "-in"])
+        .arg(&private_key)
+        .args(["-pubout", "-out"])
+        .arg(&public_key)
+        .output()
+        .unwrap();
+    assert!(exported.status.success());
+
+    let manifest = project.join(".pam/bootstrap.snapshot.json");
+    let signature = project.join(".pam/bootstrap.snapshot.json.sig");
+    let created = run_pam(&[
+        "snapshot",
+        "create",
+        project.to_str().unwrap(),
+        "--signing-key",
+        private_key.to_str().unwrap(),
+    ]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    assert!(signature.is_file());
+
+    let untrusted = run_pam(&[
+        "snapshot",
+        "verify",
+        manifest.to_str().unwrap(),
+        "--project",
+        project.to_str().unwrap(),
+    ]);
+    assert!(!untrusted.status.success());
+    assert!(String::from_utf8_lossy(&untrusted.stderr).contains("--public-key is required"));
+
+    let trusted = run_pam(&[
+        "snapshot",
+        "verify",
+        manifest.to_str().unwrap(),
+        "--project",
+        project.to_str().unwrap(),
+        "--public-key",
+        public_key.to_str().unwrap(),
+        "--require-signature",
+    ]);
+    assert!(
+        trusted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&trusted.stderr)
+    );
+
+    fs::write(&signature, b"corrupt-signature").unwrap();
+    let corrupt = run_pam(&[
+        "snapshot",
+        "verify",
+        manifest.to_str().unwrap(),
+        "--project",
+        project.to_str().unwrap(),
+        "--public-key",
+        public_key.to_str().unwrap(),
+        "--require-signature",
+    ]);
+    assert!(!corrupt.status.success());
+    fs::remove_dir_all(project).unwrap();
+    fs::remove_file(private_key).unwrap();
+    fs::remove_file(public_key).unwrap();
+}
+
+#[test]
 fn handles_bounded_adapter_queues_and_fragmented_nats_frames() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = listener.local_addr().unwrap().port();

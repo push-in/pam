@@ -26,6 +26,7 @@ const DIAGNOSTICS_BOOTSTRAP: &str = include_str!("../runtime/diagnostics.php");
 const FLIGHT_RECORDER_BOOTSTRAP: &str = include_str!("../runtime/flight_recorder.php");
 const WORKFLOWS_BOOTSTRAP: &str = include_str!("../runtime/workflows.php");
 const CONTRACTS_BOOTSTRAP: &str = include_str!("../runtime/contracts.php");
+const CLUSTER_SERVICES_BOOTSTRAP: &str = include_str!("../runtime/cluster_services.php");
 const LARAVEL_BOOTSTRAP: &str = include_str!("../runtime/laravel.php");
 const EX_SOFTWARE: c_int = 70;
 pub const NATIVE_ABI_VERSION: u32 = 1;
@@ -344,6 +345,12 @@ impl PhpRuntime {
             })
             .and_then(|()| {
                 evaluate_runtime_source(CONTRACTS_BOOTSTRAP, b"Pam contracts bootstrap\0")
+            })
+            .and_then(|()| {
+                evaluate_runtime_source(
+                    CLUSTER_SERVICES_BOOTSTRAP,
+                    b"Pam cluster services bootstrap\0",
+                )
             })
             .and_then(|()| evaluate_runtime_source(BOOTSTRAP, b"Pam runtime bootstrap\0"))
             .and_then(|()| evaluate_runtime_source(LARAVEL_BOOTSTRAP, b"Pam Laravel bootstrap\0"))

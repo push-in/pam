@@ -5,6 +5,15 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.29 - 2026-07-26
+
+- Added Redis-backed distributed coordination with TLS/mTLS, expiring service
+  discovery, fenced leases, singleton cron, atomic rate limits, circuit breakers,
+  bounded queues and WebSocket presence.
+- Added deterministic bootstrap source snapshots with full-tree SHA-256
+  validation, runtime/ABI binding, Ed25519 trust and pre-execution mutation
+  rejection.
+
 ## 0.1.28 - 2026-07-26
 
 - Added versioned SQLite-backed durable workflows with idempotent starts,

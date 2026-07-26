@@ -256,11 +256,322 @@ struct BuildSignature {
     file: String,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 struct BuildFile {
     path: String,
     bytes: u64,
     sha256: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SnapshotManifest {
+    schema_version: u8,
+    pam_version: String,
+    native_abi_version: u32,
+    entry: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<BuildSignature>,
+    files: Vec<BuildFile>,
+}
+
+pub struct SnapshotPlan {
+    pub entry: PathBuf,
+    pub files: Vec<PathBuf>,
+}
+
+pub fn create_snapshot(
+    project: &Path,
+    entry: &Path,
+    output: &Path,
+    signing_key: Option<&Path>,
+) -> Result<u8, String> {
+    if output.exists() {
+        return Err(format!(
+            "refusing to overwrite snapshot {}; remove it intentionally first",
+            output.display()
+        ));
+    }
+    let project = canonical_project(project)?;
+    let entry = safe_snapshot_path(entry, "snapshot entry")?;
+    if !project.join(&entry).is_file() {
+        return Err(format!(
+            "snapshot entry {} is not a regular file",
+            project.join(&entry).display()
+        ));
+    }
+    let files = snapshot_files(&project)?;
+    let entry_name = entry.to_string_lossy().replace('\\', "/");
+    if !files.iter().any(|file| file.path == entry_name) {
+        return Err("snapshot entry must be a PHP file included in the snapshot".to_owned());
+    }
+    let signature_path = output.with_file_name(format!(
+        "{}.sig",
+        output
+            .file_name()
+            .and_then(OsStr::to_str)
+            .ok_or("snapshot output requires a UTF-8 filename")?
+    ));
+    if signature_path.exists() {
+        return Err(format!(
+            "refusing to overwrite snapshot signature {}",
+            signature_path.display()
+        ));
+    }
+    let signature = signing_key
+        .map(|key| -> Result<BuildSignature, String> {
+            Ok(BuildSignature {
+                algorithm: 1,
+                key_id: private_key_id(key)?,
+                file: signature_path
+                    .file_name()
+                    .and_then(OsStr::to_str)
+                    .ok_or("snapshot signature requires a UTF-8 filename")?
+                    .to_owned(),
+            })
+        })
+        .transpose()?;
+    let manifest = SnapshotManifest {
+        schema_version: 1,
+        pam_version: env!("CARGO_PKG_VERSION").to_owned(),
+        native_abi_version: crate::php::NATIVE_ABI_VERSION,
+        entry: entry_name,
+        signature,
+        files,
+    };
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
+    fs::write(
+        output,
+        serde_json::to_vec_pretty(&manifest)
+            .map_err(|error| format!("cannot serialize bootstrap snapshot: {error}"))?,
+    )
+    .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
+    if let Some(key) = signing_key {
+        sign_manifest(output, key, &signature_path)?;
+    }
+
+    let ui = Terminal::stdout();
+    println!("{}", ui.success("● BOOTSTRAP SNAPSHOT CREATED"));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {} PHP files",
+        ui.muted(format!("{:<12}", "Preload")),
+        manifest.files.len()
+    );
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Output")),
+        output.display()
+    );
+    Ok(0)
+}
+
+pub fn verify_snapshot(
+    project: &Path,
+    manifest: &Path,
+    public_key: Option<&Path>,
+    require_signature: bool,
+) -> Result<u8, String> {
+    let plan = snapshot_plan(project, manifest, public_key, require_signature)?;
+    let ui = Terminal::stdout();
+    println!("{}", ui.success("● BOOTSTRAP SNAPSHOT VERIFIED"));
+    println!("{}", ui.rule());
+    println!(
+        "  {} {} PHP files",
+        ui.muted(format!("{:<12}", "Integrity")),
+        plan.files.len()
+    );
+    println!(
+        "  {} {}",
+        ui.muted(format!("{:<12}", "Entry")),
+        plan.entry.display()
+    );
+    Ok(0)
+}
+
+pub fn snapshot_plan(
+    project: &Path,
+    manifest_path: &Path,
+    public_key: Option<&Path>,
+    require_signature: bool,
+) -> Result<SnapshotPlan, String> {
+    let project = canonical_project(project)?;
+    let contents = fs::read(manifest_path)
+        .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
+    let manifest: SnapshotManifest = serde_json::from_slice(&contents)
+        .map_err(|error| format!("invalid bootstrap snapshot: {error}"))?;
+    if manifest.schema_version != 1 {
+        return Err(format!(
+            "unsupported bootstrap snapshot schema {}",
+            manifest.schema_version
+        ));
+    }
+    if manifest.pam_version != env!("CARGO_PKG_VERSION")
+        || manifest.native_abi_version != crate::php::NATIVE_ABI_VERSION
+    {
+        return Err(format!(
+            "snapshot runtime mismatch: expected PAM {} / ABI {}, found PAM {} / ABI {}",
+            env!("CARGO_PKG_VERSION"),
+            crate::php::NATIVE_ABI_VERSION,
+            manifest.pam_version,
+            manifest.native_abi_version,
+        ));
+    }
+    match (&manifest.signature, public_key) {
+        (Some(signature), Some(key)) => {
+            if signature.algorithm != 1 {
+                return Err("unsupported snapshot signature algorithm".to_owned());
+            }
+            let signature_file =
+                safe_snapshot_path(Path::new(&signature.file), "snapshot signature file")?;
+            if signature_file.components().count() != 1 {
+                return Err("snapshot signature must sit beside the manifest".to_owned());
+            }
+            let actual_key_id = public_key_id(key)?;
+            if actual_key_id != signature.key_id {
+                return Err(format!(
+                    "trusted public key does not match snapshot key ID {}",
+                    signature.key_id
+                ));
+            }
+            let signature_path = manifest_path
+                .parent()
+                .unwrap_or_else(|| Path::new("."))
+                .join(signature_file);
+            verify_manifest_signature(manifest_path, key, &signature_path)?;
+        }
+        (Some(_), None) => {
+            return Err(
+                "snapshot is signed; --public-key is required to establish trust".to_owned(),
+            );
+        }
+        (None, _) if require_signature => {
+            return Err("snapshot is unsigned and --require-signature was requested".to_owned());
+        }
+        (None, _) => {}
+    }
+    let entry = safe_snapshot_path(Path::new(&manifest.entry), "snapshot entry")?;
+    let expected = snapshot_files(&project)?;
+    if manifest.files != expected {
+        return Err(
+            "bootstrap snapshot does not match current PHP files; create a fresh snapshot"
+                .to_owned(),
+        );
+    }
+    let mut unique = HashSet::new();
+    let mut files = Vec::with_capacity(manifest.files.len());
+    for file in &manifest.files {
+        let relative = safe_snapshot_path(Path::new(&file.path), "snapshot file")?;
+        if !unique.insert(relative.clone()) {
+            return Err(format!("bootstrap snapshot duplicates {}", file.path));
+        }
+        let path = project.join(relative);
+        let canonical = fs::canonicalize(&path)
+            .map_err(|error| format!("cannot resolve snapshot file {}: {error}", path.display()))?;
+        if !canonical.starts_with(&project) {
+            return Err(format!("snapshot file escapes project: {}", path.display()));
+        }
+        files.push(canonical);
+    }
+    Ok(SnapshotPlan {
+        entry: project.join(entry),
+        files,
+    })
+}
+
+fn canonical_project(project: &Path) -> Result<PathBuf, String> {
+    let project = fs::canonicalize(project)
+        .map_err(|error| format!("cannot resolve project {}: {error}", project.display()))?;
+    if !project.is_dir() {
+        return Err(format!(
+            "snapshot project is not a directory: {}",
+            project.display()
+        ));
+    }
+    Ok(project)
+}
+
+fn safe_snapshot_path(path: &Path, label: &str) -> Result<PathBuf, String> {
+    if path.as_os_str().is_empty()
+        || path.is_absolute()
+        || path.components().any(|component| {
+            !matches!(
+                component,
+                std::path::Component::Normal(_) | std::path::Component::CurDir
+            )
+        })
+    {
+        return Err(format!("{label} must be a safe relative path"));
+    }
+    Ok(path.to_path_buf())
+}
+
+fn snapshot_files(project: &Path) -> Result<Vec<BuildFile>, String> {
+    fn visit(root: &Path, directory: &Path, files: &mut Vec<BuildFile>) -> Result<(), String> {
+        for entry in fs::read_dir(directory)
+            .map_err(|error| format!("cannot read {}: {error}", directory.display()))?
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+            if file_type.is_symlink() {
+                return Err(format!(
+                    "bootstrap snapshots reject symbolic links: {}",
+                    path.display()
+                ));
+            }
+            if file_type.is_dir() {
+                if matches!(
+                    entry.file_name().to_str(),
+                    Some(".git" | ".pam" | "node_modules" | "storage" | "target")
+                ) {
+                    continue;
+                }
+                visit(root, &path, files)?;
+                continue;
+            }
+            if !file_type.is_file()
+                || !path
+                    .extension()
+                    .and_then(OsStr::to_str)
+                    .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
+            {
+                continue;
+            }
+            if files.len() >= 100_000 {
+                return Err("bootstrap snapshot exceeds 100,000 PHP files".to_owned());
+            }
+            let contents = fs::read(&path)
+                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+            if contents.len() > 64 * 1024 * 1024 {
+                return Err(format!(
+                    "snapshot PHP file exceeds 64 MiB: {}",
+                    path.display()
+                ));
+            }
+            let relative = path
+                .strip_prefix(root)
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            files.push(BuildFile {
+                path: relative,
+                bytes: contents.len() as u64,
+                sha256: format!("{:x}", Sha256::digest(contents)),
+            });
+        }
+        Ok(())
+    }
+
+    let mut files = Vec::new();
+    visit(project, project, &mut files)?;
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(files)
 }
 
 #[derive(Serialize)]

@@ -182,6 +182,10 @@ pub fn print_help(executable: &OsStr) {
             ),
             ("composer [args...]", "Run the embedded Composer toolchain"),
             ("test [path]", "Run Pest or PHPUnit inside Pam"),
+            (
+                "snapshot create|verify|run",
+                "Build and execute integrity-checked source snapshots",
+            ),
         ],
     );
     command_group(
@@ -398,6 +402,33 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[
                 "contracts index.php",
                 "contracts bootstrap/contracts.php --output generated/api",
+            ],
+        ),
+        "snapshot" => (
+            "Create, verify, or run a deterministic integrity-checked PHP source snapshot.",
+            "snapshot <create|verify|run> [arguments] [options]",
+            &[
+                ("--entry FILE", "Create entry point; default: index.php"),
+                (
+                    "--output FILE",
+                    "Create manifest; default: PROJECT/.pam/bootstrap.snapshot.json",
+                ),
+                ("--signing-key FILE", "Sign a created snapshot with Ed25519"),
+                (
+                    "--project DIR",
+                    "Project root for verify or run; default: .",
+                ),
+                ("--public-key FILE", "Trusted Ed25519 key for verify or run"),
+                ("--require-signature", "Reject unsigned snapshots"),
+                (
+                    "--",
+                    "Pass remaining arguments to the entry point when running",
+                ),
+            ],
+            &[
+                "snapshot create . --entry public/index.php",
+                "snapshot verify .pam/bootstrap.snapshot.json --project .",
+                "snapshot run .pam/bootstrap.snapshot.json --project .",
             ],
         ),
         "replay" => (

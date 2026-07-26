@@ -279,6 +279,10 @@ fn run() -> Result<u8, CliError> {
         };
     }
 
+    if script_arg == "snapshot" {
+        return snapshot_command(&executable, raw_args.collect());
+    }
+
     if script_arg == "contracts" {
         let mut script = OsString::from("index.php");
         let mut output = PathBuf::from("generated/contracts");
@@ -720,6 +724,125 @@ fn run_script(
     }
 
     Ok(0)
+}
+
+fn snapshot_command(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, CliError> {
+    let mut arguments = arguments.into_iter();
+    let action = arguments.next().unwrap_or_else(|| OsString::from("--help"));
+    if action == "--help" || action == "-h" {
+        terminal::print_command_help(executable, "snapshot");
+        return Ok(0);
+    }
+    match action.to_string_lossy().as_ref() {
+        "create" => {
+            let mut project = PathBuf::from(".");
+            let mut entry = PathBuf::from("index.php");
+            let mut output = None;
+            let mut signing_key = None;
+            let mut positional = false;
+            while let Some(argument) = arguments.next() {
+                match argument.to_string_lossy().as_ref() {
+                    "--entry" => {
+                        entry = PathBuf::from(arguments.next().ok_or_else(|| {
+                            CliError::Commands("--entry requires a PHP file".to_owned())
+                        })?);
+                    }
+                    "--output" => {
+                        output = Some(PathBuf::from(arguments.next().ok_or_else(|| {
+                            CliError::Commands("--output requires a file".to_owned())
+                        })?));
+                    }
+                    "--signing-key" => {
+                        signing_key = Some(PathBuf::from(arguments.next().ok_or_else(|| {
+                            CliError::Commands("--signing-key requires a file".to_owned())
+                        })?));
+                    }
+                    option if option.starts_with('-') => {
+                        return Err(CliError::Commands(format!(
+                            "unknown snapshot create option: {option}"
+                        )));
+                    }
+                    _ if !positional => {
+                        project = PathBuf::from(argument);
+                        positional = true;
+                    }
+                    _ => {
+                        return Err(CliError::Commands(
+                            "snapshot create accepts one project directory".to_owned(),
+                        ));
+                    }
+                }
+            }
+            let output = output.unwrap_or_else(|| project.join(".pam/bootstrap.snapshot.json"));
+            commands::create_snapshot(&project, &entry, &output, signing_key.as_deref())
+                .map_err(CliError::Commands)
+        }
+        "verify" | "run" => {
+            let manifest = PathBuf::from(arguments.next().ok_or_else(|| {
+                CliError::Commands(format!(
+                    "snapshot {} requires a manifest",
+                    action.to_string_lossy()
+                ))
+            })?);
+            let mut project = PathBuf::from(".");
+            let mut public_key = None;
+            let mut require_signature = false;
+            let mut script_arguments = Vec::new();
+            let mut passthrough = false;
+            while let Some(argument) = arguments.next() {
+                if passthrough {
+                    script_arguments.push(argument);
+                    continue;
+                }
+                match argument.to_string_lossy().as_ref() {
+                    "--project" => {
+                        project = PathBuf::from(arguments.next().ok_or_else(|| {
+                            CliError::Commands("--project requires a directory".to_owned())
+                        })?);
+                    }
+                    "--public-key" => {
+                        public_key = Some(PathBuf::from(arguments.next().ok_or_else(|| {
+                            CliError::Commands("--public-key requires a file".to_owned())
+                        })?));
+                    }
+                    "--require-signature" => require_signature = true,
+                    "--" if action == "run" => passthrough = true,
+                    option if option.starts_with('-') => {
+                        return Err(CliError::Commands(format!(
+                            "unknown snapshot {} option: {option}",
+                            action.to_string_lossy()
+                        )));
+                    }
+                    _ => {
+                        return Err(CliError::Commands(format!(
+                            "unexpected snapshot {} argument",
+                            action.to_string_lossy()
+                        )));
+                    }
+                }
+            }
+            if action == "verify" {
+                return commands::verify_snapshot(
+                    &project,
+                    &manifest,
+                    public_key.as_deref(),
+                    require_signature,
+                )
+                .map_err(CliError::Commands);
+            }
+            let plan = commands::snapshot_plan(
+                &project,
+                &manifest,
+                public_key.as_deref(),
+                require_signature,
+            )
+            .map_err(CliError::Commands)?;
+            run_script(executable, &plan.entry, script_arguments)
+        }
+        value => Err(CliError::Commands(format!(
+            "unknown snapshot action {value:?}; expected create, verify, or run"
+        ))),
+    }
 }
 
 fn resolve_script(script: &OsStr) -> Result<PathBuf, CliError> {

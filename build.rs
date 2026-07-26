@@ -13,6 +13,7 @@ fn main() {
     println!("cargo:rerun-if-changed=runtime/flight_recorder.php");
     println!("cargo:rerun-if-changed=runtime/workflows.php");
     println!("cargo:rerun-if-changed=runtime/contracts.php");
+    println!("cargo:rerun-if-changed=runtime/cluster_services.php");
     println!("cargo:rerun-if-env-changed=CC");
     println!("cargo:rerun-if-env-changed=AR");
     println!("cargo:rerun-if-env-changed=PHP_CONFIG");
