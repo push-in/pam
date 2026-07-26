@@ -5,6 +5,14 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.31 - 2026-07-26
+
+- Added authenticated control-plane `POST /reload` and `POST /drain` actions
+  with constant-time Bearer checks, master-only environment secrets and
+  readiness-gated generation activation.
+- Fixed Composer advisory execution with setup-php command wrappers while
+  retaining the verified embedded Composer fallback.
+
 ## 0.1.30 - 2026-07-26
 
 - Added the fail-closed `pam supply-chain` gate for Composer scripts, plugins,

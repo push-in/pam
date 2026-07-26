@@ -25,7 +25,7 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.30`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.31`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
 **Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
@@ -623,7 +623,8 @@ Production is a supervised cluster:
 pam start index.php \
   --workers 10 \
   --max-requests 10000000 \
-  --admin-address 127.0.0.1:3010
+  --admin-address 127.0.0.1:3010 \
+  --admin-token-env PAM_ADMIN_TOKEN
 ```
 
 The production master:
@@ -643,9 +644,25 @@ curl --fail http://127.0.0.1:3010/live
 curl --fail http://127.0.0.1:3010/startup
 curl --fail http://127.0.0.1:3010/ready
 curl --fail http://127.0.0.1:3010/metrics
+
+curl --fail --request POST \
+  --header "Authorization: Bearer ${PAM_ADMIN_TOKEN}" \
+  http://127.0.0.1:3010/reload
+
+curl --fail --request POST \
+  --header "Authorization: Bearer ${PAM_ADMIN_TOKEN}" \
+  http://127.0.0.1:3010/drain
 ```
 
-Do not expose the admin listener directly to the public Internet.
+Reload returns `202` before the readiness-gated generation change; a failed
+replacement leaves the healthy generation serving. Drain stops new work and
+waits for workers up to the configured graceful timeout. The secret is read by
+the master and removed from worker environments. Mutations are disabled unless
+the token environment is configured.
+
+Do not expose the admin listener directly to the public Internet. Keep it behind
+localhost, a private control network or an authenticated proxy even when the
+Bearer token is enabled.
 
 For multiple hosts, [Distributed cluster services](docs/cluster-services.md)
 adds Redis-backed discovery, mTLS, fenced locks, singleton cron, shared rate

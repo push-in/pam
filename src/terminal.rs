@@ -305,6 +305,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "--admin-address IP:PORT",
                     "Expose health and metrics control plane",
                 ),
+                (
+                    "--admin-token-env NAME",
+                    "Enable authenticated reload/drain mutations using this secret",
+                ),
                 ("--graceful-timeout MS", "Worker shutdown deadline"),
                 ("--startup-timeout MS", "Worker readiness deadline"),
                 ("--restart-backoff MS", "Initial crash restart delay"),
@@ -312,7 +316,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &[
                 "start index.php --workers 4",
-                "start index.php --workers 8 --admin-address 127.0.0.1:3010",
+                "start index.php --workers 8 --admin-address 127.0.0.1:3010 --admin-token-env PAM_ADMIN_TOKEN",
             ],
         ),
         "init" => (

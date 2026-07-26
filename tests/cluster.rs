@@ -58,8 +58,11 @@ impl ClusterProcess {
                 "50",
                 "--admin-address",
                 &format!("127.0.0.1:{admin_port}"),
+                "--admin-token-env",
+                "PAM_TEST_ADMIN_TOKEN",
             ])
             .env("PAM_TEST_PORT", port.to_string())
+            .env("PAM_TEST_ADMIN_TOKEN", "cluster-secret")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null());
@@ -128,6 +131,24 @@ impl ClusterProcess {
             .write_all(
                 format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
                     .as_bytes(),
+            )
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
+
+    fn admin_mutation(&self, path: &str, token: Option<&str>) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", self.admin_port)).unwrap();
+        let authorization = token
+            .map(|token| format!("Authorization: Bearer {token}\r\n"))
+            .unwrap_or_default();
+        stream
+            .write_all(
+                format!(
+                    "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{authorization}Content-Length: 0\r\nConnection: close\r\n\r\n"
+                )
+                .as_bytes(),
             )
             .unwrap();
         let mut response = String::new();
@@ -383,4 +404,54 @@ fn failed_reload_keeps_the_healthy_generation() {
     assert!(ready.starts_with("HTTP/1.1 200 OK"), "{ready}");
     assert!(ready.contains(r#""generation":1"#), "{ready}");
     cluster.stop();
+}
+
+#[test]
+fn authenticates_remote_reload_and_graceful_drain_actions() {
+    let mut cluster = ClusterProcess::start(1_000);
+    let original = cluster.children();
+    let worker_environment = cluster.request_path("/admin-secret").unwrap();
+    assert!(
+        worker_environment.contains(r#""inherited":false"#),
+        "{worker_environment}"
+    );
+
+    let unauthorized = cluster.admin_mutation("/reload", None);
+    assert!(
+        unauthorized.starts_with("HTTP/1.1 401 Unauthorized"),
+        "{unauthorized}"
+    );
+    assert_eq!(cluster.children(), original);
+
+    let accepted = cluster.admin_mutation("/reload", Some("cluster-secret"));
+    assert!(accepted.starts_with("HTTP/1.1 202 Accepted"), "{accepted}");
+    assert!(accepted.contains(r#""action":1"#), "{accepted}");
+    let reload_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let current = cluster.children();
+        let ready = cluster.admin_request("/ready");
+        if current.len() == 2
+            && current.is_disjoint(&original)
+            && ready.contains(r#""generation":2"#)
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < reload_deadline,
+            "authenticated reload did not activate a new generation"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
+
+    let draining = cluster.admin_mutation("/drain", Some("cluster-secret"));
+    assert!(draining.starts_with("HTTP/1.1 202 Accepted"), "{draining}");
+    assert!(draining.contains(r#""action":2"#), "{draining}");
+    let drain_deadline = Instant::now() + Duration::from_secs(5);
+    while cluster.child.try_wait().unwrap().is_none() {
+        assert!(
+            Instant::now() < drain_deadline,
+            "authenticated drain did not stop the cluster"
+        );
+        thread::sleep(Duration::from_millis(20));
+    }
 }

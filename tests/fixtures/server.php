@@ -22,6 +22,9 @@ $app->get('/ping', static fn (Request $request, Response $response) => $response
     'message' => 'pong',
     'query' => $request->getQuery('query'),
 ]));
+$app->get('/admin-secret', static fn (Request $request, Response $response) => $response->json([
+    'inherited' => getenv('PAM_TEST_ADMIN_TOKEN') !== false,
+]));
 $app->post('/echo', static fn (Request $request, Response $response) => $response->json([
     'body' => $request->json(),
     'testHeader' => $request->getHeader('x-pam-test'),

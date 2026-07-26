@@ -503,20 +503,41 @@ fn inspect_capabilities(
 }
 
 fn composer_audit(executable: &OsStr, project: &Path) -> Result<Value, String> {
-    let output = Command::new(executable)
-        .args([
-            "composer",
-            "audit",
-            "--locked",
-            "--format=json",
-            "--no-interaction",
-            "--no-plugins",
-            "--no-scripts",
-            "--working-dir",
-        ])
+    let arguments = [
+        "audit",
+        "--locked",
+        "--format=json",
+        "--no-interaction",
+        "--no-plugins",
+        "--no-scripts",
+        "--working-dir",
+    ];
+    let output = match Command::new("composer")
+        .args(arguments)
         .arg(project)
         .output()
-        .map_err(|error| format!("cannot execute Composer audit: {error}"))?;
+    {
+        Ok(output) => output,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Command::new(executable)
+            .args([
+                "composer",
+                "audit",
+                "--locked",
+                "--format=json",
+                "--no-interaction",
+                "--no-plugins",
+                "--no-scripts",
+                "--working-dir",
+            ])
+            .arg(project)
+            .output()
+            .map_err(|fallback| {
+                format!(
+                    "cannot execute Composer audit ({error}); embedded fallback failed: {fallback}"
+                )
+            })?,
+        Err(error) => return Err(format!("cannot execute Composer audit: {error}")),
+    };
     serde_json::from_slice(&output.stdout).map_err(|error| {
         format!(
             "Composer audit did not return valid JSON: {error}; {}",
