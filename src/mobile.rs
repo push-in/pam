@@ -10,6 +10,8 @@ use std::time::{Duration, Instant, SystemTime};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::package_coordinates;
+
 const MANIFEST_NAME: &str = "pam-native.json";
 const DEFAULT_PORT: u16 = 39_100;
 const MAX_PROJECT_FILES: usize = 10_000;
@@ -359,6 +361,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "plugin:doctor" => doctor_plugins(parse_project_only(arguments)?),
         "make:screen" => generate_screen(parse_generator(arguments)?),
         "make:component" => generate_component(parse_generator(arguments)?),
+        "make:flow" => generate_flow(parse_generator(arguments)?),
         "make:native-view" => generate_native_view(parse_generator(arguments)?),
         unknown => Err(format!(
             "unknown mobile command {unknown:?}; run `pam mobile --help`"
@@ -621,10 +624,21 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
     })?;
     let vendor_directory = fs::canonicalize(root.join("vendor"))
         .map_err(|error| format!("cannot resolve Composer vendor directory: {error}"))?;
-    let current_version = parse_release_version(env!("CARGO_PKG_VERSION"))?;
+    let packages = installed.packages();
+    let current_version_text = packages
+        .iter()
+        .find(|package| package.name == package_coordinates::NATIVE)
+        .map(|package| package.version.clone())
+        .ok_or_else(|| {
+            format!(
+                "Composer package {} is required for a Pam Native mobile project",
+                package_coordinates::NATIVE,
+            )
+        })?;
+    let current_version = parse_installed_sdk_version(&current_version_text)?;
     let mut plugins = Vec::new();
 
-    for package in installed.packages() {
+    for package in packages {
         let Some(extra) = package.extra.pam_native else {
             continue;
         };
@@ -698,6 +712,7 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
             &plugin_manifest,
             app,
             current_version,
+            &current_version_text,
         )?;
         plugins.push(NativePlugin {
             package: package.name,
@@ -720,6 +735,7 @@ fn validate_plugin_manifest(
     manifest: &PluginManifest,
     app: &NativeManifest,
     current_version: (u32, u32, u32),
+    current_version_text: &str,
 ) -> Result<(), String> {
     if manifest.version != 1 {
         return Err(format!(
@@ -749,7 +765,7 @@ fn validate_plugin_manifest(
             "plugin {package} supports Pam Native {} through {}, exclusive; installed SDK is {}",
             manifest.pam_native.minimum,
             manifest.pam_native.maximum_exclusive,
-            env!("CARGO_PKG_VERSION")
+            current_version_text,
         ));
     }
     if let Some(provider) = &manifest.php.provider
@@ -899,6 +915,24 @@ fn parse_release_version(value: &str) -> Result<(u32, u32, u32), String> {
         return Err(format!("{value:?} must contain major.minor.patch"));
     }
     Ok((numbers[0], numbers[1], numbers[2]))
+}
+
+fn parse_installed_sdk_version(value: &str) -> Result<(u32, u32, u32), String> {
+    if let Some(release) = value.strip_suffix("-dev") {
+        let parts = release.split('.').collect::<Vec<_>>();
+        if parts.len() == 3 && matches!(parts[2], "x" | "*") {
+            let major = parts[0]
+                .parse::<u32>()
+                .map_err(|_| format!("{value:?} is not a supported Composer SDK version"))?;
+            let minor = parts[1]
+                .parse::<u32>()
+                .map_err(|_| format!("{value:?} is not a supported Composer SDK version"))?;
+            return Ok((major, minor, 0));
+        }
+    }
+
+    parse_release_version(value)
+        .map_err(|_| format!("{value:?} is not a supported Composer SDK version"))
 }
 
 fn valid_composer_package(value: &str) -> bool {
@@ -2223,6 +2257,168 @@ final class {name} extends Component
     Ok(0)
 }
 
+fn generate_flow(options: GeneratorOptions) -> Result<u8, String> {
+    let project = load_project(&options.project)?;
+    let template_name = format!("{}-flow", kebab_case(&options.name));
+    let component_path = project
+        .root
+        .join("src/Flows")
+        .join(format!("{}.php", options.name));
+    let template_path = project
+        .root
+        .join("resources/native")
+        .join(format!("{template_name}.pam"));
+    let test_path = project
+        .root
+        .join("tests")
+        .join(format!("{}FlowTest.php", options.name));
+    ensure_available(&[&component_path, &template_path, &test_path])?;
+
+    let component = format!(
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace App\Flows;
+
+use Pam\Native\Attributes\State;
+use Pam\Native\Component;
+use Pam\Native\Renderable;
+use Pam\Native\View;
+
+enum {name}Step: int
+{{
+    case Details = 1;
+    case Review = 2;
+    case Complete = 3;
+}}
+
+final class {name} extends Component
+{{
+    #[State]
+    public int $step = {name}Step::Details->value;
+
+    public function render(): Renderable
+    {{
+        return View::make('{template_name}');
+    }}
+
+    public function next(): void
+    {{
+        $this->step = min({name}Step::Complete->value, $this->step + 1);
+    }}
+
+    public function back(): void
+    {{
+        $this->step = max({name}Step::Details->value, $this->step - 1);
+    }}
+}}
+"#,
+        name = options.name,
+    );
+    let template = format!(
+        r#"<AppScreen title="{name}" subtitle="A generated, typed PAM flow.">
+    <VStack class="gap-4">
+        <HStack class="items-center justify-between">
+            <Badge variant="secondary">
+                <BadgeText>Step {{{{ $step }}}} of 3</BadgeText>
+            </Badge>
+            <Text class="ui-text-muted">State survives native re-renders</Text>
+        </HStack>
+
+        <Progress :value="$step * 33.333">
+            <ProgressFilledTrack />
+        </Progress>
+
+        <Card v-if="$step === 1" class="p-5 rounded-2xl">
+            <VStack class="gap-2">
+                <Heading size="lg">Details</Heading>
+                <Text class="ui-text-muted">Collect typed input with FormField and NativeForm here.</Text>
+            </VStack>
+        </Card>
+        <Card v-else-if="$step === 2" class="p-5 rounded-2xl">
+            <VStack class="gap-2">
+                <Heading size="lg">Review</Heading>
+                <Text class="ui-text-muted">Review data before the final native action.</Text>
+            </VStack>
+        </Card>
+        <ContentState v-else status="content">
+            <Alert action="success" variant="subtle" class="rounded-2xl">
+                <AlertText>{name} completed successfully.</AlertText>
+            </Alert>
+        </ContentState>
+    </VStack>
+
+    <template #bottom>
+        <HStack class="p-4 gap-3">
+            <Button
+                v-if="$step > 1 &amp;&amp; $step < 3"
+                variant="outline"
+                class="flex-1"
+                @press="back"
+            >
+                <ButtonText>Back</ButtonText>
+            </Button>
+            <Button v-if="$step < 3" class="flex-1" @press="next">
+                <ButtonText>{{{{ $step === 2 ? 'Confirm' : 'Continue' }}}}</ButtonText>
+            </Button>
+        </HStack>
+    </template>
+</AppScreen>
+"#,
+        name = options.name,
+    );
+    let test = format!(
+        r#"<?php
+
+declare(strict_types=1);
+
+use App\Flows\{name};
+use App\Flows\{name}Step;
+
+require dirname(__DIR__).'/vendor/autoload.php';
+
+$flow = new {name}();
+assert($flow->step === {name}Step::Details->value);
+$flow->next();
+assert($flow->step === {name}Step::Review->value);
+$flow->next();
+$flow->next();
+assert($flow->step === {name}Step::Complete->value);
+$flow->back();
+assert($flow->step === {name}Step::Review->value);
+
+fwrite(STDOUT, "{name} flow contract passed.\n");
+"#,
+        name = options.name,
+    );
+
+    let mut created = Vec::new();
+    for (path, contents) in [
+        (&component_path, component.as_bytes()),
+        (&template_path, template.as_bytes()),
+        (&test_path, test.as_bytes()),
+    ] {
+        if let Err(error) = write_new_file(path, contents) {
+            for created_path in created {
+                let _ = fs::remove_file(created_path);
+            }
+            return Err(error);
+        }
+        created.push(path);
+    }
+
+    println!("Created flow {}", component_path.display());
+    println!("Created template {}", template_path.display());
+    println!("Created contract test {}", test_path.display());
+    println!(
+        "Mount App\\Flows\\{} after App::views(...), then run `php {}`.",
+        options.name,
+        test_path.display(),
+    );
+    Ok(0)
+}
+
 fn generate_native_view(options: GeneratorOptions) -> Result<u8, String> {
     let project = load_project(&options.project)?;
     let binding_name = kebab_case(&options.name);
@@ -2838,6 +3034,22 @@ mod tests {
         .expect("component");
         assert!(root.join("src/Components/MetricCard.pam.php").is_file());
 
+        generate_flow(GeneratorOptions {
+            name: "Checkout".to_owned(),
+            project: root.clone(),
+        })
+        .expect("flow");
+        assert!(root.join("src/Flows/Checkout.php").is_file());
+        assert!(root.join("resources/native/checkout-flow.pam").is_file());
+        assert!(root.join("tests/CheckoutFlowTest.php").is_file());
+        assert!(
+            generate_flow(GeneratorOptions {
+                name: "Checkout".to_owned(),
+                project: root.clone(),
+            })
+            .is_err()
+        );
+
         generate_native_view(GeneratorOptions {
             name: "CameraPreview".to_owned(),
             project: root.clone(),
@@ -2869,9 +3081,11 @@ mod tests {
                 .as_nanos()
         ));
         let package = root.join("vendor/community/example");
+        let native_package = root.join("vendor/pushinbr/pam-native");
         let composer = root.join("vendor/composer");
         let source = package.join("android/src/main/kotlin");
         fs::create_dir_all(&source).expect("plugin source");
+        fs::create_dir_all(&native_package).expect("native package");
         fs::create_dir_all(&composer).expect("composer");
         fs::write(root.join("vendor/autoload.php"), "<?php\n").expect("autoload");
         fs::write(root.join("index.php"), "<?php\n").expect("entry");
@@ -2892,6 +3106,10 @@ mod tests {
             composer.join("installed.json"),
             r#"{
                 "packages": [{
+                    "name": "pushinbr/pam-native",
+                    "version": "0.1.35",
+                    "install-path": "../pushinbr/pam-native"
+                }, {
                     "name": "community/example",
                     "version": "1.2.3",
                     "install-path": "../community/example",
@@ -2984,6 +3202,10 @@ mod tests {
             composer.join("installed.json"),
             r#"{
                 "packages": [{
+                    "name": "pushinbr/pam-native",
+                    "version": "0.1.35",
+                    "install-path": "../pushinbr/pam-native"
+                }, {
                     "name": "community/example",
                     "version": "1.2.3",
                     "install-path": "../community/example",
@@ -3002,3 +3224,10 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 }
+    #[test]
+    fn installed_sdk_versions_accept_stable_and_composer_dev_lines() {
+        assert_eq!(parse_installed_sdk_version("0.2.1"), Ok((0, 2, 1)));
+        assert_eq!(parse_installed_sdk_version("0.2.x-dev"), Ok((0, 2, 0)));
+        assert!(parse_installed_sdk_version("dev-main").is_err());
+        assert!(parse_release_version("0.2.x-dev").is_err());
+    }
