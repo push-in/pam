@@ -186,6 +186,10 @@ pub fn print_help(executable: &OsStr) {
                 "snapshot create|verify|run",
                 "Build and execute integrity-checked source snapshots",
             ),
+            (
+                "supply-chain [path]",
+                "Audit Composer provenance, policy and capabilities",
+            ),
         ],
     );
     command_group(
@@ -429,6 +433,23 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "snapshot create . --entry public/index.php",
                 "snapshot verify .pam/bootstrap.snapshot.json --project .",
                 "snapshot run .pam/bootstrap.snapshot.json --project .",
+            ],
+        ),
+        "supply-chain" => (
+            "Audit Composer scripts, plugins, maintainers, licenses, provenance, advisories and capabilities.",
+            "supply-chain [directory] [options]",
+            &[
+                ("--policy FILE", "PAM supply-chain policy JSON"),
+                (
+                    "--capabilities FILE",
+                    "Package capability manifest to audit",
+                ),
+                ("--output FILE", "Write the deterministic JSON report"),
+                ("--offline", "Skip advisories and mark them as unchecked"),
+            ],
+            &[
+                "supply-chain . --policy pam.supply-chain.json",
+                "supply-chain package --capabilities package/pam.capabilities.json --offline",
             ],
         ),
         "replay" => (

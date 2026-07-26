@@ -5,6 +5,12 @@ after the first stable release.
 
 ## Unreleased
 
+## 0.1.30 - 2026-07-26
+
+- Added the fail-closed `pam supply-chain` gate for Composer scripts, plugins,
+  maintainers, licenses, immutable references, advisories, abandoned packages
+  and integer capability policies.
+
 ## 0.1.29 - 2026-07-26
 
 - Added Redis-backed distributed coordination with TLS/mTLS, expiring service

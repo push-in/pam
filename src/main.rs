@@ -16,6 +16,7 @@ mod package_coordinates;
 mod php;
 mod sandbox;
 mod server;
+mod supply_chain;
 mod terminal;
 mod worker_state;
 
@@ -281,6 +282,64 @@ fn run() -> Result<u8, CliError> {
 
     if script_arg == "snapshot" {
         return snapshot_command(&executable, raw_args.collect());
+    }
+
+    if script_arg == "supply-chain" {
+        let mut project = PathBuf::from(".");
+        let mut policy = None;
+        let mut capabilities = None;
+        let mut output = None;
+        let mut offline = false;
+        let mut positional = false;
+        while let Some(argument) = raw_args.next() {
+            match argument.to_string_lossy().as_ref() {
+                "--help" | "-h" => {
+                    terminal::print_command_help(&executable, "supply-chain");
+                    return Ok(0);
+                }
+                "--policy" => {
+                    policy = Some(PathBuf::from(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--policy requires a JSON file".to_owned())
+                    })?));
+                }
+                "--capabilities" => {
+                    capabilities = Some(PathBuf::from(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--capabilities requires a JSON file".to_owned())
+                    })?));
+                }
+                "--output" => {
+                    output = Some(PathBuf::from(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--output requires a JSON file".to_owned())
+                    })?));
+                }
+                "--offline" => offline = true,
+                option if option.starts_with('-') => {
+                    return Err(CliError::Commands(format!(
+                        "unknown supply-chain option: {option}"
+                    )));
+                }
+                _ if !positional => {
+                    project = PathBuf::from(argument);
+                    positional = true;
+                }
+                _ => {
+                    return Err(CliError::Commands(
+                        "supply-chain accepts one project directory".to_owned(),
+                    ));
+                }
+            }
+        }
+        return supply_chain::run(
+            &executable,
+            supply_chain::Options {
+                project,
+                policy,
+                capabilities,
+                output,
+                offline,
+            },
+        )
+        .map_err(CliError::Commands);
     }
 
     if script_arg == "contracts" {

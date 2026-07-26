@@ -165,6 +165,10 @@ jobs:
           compat/laravel-smoke/vendor/bin/phpstan analyse -c compat/laravel-smoke/phpstan.neon --no-progress
           ./target/debug/pam test compat/composer-smoke --phpunit --colors=never
           ./target/debug/pam test compat/composer-smoke --pest --colors=never
+          ./target/debug/pam supply-chain compat/composer-smoke \
+            --output "${RUNNER_TEMP}/composer-supply-chain.json"
+          ./target/debug/pam supply-chain compat/laravel-smoke \
+            --output "${RUNNER_TEMP}/laravel-supply-chain.json"
           cargo build --locked --release
       - name: Package self-contained runtime
         env:

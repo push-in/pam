@@ -73,6 +73,12 @@ jobs:
         run: |
           ./target/debug/pam test compat/composer-smoke --phpunit -c phpunit.xml
           ./target/debug/pam test compat/composer-smoke --pest
+      - name: Supply-chain policy gate
+        run: |
+          ./target/debug/pam supply-chain compat/composer-smoke \
+            --output "${RUNNER_TEMP}/composer-supply-chain.json"
+          ./target/debug/pam supply-chain compat/laravel-smoke \
+            --output "${RUNNER_TEMP}/laravel-supply-chain.json"
       - name: Build release binary
         run: cargo build --locked --release
       - name: Create Android runtime packaging fixture
