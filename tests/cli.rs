@@ -1538,8 +1538,8 @@ fn initializes_mobile_with_tree_default_and_pam_components_enabled() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.php")).unwrap();
     assert!(
-        manifest["require"]["pushinbr/pam-native"] == "^0.1"
-            || manifest["require"]["pam/native"] == "^0.1"
+        manifest["require"]["pushinbr/pam-native"] == "^0.2"
+            || manifest["require"]["pam/native"] == "^0.2"
     );
     assert!(manifest["require"]["pushinbr/pam-mobile-ui"].is_null());
     if let Some(repositories) = manifest["repositories"].as_array() {
@@ -1579,7 +1579,7 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
             .unwrap();
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.pam.php")).unwrap();
-    assert_eq!(manifest["require"]["pushinbr/pam-mobile-ui"], "^0.1");
+    assert_eq!(manifest["require"]["pushinbr/pam-mobile-ui"], "^0.2");
     if let Some(repositories) = manifest["repositories"].as_array() {
         assert!(!repositories.is_empty());
         assert!(

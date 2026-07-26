@@ -13,6 +13,8 @@ pam_target=$3
 output_directory=$4
 package="pam-${pam_version}-${pam_target}"
 package_root="${output_directory}/${package}"
+expected_native_version=0.2.1
+expected_mobile_ui_version=0.2.1
 
 test -x "${pam_binary}" || {
     echo "PAM binary is not executable: ${pam_binary}" >&2
@@ -51,6 +53,19 @@ test -f pam-native/Cargo.toml || {
 }
 test -f pam-mobile-ui/composer.json || {
     echo "PAM Mobile UI source is missing from the release checkout." >&2
+    exit 66
+}
+native_version=$(
+    sed -n 's/^version = "\([^"]*\)"$/\1/p' pam-native/Cargo.toml |
+        head -n 1
+)
+mobile_ui_version=$(tr -d '\r\n' <pam-mobile-ui/VERSION)
+test "${native_version}" = "${expected_native_version}" || {
+    echo "Expected PAM Native ${expected_native_version}, found ${native_version}." >&2
+    exit 66
+}
+test "${mobile_ui_version}" = "${expected_mobile_ui_version}" || {
+    echo "Expected PAM Mobile UI ${expected_mobile_ui_version}, found ${mobile_ui_version}." >&2
     exit 66
 }
 for android_abi in arm64-v8a x86_64; do

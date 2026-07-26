@@ -34,9 +34,10 @@ impl ClusterProcess {
     ) -> Self {
         let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = probe.local_addr().unwrap().port();
-        drop(probe);
         let admin_probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let admin_port = admin_probe.local_addr().unwrap().port();
+        assert_ne!(port, admin_port);
+        drop(probe);
         drop(admin_probe);
         let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/server.php");
         let mut command = Command::new(env!("CARGO_BIN_EXE_pam"));

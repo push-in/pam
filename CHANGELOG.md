@@ -3,7 +3,15 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
-## Unreleased
+## 0.1.33 - 2026-07-26
+
+- Updated mobile scaffolds to install PAM Native and PAM Mobile UI 0.2.x.
+- Documented integer `v-for`, responsive 12-column rich grids and native
+  virtual grids for arbitrary component trees.
+- Made runtime packaging reject mismatched PAM Native/PamUI source versions
+  before producing a release archive.
+- Replaced private mobile release inputs with the public, certified Native and
+  PamUI 0.2.1 distributions in CI and runtime packaging.
 
 ## 0.1.32 - 2026-07-26
 

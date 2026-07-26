@@ -185,6 +185,7 @@ project and keep event handlers as public PHP methods.
 | `bind:value="$email"` | Synchronizes an input with component state |
 | `v-if="$ready"` | Renders a conditional branch |
 | `v-for="$item in $items"` | Repeats an element |
+| `v-for="$number in $count"` | Repeats one-based from `1` through an integer |
 | `key="..."` | Preserves identity when repeated children move |
 
 Template expressions support component properties, loop locals, arrays,
@@ -358,7 +359,15 @@ public array $tasks = [
 
 Always provide a stable `key` for reordered or editable collections. Use
 `v-for` for short groups. For large datasets, use the native
-`FlatList`/`VirtualizedList` primitives so off-screen content is recycled.
+`VirtualizedList`/`VirtualGrid` primitives so off-screen component trees are
+recycled. An integer source is a direct repetition count:
+
+```xml
+<Skeleton v-for="$number in $placeholderCount" :key="$number" />
+```
+
+`$number` is `1`, `2`, `3`, and so on. Zero or a negative integer renders
+nothing.
 
 ## Forms and two-way binding
 
@@ -497,16 +506,30 @@ keeps the first screen mounted. Route names must be registered before use.
 
 For forms covered by the keyboard, compose `KeyboardAvoidingView` with a
 scrolling container. For long data sets, prefer `FlatList`,
-`VirtualizedList`, or `SectionList` over a large `ScrollView`.
+`VirtualizedList`, `VirtualGrid`, or `SectionList` over a large `ScrollView`.
+
+`Grid` accepts arbitrary PAM component trees and defaults to 12 columns.
+Children can span, offset and reorder at the mobile-first `sm`, `md`, `lg` and
+`xl` breakpoints while keeping independent row/column gutters:
+
+```xml
+<Grid columns="12" gutterX="16" gutterY="16">
+    <Card span="12" spanMd="8">Main</Card>
+    <Card span="12" spanMd="4">Aside</Card>
+</Grid>
+```
+
+For large image/component collections, `VirtualGrid::make(2, ...$cells)` uses
+the native RecyclerView window rather than mounting the entire data set.
 
 ## Core native tags
 
 | Area | Tags/classes |
 | --- | --- |
-| Layout | `Screen`, `View`, `Column`, `Row`, `SafeAreaView`, `Spacer` |
+| Layout | `Screen`, `View`, `Column`, `Row`, `Grid`, `SafeAreaView`, `Spacer` |
 | Content | `Text`, `Image`, `ImageBackground` |
 | Input | `Input`, `TextInput`, `Button`, `Pressable`, `Toggle`, `Switch` |
-| Scrolling | `ScrollView`, `FlatList`, `VirtualizedList`, `SectionList` |
+| Scrolling | `ScrollView`, `FlatList`, `VirtualizedList`, `VirtualGrid`, `SectionList` |
 | Presentation | `Modal`, `ActivityIndicator`, `StatusBar`, `KeyboardAvoidingView` |
 | Android | `DrawerLayoutAndroid`, `TouchableNativeFeedback`, `InputAccessoryView` |
 
