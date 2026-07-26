@@ -25,7 +25,7 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.33`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.34`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
 **Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [WASI and typed RPC](docs/wasi-and-rpc.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
@@ -505,7 +505,8 @@ Amp Futures can be passed to `Pam\Async\await()`. Revolt remains driven by the p
 
 See [Async runtime](docs/async-runtime.md) for the execution model.
 Use [Durable workflows](docs/durable-workflows.md) for persisted retries,
-idempotent starts, resumable timers and reverse-order compensation.
+idempotent starts, leased multi-process scheduling, resumable timers and
+reverse-order compensation.
 Use [Typed contracts](docs/typed-contracts.md) to generate JSON Schema, OpenAPI,
 TypeScript, Kotlin, mobile, form, migration, MCP and reference artifacts from
 PHP DTOs and sequential integer enums.

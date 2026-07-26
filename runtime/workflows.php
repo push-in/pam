@@ -24,6 +24,10 @@ namespace Pam\Workflow {
         case Compensated = 6;
     }
 
+    final class LeaseLostException extends \RuntimeException
+    {
+    }
+
     final readonly class RetryPolicy
     {
         public function __construct(
@@ -51,6 +55,8 @@ namespace Pam\Workflow {
 
     final readonly class Context
     {
+        private ?\Closure $leaseHeartbeat;
+
         /**
          * @param array<string, mixed> $input
          * @param array<string, mixed> $results
@@ -59,7 +65,26 @@ namespace Pam\Workflow {
             public string $instanceId,
             public array $input,
             public array $results,
+            public ?string $stepName = null,
+            ?callable $leaseHeartbeat = null,
         ) {
+            $this->leaseHeartbeat = $leaseHeartbeat === null
+                ? null
+                : \Closure::fromCallable($leaseHeartbeat);
+        }
+
+        public function idempotencyKey(): string
+        {
+            return $this->stepName === null
+                ? $this->instanceId
+                : "{$this->instanceId}:{$this->stepName}";
+        }
+
+        public function heartbeat(): void
+        {
+            if ($this->leaseHeartbeat !== null) {
+                ($this->leaseHeartbeat)();
+            }
         }
     }
 
@@ -241,6 +266,160 @@ namespace Pam\Workflow {
                 $steps[] = self::stepRow($row);
             }
             return $steps;
+        }
+
+        /** @return list<Instance> */
+        public function claimDue(
+            string $owner,
+            int $limit = 10,
+            float $leaseSeconds = 30.0,
+            ?float $now = null,
+        ): array {
+            self::validateLease($owner, $leaseSeconds);
+            if ($limit < 1 || $limit > 1_000) {
+                throw new \InvalidArgumentException('Workflow claim limit must be between 1 and 1000.');
+            }
+            $now ??= microtime(true);
+            if (!is_finite($now) || $now < 0) {
+                throw new \InvalidArgumentException('Workflow claim time must be a positive finite timestamp.');
+            }
+
+            $ids = [];
+            $this->database->exec('BEGIN IMMEDIATE');
+            try {
+                $statement = $this->database->prepare(
+                    'SELECT id
+                    FROM pam_workflow_instances
+                    WHERE state IN (:pending, :running, :waiting, :compensating)
+                      AND (next_run_at IS NULL OR next_run_at <= :now)
+                      AND (lease_owner IS NULL OR lease_expires_at <= :now)
+                    ORDER BY COALESCE(next_run_at, created_at), created_at, id
+                    LIMIT :limit',
+                );
+                $statement->bindValue(':pending', InstanceState::Pending->value, \PDO::PARAM_INT);
+                $statement->bindValue(':running', InstanceState::Running->value, \PDO::PARAM_INT);
+                $statement->bindValue(':waiting', InstanceState::Waiting->value, \PDO::PARAM_INT);
+                $statement->bindValue(':compensating', InstanceState::Compensating->value, \PDO::PARAM_INT);
+                $statement->bindValue(':now', $now);
+                $statement->bindValue(':limit', $limit, \PDO::PARAM_INT);
+                $statement->execute();
+                foreach ($statement->fetchAll(\PDO::FETCH_COLUMN) as $id) {
+                    if (!is_string($id)) {
+                        throw new \UnexpectedValueException('Workflow claim returned an invalid instance id.');
+                    }
+                    $ids[] = $id;
+                }
+
+                $claim = $this->database->prepare(
+                    'UPDATE pam_workflow_instances
+                    SET lease_owner = :owner, lease_expires_at = :expires, updated_at = :updated
+                    WHERE id = :id',
+                );
+                foreach ($ids as $id) {
+                    $claim->execute([
+                        'owner' => $owner,
+                        'expires' => $now + $leaseSeconds,
+                        'updated' => $now,
+                        'id' => $id,
+                    ]);
+                }
+                $this->database->commit();
+            } catch (\Throwable $error) {
+                if ($this->database->inTransaction()) {
+                    $this->database->rollBack();
+                }
+                throw $error;
+            }
+
+            return array_map($this->find(...), $ids);
+        }
+
+        public function renewLease(
+            string $instanceId,
+            string $owner,
+            float $leaseSeconds = 30.0,
+        ): bool {
+            self::validateLease($owner, $leaseSeconds);
+            $now = microtime(true);
+            $statement = $this->database->prepare(
+                'UPDATE pam_workflow_instances
+                SET lease_expires_at = :expires, updated_at = :updated
+                WHERE id = :id AND lease_owner = :owner AND lease_expires_at > :now',
+            );
+            $statement->execute([
+                'expires' => $now + $leaseSeconds,
+                'updated' => $now,
+                'id' => $instanceId,
+                'owner' => $owner,
+                'now' => $now,
+            ]);
+            return $statement->rowCount() === 1;
+        }
+
+        public function releaseLease(string $instanceId, string $owner): bool
+        {
+            self::validateOwner($owner);
+            $statement = $this->database->prepare(
+                'UPDATE pam_workflow_instances
+                SET lease_owner = NULL, lease_expires_at = NULL, updated_at = :updated
+                WHERE id = :id AND lease_owner = :owner',
+            );
+            $statement->execute([
+                'updated' => microtime(true),
+                'id' => $instanceId,
+                'owner' => $owner,
+            ]);
+            return $statement->rowCount() === 1;
+        }
+
+        public function hasActiveLease(string $instanceId): bool
+        {
+            [, , $active] = $this->leaseState($instanceId);
+            return $active;
+        }
+
+        public function assertRunnable(string $instanceId, ?string $owner = null): void
+        {
+            if ($owner !== null) {
+                self::validateOwner($owner);
+            }
+            [$leaseOwner, , $active] = $this->leaseState($instanceId);
+            if ($owner === null && $active) {
+                throw new \LogicException("Workflow instance {$instanceId} is leased by another scheduler.");
+            }
+            if ($owner !== null && (!$active || !hash_equals($leaseOwner ?? '', $owner))) {
+                throw new \LogicException("Workflow instance {$instanceId} is not actively leased by {$owner}.");
+            }
+        }
+
+        /** @return array{?string, ?float, bool} */
+        private function leaseState(string $instanceId): array
+        {
+            $statement = $this->database->prepare(
+                'SELECT lease_owner, lease_expires_at
+                FROM pam_workflow_instances WHERE id = :id',
+            );
+            $statement->execute(['id' => $instanceId]);
+            $row = $statement->fetch();
+            if (!is_array($row)) {
+                throw new \OutOfBoundsException("Workflow instance {$instanceId} does not exist.");
+            }
+            $leaseOwner = $row['lease_owner'] ?? null;
+            $leaseExpiresAt = $row['lease_expires_at'] ?? null;
+            if (
+                !(is_string($leaseOwner) || $leaseOwner === null)
+                || !(is_int($leaseExpiresAt) || is_float($leaseExpiresAt) || $leaseExpiresAt === null)
+            ) {
+                throw new \UnexpectedValueException('Workflow lease persistence has an invalid shape.');
+            }
+            $active = $leaseOwner !== null
+                && $leaseExpiresAt !== null
+                && (float) $leaseExpiresAt > microtime(true);
+            return [
+                $leaseOwner,
+                $leaseExpiresAt === null ? null : (float) $leaseExpiresAt,
+                $active,
+            ];
         }
 
         /** @param array<string, mixed>|null $result */
@@ -464,11 +643,26 @@ namespace Pam\Workflow {
                     error TEXT,
                     next_run_at REAL,
                     idempotency_key TEXT NOT NULL,
+                    lease_owner TEXT,
+                    lease_expires_at REAL,
                     created_at REAL NOT NULL,
                     updated_at REAL NOT NULL,
                     UNIQUE (definition, idempotency_key)
                 )',
             );
+            $columns = $this->database->query(
+                'PRAGMA table_info(pam_workflow_instances)',
+            )->fetchAll(\PDO::FETCH_COLUMN, 1);
+            if (!in_array('lease_owner', $columns, true)) {
+                $this->database->exec(
+                    'ALTER TABLE pam_workflow_instances ADD COLUMN lease_owner TEXT',
+                );
+            }
+            if (!in_array('lease_expires_at', $columns, true)) {
+                $this->database->exec(
+                    'ALTER TABLE pam_workflow_instances ADD COLUMN lease_expires_at REAL',
+                );
+            }
             $this->database->exec(
                 'CREATE TABLE IF NOT EXISTS pam_workflow_steps (
                     instance_id TEXT NOT NULL,
@@ -486,6 +680,27 @@ namespace Pam\Workflow {
                 'CREATE INDEX IF NOT EXISTS pam_workflow_due
                 ON pam_workflow_instances (state, next_run_at)',
             );
+            $this->database->exec(
+                'CREATE INDEX IF NOT EXISTS pam_workflow_claimable
+                ON pam_workflow_instances (state, next_run_at, lease_expires_at)',
+            );
+        }
+
+        private static function validateLease(string $owner, float $leaseSeconds): void
+        {
+            self::validateOwner($owner);
+            if (!is_finite($leaseSeconds) || $leaseSeconds < 1 || $leaseSeconds > 3_600) {
+                throw new \InvalidArgumentException(
+                    'Workflow lease duration must be between 1 and 3600 seconds.',
+                );
+            }
+        }
+
+        private static function validateOwner(string $owner): void
+        {
+            if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/', $owner) !== 1) {
+                throw new \InvalidArgumentException('Workflow lease owner is invalid.');
+            }
         }
 
         private static function encode(mixed $value): string
@@ -530,11 +745,35 @@ namespace Pam\Workflow {
         ): Instance {
             $resolved = $this->definition($definition, $version);
             $instance = $this->store->create($resolved, $input, $idempotencyKey);
+            if ($this->store->hasActiveLease($instance->id)) {
+                return $instance;
+            }
             return $this->run($instance->id);
         }
 
         public function run(string $instanceId): Instance
         {
+            $this->store->assertRunnable($instanceId);
+            return $this->execute($instanceId);
+        }
+
+        public function runClaimed(
+            string $instanceId,
+            string $owner,
+            float $leaseSeconds = 30.0,
+        ): Instance {
+            $this->store->assertRunnable($instanceId, $owner);
+            if (!$this->store->renewLease($instanceId, $owner, $leaseSeconds)) {
+                throw new LeaseLostException("Workflow lease for {$instanceId} was lost before execution.");
+            }
+            return $this->execute($instanceId, $owner, $leaseSeconds);
+        }
+
+        private function execute(
+            string $instanceId,
+            ?string $owner = null,
+            float $leaseSeconds = 30.0,
+        ): Instance {
             $instance = $this->store->find($instanceId);
             if (in_array($instance->state, [
                 InstanceState::Completed,
@@ -547,8 +786,18 @@ namespace Pam\Workflow {
                 return $instance;
             }
             $definition = $this->definition($instance->definition, $instance->version);
-            $this->transition($instance->id, InstanceState::Running);
             $persistedSteps = $this->store->steps($instance->id);
+            if ($instance->state === InstanceState::Compensating) {
+                return $this->resumeCompensation(
+                    $definition,
+                    $instance,
+                    $persistedSteps,
+                    $owner,
+                    $leaseSeconds,
+                );
+            }
+            $this->heartbeat($instance->id, $owner, $leaseSeconds);
+            $this->transition($instance->id, InstanceState::Running);
             $results = [];
 
             foreach ($persistedSteps as $position => $persisted) {
@@ -562,9 +811,17 @@ namespace Pam\Workflow {
                         : json_decode($persisted['result_json'], true, 64, JSON_THROW_ON_ERROR);
                     continue;
                 }
+                $this->heartbeat($instance->id, $owner, $leaseSeconds);
                 $attempt = $this->store->startStep($instance->id, $step->name);
                 try {
-                    $result = ($step->activity)(new Context($instance->id, $instance->input, $results));
+                    $result = ($step->activity)($this->context(
+                        $instance,
+                        $results,
+                        $step->name,
+                        $owner,
+                        $leaseSeconds,
+                    ));
+                    $this->heartbeat($instance->id, $owner, $leaseSeconds);
                     $this->store->finishStep(
                         $instance->id,
                         $step->name,
@@ -573,6 +830,10 @@ namespace Pam\Workflow {
                     );
                     $results[$step->name] = $result;
                 } catch (\Throwable $error) {
+                    if ($error instanceof LeaseLostException) {
+                        throw $error;
+                    }
+                    $this->heartbeat($instance->id, $owner, $leaseSeconds);
                     if ($attempt < $step->retry->maxAttempts) {
                         $next = microtime(true) + $step->retry->delayAfter($attempt);
                         $this->store->finishStep(
@@ -595,35 +856,124 @@ namespace Pam\Workflow {
                         StepState::Failed,
                         error: self::error($error),
                     );
-                    return $this->compensate($definition, $instance, $results, $error);
+                    return $this->compensate(
+                        $definition,
+                        $instance,
+                        $results,
+                        self::error($error),
+                        $persistedSteps,
+                        $owner,
+                        $leaseSeconds,
+                    );
                 }
             }
 
+            $this->heartbeat($instance->id, $owner, $leaseSeconds);
             $this->transition($instance->id, InstanceState::Completed, $results);
             return $this->store->find($instance->id);
         }
 
-        /** @param array<string, mixed> $results */
+        /**
+         * @param array<string, mixed> $results
+         * @param list<array{name: string, position: int, state: int, attempts: int, result_json: ?string, error: ?string}> $persistedSteps
+         */
         private function compensate(
             Definition $definition,
             Instance $instance,
             array $results,
-            \Throwable $cause,
+            string $cause,
+            array $persistedSteps,
+            ?string $owner,
+            float $leaseSeconds,
         ): Instance {
             $this->transition(
                 $instance->id,
                 InstanceState::Compensating,
-                error: self::error($cause),
+                error: $cause,
             );
+            return $this->finishCompensation(
+                $definition,
+                $instance,
+                $results,
+                $cause,
+                $persistedSteps,
+                $owner,
+                $leaseSeconds,
+            );
+        }
+
+        /**
+         * @param list<array{name: string, position: int, state: int, attempts: int, result_json: ?string, error: ?string}> $persistedSteps
+         */
+        private function resumeCompensation(
+            Definition $definition,
+            Instance $instance,
+            array $persistedSteps,
+            ?string $owner,
+            float $leaseSeconds,
+        ): Instance {
+            $results = [];
+            foreach ($persistedSteps as $persisted) {
+                if (
+                    in_array($persisted['state'], [
+                        StepState::Completed->value,
+                        StepState::Compensated->value,
+                    ], true)
+                ) {
+                    $results[$persisted['name']] = $persisted['result_json'] === null
+                        ? null
+                        : json_decode($persisted['result_json'], true, 64, JSON_THROW_ON_ERROR);
+                }
+            }
+            return $this->finishCompensation(
+                $definition,
+                $instance,
+                $results,
+                $instance->error ?? 'Workflow compensation resumed after interruption.',
+                $persistedSteps,
+                $owner,
+                $leaseSeconds,
+            );
+        }
+
+        /**
+         * @param array<string, mixed> $results
+         * @param list<array{name: string, position: int, state: int, attempts: int, result_json: ?string, error: ?string}> $persistedSteps
+         */
+        private function finishCompensation(
+            Definition $definition,
+            Instance $instance,
+            array $results,
+            string $cause,
+            array $persistedSteps,
+            ?string $owner,
+            float $leaseSeconds,
+        ): Instance {
+            $states = [];
+            foreach ($persistedSteps as $persisted) {
+                $states[$persisted['name']] = $persisted['state'];
+            }
             try {
                 foreach (array_reverse($definition->steps) as $step) {
-                    if (!array_key_exists($step->name, $results) || $step->compensation === null) {
+                    if (
+                        !array_key_exists($step->name, $results)
+                        || $step->compensation === null
+                        || ($states[$step->name] ?? null) === StepState::Compensated->value
+                    ) {
                         continue;
                     }
+                    $this->heartbeat($instance->id, $owner, $leaseSeconds);
                     ($step->compensation)(
-                        new Context($instance->id, $instance->input, $results),
+                        $this->context(
+                            $instance,
+                            $results,
+                            $step->name,
+                            $owner,
+                            $leaseSeconds,
+                        ),
                         $results[$step->name],
                     );
+                    $this->heartbeat($instance->id, $owner, $leaseSeconds);
                     $this->store->finishStep(
                         $instance->id,
                         $step->name,
@@ -631,19 +981,59 @@ namespace Pam\Workflow {
                         $results[$step->name],
                     );
                 }
+                $this->heartbeat($instance->id, $owner, $leaseSeconds);
                 $this->transition(
                     $instance->id,
                     InstanceState::Compensated,
-                    error: self::error($cause),
+                    error: $cause,
                 );
             } catch (\Throwable $compensationError) {
+                if ($compensationError instanceof LeaseLostException) {
+                    throw $compensationError;
+                }
+                $this->heartbeat($instance->id, $owner, $leaseSeconds);
                 $this->transition(
                     $instance->id,
                     InstanceState::Failed,
-                    error: self::error($cause) . '; compensation: ' . self::error($compensationError),
+                    error: $cause . '; compensation: ' . self::error($compensationError),
                 );
             }
             return $this->store->find($instance->id);
+        }
+
+        /** @param array<string, mixed> $results */
+        private function context(
+            Instance $instance,
+            array $results,
+            string $stepName,
+            ?string $owner,
+            float $leaseSeconds,
+        ): Context {
+            $heartbeat = $owner === null
+                ? null
+                : function () use ($instance, $owner, $leaseSeconds): void {
+                    $this->heartbeat($instance->id, $owner, $leaseSeconds);
+                };
+            return new Context(
+                $instance->id,
+                $instance->input,
+                $results,
+                $stepName,
+                $heartbeat,
+            );
+        }
+
+        private function heartbeat(
+            string $instanceId,
+            ?string $owner,
+            float $leaseSeconds,
+        ): void {
+            if (
+                $owner !== null
+                && !$this->store->renewLease($instanceId, $owner, $leaseSeconds)
+            ) {
+                throw new LeaseLostException("Workflow lease for {$instanceId} was lost during execution.");
+            }
         }
 
         private function definition(string $name, ?int $version): Definition
@@ -684,6 +1074,83 @@ namespace Pam\Workflow {
         private static function error(\Throwable $error): string
         {
             return $error::class . ': ' . $error->getMessage();
+        }
+    }
+
+    final readonly class SchedulerTick
+    {
+        /** @param list<string> $errors */
+        public function __construct(
+            public int $claimed,
+            public int $completed,
+            public int $waiting,
+            public int $failed,
+            public int $compensated,
+            public array $errors,
+        ) {
+        }
+    }
+
+    final readonly class Scheduler
+    {
+        public function __construct(
+            private Store $store,
+            private Engine $engine,
+            private string $owner,
+            private float $leaseSeconds = 30.0,
+        ) {
+            if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/', $owner) !== 1) {
+                throw new \InvalidArgumentException('Workflow scheduler owner is invalid.');
+            }
+            if (!is_finite($leaseSeconds) || $leaseSeconds < 1 || $leaseSeconds > 3_600) {
+                throw new \InvalidArgumentException(
+                    'Workflow scheduler lease duration must be between 1 and 3600 seconds.',
+                );
+            }
+        }
+
+        public function tick(int $limit = 10): SchedulerTick
+        {
+            $instances = $this->store->claimDue(
+                $this->owner,
+                $limit,
+                $this->leaseSeconds,
+            );
+            $completed = 0;
+            $waiting = 0;
+            $failed = 0;
+            $compensated = 0;
+            $errors = [];
+
+            foreach ($instances as $instance) {
+                try {
+                    $result = $this->engine->runClaimed(
+                        $instance->id,
+                        $this->owner,
+                        $this->leaseSeconds,
+                    );
+                    match ($result->state) {
+                        InstanceState::Completed => $completed++,
+                        InstanceState::Waiting => $waiting++,
+                        InstanceState::Failed => $failed++,
+                        InstanceState::Compensated => $compensated++,
+                        default => null,
+                    };
+                } catch (\Throwable $error) {
+                    $errors[] = $instance->id . ': ' . $error::class . ': ' . $error->getMessage();
+                } finally {
+                    $this->store->releaseLease($instance->id, $this->owner);
+                }
+            }
+
+            return new SchedulerTick(
+                count($instances),
+                $completed,
+                $waiting,
+                $failed,
+                $compensated,
+                $errors,
+            );
         }
     }
 }

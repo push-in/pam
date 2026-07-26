@@ -3,6 +3,17 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
+## 0.1.34 - 2026-07-26
+
+- Added atomic durable-workflow claims with expiring owner leases, bounded
+  batches and safe contention across local scheduler processes.
+- Added a typed scheduler tick API, lease renewal and activity heartbeats so
+  due retries and timers no longer depend on manual `run()` calls.
+- Added stable per-step idempotency keys, interrupted compensation resume and
+  automatic migration of pre-lease workflow databases.
+- Expanded the executable workflow contract with lease contention, stale-owner
+  recovery, wrong-owner rejection, scheduler execution and legacy-schema tests.
+
 ## 0.1.33 - 2026-07-26
 
 - Updated mobile scaffolds to install PAM Native and PAM Mobile UI 0.2.x.

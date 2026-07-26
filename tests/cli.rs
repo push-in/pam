@@ -495,8 +495,33 @@ fn resumes_idempotent_durable_workflows_and_compensates_failures() {
         })
     );
     assert_eq!(contract["deduplicatedId"], contract["originalId"]);
+    assert_eq!(
+        contract["deduplicatedWhileLeasedId"],
+        contract["originalId"]
+    );
+    assert_eq!(contract["deduplicatedWhileLeasedState"], 3);
     assert_eq!(contract["compensatedState"], 7);
     assert_eq!(contract["compensations"][0][1], "reservation-1");
+    assert_eq!(contract["lostLeaseErrors"], 1);
+    assert_eq!(contract["stateAfterLeaseLoss"], 2);
+    assert_eq!(contract["recoveredLeaseCompleted"], 1);
+    assert_eq!(contract["stateAfterLeaseRecovery"], 4);
+    assert_eq!(contract["claimed"], 1);
+    assert_eq!(contract["contended"], 0);
+    assert_eq!(contract["wrongOwnerRejected"], true);
+    assert_eq!(
+        contract["activityKey"],
+        format!("{}:receipt", contract["originalId"].as_str().unwrap())
+    );
+    assert_eq!(contract["staleClaims"], 2);
+    assert_eq!(contract["recoveredClaims"], 2);
+    assert_eq!(contract["schedulerClaimed"], 2);
+    assert_eq!(contract["schedulerCompleted"], 2);
+    assert_eq!(contract["schedulerErrors"], serde_json::json!([]));
+    assert_eq!(
+        contract["legacyLeaseColumns"],
+        serde_json::json!(["lease_owner", "lease_expires_at"])
+    );
     assert!(database.is_file());
     fs::remove_dir_all(directory).unwrap();
 }
