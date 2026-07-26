@@ -1,4 +1,5 @@
 /target/
+/fuzz/target/
 /.pam-sdk/
 /playground/
 /.idea/
