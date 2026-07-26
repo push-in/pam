@@ -650,9 +650,13 @@ namespace Pam\Workflow {
                     UNIQUE (definition, idempotency_key)
                 )',
             );
-            $columns = $this->database->query(
+            $columnsStatement = $this->database->query(
                 'PRAGMA table_info(pam_workflow_instances)',
-            )->fetchAll(\PDO::FETCH_COLUMN, 1);
+            );
+            if (!$columnsStatement instanceof \PDOStatement) {
+                throw new \RuntimeException('Cannot inspect the workflow database schema.');
+            }
+            $columns = $columnsStatement->fetchAll(\PDO::FETCH_COLUMN, 1);
             if (!in_array('lease_owner', $columns, true)) {
                 $this->database->exec(
                     'ALTER TABLE pam_workflow_instances ADD COLUMN lease_owner TEXT',
