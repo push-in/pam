@@ -4497,6 +4497,10 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
     "applicationId": "app.pam.hello",
     "name": "Pam Hello",
     "entry": "index.php",
+    "runtime": {{
+        "php": "8.5",
+        "channel": "stable"
+    }},
     "versionCode": 1,
     "versionName": "0.1.0",
     "android": {{

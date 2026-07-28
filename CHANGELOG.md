@@ -3,6 +3,14 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
+## 0.1.37 - 2026-07-28
+
+- Centralized Android PHP 8.4 and 8.5 ownership in PAM with verified source
+  checksums, side-by-side runtime artifacts and reproducible project lockfiles.
+- Added `pam mobile runtime:list`, `runtime:info`, `runtime:use` and
+  `runtime:update`; Pam Native now inherits the selected runtime without
+  publishing or compiling PHP itself.
+
 ## 0.1.35 - 2026-07-26
 
 - Added public GitHub artifact attestation for the standalone Android runtime

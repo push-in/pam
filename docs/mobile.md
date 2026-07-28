@@ -1,5 +1,9 @@
 # PAM Mobile
 
+PHP runtime selection is centralized in PAM. See the
+[PHP Runtime Manager](php-runtime-manager.md) for PHP 8.4/8.5 selection,
+checksums and reproducible locks.
+
 Build native Android applications with PHP components that stay alive for the
 whole application session. PAM Mobile does not render HTML, start a WebView, or
 ship a JavaScript runtime. Both authoring styles become the same native tree:

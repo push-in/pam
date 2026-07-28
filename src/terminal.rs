@@ -766,12 +766,21 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ),
                 ("devtools", "Toggle the live performance overlay"),
                 ("plugin:list | plugin:doctor", "Inspect native plugins"),
+                (
+                    "runtime:list | runtime:info",
+                    "Inspect selectable PAM-owned PHP runtimes",
+                ),
+                (
+                    "runtime:use | runtime:update",
+                    "Select and lock PHP 8.4 or 8.5",
+                ),
                 ("make:*", "Generate screens, components, or native views"),
             ],
             &[
                 "mobile doctor",
                 "mobile dev .",
                 "mobile devtools .",
+                "mobile runtime:use 8.5 .",
                 "mobile make:screen Dashboard .",
             ],
         ),

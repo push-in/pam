@@ -13,7 +13,7 @@ pam_target=$3
 output_directory=$4
 package="pam-${pam_version}-${pam_target}"
 package_root="${output_directory}/${package}"
-expected_native_version=0.2.1
+expected_native_version=0.5.0
 expected_mobile_ui_version=0.2.1
 
 test -x "${pam_binary}" || {
@@ -41,6 +41,7 @@ mkdir -p \
     "${package_root}/bin" \
     "${package_root}/etc/conf.d" \
     "${package_root}/lib/php/extensions" \
+    "${package_root}/share/pam/runtime" \
     "${package_root}/share/pam/native" \
     "${package_root}/share/pam/mobile-ui"
 
@@ -68,24 +69,32 @@ test "${mobile_ui_version}" = "${expected_mobile_ui_version}" || {
     echo "Expected PAM Mobile UI ${expected_mobile_ui_version}, found ${mobile_ui_version}." >&2
     exit 66
 }
-for android_abi in arm64-v8a x86_64; do
-    android_runtime="pam-native/runtime/android/${android_abi}"
+test -f runtime/catalog.json || {
+    echo "PAM runtime catalog is missing." >&2
+    exit 66
+}
+for runtime_id in 8.4.23-r1 8.5.8-r1; do
+  for android_abi in arm64-v8a x86_64; do
+    android_runtime="runtime/android/${runtime_id}/${android_abi}"
     test -s "${android_runtime}/lib/libphp.a" || {
-        echo "PHP Android runtime library is missing for ${android_abi}." >&2
+        echo "PHP Android runtime library is missing for ${runtime_id}/${android_abi}." >&2
         exit 66
     }
     test -f "${android_runtime}/include/php/main/php.h" || {
-        echo "PHP Android headers are missing for ${android_abi}." >&2
+        echo "PHP Android headers are missing for ${runtime_id}/${android_abi}." >&2
         exit 66
     }
     test -f "${android_runtime}/include/php/sapi/embed/php_embed.h" || {
-        echo "PHP Android Embed headers are missing for ${android_abi}." >&2
+        echo "PHP Android Embed headers are missing for ${runtime_id}/${android_abi}." >&2
         exit 66
     }
     test -f "${android_runtime}/runtime.json" || {
-        echo "PHP Android runtime provenance is missing for ${android_abi}." >&2
+        echo "PHP Android runtime provenance is missing for ${runtime_id}/${android_abi}." >&2
         exit 66
     }
+  done
+done
+for android_abi in arm64-v8a x86_64; do
     case "${android_abi}" in
         arm64-v8a) rust_target=aarch64-linux-android ;;
         x86_64) rust_target=x86_64-linux-android ;;
@@ -96,6 +105,8 @@ for android_abi in arm64-v8a x86_64; do
         exit 66
     }
 done
+cp runtime/catalog.json "${package_root}/share/pam/runtime/catalog.json"
+cp -R runtime/android "${package_root}/share/pam/runtime/android"
 tar \
     --exclude='./.git' \
     --exclude='./target' \

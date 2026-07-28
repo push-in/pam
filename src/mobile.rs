@@ -22,6 +22,7 @@ const HOT_RELOAD_DEBOUNCE: Duration = Duration::from_millis(400);
 const PLUGIN_PROTOCOL_VERSION: u32 = 1;
 const PLUGIN_LOCK_VERSION: u32 = 1;
 const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
+const RUNTIME_LOCK_VERSION: u32 = 1;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildMode {
@@ -93,6 +94,8 @@ struct NativeManifest {
     application_id: String,
     name: String,
     entry: PathBuf,
+    #[serde(default)]
+    runtime: RuntimeRequest,
     #[serde(default = "default_version_code")]
     version_code: u32,
     #[serde(default = "default_version_name")]
@@ -103,6 +106,73 @@ struct NativeManifest {
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeRequest {
+    #[serde(default = "default_php_series")]
+    php: String,
+    #[serde(default = "default_runtime_channel")]
+    channel: String,
+}
+
+impl Default for RuntimeRequest {
+    fn default() -> Self {
+        Self {
+            php: default_php_series(),
+            channel: default_runtime_channel(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeCatalog {
+    schema_version: u32,
+    default: String,
+    channels: std::collections::BTreeMap<String, String>,
+    releases: std::collections::BTreeMap<String, RuntimeRelease>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RuntimeRelease {
+    php_version: String,
+    runtime_revision: u32,
+    source_url: String,
+    source_sha256: String,
+    android_api: u32,
+    ndk_version: String,
+    extensions: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeLock<'a> {
+    schema_version: u32,
+    runtime_id: &'a str,
+    php_version: &'a str,
+    runtime_revision: u32,
+    channel: &'a str,
+    source_sha256: &'a str,
+    android_api: u32,
+    ndk_version: &'a str,
+    extensions: &'a [String],
+}
+
+struct ResolvedRuntime {
+    id: String,
+    release: RuntimeRelease,
+    root: PathBuf,
+}
+
+fn default_php_series() -> String {
+    "8.5".to_owned()
+}
+
+fn default_runtime_channel() -> String {
+    "stable".to_owned()
 }
 
 #[derive(Debug, Deserialize)]
@@ -326,8 +396,15 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "codegen" => {
             let project = load_project(&parse_project_only(arguments)?)?;
             let native_home = native_home()?;
+            let runtime = resolve_runtime(&project, &pam_home()?)?;
             let workspace = sync_android_host(&project, &native_home)?;
-            configure_android(&project, &native_home, &workspace, &default_abis())?;
+            configure_android(
+                &project,
+                &native_home,
+                &runtime,
+                &workspace,
+                &default_abis(),
+            )?;
             generate_modules(&project, &workspace)?;
             generate_views(&project, &workspace)?;
             println!("Generated Android bindings for {}", project.manifest.name);
@@ -359,6 +436,10 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "devtools" => toggle_devtools(parse_project_only(arguments)?),
         "plugin:list" => list_plugins(parse_project_only(arguments)?),
         "plugin:doctor" => doctor_plugins(parse_project_only(arguments)?),
+        "runtime:list" => list_runtimes(parse_project_only(arguments)?),
+        "runtime:info" => runtime_info(parse_project_only(arguments)?),
+        "runtime:use" => runtime_use(parse_runtime_use(arguments)?),
+        "runtime:update" => runtime_update(parse_project_only(arguments)?),
         "make:screen" => generate_screen(parse_generator(arguments)?),
         "make:component" => generate_component(parse_generator(arguments)?),
         "make:flow" => generate_flow(parse_generator(arguments)?),
@@ -367,6 +448,32 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             "unknown mobile command {unknown:?}; run `pam mobile --help`"
         )),
     }
+}
+
+struct RuntimeUseOptions {
+    php: String,
+    project: PathBuf,
+}
+
+fn parse_runtime_use(
+    mut arguments: impl Iterator<Item = OsString>,
+) -> Result<RuntimeUseOptions, String> {
+    let php = arguments
+        .next()
+        .ok_or_else(|| "`pam mobile runtime:use` requires 8.4 or 8.5".to_owned())?
+        .into_string()
+        .map_err(|_| "PHP runtime version must be valid UTF-8".to_owned())?;
+    let project = arguments.next().unwrap_or_else(|| OsString::from("."));
+    if let Some(extra) = arguments.next() {
+        return Err(format!(
+            "unexpected runtime argument {}",
+            extra.to_string_lossy()
+        ));
+    }
+    Ok(RuntimeUseOptions {
+        php,
+        project: PathBuf::from(project),
+    })
 }
 
 struct GeneratorOptions {
@@ -520,6 +627,12 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
             "unsupported Pam Native manifest version {}; expected 1",
             manifest.version
         ));
+    }
+    if !matches!(manifest.runtime.php.as_str(), "8.4" | "8.5") {
+        return Err("runtime.php must be 8.4 or 8.5".to_owned());
+    }
+    if manifest.runtime.channel != "stable" {
+        return Err("runtime.channel currently supports only \"stable\"".to_owned());
     }
     if !valid_application_id(&manifest.application_id) {
         return Err("applicationId must be a dot-separated Java package name".to_owned());
@@ -1081,9 +1194,189 @@ fn native_home() -> Result<PathBuf, String> {
         })
 }
 
+fn pam_home() -> Result<PathBuf, String> {
+    let mut candidates = Vec::new();
+    if let Some(configured) = std::env::var_os("PAM_HOME") {
+        candidates.push(PathBuf::from(configured));
+    }
+    candidates.push(PathBuf::from(env!("CARGO_MANIFEST_DIR")));
+    if let Ok(executable) = std::env::current_exe()
+        && let Some(binary) = executable.parent()
+    {
+        candidates.push(binary.join("../share/pam"));
+        candidates.push(binary.join("../lib/pam"));
+    }
+    candidates
+        .into_iter()
+        .find_map(|candidate| {
+            let resolved = fs::canonicalize(candidate).ok()?;
+            resolved
+                .join("runtime/catalog.json")
+                .is_file()
+                .then_some(resolved)
+        })
+        .ok_or_else(|| "PAM runtime catalog was not found; set PAM_HOME".to_owned())
+}
+
+fn load_runtime_catalog(pam_home: &Path) -> Result<RuntimeCatalog, String> {
+    let path = pam_home.join("runtime/catalog.json");
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read runtime catalog {}: {error}", path.display()))?;
+    let catalog: RuntimeCatalog = serde_json::from_str(&contents)
+        .map_err(|error| format!("invalid runtime catalog {}: {error}", path.display()))?;
+    if catalog.schema_version != 1 {
+        return Err(format!(
+            "unsupported runtime catalog schema {}; expected 1",
+            catalog.schema_version
+        ));
+    }
+    if !catalog.channels.contains_key(&catalog.default) {
+        return Err("runtime catalog default does not name a channel".to_owned());
+    }
+    Ok(catalog)
+}
+
+fn resolve_runtime(project: &Project, pam_home: &Path) -> Result<ResolvedRuntime, String> {
+    let catalog = load_runtime_catalog(pam_home)?;
+    let id = catalog
+        .channels
+        .get(&project.manifest.runtime.php)
+        .ok_or_else(|| {
+            format!(
+                "PHP {} has no {} runtime in this Pam Native SDK",
+                project.manifest.runtime.php, project.manifest.runtime.channel
+            )
+        })?
+        .clone();
+    let release = catalog
+        .releases
+        .get(&id)
+        .ok_or_else(|| format!("runtime catalog points to missing release {id}"))?
+        .clone();
+    Ok(ResolvedRuntime {
+        root: pam_home.join("runtime/android").join(&id),
+        id,
+        release,
+    })
+}
+
+fn write_runtime_lock(project: &Project, runtime: &ResolvedRuntime) -> Result<(), String> {
+    let lock = RuntimeLock {
+        schema_version: RUNTIME_LOCK_VERSION,
+        runtime_id: &runtime.id,
+        php_version: &runtime.release.php_version,
+        runtime_revision: runtime.release.runtime_revision,
+        channel: &project.manifest.runtime.channel,
+        source_sha256: &runtime.release.source_sha256,
+        android_api: runtime.release.android_api,
+        ndk_version: &runtime.release.ndk_version,
+        extensions: &runtime.release.extensions,
+    };
+    let bytes = serde_json::to_vec_pretty(&lock)
+        .map_err(|error| format!("cannot encode runtime lock: {error}"))?;
+    write_atomic(
+        &project.root.join(".pam-native/runtime.lock.json"),
+        &[bytes, b"\n".to_vec()].concat(),
+    )
+}
+
+fn list_runtimes(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let pam_home = pam_home()?;
+    let catalog = load_runtime_catalog(&pam_home)?;
+    println!("Pam Native PHP runtimes\n");
+    for (series, id) in &catalog.channels {
+        let release = catalog
+            .releases
+            .get(id)
+            .ok_or_else(|| format!("runtime catalog points to missing release {id}"))?;
+        let selected = series == &project.manifest.runtime.php;
+        let installed = default_abis()
+            .into_iter()
+            .all(|abi| runtime_ready_at(&pam_home.join("runtime/android").join(id), abi));
+        println!(
+            "{} PHP {} · {} · {}",
+            if selected { "*" } else { " " },
+            release.php_version,
+            id,
+            if installed { "installed" } else { "not built" }
+        );
+    }
+    Ok(0)
+}
+
+fn runtime_info(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
+    println!("Pam Native runtime\n");
+    println!("PHP:          {}", runtime.release.php_version);
+    println!("Runtime:      {}", runtime.id);
+    println!("Revision:     {}", runtime.release.runtime_revision);
+    println!("Android API:  {}", runtime.release.android_api);
+    println!("NDK:          {}", runtime.release.ndk_version);
+    println!("Extensions:   {}", runtime.release.extensions.join(", "));
+    println!("Location:     {}", runtime.root.display());
+    Ok(0)
+}
+
+fn runtime_use(options: RuntimeUseOptions) -> Result<u8, String> {
+    if !matches!(options.php.as_str(), "8.4" | "8.5") {
+        return Err("PHP runtime must be 8.4 or 8.5".to_owned());
+    }
+    let root = fs::canonicalize(&options.project).map_err(|error| {
+        format!(
+            "cannot resolve mobile project {}: {error}",
+            options.project.display()
+        )
+    })?;
+    let path = root.join(MANIFEST_NAME);
+    let contents = fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let mut manifest: serde_json::Value = serde_json::from_str(&contents)
+        .map_err(|error| format!("invalid {}: {error}", path.display()))?;
+    manifest["runtime"] = serde_json::json!({
+        "php": options.php,
+        "channel": "stable"
+    });
+    let bytes = serde_json::to_vec_pretty(&manifest)
+        .map_err(|error| format!("cannot serialize {}: {error}", path.display()))?;
+    write_atomic(&path, &[bytes, b"\n".to_vec()].concat())?;
+    let project = load_project(&root)?;
+    let pam_home = pam_home()?;
+    let runtime = resolve_runtime(&project, &pam_home)?;
+    write_runtime_lock(&project, &runtime)?;
+    println!(
+        "Selected PHP {} ({}) for {}.",
+        runtime.release.php_version, runtime.id, project.manifest.name
+    );
+    if !default_abis()
+        .into_iter()
+        .all(|abi| runtime_ready_at(&runtime.root, abi))
+    {
+        println!(
+            "Build it with: {}/runtime-builder/android/build.sh --php {} all",
+            pam_home.display(),
+            project.manifest.runtime.php
+        );
+    }
+    Ok(0)
+}
+
+fn runtime_update(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
+    write_runtime_lock(&project, &runtime)?;
+    println!(
+        "Locked PHP {} to {}.",
+        project.manifest.runtime.php, runtime.id
+    );
+    Ok(0)
+}
+
 fn doctor(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
     let native_home = native_home()?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
     let mut healthy = true;
     println!("Pam Native Android doctor\n");
     check("Native SDK", true, native_home.display().to_string());
@@ -1137,16 +1430,16 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
     healthy &= ndk;
     check("Android NDK 27.1", ndk, "27.1.12297006".to_owned());
     for abi in default_abis() {
-        let runtime = runtime_ready(&native_home, abi);
-        healthy &= runtime;
+        let ready = runtime_ready_at(&runtime.root, abi);
+        healthy &= ready;
         check(
-            &format!("PHP 8.4 runtime ({})", abi.android()),
-            runtime,
-            native_home
-                .join("runtime/android")
-                .join(abi.android())
-                .display()
-                .to_string(),
+            &format!(
+                "PHP {} runtime ({})",
+                runtime.release.php_version,
+                abi.android()
+            ),
+            ready,
+            runtime.root.join(abi.android()).display().to_string(),
         );
     }
     if !missing_engines.is_empty() {
@@ -1281,8 +1574,10 @@ fn command_exists(command: &str) -> bool {
 }
 
 fn prepare(project: &Project, native_home: &Path, abis: &[AndroidAbi]) -> Result<PathBuf, String> {
+    let runtime = resolve_runtime(project, &pam_home()?)?;
+    write_runtime_lock(project, &runtime)?;
     let workspace = sync_android_host(project, native_home)?;
-    configure_android(project, native_home, &workspace, abis)?;
+    configure_android(project, native_home, &runtime, &workspace, abis)?;
     generate_modules(project, &workspace)?;
     generate_views(project, &workspace)?;
     stage_project(project, &workspace)?;
@@ -1396,6 +1691,7 @@ fn copy_tree(source: &Path, destination: &Path, ignored: &[&str]) -> Result<(), 
 fn configure_android(
     project: &Project,
     native_home: &Path,
+    runtime: &ResolvedRuntime,
     workspace: &Path,
     abis: &[AndroidAbi],
 ) -> Result<(), String> {
@@ -1405,8 +1701,9 @@ fn configure_android(
         format!("sdk.dir={}\n", property_value(&sdk.to_string_lossy())).as_bytes(),
     )?;
     let properties = format!(
-        "nativeHome={}\nprojectRoot={}\napplicationId={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
+        "nativeHome={}\nruntimeHome={}\nprojectRoot={}\napplicationId={}\napplicationName={}\nminSdk={}\ntargetSdk={}\nversionCode={}\nversionName={}\nabis={}\n",
         property_value(&native_home.to_string_lossy()),
+        property_value(&runtime.root.to_string_lossy()),
         property_value(&project.root.to_string_lossy()),
         project.manifest.application_id,
         property_value(&project.manifest.name),
@@ -2004,16 +2301,15 @@ struct BuiltApk {
 fn build(options: MobileOptions) -> Result<BuiltApk, String> {
     let project = load_project(&options.project)?;
     let native_home = native_home()?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
     let workspace = prepare(&project, &native_home, &options.abis)?;
     for abi in &options.abis {
-        if !runtime_ready(&native_home, *abi) {
+        if !runtime_ready_at(&runtime.root, *abi) {
             return Err(format!(
-                "verified PHP Android runtime is missing for {}; install a Pam release runtime in {}",
+                "verified PHP {} Android runtime is missing for {}; build it with `pam mobile runtime:update` (expected {})",
+                runtime.release.php_version,
                 abi.android(),
-                native_home
-                    .join("runtime/android")
-                    .join(abi.android())
-                    .display()
+                runtime.root.join(abi.android()).display()
             ));
         }
         build_engine(&native_home, *abi)?;
@@ -2108,16 +2404,15 @@ fn run_android_performance_suite(
 ) -> Result<u8, String> {
     let project = load_project(&project_path)?;
     let native_home = native_home()?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
     let abi = connected_abi()?;
     let workspace = prepare(&project, &native_home, &[abi])?;
-    if !runtime_ready(&native_home, abi) {
+    if !runtime_ready_at(&runtime.root, abi) {
         return Err(format!(
-            "verified PHP Android runtime is missing for {}; install it in {}",
+            "verified PHP {} Android runtime is missing for {}; expected {}",
+            runtime.release.php_version,
             abi.android(),
-            native_home
-                .join("runtime/android")
-                .join(abi.android())
-                .display()
+            runtime.root.join(abi.android()).display()
         ));
     }
     build_engine(&native_home, abi)?;
@@ -2600,8 +2895,8 @@ fn installed_rust_targets() -> Result<HashSet<String>, String> {
         .collect())
 }
 
-fn runtime_ready(native_home: &Path, abi: AndroidAbi) -> bool {
-    let root = native_home.join("runtime/android").join(abi.android());
+fn runtime_ready_at(runtime_root: &Path, abi: AndroidAbi) -> bool {
+    let root = runtime_root.join(abi.android());
     root.join("lib/libphp.a").is_file()
         && root.join("include/php/main/php.h").is_file()
         && root.join("include/php/sapi/embed/php_embed.h").is_file()
@@ -2764,7 +3059,14 @@ fn refresh_dev_bundle(
     version: &mut String,
     bundle: &mut Vec<u8>,
 ) -> Result<(), String> {
-    configure_android(project, native_home, workspace, &[connected_abi()?])?;
+    let runtime = resolve_runtime(project, &pam_home()?)?;
+    configure_android(
+        project,
+        native_home,
+        &runtime,
+        workspace,
+        &[connected_abi()?],
+    )?;
     generate_modules(project, workspace)?;
     generate_views(project, workspace)?;
     stage_project(project, workspace)?;
