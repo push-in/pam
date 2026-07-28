@@ -8,11 +8,19 @@
 
 Write elegant PHP. Keep Composer. Serve HTTP, WebSockets, and asynchronous I/O from memory—without rebuilding your application for every request.
 
+[![Documentation](https://img.shields.io/badge/docs-push--in.github.io-5b50d6?style=flat-square)](https://push-in.github.io/pam-docs/introduction/)
 ![Status](https://img.shields.io/badge/status-experimental-f59e0b?style=flat-square)
 ![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-1.94%2B-000000?style=flat-square&logo=rust&logoColor=white)
 ![HTTP](https://img.shields.io/badge/HTTP-1.1%20%7C%202%20%7C%203-2563eb?style=flat-square)
 ![License](https://img.shields.io/badge/license-MIT-22c55e?style=flat-square)
+
+**[Documentation](https://push-in.github.io/pam-docs/introduction/) ·
+[How PAM works](https://push-in.github.io/pam-docs/runtime/how-pam-works/) ·
+[Laravel](https://push-in.github.io/pam-docs/laravel/overview/) ·
+[Native mobile](https://push-in.github.io/pam-docs/native/overview/) ·
+[Desktop](https://push-in.github.io/pam-docs/desktop/overview/) ·
+[Contributing](CONTRIBUTING.md)**
 
 </div>
 
@@ -23,6 +31,16 @@ Pam brings the long-lived, event-driven runtime model to PHP while preserving th
 It embeds PHP through the official Embed SAPI, loads your application and Composer autoloader once, and keeps them alive inside a Rust runtime. Incoming requests run in isolated PHP Fibers; native I/O is scheduled by Tokio; HTTP and WebSocket connections stay in memory; production workloads scale through supervised workers.
 
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
+
+PAM is what happens when PHP is treated as a serious long-lived application
+platform instead of a language that must restart its world for every request.
+It keeps the ecosystem developers already know, moves scheduling and systems
+work into Rust, and extends the same philosophy from servers to Laravel,
+native mobile, and desktop applications.
+
+The ambition is large, and the standard is larger: typed contracts, bounded
+resources, executable compatibility matrices, reproducible releases, crash
+recovery, observability, and documentation that says exactly what is proven.
 
 > [!IMPORTANT]
 > Pam is currently experimental (`0.1.35`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
