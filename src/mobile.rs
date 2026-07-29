@@ -1094,7 +1094,8 @@ fn parse_release_version(value: &str) -> Result<(u32, u32, u32), String> {
 }
 
 fn parse_installed_sdk_version(value: &str) -> Result<(u32, u32, u32), String> {
-    if let Some(release) = value.strip_suffix("-dev") {
+    let normalized = value.strip_prefix('v').unwrap_or(value);
+    if let Some(release) = normalized.strip_suffix("-dev") {
         let parts = release.split('.').collect::<Vec<_>>();
         if parts.len() == 3 && matches!(parts[2], "x" | "*") {
             let major = parts[0]
@@ -1107,7 +1108,7 @@ fn parse_installed_sdk_version(value: &str) -> Result<(u32, u32, u32), String> {
         }
     }
 
-    parse_release_version(value)
+    parse_release_version(normalized)
         .map_err(|_| format!("{value:?} is not a supported Composer SDK version"))
 }
 
@@ -3716,6 +3717,7 @@ mod tests {
 #[test]
 fn installed_sdk_versions_accept_stable_and_composer_dev_lines() {
     assert_eq!(parse_installed_sdk_version("0.2.1"), Ok((0, 2, 1)));
+    assert_eq!(parse_installed_sdk_version("v0.5.31"), Ok((0, 5, 31)));
     assert_eq!(parse_installed_sdk_version("0.2.x-dev"), Ok((0, 2, 0)));
     assert!(parse_installed_sdk_version("dev-main").is_err());
     assert!(parse_release_version("0.2.x-dev").is_err());
