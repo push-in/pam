@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.40 - 2026-07-29
+
+- Generate configurable Android `ACTION_SEND` and `ACTION_SEND_MULTIPLE`
+  share-target filters from `android.shareTargets`.
+- Bundle PAM Native 0.5.33.
+
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 

@@ -186,6 +186,8 @@ struct AndroidOptions {
     permissions: Vec<String>,
     #[serde(default)]
     deep_links: Vec<AndroidDeepLink>,
+    #[serde(default)]
+    share_targets: Vec<String>,
 }
 
 impl Default for AndroidOptions {
@@ -195,6 +197,7 @@ impl Default for AndroidOptions {
             target_sdk: default_target_sdk(),
             permissions: Vec::new(),
             deep_links: Vec::new(),
+            share_targets: Vec::new(),
         }
     }
 }
@@ -749,7 +752,31 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
             );
         }
     }
+    for mime_type in &manifest.android.share_targets {
+        if !valid_mime_type(mime_type) {
+            return Err(format!(
+                "invalid Android share-target MIME type {mime_type:?}"
+            ));
+        }
+    }
     Ok(())
+}
+
+fn valid_mime_type(value: &str) -> bool {
+    let Some((kind, subtype)) = value.split_once('/') else {
+        return false;
+    };
+    let valid = |part: &str| {
+        !part.is_empty()
+            && part.chars().all(|character| {
+                character.is_ascii_alphanumeric()
+                    || matches!(
+                        character,
+                        '!' | '#' | '$' | '&' | '^' | '_' | '.' | '+' | '*' | '-'
+                    )
+            })
+    };
+    valid(kind) && (subtype == "*" || valid(subtype))
 }
 
 fn valid_uri_scheme(value: &str) -> bool {
@@ -1799,6 +1826,10 @@ fn configure_android(
     add_deep_links(
         &workspace.join("app/src/main/AndroidManifest.xml"),
         &project.manifest.android.deep_links,
+    )?;
+    add_share_targets(
+        &workspace.join("app/src/main/AndroidManifest.xml"),
+        &project.manifest.android.share_targets,
     )
 }
 
@@ -1883,6 +1914,42 @@ fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), Stri
     }
     declarations.push_str(END_MARKER);
     contents.insert_str(activity_end, &declarations);
+    write_atomic(manifest, contents.as_bytes())
+}
+
+fn add_share_targets(manifest: &Path, mime_types: &[String]) -> Result<(), String> {
+    const START: &str = "            <!-- pam-native:share-targets:start -->";
+    const END: &str = "            <!-- pam-native:share-targets:end -->";
+
+    let mut contents = fs::read_to_string(manifest)
+        .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    let start = contents
+        .find(START)
+        .ok_or_else(|| "Android manifest has no share-target start marker".to_owned())?;
+    let end_offset = contents[start..]
+        .find(END)
+        .ok_or_else(|| "Android manifest has no share-target end marker".to_owned())?;
+    let end = start + end_offset + END.len();
+    let mut filters = String::new();
+    filters.push_str(START);
+    filters.push('\n');
+    for mime_type in mime_types {
+        filters.push_str("            <intent-filter>\n");
+        filters
+            .push_str("                <action android:name=\"android.intent.action.SEND\" />\n");
+        filters.push_str(
+            "                <action android:name=\"android.intent.action.SEND_MULTIPLE\" />\n",
+        );
+        filters.push_str(
+            "                <category android:name=\"android.intent.category.DEFAULT\" />\n",
+        );
+        filters.push_str("                <data android:mimeType=\"");
+        filters.push_str(mime_type);
+        filters.push_str("\" />\n");
+        filters.push_str("            </intent-filter>\n");
+    }
+    filters.push_str(END);
+    contents.replace_range(start..end, &filters);
     write_atomic(manifest, contents.as_bytes())
 }
 
@@ -3393,6 +3460,38 @@ mod tests {
             2
         );
         assert_eq!(contents.matches("<!-- pam:deep-links -->").count(), 1);
+        fs::remove_file(manifest).expect("cleanup");
+    }
+
+    #[test]
+    fn android_share_targets_generate_idempotent_intent_filters() {
+        let manifest = std::env::temp_dir().join(format!(
+            "pam-share-targets-{}-{}.xml",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::write(
+            &manifest,
+            "<manifest><application><activity android:name=\".PamActivity\">\n            <!-- pam-native:share-targets:start -->\n            <!-- pam-native:share-targets:end -->\n        </activity></application></manifest>",
+        )
+        .expect("manifest");
+        let targets = vec!["image/*".to_owned(), "text/plain".to_owned()];
+        add_share_targets(&manifest, &targets).expect("share targets");
+        add_share_targets(&manifest, &targets).expect("idempotent share targets");
+        let contents = fs::read_to_string(&manifest).expect("generated manifest");
+        assert_eq!(contents.matches("android.intent.action.SEND\"").count(), 2);
+        assert_eq!(
+            contents
+                .matches("android.intent.action.SEND_MULTIPLE\"")
+                .count(),
+            2
+        );
+        assert!(contents.contains("android:mimeType=\"image/*\""));
+        assert!(valid_mime_type("application/vnd.example+json"));
+        assert!(!valid_mime_type("image/<script>"));
         fs::remove_file(manifest).expect("cleanup");
     }
 
