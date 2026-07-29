@@ -1833,11 +1833,20 @@ fn add_permissions(manifest: &Path, permissions: &[String]) -> Result<(), String
 }
 
 fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), String> {
-    if links.is_empty() {
-        return Ok(());
-    }
     let mut contents = fs::read_to_string(manifest)
         .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    const START_MARKER: &str = "            <!-- pam:deep-links -->\n";
+    const END_MARKER: &str = "            <!-- /pam:deep-links -->\n";
+    if let Some(start) = contents.find(START_MARKER) {
+        let end = contents[start + START_MARKER.len()..]
+            .find(END_MARKER)
+            .map(|position| start + START_MARKER.len() + position + END_MARKER.len())
+            .ok_or_else(|| "Android manifest has an incomplete PAM deep-link block".to_owned())?;
+        contents.replace_range(start..end, "");
+    }
+    if links.is_empty() {
+        return write_atomic(manifest, contents.as_bytes());
+    }
     let activity_start = contents
         .find("android:name=\".PamActivity\"")
         .ok_or_else(|| "Android manifest has no PamActivity element".to_owned())?;
@@ -1845,7 +1854,7 @@ fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), Stri
         .find("</activity>")
         .map(|position| activity_start + position)
         .ok_or_else(|| "Android manifest has no closing PamActivity element".to_owned())?;
-    let mut declarations = String::new();
+    let mut declarations = START_MARKER.to_owned();
     for link in links {
         let auto_verify = if link.auto_verify {
             " android:autoVerify=\"true\""
@@ -1871,6 +1880,7 @@ fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), Stri
              \x20   </intent-filter>\n",
         );
     }
+    declarations.push_str(END_MARKER);
     contents.insert_str(activity_end, &declarations);
     write_atomic(manifest, contents.as_bytes())
 }
@@ -3352,6 +3362,24 @@ mod tests {
             ],
         )
         .expect("deep-link filters");
+        add_deep_links(
+            &manifest,
+            &[
+                AndroidDeepLink {
+                    scheme: "pushin".to_owned(),
+                    host: None,
+                    path_prefix: None,
+                    auto_verify: false,
+                },
+                AndroidDeepLink {
+                    scheme: "https".to_owned(),
+                    host: Some("api.zechat.com.br".to_owned()),
+                    path_prefix: Some("/reel/".to_owned()),
+                    auto_verify: true,
+                },
+            ],
+        )
+        .expect("idempotent deep-link filters");
         let contents = fs::read_to_string(&manifest).expect("generated manifest");
         assert!(contents.contains("android:scheme=\"pushin\""));
         assert!(contents.contains("android:autoVerify=\"true\""));
@@ -3363,6 +3391,7 @@ mod tests {
                 .count(),
             2
         );
+        assert_eq!(contents.matches("<!-- pam:deep-links -->").count(), 1);
         fs::remove_file(manifest).expect("cleanup");
     }
 
