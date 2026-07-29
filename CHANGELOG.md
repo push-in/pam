@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.41 - 2026-07-29
+
+- Bundle PAM Native 0.5.34 with cross-platform cache usage and cleanup APIs.
+
 ## 0.1.40 - 2026-07-29
 
 - Generate configurable Android `ACTION_SEND` and `ACTION_SEND_MULTIPLE`
