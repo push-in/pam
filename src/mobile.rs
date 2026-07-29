@@ -1842,7 +1842,7 @@ fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), Stri
         .find("android:name=\".PamActivity\"")
         .ok_or_else(|| "Android manifest has no PamActivity element".to_owned())?;
     let activity_end = contents[activity_start..]
-        .find("        </activity>")
+        .find("</activity>")
         .map(|position| activity_start + position)
         .ok_or_else(|| "Android manifest has no closing PamActivity element".to_owned())?;
     let mut declarations = String::new();
