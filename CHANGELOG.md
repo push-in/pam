@@ -3,6 +3,11 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
+## 0.1.39 - 2026-07-29
+
+- Bundle PAM Native 0.5.32 so quoted template attributes accept comparison
+  operators without application-level workarounds.
+
 ## 0.1.38 - 2026-07-29
 
 - Added validated `android.deepLinks` manifest configuration with custom URI
