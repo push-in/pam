@@ -4506,7 +4506,8 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
     "android": {{
         "minSdk": 26,
         "targetSdk": 36,
-        "permissions": []
+        "permissions": [],
+        "deepLinks": []
     }},
     "modules": [],
     "views": []

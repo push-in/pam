@@ -184,6 +184,8 @@ struct AndroidOptions {
     target_sdk: u32,
     #[serde(default)]
     permissions: Vec<String>,
+    #[serde(default)]
+    deep_links: Vec<AndroidDeepLink>,
 }
 
 impl Default for AndroidOptions {
@@ -192,8 +194,21 @@ impl Default for AndroidOptions {
             min_sdk: default_min_sdk(),
             target_sdk: default_target_sdk(),
             permissions: Vec::new(),
+            deep_links: Vec::new(),
         }
     }
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AndroidDeepLink {
+    scheme: String,
+    #[serde(default)]
+    host: Option<String>,
+    #[serde(default)]
+    path_prefix: Option<String>,
+    #[serde(default)]
+    auto_verify: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -707,7 +722,55 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
             return Err(format!("invalid Android permission {permission:?}"));
         }
     }
+    for link in &manifest.android.deep_links {
+        if !valid_uri_scheme(&link.scheme) {
+            return Err(format!(
+                "invalid Android deep-link scheme {:?}",
+                link.scheme
+            ));
+        }
+        if let Some(host) = &link.host
+            && !valid_deep_link_host(host)
+        {
+            return Err(format!("invalid Android deep-link host {host:?}"));
+        }
+        if let Some(path) = &link.path_prefix
+            && (!path.starts_with('/')
+                || path.len() > 512
+                || path.contains(['\n', '\r', '\0', '"', '<', '>', '&']))
+        {
+            return Err(format!(
+                "Android deep-link pathPrefix {path:?} must be an absolute safe path"
+            ));
+        }
+        if link.auto_verify && (link.scheme != "https" || link.host.is_none()) {
+            return Err(
+                "Android autoVerify deep links require scheme \"https\" and a host".to_owned(),
+            );
+        }
+    }
     Ok(())
+}
+
+fn valid_uri_scheme(value: &str) -> bool {
+    let mut characters = value.chars();
+    characters
+        .next()
+        .is_some_and(|value| value.is_ascii_alphabetic())
+        && characters.all(|value| value.is_ascii_alphanumeric() || matches!(value, '+' | '-' | '.'))
+        && value.len() <= 64
+}
+
+fn valid_deep_link_host(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 253
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '.' | '-'))
+        && !value.starts_with('.')
+        && !value.starts_with('-')
+        && !value.ends_with('.')
+        && !value.ends_with('-')
 }
 
 fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugin>, String> {
@@ -1731,6 +1794,10 @@ fn configure_android(
     add_permissions(
         &workspace.join("app/src/main/AndroidManifest.xml"),
         &permissions,
+    )?;
+    add_deep_links(
+        &workspace.join("app/src/main/AndroidManifest.xml"),
+        &project.manifest.android.deep_links,
     )
 }
 
@@ -1762,6 +1829,49 @@ fn add_permissions(manifest: &Path, permissions: &[String]) -> Result<(), String
         }
     }
     contents.insert_str(position, &declarations);
+    write_atomic(manifest, contents.as_bytes())
+}
+
+fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), String> {
+    if links.is_empty() {
+        return Ok(());
+    }
+    let mut contents = fs::read_to_string(manifest)
+        .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
+    let activity_start = contents
+        .find("android:name=\".PamActivity\"")
+        .ok_or_else(|| "Android manifest has no PamActivity element".to_owned())?;
+    let activity_end = contents[activity_start..]
+        .find("        </activity>")
+        .map(|position| activity_start + position)
+        .ok_or_else(|| "Android manifest has no closing PamActivity element".to_owned())?;
+    let mut declarations = String::new();
+    for link in links {
+        let auto_verify = if link.auto_verify {
+            " android:autoVerify=\"true\""
+        } else {
+            ""
+        };
+        declarations.push_str(&format!(
+            "            <intent-filter{auto_verify}>\n\
+             \x20   <action android:name=\"android.intent.action.VIEW\" />\n\
+             \x20   <category android:name=\"android.intent.category.DEFAULT\" />\n\
+             \x20   <category android:name=\"android.intent.category.BROWSABLE\" />\n\
+             \x20   <data android:scheme=\"{}\"",
+            link.scheme,
+        ));
+        if let Some(host) = &link.host {
+            declarations.push_str(&format!(" android:host=\"{host}\""));
+        }
+        if let Some(path) = &link.path_prefix {
+            declarations.push_str(&format!(" android:pathPrefix=\"{path}\""));
+        }
+        declarations.push_str(
+            " />\n\
+             \x20   </intent-filter>\n",
+        );
+    }
+    contents.insert_str(activity_end, &declarations);
     write_atomic(manifest, contents.as_bytes())
 }
 
@@ -3207,6 +3317,54 @@ fn print_usage() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn android_deep_links_generate_browsable_intent_filters() {
+        let manifest = std::env::temp_dir().join(format!(
+            "pam-deep-links-{}-{}.xml",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::write(
+            &manifest,
+            "<manifest><application><activity android:name=\".PamActivity\">\n\
+             \x20   </activity></application></manifest>",
+        )
+        .expect("manifest");
+        add_deep_links(
+            &manifest,
+            &[
+                AndroidDeepLink {
+                    scheme: "pushin".to_owned(),
+                    host: None,
+                    path_prefix: None,
+                    auto_verify: false,
+                },
+                AndroidDeepLink {
+                    scheme: "https".to_owned(),
+                    host: Some("api.zechat.com.br".to_owned()),
+                    path_prefix: Some("/reel/".to_owned()),
+                    auto_verify: true,
+                },
+            ],
+        )
+        .expect("deep-link filters");
+        let contents = fs::read_to_string(&manifest).expect("generated manifest");
+        assert!(contents.contains("android:scheme=\"pushin\""));
+        assert!(contents.contains("android:autoVerify=\"true\""));
+        assert!(contents.contains("android:host=\"api.zechat.com.br\""));
+        assert!(contents.contains("android:pathPrefix=\"/reel/\""));
+        assert_eq!(
+            contents
+                .matches("android:name=\"android.intent.category.BROWSABLE\"")
+                .count(),
+            2
+        );
+        fs::remove_file(manifest).expect("cleanup");
+    }
 
     #[test]
     fn generator_names_are_safe_and_human_readable() {

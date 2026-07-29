@@ -3,6 +3,13 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
+## 0.1.38 - 2026-07-29
+
+- Added validated `android.deepLinks` manifest configuration with custom URI
+  schemes, verified HTTPS hosts and optional path prefixes.
+- Generate Android `VIEW`, `DEFAULT` and `BROWSABLE` intent filters directly
+  into `PamActivity`, including `android:autoVerify` for supported HTTPS links.
+
 ## 0.1.37 - 2026-07-28
 
 - Centralized Android PHP 8.4 and 8.5 ownership in PAM with verified source
