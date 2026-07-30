@@ -2558,7 +2558,7 @@ fn baseline_profile(project_path: PathBuf) -> Result<u8, String> {
 
 fn toggle_devtools(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
-    let application_id = format!("{}.debug", project.manifest.application_id);
+    let application_id = debug_application_id(&project);
     let running = Command::new("adb")
         .args(["shell", "pidof", &application_id])
         .output()
@@ -3143,7 +3143,7 @@ fn connected_abi() -> Result<AndroidAbi, String> {
 fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<(), String> {
     command_status("adb", &["install", "-r", apk.to_string_lossy().as_ref()])?;
     let application_id = match mode {
-        BuildMode::Debug => format!("{}.debug", project.manifest.application_id),
+        BuildMode::Debug => debug_application_id(project),
         BuildMode::Release => project.manifest.application_id.clone(),
     };
     command_status(
@@ -3158,6 +3158,21 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
     )?;
     println!("Started {application_id}");
     Ok(())
+}
+
+fn debug_application_id(project: &Project) -> String {
+    let firebase_enabled = [
+        project.root.join(".pam/google-services.json"),
+        project.root.join("google-services.json"),
+    ]
+    .into_iter()
+    .any(|path| path.is_file());
+
+    if firebase_enabled {
+        project.manifest.application_id.clone()
+    } else {
+        format!("{}.debug", project.manifest.application_id)
+    }
 }
 
 fn command_status(command: &str, arguments: &[&str]) -> Result<(), String> {
@@ -3655,6 +3670,12 @@ mod tests {
             root.join("android/src/main/kotlin/app/pam/generated/views/CameraPreviewFactory.kt")
                 .is_file()
         );
+
+        let project = load_project(&root).expect("project");
+        assert_eq!(debug_application_id(&project), "app.pam.generated.debug");
+        fs::create_dir_all(root.join(".pam")).expect("pam state");
+        fs::write(root.join(".pam/google-services.json"), "{}").expect("firebase config");
+        assert_eq!(debug_application_id(&project), "app.pam.generated");
 
         fs::remove_dir_all(root).expect("cleanup");
     }

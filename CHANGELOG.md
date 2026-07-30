@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.42 - 2026-07-30
+
+- Launch and target the actual Android debug application ID when Firebase keeps
+  the base package because `google-services.json` has no `.debug` client.
+- Keep the conventional `.debug` package for non-Firebase development builds.
+
 ## 0.1.41 - 2026-07-29
 
 - Bundle PAM Native 0.5.34 with cross-platform cache usage and cleanup APIs.
