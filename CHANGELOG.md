@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.43 - 2026-07-30
+
+- Bundle PAM Native 0.5.88 so mobile plugins can react to package-restricted
+  FCM data-only delivery while persistent PHP is suspended.
+- Keep mobile behavior in PAM Native; the pure `pam` executable only pins and
+  distributes the verified mobile SDK and engine artifacts.
+
 ## 0.1.42 - 2026-07-30
 
 - Launch and target the actual Android debug application ID when Firebase keeps
