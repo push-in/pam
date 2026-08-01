@@ -1,16 +1,14 @@
-use std::collections::{BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, SystemTime};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-
-use crate::package_coordinates;
 
 const MANIFEST_NAME: &str = "pam-native.json";
 const DEFAULT_PORT: u16 = 39_100;
@@ -18,7 +16,6 @@ const MAX_PROJECT_FILES: usize = 10_000;
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_PROJECT_BYTES: u64 = 128 * 1024 * 1024;
 const MAX_DEV_BUNDLE_BYTES: usize = 16 * 1024 * 1024;
-const HOT_RELOAD_DEBOUNCE: Duration = Duration::from_millis(400);
 const PLUGIN_PROTOCOL_VERSION: u32 = 1;
 const PLUGIN_LOCK_VERSION: u32 = 1;
 const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
@@ -224,7 +221,7 @@ struct NativeModule {
 }
 
 #[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
 struct NativeView {
     name: String,
     class: String,
@@ -286,6 +283,8 @@ struct PluginManifest {
     #[serde(default)]
     ios: PluginIos,
     #[serde(default)]
+    idl: Option<PathBuf>,
+    #[serde(default)]
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
@@ -337,21 +336,136 @@ struct PluginAndroid {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PluginIos {
-    #[serde(default = "default_ios_version")]
+    #[serde(default = "default_ios_minimum_version")]
     minimum_version: String,
     #[serde(default)]
     source_dirs: Vec<PathBuf>,
     #[serde(default)]
     resource_dirs: Vec<PathBuf>,
+    #[serde(default)]
+    swift_packages: Vec<PluginSwiftPackage>,
+    #[serde(default)]
+    frameworks: Vec<String>,
+    #[serde(default)]
+    usage_descriptions: BTreeMap<String, String>,
+    #[serde(default)]
+    entitlements: Option<PathBuf>,
+    #[serde(default)]
+    info_plist: Option<PathBuf>,
+    #[serde(default)]
+    extensions: Vec<PluginIosExtension>,
 }
 
 impl Default for PluginIos {
     fn default() -> Self {
         Self {
-            minimum_version: default_ios_version(),
+            minimum_version: default_ios_minimum_version(),
             source_dirs: Vec::new(),
             resource_dirs: Vec::new(),
+            swift_packages: Vec::new(),
+            frameworks: Vec::new(),
+            usage_descriptions: BTreeMap::new(),
+            entitlements: None,
+            info_plist: None,
+            extensions: Vec::new(),
         }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PluginSwiftPackage {
+    url: String,
+    requirement: PluginSwiftPackageRequirement,
+    products: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PluginSwiftPackageRequirement {
+    kind: SwiftPackageRequirementKind,
+    value: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[repr(u8)]
+#[serde(try_from = "u8", into = "u8")]
+enum SwiftPackageRequirementKind {
+    Exact = 1,
+    From = 2,
+    Branch = 3,
+    Revision = 4,
+    UpToNextMinor = 5,
+}
+
+impl TryFrom<u8> for SwiftPackageRequirementKind {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Exact),
+            2 => Ok(Self::From),
+            3 => Ok(Self::Branch),
+            4 => Ok(Self::Revision),
+            5 => Ok(Self::UpToNextMinor),
+            _ => {
+                Err("Swift package requirement kind must be an integer from 1 through 5".to_owned())
+            }
+        }
+    }
+}
+
+impl From<SwiftPackageRequirementKind> for u8 {
+    fn from(value: SwiftPackageRequirementKind) -> Self {
+        value as Self
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PluginIosExtension {
+    kind: IosExtensionKind,
+    name: String,
+    bundle_suffix: String,
+    #[serde(default)]
+    source_dirs: Vec<PathBuf>,
+    #[serde(default)]
+    resource_dirs: Vec<PathBuf>,
+    #[serde(default)]
+    entitlements: Option<PathBuf>,
+    #[serde(default)]
+    info_plist: Option<PathBuf>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[repr(u8)]
+#[serde(try_from = "u8", into = "u8")]
+enum IosExtensionKind {
+    Share = 1,
+    Widget = 2,
+    NotificationService = 3,
+    Intents = 4,
+    LiveActivity = 5,
+}
+
+impl TryFrom<u8> for IosExtensionKind {
+    type Error = String;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Share),
+            2 => Ok(Self::Widget),
+            3 => Ok(Self::NotificationService),
+            4 => Ok(Self::Intents),
+            5 => Ok(Self::LiveActivity),
+            _ => Err("iOS extension kind must be an integer from 1 through 5".to_owned()),
+        }
+    }
+}
+
+impl From<IosExtensionKind> for u8 {
+    fn from(value: IosExtensionKind) -> Self {
+        value as Self
     }
 }
 
@@ -362,6 +476,7 @@ struct NativePlugin {
     root: PathBuf,
     descriptor: PathBuf,
     descriptor_digest: String,
+    idl_digest: Option<String>,
     manifest: PluginManifest,
 }
 
@@ -380,17 +495,24 @@ struct PluginLockEntry<'a> {
     package: &'a str,
     package_version: &'a str,
     descriptor_sha256: &'a str,
+    idl_sha256: Option<&'a str>,
     php_provider: Option<&'a str>,
     modules: Vec<&'a str>,
     views: Vec<&'a str>,
     android_dependencies: Vec<&'a str>,
+    ios_minimum_version: &'a str,
+    ios_source_directories: Vec<&'a Path>,
+    ios_resource_directories: Vec<&'a Path>,
+    ios_swift_packages: Vec<&'a str>,
+    ios_frameworks: Vec<&'a str>,
+    ios_extensions: Vec<&'a str>,
 }
 
 fn default_min_sdk() -> u32 {
     26
 }
 
-fn default_ios_version() -> String {
+fn default_ios_minimum_version() -> String {
     "15.0".to_owned()
 }
 
@@ -456,12 +578,22 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             )?;
             generate_modules(&project, &workspace)?;
             generate_views(&project, &workspace)?;
-            let ios_workspace = sync_ios_host(&project, &native_home)?;
-            generate_ios_modules(&project, &ios_workspace)?;
-            generate_ios_views(&project, &ios_workspace)?;
+            println!("Generated Android bindings for {}", project.manifest.name);
+            Ok(0)
+        }
+        "ios:prepare" => {
+            let project = load_project(&parse_project_only(arguments)?)?;
+            let native_home = native_home()?;
+            write_plugin_lock(&project)?;
+            write_ios_plugin_plan(&project)?;
+            write_ios_plugin_package(&project, &native_home)?;
             println!(
-                "Generated Android and iOS bindings for {}",
+                "Prepared iOS plugin package for {} at {}",
                 project.manifest.name,
+                project
+                    .root
+                    .join(".pam-native/ios/PamNativePlugins")
+                    .display()
             );
             Ok(0)
         }
@@ -497,7 +629,6 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "runtime:update" => runtime_update(parse_project_only(arguments)?),
         "make:screen" => generate_screen(parse_generator(arguments)?),
         "make:component" => generate_component(parse_generator(arguments)?),
-        "make:flow" => generate_flow(parse_generator(arguments)?),
         "make:native-view" => generate_native_view(parse_generator(arguments)?),
         unknown => Err(format!(
             "unknown mobile command {unknown:?}; run `pam mobile --help`"
@@ -867,15 +998,10 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
     let packages = installed.packages();
     let current_version_text = packages
         .iter()
-        .find(|package| package.name == package_coordinates::NATIVE)
+        .find(|package| package.name == "pushinbr/pam-native")
         .map(|package| package.version.clone())
-        .ok_or_else(|| {
-            format!(
-                "Composer package {} is required for a Pam Native mobile project",
-                package_coordinates::NATIVE,
-            )
-        })?;
-    let current_version = parse_installed_sdk_version(&current_version_text)?;
+        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
+    let current_version = parse_release_version(&current_version_text)?;
     let mut plugins = Vec::new();
 
     for package in packages {
@@ -915,9 +1041,8 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
         }
         if !package_root.starts_with(&vendor_directory) {
             return Err(format!(
-                "Composer package {} install path escapes the project vendor directory; \
-                 path repositories used by mobile apps must set options.symlink to false",
-                package.name,
+                "Composer package {} install path escapes the project vendor directory",
+                package.name
             ));
         }
         let descriptor =
@@ -954,12 +1079,18 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
             current_version,
             &current_version_text,
         )?;
+        let idl_digest = plugin_manifest
+            .idl
+            .as_ref()
+            .map(|path| digest_plugin_idl(&package.name, &package_root, path))
+            .transpose()?;
         plugins.push(NativePlugin {
             package: package.name,
             package_version: package.version,
             root: package_root,
             descriptor,
             descriptor_digest: format!("{:x}", Sha256::digest(&descriptor_bytes)),
+            idl_digest,
             manifest: plugin_manifest,
         });
     }
@@ -967,6 +1098,20 @@ fn discover_plugins(root: &Path, app: &NativeManifest) -> Result<Vec<NativePlugi
     plugins.sort_by(|left, right| left.package.cmp(&right.package));
     validate_plugin_bindings(app, &plugins)?;
     Ok(plugins)
+}
+
+fn installed_pam_native_version(root: &Path) -> Result<String, String> {
+    let installed_path = root.join("vendor/composer/installed.json");
+    let contents = fs::read_to_string(&installed_path)
+        .map_err(|error| format!("cannot read {}: {error}", installed_path.display()))?;
+    let installed: ComposerInstalled = serde_json::from_str(&contents)
+        .map_err(|error| format!("invalid {}: {error}", installed_path.display()))?;
+    installed
+        .packages()
+        .iter()
+        .find(|package| package.name == "pushinbr/pam-native")
+        .map(|package| package.version.clone())
+        .ok_or_else(|| "Composer package pushinbr/pam-native is not installed".to_owned())
 }
 
 fn validate_plugin_manifest(
@@ -1005,7 +1150,7 @@ fn validate_plugin_manifest(
             "plugin {package} supports Pam Native {} through {}, exclusive; installed SDK is {}",
             manifest.pam_native.minimum,
             manifest.pam_native.maximum_exclusive,
-            current_version_text,
+            current_version_text
         ));
     }
     if let Some(provider) = &manifest.php.provider
@@ -1052,29 +1197,46 @@ fn validate_plugin_manifest(
             ));
         }
     }
-    for path in plugin_paths(&manifest.android) {
+    for path in android_plugin_paths(&manifest.android) {
         validate_plugin_path(package, root, path)?;
     }
     if !valid_ios_version(&manifest.ios.minimum_version) {
         return Err(format!(
-            "plugin {package} has invalid ios.minimumVersion {:?}",
-            manifest.ios.minimum_version,
+            "plugin {package} has invalid iOS minimumVersion {:?}; expected major.minor",
+            manifest.ios.minimum_version
         ));
     }
-    for path in plugin_ios_paths(&manifest.ios) {
+    for path in ios_plugin_paths(&manifest.ios) {
         validate_plugin_path(package, root, path)?;
+        let expects_directory = manifest.ios.source_dirs.contains(path)
+            || manifest.ios.resource_dirs.contains(path)
+            || manifest.ios.extensions.iter().any(|extension| {
+                extension.source_dirs.contains(path) || extension.resource_dirs.contains(path)
+            });
+        if expects_directory && !root.join(path).is_dir() {
+            return Err(format!(
+                "plugin {package} iOS path {} must be a directory",
+                path.display()
+            ));
+        }
+    }
+    validate_ios_integration(package, &manifest.ios)?;
+    if let Some(idl) = &manifest.idl {
+        validate_plugin_path(package, root, idl)?;
+        if !root.join(idl).is_file() {
+            return Err(format!(
+                "plugin {package} IDL {} must be a file",
+                idl.display()
+            ));
+        }
     }
     for binding in &manifest.modules {
         validate_binding(package, "module", &binding.name, &binding.class)?;
-        if let Some(class) = &binding.ios_class {
-            validate_ios_binding(package, "module", &binding.name, class)?;
-        }
+        validate_ios_binding(package, "module", binding.ios_class.as_deref())?;
     }
     for binding in &manifest.views {
         validate_binding(package, "view", &binding.name, &binding.class)?;
-        if let Some(class) = &binding.ios_class {
-            validate_ios_binding(package, "view", &binding.name, class)?;
-        }
+        validate_ios_binding(package, "view", binding.ios_class.as_deref())?;
     }
     Ok(())
 }
@@ -1111,7 +1273,7 @@ fn validate_plugin_bindings(app: &NativeManifest, plugins: &[NativePlugin]) -> R
     Ok(())
 }
 
-fn plugin_paths(android: &PluginAndroid) -> Vec<&PathBuf> {
+fn android_plugin_paths(android: &PluginAndroid) -> Vec<&PathBuf> {
     let mut paths = Vec::new();
     paths.extend(&android.local_aars);
     paths.extend(&android.source_dirs);
@@ -1123,36 +1285,123 @@ fn plugin_paths(android: &PluginAndroid) -> Vec<&PathBuf> {
     paths
 }
 
-fn plugin_ios_paths(ios: &PluginIos) -> Vec<&PathBuf> {
-    ios.source_dirs.iter().chain(&ios.resource_dirs).collect()
+fn ios_plugin_paths(ios: &PluginIos) -> Vec<&PathBuf> {
+    let mut paths = ios
+        .source_dirs
+        .iter()
+        .chain(ios.resource_dirs.iter())
+        .collect::<Vec<_>>();
+    paths.extend(ios.entitlements.iter());
+    paths.extend(ios.info_plist.iter());
+    for extension in &ios.extensions {
+        paths.extend(extension.source_dirs.iter());
+        paths.extend(extension.resource_dirs.iter());
+        paths.extend(extension.entitlements.iter());
+        paths.extend(extension.info_plist.iter());
+    }
+    paths
 }
 
-fn valid_ios_version(value: &str) -> bool {
-    let mut parts = value.split('.');
-    matches!(
-        (parts.next(), parts.next(), parts.next()),
-        (Some(major), Some(minor), None)
-            if major.parse::<u32>().is_ok() && minor.parse::<u32>().is_ok()
-    )
-}
-
-fn validate_ios_binding(package: &str, kind: &str, name: &str, class: &str) -> Result<(), String> {
-    if class.is_empty()
-        || class.len() > 255
-        || !class.split('.').all(|segment| {
-            let mut characters = segment.chars();
-            characters
-                .next()
-                .is_some_and(|character| character == '_' || character.is_ascii_alphabetic())
-                && characters.all(|character| character == '_' || character.is_ascii_alphanumeric())
-        })
+fn validate_ios_integration(package: &str, ios: &PluginIos) -> Result<(), String> {
+    let mut package_urls = HashSet::new();
+    for dependency in &ios.swift_packages {
+        if !dependency.url.starts_with("https://")
+            || !dependency.url.ends_with(".git")
+            || dependency.url.len() > 2048
+            || dependency.url.contains(['\n', '\r', '\0', '"'])
+        {
+            return Err(format!(
+                "plugin {package} Swift package URL must be a safe HTTPS .git URL"
+            ));
+        }
+        if !package_urls.insert(&dependency.url) {
+            return Err(format!(
+                "plugin {package} declares Swift package {} more than once",
+                dependency.url
+            ));
+        }
+        if dependency.requirement.value.is_empty()
+            || dependency.requirement.value.len() > 160
+            || dependency
+                .requirement
+                .value
+                .contains(['\n', '\r', '\0', '"'])
+        {
+            return Err(format!(
+                "plugin {package} Swift package requirement value is invalid"
+            ));
+        }
+        if dependency.products.is_empty()
+            || dependency
+                .products
+                .iter()
+                .any(|product| !valid_apple_identifier(product))
+        {
+            return Err(format!(
+                "plugin {package} Swift package products must be non-empty safe identifiers"
+            ));
+        }
+    }
+    if ios
+        .frameworks
+        .iter()
+        .any(|framework| !valid_apple_identifier(framework))
     {
         return Err(format!(
-            "plugin {package} {kind} {name:?} has invalid iOS class {class:?}",
+            "plugin {package} contains an invalid Apple framework name"
         ));
     }
-
+    for (key, value) in &ios.usage_descriptions {
+        if !(key.starts_with("NS") || key == "NFCReaderUsageDescription")
+            || !key.ends_with("UsageDescription")
+            || !valid_apple_identifier(key)
+            || value.trim().is_empty()
+            || value.len() > 1000
+            || value.contains('\0')
+        {
+            return Err(format!(
+                "plugin {package} contains an invalid iOS usage description"
+            ));
+        }
+    }
+    let mut extension_names = HashSet::new();
+    let mut bundle_suffixes = HashSet::new();
+    for extension in &ios.extensions {
+        if !valid_apple_identifier(&extension.name)
+            || !valid_bundle_suffix(&extension.bundle_suffix)
+            || !extension_names.insert(&extension.name)
+            || !bundle_suffixes.insert(&extension.bundle_suffix)
+            || extension.source_dirs.is_empty()
+        {
+            return Err(format!(
+                "plugin {package} contains an invalid iOS extension declaration"
+            ));
+        }
+    }
     Ok(())
+}
+
+fn valid_apple_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'.' | b'+'))
+}
+
+fn valid_bundle_suffix(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 120
+        && value.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        })
 }
 
 fn validate_plugin_path(package: &str, root: &Path, path: &Path) -> Result<(), String> {
@@ -1173,6 +1422,31 @@ fn validate_plugin_path(package: &str, root: &Path, path: &Path) -> Result<(), S
     Ok(())
 }
 
+fn digest_plugin_idl(package: &str, root: &Path, path: &Path) -> Result<String, String> {
+    let resolved = fs::canonicalize(root.join(path)).map_err(|error| {
+        format!(
+            "plugin {package} IDL {} cannot be resolved: {error}",
+            path.display()
+        )
+    })?;
+    if !resolved.starts_with(root) || !resolved.is_file() {
+        return Err(format!(
+            "plugin {package} IDL {} must be a package file",
+            path.display()
+        ));
+    }
+    let metadata = fs::metadata(&resolved)
+        .map_err(|error| format!("cannot inspect plugin {package} IDL: {error}"))?;
+    if metadata.len() > PLUGIN_MANIFEST_MAX_BYTES {
+        return Err(format!(
+            "plugin {package} IDL exceeds the one MiB safety limit"
+        ));
+    }
+    let bytes = fs::read(&resolved)
+        .map_err(|error| format!("cannot read plugin {package} IDL: {error}"))?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
+}
+
 fn validate_binding(package: &str, kind: &str, name: &str, class: &str) -> Result<(), String> {
     if !valid_module_name(name) {
         return Err(format!(
@@ -1187,10 +1461,22 @@ fn validate_binding(package: &str, kind: &str, name: &str, class: &str) -> Resul
     Ok(())
 }
 
+fn validate_ios_binding(package: &str, kind: &str, class: Option<&str>) -> Result<(), String> {
+    if let Some(class) = class
+        && !valid_swift_class_name(class)
+    {
+        return Err(format!(
+            "plugin {package} has invalid Swift {kind} class {class:?}"
+        ));
+    }
+    Ok(())
+}
+
 fn parse_release_version(value: &str) -> Result<(u32, u32, u32), String> {
-    let release = value
+    let normalized = value.strip_prefix('v').unwrap_or(value);
+    let release = normalized
         .split_once(['-', '+'])
-        .map_or(value, |(release, _)| release);
+        .map_or(normalized, |(release, _)| release);
     let numbers = release
         .split('.')
         .map(|part| {
@@ -1202,25 +1488,6 @@ fn parse_release_version(value: &str) -> Result<(u32, u32, u32), String> {
         return Err(format!("{value:?} must contain major.minor.patch"));
     }
     Ok((numbers[0], numbers[1], numbers[2]))
-}
-
-fn parse_installed_sdk_version(value: &str) -> Result<(u32, u32, u32), String> {
-    let normalized = value.strip_prefix('v').unwrap_or(value);
-    if let Some(release) = normalized.strip_suffix("-dev") {
-        let parts = release.split('.').collect::<Vec<_>>();
-        if parts.len() == 3 && matches!(parts[2], "x" | "*") {
-            let major = parts[0]
-                .parse::<u32>()
-                .map_err(|_| format!("{value:?} is not a supported Composer SDK version"))?;
-            let minor = parts[1]
-                .parse::<u32>()
-                .map_err(|_| format!("{value:?} is not a supported Composer SDK version"))?;
-            return Ok((major, minor, 0));
-        }
-    }
-
-    parse_release_version(normalized)
-        .map_err(|_| format!("{value:?} is not a supported Composer SDK version"))
 }
 
 fn valid_composer_package(value: &str) -> bool {
@@ -1253,18 +1520,23 @@ fn valid_php_class_name(value: &str) -> bool {
 }
 
 fn valid_android_permission(value: &str) -> bool {
-    value
-        .strip_prefix("android.permission.")
-        .is_some_and(|permission| {
-            !permission.is_empty()
-                && value.len() <= 160
-                && permission.bytes().all(|byte| {
-                    byte.is_ascii_uppercase()
-                        || byte.is_ascii_digit()
-                        || byte == b'.'
-                        || byte == b'_'
-                })
-        })
+    let Some(permission) = value.strip_prefix("android.permission.") else {
+        return false;
+    };
+    if permission.is_empty() || value.len() > 160 {
+        return false;
+    }
+    let parts = permission.split('.').collect::<Vec<_>>();
+    parts.iter().enumerate().all(|(index, part)| {
+        !part.is_empty()
+            && part.bytes().all(|byte| {
+                if index + 1 == parts.len() {
+                    byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_'
+                } else {
+                    byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                }
+            })
+    })
 }
 
 fn valid_maven_coordinate(value: &str) -> bool {
@@ -1340,6 +1612,32 @@ fn valid_class_name(value: &str) -> bool {
                     .chars()
                     .all(|character| character.is_ascii_alphanumeric() || character == '_')
         })
+}
+
+fn valid_swift_class_name(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 240
+        && value.split('.').all(|part| {
+            !part.is_empty()
+                && part
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        })
+}
+
+fn valid_ios_version(value: &str) -> bool {
+    let mut parts = value.split('.');
+    let major = parts.next();
+    let minor = parts.next();
+    parts.next().is_none()
+        && major
+            .is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        && minor
+            .is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 fn native_home() -> Result<PathBuf, String> {
@@ -1569,26 +1867,12 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
         command_exists("java"),
         tool_version("java", &["-version"]),
     );
-    let missing_engines = default_abis()
-        .into_iter()
-        .filter(|abi| !engine_ready(&native_home, *abi))
-        .collect::<Vec<_>>();
-    if missing_engines.is_empty() {
-        for abi in default_abis() {
-            check(
-                &format!("Native engine ({})", abi.android()),
-                true,
-                engine_library(&native_home, abi).display().to_string(),
-            );
-        }
-    } else {
-        healthy &= command_exists("cargo");
-        check(
-            "Rust",
-            command_exists("cargo"),
-            tool_version("rustc", &["--version"]),
-        );
-    }
+    healthy &= command_exists("cargo");
+    check(
+        "Rust",
+        command_exists("cargo"),
+        tool_version("rustc", &["--version"]),
+    );
     let sdk = android_sdk();
     healthy &= sdk.is_ok();
     check(
@@ -1617,21 +1901,19 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
             runtime.root.join(abi.android()).display().to_string(),
         );
     }
-    if !missing_engines.is_empty() {
-        let installed = installed_rust_targets().unwrap_or_default();
-        for abi in missing_engines {
-            let available = installed.contains(abi.rust_target());
-            healthy &= available;
-            check(
-                &format!("Rust target ({})", abi.rust_target()),
-                available,
-                if available {
-                    "installed".to_owned()
-                } else {
-                    format!("run: rustup target add {}", abi.rust_target())
-                },
-            );
-        }
+    let installed = installed_rust_targets().unwrap_or_default();
+    for abi in default_abis() {
+        let available = installed.contains(abi.rust_target());
+        healthy &= available;
+        check(
+            &format!("Rust target ({})", abi.rust_target()),
+            available,
+            if available {
+                "installed".to_owned()
+            } else {
+                format!("run: rustup target add {}", abi.rust_target())
+            },
+        );
     }
     if healthy {
         println!("\nPam Native is ready to build Android applications.");
@@ -1756,9 +2038,6 @@ fn prepare(project: &Project, native_home: &Path, abis: &[AndroidAbi]) -> Result
     generate_modules(project, &workspace)?;
     generate_views(project, &workspace)?;
     stage_project(project, &workspace)?;
-    let ios_workspace = sync_ios_host(project, native_home)?;
-    generate_ios_modules(project, &ios_workspace)?;
-    generate_ios_views(project, &ios_workspace)?;
     Ok(workspace)
 }
 
@@ -1777,32 +2056,6 @@ fn sync_android_host(project: &Project, native_home: &Path) -> Result<PathBuf, S
         &destination,
         &[".gradle", "build", ".cxx", "local.properties"],
     )?;
-    Ok(destination)
-}
-
-fn sync_ios_host(project: &Project, native_home: &Path) -> Result<PathBuf, String> {
-    let source = native_home.join("ios");
-    let destination = project.root.join(".pam-native/ios");
-    fs::create_dir_all(&destination)
-        .map_err(|error| format!("cannot create {}: {error}", destination.display()))?;
-    prune_tree(&source, &destination, &[".build"])?;
-    copy_tree(&source, &destination, &[".build"])?;
-
-    let plugins_root = destination.join("Sources/PamNative/Plugins");
-    fs::create_dir_all(&plugins_root)
-        .map_err(|error| format!("cannot create {}: {error}", plugins_root.display()))?;
-    for (index, plugin) in project.plugins.iter().enumerate() {
-        for (source_index, relative) in plugin.manifest.ios.source_dirs.iter().enumerate() {
-            let plugin_source = plugin.root.join(relative);
-            let plugin_destination =
-                plugins_root.join(format!("plugin-{index}/source-{source_index}"));
-            fs::create_dir_all(&plugin_destination).map_err(|error| {
-                format!("cannot create {}: {error}", plugin_destination.display())
-            })?;
-            copy_tree(&plugin_source, &plugin_destination, &[])?;
-        }
-    }
-
     Ok(destination)
 }
 
@@ -1923,6 +2176,8 @@ fn configure_android(
     )?;
     generate_plugin_projects(project, workspace)?;
     write_plugin_lock(project)?;
+    write_ios_plugin_plan(project)?;
+    write_ios_plugin_package(project, native_home)?;
     let permissions = project
         .plugins
         .iter()
@@ -1978,55 +2233,64 @@ fn add_permissions(manifest: &Path, permissions: &[String]) -> Result<(), String
 }
 
 fn add_deep_links(manifest: &Path, links: &[AndroidDeepLink]) -> Result<(), String> {
+    const START: &str = "            <!-- pam-native:deep-links:start -->";
+    const END: &str = "            <!-- pam-native:deep-links:end -->";
+
     let mut contents = fs::read_to_string(manifest)
         .map_err(|error| format!("cannot read {}: {error}", manifest.display()))?;
-    const START_MARKER: &str = "            <!-- pam:deep-links -->\n";
-    const END_MARKER: &str = "            <!-- /pam:deep-links -->\n";
-    if let Some(start) = contents.find(START_MARKER) {
-        let end = contents[start + START_MARKER.len()..]
-            .find(END_MARKER)
-            .map(|position| start + START_MARKER.len() + position + END_MARKER.len())
-            .ok_or_else(|| "Android manifest has an incomplete PAM deep-link block".to_owned())?;
-        contents.replace_range(start..end, "");
+    if let Some(start) = contents.find(START)
+        && let Some(end_offset) = contents[start..].find(END)
+    {
+        let end = start + end_offset + END.len();
+        let trailing = usize::from(contents.as_bytes().get(end) == Some(&b'\n'));
+        contents.replace_range(start..end + trailing, "");
     }
     if links.is_empty() {
         return write_atomic(manifest, contents.as_bytes());
     }
-    let activity_start = contents
-        .find("android:name=\".PamActivity\"")
+    let activity = contents
+        .find("<activity\n            android:name=\".PamActivity\"")
         .ok_or_else(|| "Android manifest has no PamActivity element".to_owned())?;
-    let activity_end = contents[activity_start..]
-        .find("</activity>")
-        .map(|position| activity_start + position)
-        .ok_or_else(|| "Android manifest has no closing PamActivity element".to_owned())?;
-    let mut declarations = START_MARKER.to_owned();
+    let close = contents[activity..]
+        .find("        </activity>")
+        .map(|offset| activity + offset)
+        .ok_or_else(|| "PamActivity element is not closed".to_owned())?;
+    let mut filters = String::new();
+    filters.push_str(START);
+    filters.push('\n');
     for link in links {
-        let auto_verify = if link.auto_verify {
-            " android:autoVerify=\"true\""
-        } else {
-            ""
-        };
-        declarations.push_str(&format!(
-            "            <intent-filter{auto_verify}>\n\
-             \x20   <action android:name=\"android.intent.action.VIEW\" />\n\
-             \x20   <category android:name=\"android.intent.category.DEFAULT\" />\n\
-             \x20   <category android:name=\"android.intent.category.BROWSABLE\" />\n\
-             \x20   <data android:scheme=\"{}\"",
-            link.scheme,
-        ));
+        filters.push_str("            <intent-filter");
+        if link.auto_verify {
+            filters.push_str(" android:autoVerify=\"true\"");
+        }
+        filters.push_str(">\n");
+        filters
+            .push_str("                <action android:name=\"android.intent.action.VIEW\" />\n");
+        filters.push_str(
+            "                <category android:name=\"android.intent.category.DEFAULT\" />\n",
+        );
+        filters.push_str(
+            "                <category android:name=\"android.intent.category.BROWSABLE\" />\n",
+        );
+        filters.push_str("                <data android:scheme=\"");
+        filters.push_str(&link.scheme);
+        filters.push('"');
         if let Some(host) = &link.host {
-            declarations.push_str(&format!(" android:host=\"{host}\""));
+            filters.push_str(" android:host=\"");
+            filters.push_str(host);
+            filters.push('"');
         }
         if let Some(path) = &link.path_prefix {
-            declarations.push_str(&format!(" android:pathPrefix=\"{path}\""));
+            filters.push_str(" android:pathPrefix=\"");
+            filters.push_str(path);
+            filters.push('"');
         }
-        declarations.push_str(
-            " />\n\
-             \x20   </intent-filter>\n",
-        );
+        filters.push_str(" />\n");
+        filters.push_str("            </intent-filter>\n");
     }
-    declarations.push_str(END_MARKER);
-    contents.insert_str(activity_end, &declarations);
+    filters.push_str(END);
+    filters.push('\n');
+    contents.insert_str(close, &filters);
     write_atomic(manifest, contents.as_bytes())
 }
 
@@ -2323,6 +2587,7 @@ fn write_plugin_lock(project: &Project) -> Result<(), String> {
             package: &plugin.package,
             package_version: &plugin.package_version,
             descriptor_sha256: &plugin.descriptor_digest,
+            idl_sha256: plugin.idl_digest.as_deref(),
             php_provider: plugin.manifest.php.provider.as_deref(),
             modules: plugin
                 .manifest
@@ -2343,12 +2608,49 @@ fn write_plugin_lock(project: &Project) -> Result<(), String> {
                 .iter()
                 .map(String::as_str)
                 .collect(),
+            ios_minimum_version: &plugin.manifest.ios.minimum_version,
+            ios_source_directories: plugin
+                .manifest
+                .ios
+                .source_dirs
+                .iter()
+                .map(PathBuf::as_path)
+                .collect(),
+            ios_resource_directories: plugin
+                .manifest
+                .ios
+                .resource_dirs
+                .iter()
+                .map(PathBuf::as_path)
+                .collect(),
+            ios_swift_packages: plugin
+                .manifest
+                .ios
+                .swift_packages
+                .iter()
+                .map(|package| package.url.as_str())
+                .collect(),
+            ios_frameworks: plugin
+                .manifest
+                .ios
+                .frameworks
+                .iter()
+                .map(String::as_str)
+                .collect(),
+            ios_extensions: plugin
+                .manifest
+                .ios
+                .extensions
+                .iter()
+                .map(|extension| extension.name.as_str())
+                .collect(),
         })
         .collect();
+    let pam_native_version = installed_pam_native_version(&project.root)?;
     let lock = PluginLock {
         version: PLUGIN_LOCK_VERSION,
         protocol: PLUGIN_PROTOCOL_VERSION,
-        pam_native: env!("CARGO_PKG_VERSION"),
+        pam_native: &pam_native_version,
         plugins: entries,
     };
     let bytes = serde_json::to_vec_pretty(&lock)
@@ -2357,6 +2659,321 @@ fn write_plugin_lock(project: &Project) -> Result<(), String> {
     let mut bytes = bytes;
     bytes.push(b'\n');
     write_atomic(&target, &bytes)
+}
+
+fn write_ios_plugin_plan(project: &Project) -> Result<(), String> {
+    let plugins = project
+        .plugins
+        .iter()
+        .filter(|plugin| has_ios_payload(&plugin.manifest))
+        .map(|plugin| {
+            let ios = &plugin.manifest.ios;
+            let source_dirs = canonical_plugin_paths(plugin, &ios.source_dirs)?;
+            let resource_dirs = canonical_plugin_paths(plugin, &ios.resource_dirs)?;
+            let entitlements = ios
+                .entitlements
+                .as_ref()
+                .map(|path| canonical_plugin_path(plugin, path))
+                .transpose()?;
+            let info_plist = ios
+                .info_plist
+                .as_ref()
+                .map(|path| canonical_plugin_path(plugin, path))
+                .transpose()?;
+            let extensions = ios
+                .extensions
+                .iter()
+                .map(|extension| {
+                    Ok(serde_json::json!({
+                        "kind": extension.kind,
+                        "name": extension.name,
+                        "bundleSuffix": extension.bundle_suffix,
+                        "sourceDirs": canonical_plugin_paths(plugin, &extension.source_dirs)?,
+                        "resourceDirs": canonical_plugin_paths(plugin, &extension.resource_dirs)?,
+                        "entitlements": extension.entitlements.as_ref()
+                            .map(|path| canonical_plugin_path(plugin, path)).transpose()?,
+                        "infoPlist": extension.info_plist.as_ref()
+                            .map(|path| canonical_plugin_path(plugin, path)).transpose()?,
+                    }))
+                })
+                .collect::<Result<Vec<serde_json::Value>, String>>()?;
+            Ok(serde_json::json!({
+                "package": plugin.package,
+                "packageVersion": plugin.package_version,
+                "descriptorSha256": plugin.descriptor_digest,
+                "minimumVersion": ios.minimum_version,
+                "sourceDirs": source_dirs,
+                "resourceDirs": resource_dirs,
+                "swiftPackages": ios.swift_packages,
+                "frameworks": ios.frameworks,
+                "usageDescriptions": ios.usage_descriptions,
+                "entitlements": entitlements,
+                "infoPlist": info_plist,
+                "extensions": extensions,
+                "modules": plugin.manifest.modules.iter().filter_map(|binding| {
+                    binding.ios_class.as_ref().map(|class| serde_json::json!({
+                        "name": binding.name,
+                        "class": class,
+                    }))
+                }).collect::<Vec<_>>(),
+                "views": plugin.manifest.views.iter().filter_map(|binding| {
+                    binding.ios_class.as_ref().map(|class| serde_json::json!({
+                        "name": binding.name,
+                        "class": class,
+                    }))
+                }).collect::<Vec<_>>(),
+            }))
+        })
+        .collect::<Result<Vec<serde_json::Value>, String>>()?;
+    let plan = serde_json::json!({
+        "version": 1,
+        "protocol": PLUGIN_PROTOCOL_VERSION,
+        "applicationId": project.manifest.application_id,
+        "plugins": plugins,
+    });
+    let mut bytes = serde_json::to_vec_pretty(&plan)
+        .map_err(|error| format!("cannot encode iOS plugin plan: {error}"))?;
+    bytes.push(b'\n');
+    write_atomic(&project.root.join(".pam-native/ios/plugins.json"), &bytes)
+}
+
+fn canonical_plugin_paths(
+    plugin: &NativePlugin,
+    paths: &[PathBuf],
+) -> Result<Vec<PathBuf>, String> {
+    paths
+        .iter()
+        .map(|path| canonical_plugin_path(plugin, path))
+        .collect()
+}
+
+fn has_ios_payload(manifest: &PluginManifest) -> bool {
+    manifest
+        .modules
+        .iter()
+        .any(|binding| binding.ios_class.is_some())
+        || manifest
+            .views
+            .iter()
+            .any(|binding| binding.ios_class.is_some())
+        || !manifest.ios.source_dirs.is_empty()
+        || !manifest.ios.resource_dirs.is_empty()
+        || !manifest.ios.swift_packages.is_empty()
+        || !manifest.ios.frameworks.is_empty()
+        || !manifest.ios.usage_descriptions.is_empty()
+        || manifest.ios.entitlements.is_some()
+        || manifest.ios.info_plist.is_some()
+        || !manifest.ios.extensions.is_empty()
+}
+
+fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(), String> {
+    let package_root = project.root.join(".pam-native/ios/PamNativePlugins");
+    if package_root.exists() {
+        fs::remove_dir_all(&package_root).map_err(|error| {
+            format!(
+                "cannot clean generated iOS plugin package {}: {error}",
+                package_root.display()
+            )
+        })?;
+    }
+    fs::create_dir_all(package_root.join("Sources/PamNativePlugins"))
+        .map_err(|error| format!("cannot create generated iOS package: {error}"))?;
+
+    let plugins = project
+        .plugins
+        .iter()
+        .filter(|plugin| has_ios_payload(&plugin.manifest))
+        .collect::<Vec<_>>();
+    let mut package_dependencies = BTreeMap::<String, &PluginSwiftPackage>::new();
+    let mut target_names = Vec::new();
+    let mut targets = String::new();
+    let mut registry_imports = String::from("import PamNative\n");
+    let mut module_entries = Vec::new();
+    let mut view_entries = Vec::new();
+
+    for (index, plugin) in plugins.iter().enumerate() {
+        let target = swift_target_name(index, &plugin.package);
+        target_names.push(target.clone());
+        registry_imports.push_str(&format!("import {target}\n"));
+        for binding in &plugin.manifest.modules {
+            if let Some(class) = &binding.ios_class {
+                module_entries.push(format!(
+                    "            {}: {}(),",
+                    swift_string(&binding.name),
+                    swift_class_reference(class)
+                ));
+            }
+        }
+        for binding in &plugin.manifest.views {
+            if let Some(class) = &binding.ios_class {
+                view_entries.push(format!(
+                    "            {}: {}(),",
+                    swift_string(&binding.name),
+                    swift_class_reference(class)
+                ));
+            }
+        }
+        let target_root = package_root.join("Sources").join(&target);
+        fs::create_dir_all(&target_root)
+            .map_err(|error| format!("cannot create Swift target {target}: {error}"))?;
+        for source in &plugin.manifest.ios.source_dirs {
+            copy_tree(&canonical_plugin_path(plugin, source)?, &target_root, &[])?;
+        }
+        let resources_root = target_root.join("Resources");
+        for resources in &plugin.manifest.ios.resource_dirs {
+            fs::create_dir_all(&resources_root)
+                .map_err(|error| format!("cannot create Swift resources: {error}"))?;
+            copy_tree(
+                &canonical_plugin_path(plugin, resources)?,
+                &resources_root,
+                &[],
+            )?;
+        }
+        if plugin.manifest.ios.source_dirs.is_empty() {
+            write_atomic(
+                &target_root.join("GeneratedPlugin.swift"),
+                format!("public enum {target}Plugin {{}}\n").as_bytes(),
+            )?;
+        }
+
+        let mut dependencies = vec![".product(name: \"PamNative\", package: \"ios\")".to_owned()];
+        for package in &plugin.manifest.ios.swift_packages {
+            let identity = swift_package_identity(&package.url)?;
+            if let Some(existing) = package_dependencies.get(&package.url) {
+                if existing.requirement.kind != package.requirement.kind
+                    || existing.requirement.value != package.requirement.value
+                {
+                    return Err(format!(
+                        "Swift package {} has conflicting requirements across plugins",
+                        package.url
+                    ));
+                }
+            } else {
+                package_dependencies.insert(package.url.clone(), package);
+            }
+            for product in &package.products {
+                dependencies.push(format!(
+                    ".product(name: {}, package: {})",
+                    swift_string(product),
+                    swift_string(&identity)
+                ));
+            }
+        }
+        let frameworks = plugin
+            .manifest
+            .ios
+            .frameworks
+            .iter()
+            .map(|framework| format!(".linkedFramework({})", swift_string(framework)))
+            .collect::<Vec<_>>();
+        targets.push_str(&format!(
+            "        .target(\n            name: {},\n            dependencies: [{}],\n            path: {},{}{}\n        ),\n",
+            swift_string(&target),
+            dependencies.join(", "),
+            swift_string(&format!("Sources/{target}")),
+            if plugin.manifest.ios.resource_dirs.is_empty() {
+                ""
+            } else {
+                "\n            resources: [.process(\"Resources\")],"
+            },
+            if frameworks.is_empty() {
+                String::new()
+            } else {
+                format!("\n            linkerSettings: [{}],", frameworks.join(", "))
+            },
+        ));
+    }
+
+    let aggregate_dependencies = target_names
+        .iter()
+        .map(|target| swift_string(target))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let registry = format!(
+        "{}\npublic enum PamNativePluginRegistry {{\n    public static func modules() -> [String: NativeModule] {{\n        [\n{}\n        ]\n    }}\n\n    public static func views() -> [String: NativeViewFactory] {{\n        [\n{}\n        ]\n    }}\n}}\n",
+        registry_imports,
+        module_entries.join("\n"),
+        view_entries.join("\n"),
+    );
+    write_atomic(
+        &package_root.join("Sources/PamNativePlugins/PamNativePlugins.swift"),
+        registry.as_bytes(),
+    )?;
+    targets.push_str(&format!(
+        "        .target(\n            name: \"PamNativePlugins\",\n            dependencies: [{}],\n            path: \"Sources/PamNativePlugins\"\n        ),\n",
+        aggregate_dependencies
+    ));
+    let external_dependencies = package_dependencies
+        .values()
+        .map(|package| swift_package_declaration(package))
+        .collect::<Result<Vec<_>, _>>()?;
+    let pam_native_path = native_home.join("ios");
+    let manifest = format!(
+        "// swift-tools-version: 5.9\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"PamNativePlugins\",\n    platforms: [.iOS(.v15)],\n    products: [.library(name: \"PamNativePlugins\", targets: [\"PamNativePlugins\"])],\n    dependencies: [\n        .package(path: {}),{}\n    ],\n    targets: [\n{}    ]\n)\n",
+        swift_string(&pam_native_path.to_string_lossy()),
+        if external_dependencies.is_empty() {
+            String::new()
+        } else {
+            format!("\n        {},", external_dependencies.join(",\n        "))
+        },
+        targets,
+    );
+    write_atomic(&package_root.join("Package.swift"), manifest.as_bytes())
+}
+
+fn swift_target_name(index: usize, package: &str) -> String {
+    let name = package
+        .split(|character: char| !character.is_ascii_alphanumeric())
+        .filter(|part| !part.is_empty())
+        .map(|part| {
+            let mut characters = part.chars();
+            characters
+                .next()
+                .map(|first| first.to_ascii_uppercase().to_string() + characters.as_str())
+                .unwrap_or_default()
+        })
+        .collect::<String>();
+    format!("PamPlugin{index}{name}")
+}
+
+fn swift_package_identity(url: &str) -> Result<String, String> {
+    url.rsplit('/')
+        .next()
+        .and_then(|name| name.strip_suffix(".git"))
+        .filter(|name| !name.is_empty())
+        .map(str::to_ascii_lowercase)
+        .ok_or_else(|| format!("cannot derive Swift package identity from {url}"))
+}
+
+fn swift_class_reference(value: &str) -> &str {
+    value.rsplit('.').next().unwrap_or(value)
+}
+
+fn swift_package_declaration(package: &PluginSwiftPackage) -> Result<String, String> {
+    let url = swift_string(&package.url);
+    let value = swift_string(&package.requirement.value);
+    match package.requirement.kind {
+        SwiftPackageRequirementKind::Exact => Ok(format!(".package(url: {url}, exact: {value})")),
+        SwiftPackageRequirementKind::From => Ok(format!(".package(url: {url}, from: {value})")),
+        SwiftPackageRequirementKind::Branch => Ok(format!(".package(url: {url}, branch: {value})")),
+        SwiftPackageRequirementKind::Revision => {
+            Ok(format!(".package(url: {url}, revision: {value})"))
+        }
+        SwiftPackageRequirementKind::UpToNextMinor => Ok(format!(
+            ".package(url: {url}, .upToNextMinor(from: {value}))"
+        )),
+    }
+}
+
+fn swift_string(value: &str) -> String {
+    format!(
+        "\"{}\"",
+        value
+            .replace('\\', "\\\\")
+            .replace('"', "\\\"")
+            .replace('\n', "\\n")
+            .replace('\r', "\\r")
+    )
 }
 
 fn generate_modules(project: &Project, workspace: &Path) -> Result<(), String> {
@@ -2417,50 +3034,6 @@ fn generate_views(project: &Project, workspace: &Path) -> Result<(), String> {
         source.push_str("        context.applicationContext\n");
     }
     source.push_str("    }\n}\n");
-    write_atomic(&target, source.as_bytes())
-}
-
-fn generate_ios_modules(project: &Project, workspace: &Path) -> Result<(), String> {
-    let target = workspace.join("Sources/PamNative/Modules/GeneratedPamModules.swift");
-    let mut source = String::from(
-        "import Foundation\n\n\
-         public enum GeneratedPamModules {\n\
-         \x20   public static func create() -> [String: NativeModule] {\n\
-         \x20       return [\n",
-    );
-    for module in project.manifest.modules.iter().chain(
-        project
-            .plugins
-            .iter()
-            .flat_map(|plugin| plugin.manifest.modules.iter()),
-    ) {
-        if let Some(class) = &module.ios_class {
-            source.push_str(&format!("            {:?}: {}(),\n", module.name, class));
-        }
-    }
-    source.push_str("        ]\n    }\n}\n");
-    write_atomic(&target, source.as_bytes())
-}
-
-fn generate_ios_views(project: &Project, workspace: &Path) -> Result<(), String> {
-    let target = workspace.join("Sources/PamNative/Views/GeneratedPamViews.swift");
-    let mut source = String::from(
-        "import Foundation\nimport UIKit\n\n\
-         public enum GeneratedPamViews {\n\
-         \x20   public static func create() -> [String: NativeViewFactory] {\n\
-         \x20       return [\n",
-    );
-    for view in project.manifest.views.iter().chain(
-        project
-            .plugins
-            .iter()
-            .flat_map(|plugin| plugin.manifest.views.iter()),
-    ) {
-        if let Some(class) = &view.ios_class {
-            source.push_str(&format!("            {:?}: {}(),\n", view.name, class));
-        }
-    }
-    source.push_str("        ]\n    }\n}\n");
     write_atomic(&target, source.as_bytes())
 }
 
@@ -2559,27 +3132,28 @@ fn copy_project_files(
 }
 
 fn ignored_project_path(path: &Path) -> bool {
-    path.components().any(|component| {
-        matches!(
-            component,
-            Component::Normal(value)
-                if value.to_str().is_some_and(|name| {
-                    name.starts_with('.')
-                        || matches!(
-                            name,
-                            ".build"
-                            | "build"
-                            | "dist"
-                            | "docs"
-                            | "examples"
-                            | "node_modules"
-                            | "target"
-                            | "tests"
-                            | "tools"
-                        )
-                })
-        )
-    })
+    let components = path
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(value) => value.to_str(),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some(first) = components.first().copied() else {
+        return false;
+    };
+
+    first.starts_with('.')
+        || components
+            .iter()
+            .any(|component| component.starts_with('.'))
+        || components
+            .iter()
+            .any(|component| matches!(*component, "node_modules" | "target" | "dist" | "build"))
+        || components
+            .iter()
+            .skip(1)
+            .any(|component| *component == "vendor")
 }
 
 fn directory_digest(root: &Path) -> Result<String, String> {
@@ -2628,11 +3202,10 @@ fn files_in(root: &Path) -> Result<Vec<PathBuf>, String> {
     }
     let mut files = Vec::new();
     visit(root, &mut files)?;
-    files.sort_by_key(|file| {
-        file.strip_prefix(root)
-            .unwrap_or(file)
-            .to_string_lossy()
-            .replace('\\', "/")
+    files.sort_by(|left, right| {
+        left.strip_prefix(root)
+            .unwrap_or(left)
+            .cmp(right.strip_prefix(root).unwrap_or(right))
     });
     Ok(files)
 }
@@ -2651,8 +3224,10 @@ fn build(options: MobileOptions) -> Result<BuiltApk, String> {
     for abi in &options.abis {
         if !runtime_ready_at(&runtime.root, *abi) {
             return Err(format!(
-                "verified PHP {} Android runtime is missing for {}; build it with `pam mobile runtime:update` (expected {})",
+                "verified PHP {} Android runtime is missing for {}; build it with `runtime-builder/android/build.sh --php {} {}` (expected {})",
                 runtime.release.php_version,
+                abi.android(),
+                project.manifest.runtime.php,
                 abi.android(),
                 runtime.root.join(abi.android()).display()
             ));
@@ -2700,7 +3275,7 @@ fn build(options: MobileOptions) -> Result<BuiltApk, String> {
 fn benchmark(project_path: PathBuf) -> Result<u8, String> {
     run_android_performance_suite(
         project_path,
-        "dev.pam.nativeapp.benchmark.PamNativeBenchmark#coldStartup",
+        "dev.pam.nativeapp.benchmark.PamNativeBenchmark",
         "Benchmark",
     )
 }
@@ -2897,168 +3472,6 @@ final class {name} extends Component
     Ok(0)
 }
 
-fn generate_flow(options: GeneratorOptions) -> Result<u8, String> {
-    let project = load_project(&options.project)?;
-    let template_name = format!("{}-flow", kebab_case(&options.name));
-    let component_path = project
-        .root
-        .join("src/Flows")
-        .join(format!("{}.php", options.name));
-    let template_path = project
-        .root
-        .join("resources/native")
-        .join(format!("{template_name}.pam"));
-    let test_path = project
-        .root
-        .join("tests")
-        .join(format!("{}FlowTest.php", options.name));
-    ensure_available(&[&component_path, &template_path, &test_path])?;
-
-    let component = format!(
-        r#"<?php
-
-declare(strict_types=1);
-
-namespace App\Flows;
-
-use Pam\Native\Attributes\State;
-use Pam\Native\Component;
-use Pam\Native\Renderable;
-use Pam\Native\View;
-
-enum {name}Step: int
-{{
-    case Details = 1;
-    case Review = 2;
-    case Complete = 3;
-}}
-
-final class {name} extends Component
-{{
-    #[State]
-    public int $step = {name}Step::Details->value;
-
-    public function render(): Renderable
-    {{
-        return View::make('{template_name}');
-    }}
-
-    public function next(): void
-    {{
-        $this->step = min({name}Step::Complete->value, $this->step + 1);
-    }}
-
-    public function back(): void
-    {{
-        $this->step = max({name}Step::Details->value, $this->step - 1);
-    }}
-}}
-"#,
-        name = options.name,
-    );
-    let template = format!(
-        r#"<AppScreen title="{name}" subtitle="A generated, typed PAM flow.">
-    <VStack class="gap-4">
-        <HStack class="items-center justify-between">
-            <Badge variant="secondary">
-                <BadgeText>Step {{{{ $step }}}} of 3</BadgeText>
-            </Badge>
-            <Text class="ui-text-muted">State survives native re-renders</Text>
-        </HStack>
-
-        <Progress :value="$step * 33.333">
-            <ProgressFilledTrack />
-        </Progress>
-
-        <Card v-if="$step === 1" class="p-5 rounded-2xl">
-            <VStack class="gap-2">
-                <Heading size="lg">Details</Heading>
-                <Text class="ui-text-muted">Collect typed input with FormField and NativeForm here.</Text>
-            </VStack>
-        </Card>
-        <Card v-else-if="$step === 2" class="p-5 rounded-2xl">
-            <VStack class="gap-2">
-                <Heading size="lg">Review</Heading>
-                <Text class="ui-text-muted">Review data before the final native action.</Text>
-            </VStack>
-        </Card>
-        <ContentState v-else status="content">
-            <Alert action="success" variant="subtle" class="rounded-2xl">
-                <AlertText>{name} completed successfully.</AlertText>
-            </Alert>
-        </ContentState>
-    </VStack>
-
-    <template #bottom>
-        <HStack class="p-4 gap-3">
-            <Button
-                v-if="$step > 1 &amp;&amp; $step < 3"
-                variant="outline"
-                class="flex-1"
-                @press="back"
-            >
-                <ButtonText>Back</ButtonText>
-            </Button>
-            <Button v-if="$step < 3" class="flex-1" @press="next">
-                <ButtonText>{{{{ $step === 2 ? 'Confirm' : 'Continue' }}}}</ButtonText>
-            </Button>
-        </HStack>
-    </template>
-</AppScreen>
-"#,
-        name = options.name,
-    );
-    let test = format!(
-        r#"<?php
-
-declare(strict_types=1);
-
-use App\Flows\{name};
-use App\Flows\{name}Step;
-
-require dirname(__DIR__).'/vendor/autoload.php';
-
-$flow = new {name}();
-assert($flow->step === {name}Step::Details->value);
-$flow->next();
-assert($flow->step === {name}Step::Review->value);
-$flow->next();
-$flow->next();
-assert($flow->step === {name}Step::Complete->value);
-$flow->back();
-assert($flow->step === {name}Step::Review->value);
-
-fwrite(STDOUT, "{name} flow contract passed.\n");
-"#,
-        name = options.name,
-    );
-
-    let mut created = Vec::new();
-    for (path, contents) in [
-        (&component_path, component.as_bytes()),
-        (&template_path, template.as_bytes()),
-        (&test_path, test.as_bytes()),
-    ] {
-        if let Err(error) = write_new_file(path, contents) {
-            for created_path in created {
-                let _ = fs::remove_file(created_path);
-            }
-            return Err(error);
-        }
-        created.push(path);
-    }
-
-    println!("Created flow {}", component_path.display());
-    println!("Created template {}", template_path.display());
-    println!("Created contract test {}", test_path.display());
-    println!(
-        "Mount App\\Flows\\{} after App::views(...), then run `php {}`.",
-        options.name,
-        test_path.display(),
-    );
-    Ok(0)
-}
-
 fn generate_native_view(options: GeneratorOptions) -> Result<u8, String> {
     let project = load_project(&options.project)?;
     let binding_name = kebab_case(&options.name);
@@ -3174,9 +3587,6 @@ fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), String> {
 }
 
 fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
-    if engine_ready(native_home, abi) {
-        return Ok(());
-    }
     let installed = installed_rust_targets()?;
     if !installed.contains(abi.rust_target()) {
         return Err(format!(
@@ -3245,17 +3655,6 @@ fn runtime_ready_at(runtime_root: &Path, abi: AndroidAbi) -> bool {
     root.join("lib/libphp.a").is_file()
         && root.join("include/php/main/php.h").is_file()
         && root.join("include/php/sapi/embed/php_embed.h").is_file()
-}
-
-fn engine_library(native_home: &Path, abi: AndroidAbi) -> PathBuf {
-    native_home
-        .join("target")
-        .join(abi.rust_target())
-        .join("release/libpam_native_engine.a")
-}
-
-fn engine_ready(native_home: &Path, abi: AndroidAbi) -> bool {
-    engine_library(native_home, abi).is_file()
 }
 
 fn android_sdk() -> Result<PathBuf, String> {
@@ -3374,7 +3773,6 @@ fn hot_reload_server(
     let mut fingerprint = project_fingerprint(&project.root)?;
     let mut version = String::new();
     let mut bundle = Vec::new();
-    let mut pending_change: Option<((u64, u128), Instant)> = None;
     refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle)?;
     loop {
         match listener.accept() {
@@ -3386,27 +3784,11 @@ fn hot_reload_server(
         }
         let next = project_fingerprint(&project.root)?;
         if next != fingerprint {
-            let stable = pending_change
-                .as_ref()
-                .is_some_and(|(candidate, detected_at)| {
-                    candidate == &next && detected_at.elapsed() >= HOT_RELOAD_DEBOUNCE
-                });
-            if stable {
-                fingerprint = next;
-                pending_change = None;
-                match refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle)
-                {
-                    Ok(()) => println!("Reload ready · {}", &version[..16]),
-                    Err(error) => eprintln!("pam mobile dev: {error}"),
-                }
-            } else if pending_change
-                .as_ref()
-                .is_none_or(|(candidate, _)| candidate != &next)
-            {
-                pending_change = Some((next, Instant::now()));
+            fingerprint = next;
+            match refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle) {
+                Ok(()) => println!("Reload ready · {}", &version[..16]),
+                Err(error) => eprintln!("pam mobile dev: {error}"),
             }
-        } else {
-            pending_change = None;
         }
         std::thread::sleep(Duration::from_millis(100));
     }
@@ -3569,105 +3951,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn android_deep_links_generate_browsable_intent_filters() {
-        let manifest = std::env::temp_dir().join(format!(
-            "pam-deep-links-{}-{}.xml",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        fs::write(
-            &manifest,
-            "<manifest><application><activity android:name=\".PamActivity\">\n\
-             \x20   </activity></application></manifest>",
-        )
-        .expect("manifest");
-        add_deep_links(
-            &manifest,
-            &[
-                AndroidDeepLink {
-                    scheme: "pushin".to_owned(),
-                    host: None,
-                    path_prefix: None,
-                    auto_verify: false,
-                },
-                AndroidDeepLink {
-                    scheme: "https".to_owned(),
-                    host: Some("api.zechat.com.br".to_owned()),
-                    path_prefix: Some("/reel/".to_owned()),
-                    auto_verify: true,
-                },
-            ],
-        )
-        .expect("deep-link filters");
-        add_deep_links(
-            &manifest,
-            &[
-                AndroidDeepLink {
-                    scheme: "pushin".to_owned(),
-                    host: None,
-                    path_prefix: None,
-                    auto_verify: false,
-                },
-                AndroidDeepLink {
-                    scheme: "https".to_owned(),
-                    host: Some("api.zechat.com.br".to_owned()),
-                    path_prefix: Some("/reel/".to_owned()),
-                    auto_verify: true,
-                },
-            ],
-        )
-        .expect("idempotent deep-link filters");
-        let contents = fs::read_to_string(&manifest).expect("generated manifest");
-        assert!(contents.contains("android:scheme=\"pushin\""));
-        assert!(contents.contains("android:autoVerify=\"true\""));
-        assert!(contents.contains("android:host=\"api.zechat.com.br\""));
-        assert!(contents.contains("android:pathPrefix=\"/reel/\""));
-        assert_eq!(
-            contents
-                .matches("android:name=\"android.intent.category.BROWSABLE\"")
-                .count(),
-            2
-        );
-        assert_eq!(contents.matches("<!-- pam:deep-links -->").count(), 1);
-        fs::remove_file(manifest).expect("cleanup");
-    }
-
-    #[test]
-    fn android_share_targets_generate_idempotent_intent_filters() {
-        let manifest = std::env::temp_dir().join(format!(
-            "pam-share-targets-{}-{}.xml",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        fs::write(
-            &manifest,
-            "<manifest><application><activity android:name=\".PamActivity\">\n            <!-- pam-native:share-targets:start -->\n            <!-- pam-native:share-targets:end -->\n        </activity></application></manifest>",
-        )
-        .expect("manifest");
-        let targets = vec!["image/*".to_owned(), "text/plain".to_owned()];
-        add_share_targets(&manifest, &targets).expect("share targets");
-        add_share_targets(&manifest, &targets).expect("idempotent share targets");
-        let contents = fs::read_to_string(&manifest).expect("generated manifest");
-        assert_eq!(contents.matches("android.intent.action.SEND\"").count(), 2);
-        assert_eq!(
-            contents
-                .matches("android.intent.action.SEND_MULTIPLE\"")
-                .count(),
-            2
-        );
-        assert!(contents.contains("android:mimeType=\"image/*\""));
-        assert!(valid_mime_type("application/vnd.example+json"));
-        assert!(!valid_mime_type("image/<script>"));
-        fs::remove_file(manifest).expect("cleanup");
-    }
-
-    #[test]
     fn generator_names_are_safe_and_human_readable() {
         assert!(valid_pascal_name("Checkout"));
         assert!(valid_pascal_name("HTTPClient2"));
@@ -3675,6 +3958,10 @@ mod tests {
         assert!(!valid_pascal_name("../Checkout"));
         assert_eq!(kebab_case("CheckoutForm"), "checkout-form");
         assert_eq!(kebab_case("HTTPClient"), "http-client");
+        assert!(valid_mime_type("image/*"));
+        assert!(valid_mime_type("application/vnd.example+json"));
+        assert!(!valid_mime_type("image"));
+        assert!(!valid_mime_type("image/<script>"));
     }
 
     #[test]
@@ -3706,45 +3993,6 @@ mod tests {
         assert!(!ignored_project_path(Path::new(
             "resources/icons/pam-ui.svg"
         )));
-    }
-
-    #[test]
-    fn android_bundle_digest_uses_portable_path_order() {
-        let root = std::env::temp_dir().join(format!(
-            "pam-mobile-digest-{}-{}",
-            std::process::id(),
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .expect("clock")
-                .as_nanos()
-        ));
-        fs::create_dir_all(root.join("vendor/pam/native")).expect("pam package");
-        fs::create_dir_all(root.join("vendor/pam-community/plugin")).expect("community package");
-        fs::write(root.join("vendor/pam/native/file.php"), "native").expect("native file");
-        fs::write(
-            root.join("vendor/pam-community/plugin/file.php"),
-            "community",
-        )
-        .expect("community file");
-
-        let files = files_in(&root).expect("files");
-        let relative = files
-            .iter()
-            .map(|file| {
-                file.strip_prefix(&root)
-                    .expect("relative")
-                    .to_string_lossy()
-                    .replace('\\', "/")
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            relative,
-            [
-                "vendor/pam-community/plugin/file.php",
-                "vendor/pam/native/file.php",
-            ]
-        );
-        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]
@@ -3795,22 +4043,6 @@ mod tests {
         .expect("component");
         assert!(root.join("src/Components/MetricCard.pam.php").is_file());
 
-        generate_flow(GeneratorOptions {
-            name: "Checkout".to_owned(),
-            project: root.clone(),
-        })
-        .expect("flow");
-        assert!(root.join("src/Flows/Checkout.php").is_file());
-        assert!(root.join("resources/native/checkout-flow.pam").is_file());
-        assert!(root.join("tests/CheckoutFlowTest.php").is_file());
-        assert!(
-            generate_flow(GeneratorOptions {
-                name: "Checkout".to_owned(),
-                project: root.clone(),
-            })
-            .is_err()
-        );
-
         generate_native_view(GeneratorOptions {
             name: "CameraPreview".to_owned(),
             project: root.clone(),
@@ -3848,35 +4080,31 @@ mod tests {
                 .as_nanos()
         ));
         let package = root.join("vendor/community/example");
-        let native_package = root.join("vendor/pushinbr/pam-native");
         let composer = root.join("vendor/composer");
         let source = package.join("android/src/main/kotlin");
-        let ios_source = package.join("ios/Sources/Example");
+        let ios_source = package.join("ios/Sources");
+        let ios_resources = package.join("ios/Resources");
+        let ios_extension = package.join("ios/ShareExtension");
         fs::create_dir_all(&source).expect("plugin source");
-        fs::create_dir_all(&ios_source).expect("plugin iOS source");
-        fs::create_dir_all(&native_package).expect("native package");
-        fs::create_dir_all(native_package.join("ios/Sources/PamNative/Modules"))
-            .expect("native iOS modules");
-        fs::create_dir_all(native_package.join("ios/Sources/PamNative/Views"))
-            .expect("native iOS views");
+        fs::create_dir_all(&ios_source).expect("iOS plugin source");
+        fs::create_dir_all(&ios_resources).expect("iOS plugin resources");
+        fs::create_dir_all(&ios_extension).expect("iOS extension source");
+        fs::write(
+            package.join("ios/App.entitlements"),
+            "<?xml version=\"1.0\"?><plist/>",
+        )
+        .expect("iOS entitlements");
+        fs::write(
+            package.join("ios/ShareInfo.plist"),
+            "<?xml version=\"1.0\"?><plist/>",
+        )
+        .expect("extension Info.plist");
+        fs::write(
+            package.join("pam-native.idl.json"),
+            r#"{"version":1,"namespace":"Community.Example"}"#,
+        )
+        .expect("plugin IDL");
         fs::create_dir_all(&composer).expect("composer");
-        fs::write(
-            ios_source.join("ExampleFactories.swift"),
-            "final class ExampleBadgeFactory {}\n",
-        )
-        .expect("plugin Swift source");
-        fs::write(native_package.join("ios/Package.swift"), "// package\n")
-            .expect("native iOS package");
-        fs::write(
-            native_package.join("ios/Sources/PamNative/Modules/GeneratedPamModules.swift"),
-            "// generated\n",
-        )
-        .expect("native iOS modules registry");
-        fs::write(
-            native_package.join("ios/Sources/PamNative/Views/GeneratedPamViews.swift"),
-            "// generated\n",
-        )
-        .expect("native iOS views registry");
         fs::write(root.join("vendor/autoload.php"), "<?php\n").expect("autoload");
         fs::write(root.join("index.php"), "<?php\n").expect("entry");
         fs::write(
@@ -3897,8 +4125,7 @@ mod tests {
             r#"{
                 "packages": [{
                     "name": "pushinbr/pam-native",
-                    "version": "0.1.35",
-                    "install-path": "../pushinbr/pam-native"
+                    "version": "0.6.0"
                 }, {
                     "name": "community/example",
                     "version": "1.2.3",
@@ -3916,8 +4143,8 @@ mod tests {
                 "version": 1,
                 "protocol": 1,
                 "pamNative": {
-                    "minimum": "0.1.0",
-                    "maximumExclusive": "0.2.0"
+                    "minimum": "0.6.0",
+                    "maximumExclusive": "0.7.0"
                 },
                 "php": {"provider": "Community\\Example\\PluginProvider"},
                 "android": {
@@ -3929,17 +4156,36 @@ mod tests {
                 },
                 "ios": {
                     "minimumVersion": "15.0",
-                    "sourceDirs": ["ios/Sources/Example"]
+                    "sourceDirs": ["ios/Sources"],
+                    "resourceDirs": ["ios/Resources"],
+                    "swiftPackages": [{
+                        "url": "https://github.com/apple/swift-collections.git",
+                        "requirement": {"kind": 1, "value": "1.1.0"},
+                        "products": ["Collections"]
+                    }],
+                    "frameworks": ["AuthenticationServices"],
+                    "usageDescriptions": {
+                        "NSFaceIDUsageDescription": "Authenticate your account."
+                    },
+                    "entitlements": "ios/App.entitlements",
+                    "extensions": [{
+                        "kind": 1,
+                        "name": "CommunityShare",
+                        "bundleSuffix": "share",
+                        "sourceDirs": ["ios/ShareExtension"],
+                        "infoPlist": "ios/ShareInfo.plist"
+                    }]
                 },
+                "idl": "pam-native.idl.json",
                 "modules": [{
                     "name": "community.echo",
                     "class": "community.example.EchoModule",
-                    "iosClass": "ExampleEchoModule"
+                    "iosClass": "CommunityExample.EchoModule"
                 }],
                 "views": [{
                     "name": "community.badge",
                     "class": "community.example.BadgeFactory",
-                    "iosClass": "ExampleBadgeFactory"
+                    "iosClass": "CommunityExample.BadgeFactory"
                 }]
             }"#,
         )
@@ -3957,10 +4203,13 @@ mod tests {
         generate_plugin_projects(&project, &workspace).expect("autolink");
         generate_modules(&project, &workspace).expect("module codegen");
         generate_views(&project, &workspace).expect("view codegen");
-        let ios_workspace = sync_ios_host(&project, &native_package).expect("iOS autolink");
-        generate_ios_modules(&project, &ios_workspace).expect("iOS module codegen");
-        generate_ios_views(&project, &ios_workspace).expect("iOS view codegen");
         write_plugin_lock(&project).expect("plugin lock");
+        write_ios_plugin_plan(&project).expect("iOS plugin plan");
+        let native_home = root.join("pam-native-home");
+        fs::create_dir_all(native_home.join("ios")).expect("native iOS package");
+        fs::write(native_home.join("ios/Package.swift"), "// fixture\n")
+            .expect("native Package.swift");
+        write_ios_plugin_package(&project, &native_home).expect("generated Swift package");
 
         let build = fs::read_to_string(workspace.join("pam-plugins/plugin-0/build.gradle.kts"))
             .expect("generated Gradle");
@@ -3971,25 +4220,38 @@ mod tests {
         )
         .expect("generated modules");
         assert!(modules.contains("community.example.EchoModule(context)"));
-        let ios_modules = fs::read_to_string(
-            ios_workspace.join("Sources/PamNative/Modules/GeneratedPamModules.swift"),
-        )
-        .expect("generated iOS modules");
-        assert!(ios_modules.contains("\"community.echo\": ExampleEchoModule()"));
-        let ios_views = fs::read_to_string(
-            ios_workspace.join("Sources/PamNative/Views/GeneratedPamViews.swift"),
-        )
-        .expect("generated iOS views");
-        assert!(ios_views.contains("\"community.badge\": ExampleBadgeFactory()"));
-        assert!(
-            ios_workspace
-                .join("Sources/PamNative/Plugins/plugin-0/source-0/ExampleFactories.swift")
-                .is_file()
-        );
         let lock =
             fs::read_to_string(root.join(".pam-native/plugins.lock.json")).expect("generated lock");
         assert!(lock.contains("\"package\": \"community/example\""));
         assert!(lock.contains("\"protocol\": 1"));
+        assert!(lock.contains("\"iosMinimumVersion\": \"15.0\""));
+        assert!(lock.contains("\"iosSourceDirectories\": ["));
+        assert!(lock.contains("\"ios/Resources\""));
+        assert!(lock.contains("\"idlSha256\":"));
+        assert!(lock.contains("https://github.com/apple/swift-collections.git"));
+        assert!(lock.contains("AuthenticationServices"));
+        let ios_plan = fs::read_to_string(root.join(".pam-native/ios/plugins.json"))
+            .expect("generated iOS plugin plan");
+        assert!(ios_plan.contains("CommunityShare"));
+        assert!(ios_plan.contains("NSFaceIDUsageDescription"));
+        assert!(ios_plan.contains("swift-collections.git"));
+        let swift_package =
+            fs::read_to_string(root.join(".pam-native/ios/PamNativePlugins/Package.swift"))
+                .expect("generated Swift Package.swift");
+        assert!(swift_package.contains(".linkedFramework(\"AuthenticationServices\")"));
+        assert!(swift_package.contains(
+            ".package(url: \"https://github.com/apple/swift-collections.git\", exact: \"1.1.0\")"
+        ));
+        assert!(
+            swift_package
+                .contains(".product(name: \"Collections\", package: \"swift-collections\")")
+        );
+        let swift_registry = fs::read_to_string(root.join(
+            ".pam-native/ios/PamNativePlugins/Sources/PamNativePlugins/PamNativePlugins.swift",
+        ))
+        .expect("generated Swift plugin registry");
+        assert!(swift_registry.contains("\"community.echo\": EchoModule()"));
+        assert!(swift_registry.contains("\"community.badge\": BadgeFactory()"));
 
         fs::write(
             root.join(MANIFEST_NAME),
@@ -4016,10 +4278,6 @@ mod tests {
             composer.join("installed.json"),
             r#"{
                 "packages": [{
-                    "name": "pushinbr/pam-native",
-                    "version": "0.1.35",
-                    "install-path": "../pushinbr/pam-native"
-                }, {
                     "name": "community/example",
                     "version": "1.2.3",
                     "install-path": "../community/example",
@@ -4037,12 +4295,23 @@ mod tests {
 
         fs::remove_dir_all(root).expect("cleanup");
     }
-}
-#[test]
-fn installed_sdk_versions_accept_stable_and_composer_dev_lines() {
-    assert_eq!(parse_installed_sdk_version("0.2.1"), Ok((0, 2, 1)));
-    assert_eq!(parse_installed_sdk_version("v0.5.31"), Ok((0, 5, 31)));
-    assert_eq!(parse_installed_sdk_version("0.2.x-dev"), Ok((0, 2, 0)));
-    assert!(parse_installed_sdk_version("dev-main").is_err());
-    assert!(parse_release_version("0.2.x-dev").is_err());
+
+    #[test]
+    fn ios_plugin_metadata_rejects_unsafe_versions_and_class_names() {
+        assert!(valid_ios_version("15.0"));
+        assert!(valid_ios_version("26.1"));
+        assert!(!valid_ios_version("15"));
+        assert!(!valid_ios_version("15.0.1"));
+        assert!(!valid_ios_version("v15.0"));
+
+        assert!(valid_swift_class_name("PamFirebase.FirebaseModule"));
+        assert!(valid_swift_class_name("FirebaseModule"));
+        assert!(!valid_swift_class_name("PamFirebase/FirebaseModule"));
+        assert!(!valid_swift_class_name("PamFirebase..FirebaseModule"));
+        assert!(!valid_swift_class_name("1FirebaseModule"));
+
+        assert_eq!(parse_release_version("v0.6.1"), Ok((0, 6, 1)));
+        assert_eq!(parse_release_version("1.2.3-beta.1"), Ok((1, 2, 3)));
+        assert!(parse_release_version("version-1.2.3").is_err());
+    }
 }
