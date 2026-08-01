@@ -23,14 +23,10 @@ API or dynamically built trees. Both styles can coexist in one application.
 
 ## Create and run an application
 
-Choose one preset:
+Create a project from the native preset:
 
 ```bash
-# PAM Native primitives only
 pam init my-mobile-app --template mobile
-
-# PAM Native plus the official PAM UI component library
-pam init my-mobile-app --template mobile-ui
 ```
 
 Connect an Android device with USB debugging enabled, then run:
@@ -536,11 +532,6 @@ the native RecyclerView window rather than mounting the entire data set.
 | Scrolling | `ScrollView`, `FlatList`, `VirtualizedList`, `VirtualGrid`, `SectionList` |
 | Presentation | `Modal`, `ActivityIndicator`, `StatusBar`, `KeyboardAvoidingView` |
 | Android | `DrawerLayoutAndroid`, `TouchableNativeFeedback`, `InputAccessoryView` |
-
-The `mobile-ui` preset adds PAM UI providers, cards, headings, badges, composed
-inputs, checkboxes, radio groups, drawers, popovers, menus, tabs, and other
-accessible controls. Prefer library components for product UI and core
-primitives for custom layout or low-level integration.
 
 ## Lifecycle
 

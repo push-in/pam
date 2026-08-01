@@ -331,10 +331,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             "Scaffold a production-ready Pam project.",
             "init [directory] [options]",
             &[
-                (
-                    "--template PRESET",
-                    "raw, api, laravel, desktop, mobile, or mobile-ui",
-                ),
+                ("--template PRESET", "raw, api, laravel, desktop, or mobile"),
                 ("--socket", "Add Pam Socket support"),
                 ("--no-install", "Create files without installing packages"),
                 ("--no-interaction", "Use API when no preset is supplied"),
@@ -343,7 +340,6 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "init my-api --template api",
                 "init my-app --template laravel --socket",
                 "init native-app --template mobile --no-install",
-                "init polished-app --template mobile-ui --no-install",
             ],
         ),
         "build" => (

@@ -1319,8 +1319,8 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     let init_help = run_pam(&["init", "--help"]);
     assert!(init_help.status.success());
     let init_help = String::from_utf8_lossy(&init_help.stderr);
-    assert!(init_help.contains("mobile, or mobile-ui"));
-    assert!(init_help.contains("--template mobile-ui"));
+    assert!(init_help.contains("desktop, or mobile"));
+    assert!(!init_help.contains("mobile-ui"));
 
     let mobile_help = run_pam(&["mobile", "--help"]);
     assert!(mobile_help.status.success());

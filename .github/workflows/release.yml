@@ -131,12 +131,6 @@ jobs:
           ref: v0.6.1
           path: pam-native
           persist-credentials: false
-      - uses: actions/checkout@v7
-        with:
-          repository: push-in/pam-mobile-ui-php
-          ref: v0.2.1
-          path: pam-mobile-ui
-          persist-credentials: false
       - uses: actions/download-artifact@v8
         with:
           name: pam-android-runtime
