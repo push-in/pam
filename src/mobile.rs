@@ -219,7 +219,7 @@ struct AndroidDeepLink {
 struct NativeModule {
     name: String,
     class: String,
-    #[serde(default)]
+    #[serde(rename = "iosClass", default)]
     ios_class: Option<String>,
 }
 
@@ -228,7 +228,7 @@ struct NativeModule {
 struct NativeView {
     name: String,
     class: String,
-    #[serde(default)]
+    #[serde(rename = "iosClass", default)]
     ios_class: Option<String>,
 }
 

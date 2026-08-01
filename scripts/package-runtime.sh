@@ -13,7 +13,7 @@ pam_target=$3
 output_directory=$4
 package="pam-${pam_version}-${pam_target}"
 package_root="${output_directory}/${package}"
-expected_native_version=0.5.88
+expected_native_version=0.6.1
 expected_mobile_ui_version=0.2.1
 
 test -x "${pam_binary}" || {

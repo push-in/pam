@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.44 - 2026-08-01
+
+- Autolink official and community PAM Native plugins on iOS, including typed
+  module/view registries, Swift Package dependencies, Apple frameworks,
+  resources, usage descriptions, entitlements and app extensions.
+- Validate plugin compatibility and paths before generation, and emit a
+  reproducible iOS integration plan alongside the plugin lockfile.
+- Bundle PAM Native 0.6.1 as the ecosystem plugin foundation.
+
 ## 0.1.43 - 2026-07-30
 
 - Bundle PAM Native 0.5.88 so mobile plugins can react to package-restricted
