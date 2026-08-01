@@ -210,24 +210,16 @@ The executable [SaaS API reference](examples/laravel-saas-api) demonstrates the
 recommended controller, request, service, repository, resource, enum, migration
 and endpoint-test boundaries.
 
-### Mobile presets
+### Mobile preset
 
-The CLI offers two native mobile starting points:
+Create a native mobile app backed by PAM Native:
 
 ```bash
 pam init native-core --template mobile
-pam init native-ui --template mobile-ui
 ```
 
-`mobile` starts with the explicit PAM Native PHP tree and no component-library
-dependency. `mobile-ui` installs `pushinbr/pam-mobile-ui`, enables its system
-theme and generates a `Hello.pam.php` screen using the official accessible
-components. Both presets render through the same PAM Native element tree, Rust
-diff engine and Android UI-thread commit path.
-
-See the complete [PAM Mobile guide](docs/mobile.md) for project structure,
-screen generation, tags, typed PHP trees, reusable components, state, forms,
-navigation, layout rules, builds, and device testing.
+The `mobile` preset starts with the explicit PAM Native PHP tree and renders
+through the native element tree, Rust diff engine, and platform UI thread.
 
 ### Desktop applications with Servo
 
@@ -795,7 +787,7 @@ pam rpc validate|generate|wasi [arguments]          typed SDK and WASI RPC bound
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
-pam init [directory] --template raw|api|laravel|desktop|mobile|mobile-ui
+pam init [directory] --template raw|api|laravel|desktop|mobile
                                                     scaffold and install a project
 pam init [directory] --template api --socket        add native Socket support
 pam init [directory] --no-interaction               accept the default API preset

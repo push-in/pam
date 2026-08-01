@@ -13,8 +13,7 @@ pam_target=$3
 output_directory=$4
 package="pam-${pam_version}-${pam_target}"
 package_root="${output_directory}/${package}"
-expected_native_version=0.5.88
-expected_mobile_ui_version=0.2.1
+expected_native_version=0.6.1
 
 test -x "${pam_binary}" || {
     echo "PAM binary is not executable: ${pam_binary}" >&2
@@ -42,8 +41,7 @@ mkdir -p \
     "${package_root}/etc/conf.d" \
     "${package_root}/lib/php/extensions" \
     "${package_root}/share/pam/runtime" \
-    "${package_root}/share/pam/native" \
-    "${package_root}/share/pam/mobile-ui"
+    "${package_root}/share/pam/native"
 
 cp "${pam_binary}" "${package_root}/bin/pam"
 cp "${php_library}" "${package_root}/lib/libphp.so"
@@ -52,21 +50,12 @@ test -f pam-native/Cargo.toml || {
     echo "Pam Native SDK source is missing from the release checkout." >&2
     exit 66
 }
-test -f pam-mobile-ui/composer.json || {
-    echo "PAM Mobile UI source is missing from the release checkout." >&2
-    exit 66
-}
 native_version=$(
     sed -n 's/^version = "\([^"]*\)"$/\1/p' pam-native/Cargo.toml |
         head -n 1
 )
-mobile_ui_version=$(tr -d '\r\n' <pam-mobile-ui/VERSION)
 test "${native_version}" = "${expected_native_version}" || {
     echo "Expected PAM Native ${expected_native_version}, found ${native_version}." >&2
-    exit 66
-}
-test "${mobile_ui_version}" = "${expected_mobile_ui_version}" || {
-    echo "Expected PAM Mobile UI ${expected_mobile_ui_version}, found ${mobile_ui_version}." >&2
     exit 66
 }
 test -f runtime/catalog.json || {
@@ -126,16 +115,6 @@ for rust_target in aarch64-linux-android x86_64-linux-android; do
         "pam-native/target/${rust_target}/release/libpam_native_engine.a" \
         "${engine_directory}/"
 done
-tar \
-    --exclude='./.git' \
-    --exclude='./.build' \
-    --exclude='./examples' \
-    --exclude='./tools/phpstan/vendor' \
-    --exclude='*/build' \
-    --exclude='*/.gradle' \
-    -C pam-mobile-ui -cf - . |
-    tar -C "${package_root}/share/pam/mobile-ui" -xf -
-
 copy_dependencies() {
     ldd "$1" | awk '$2 == "=>" { print $1 "|" $3 }' |
         while IFS='|' read -r library_name library_path; do

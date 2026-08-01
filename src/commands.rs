@@ -170,7 +170,7 @@ impl InitTemplate {
             "mobile" | "android" | "mobile-pure" => Ok(Self::Mobile),
             "mobile-ui" | "android-ui" | "mobile+ui" => Ok(Self::MobileUi),
             _ => Err(format!(
-                "unknown init template {value:?}; expected raw, api, laravel, desktop, mobile, or mobile-ui"
+                "unknown init template {value:?}; expected raw, api, laravel, desktop, or mobile"
             )),
         }
     }
@@ -1991,12 +1991,6 @@ fn choose_template(
         ui.heading(format!("{:<25}", "Mobile · Core")),
         ui.muted("Pure PAM Native primitives")
     );
-    println!(
-        "  {}  {} {}",
-        ui.accent("08"),
-        ui.heading(format!("{:<25}", "Mobile · Official UI")),
-        ui.muted("PAM Mobile UI design system · recommended for apps")
-    );
     print!("\n{} ", ui.command("Choose a preset [02] ›"));
     std::io::stdout()
         .flush()
@@ -2013,7 +2007,6 @@ fn choose_template(
         "5" => Ok((InitTemplate::Laravel, true)),
         "6" => Ok((InitTemplate::Desktop, false)),
         "7" => Ok((InitTemplate::Mobile, false)),
-        "8" => Ok((InitTemplate::MobileUi, false)),
         value => Err(format!("invalid init preset {value:?}")),
     }
 }
