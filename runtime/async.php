@@ -499,19 +499,41 @@ namespace Pam\Async {
                 throw new \LogicException('A task group can only be joined once.');
             }
             $this->joined = true;
-            $results = [];
-
             try {
-                foreach ($this->children as $key => $future) {
-                    $remaining = $this->deadline?->remaining();
-                    if ($remaining !== null && $remaining <= 0) {
-                        throw new \RuntimeException('The task group deadline was exceeded.');
+                while (true) {
+                    $this->deadline?->throwIfExpired();
+                    $now = microtime(true);
+                    $next = $this->deadline?->timestamp ?? INF;
+                    $pending = false;
+
+                    foreach ($this->children as $future) {
+                        if (!$future->isComplete()) {
+                            $future->advance($now);
+                        }
+                        if ($future->state() === FutureState::Rejected
+                            || $future->state() === FutureState::Cancelled) {
+                            $future->unwrap();
+                        }
+                        if (!$future->isComplete()) {
+                            $pending = true;
+                            $next = min($next, max($now, $future->resumeAt()));
+                        }
                     }
-                    $results[$key] = $future->await($remaining);
+
+                    if (!$pending) {
+                        break;
+                    }
+                    delay(max(0.0, min(0.01, $next - microtime(true))));
                 }
             } catch (\Throwable $error) {
                 $this->cancel();
                 throw $error;
+            }
+
+            $results = [];
+            foreach ($this->children as $key => $future) {
+                $results[$key] = $future->unwrap();
+                Scheduler::unregister($future);
             }
 
             return $results;
@@ -520,9 +542,7 @@ namespace Pam\Async {
         public function cancel(): void
         {
             foreach ($this->children as $future) {
-                if (!$future->isComplete()) {
-                    $future->cancel();
-                }
+                $future->cancel();
             }
         }
 
