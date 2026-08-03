@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.47 - 2026-08-03
 
 - Observe every `TaskGroup` child on each scheduler tick so failures cancel
   siblings immediately, regardless of insertion order.
