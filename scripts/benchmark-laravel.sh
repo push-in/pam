@@ -112,6 +112,7 @@ run_container nginx php-fpm 18080
 run_container octane octane-swoole 18081
 run_container frankenphp frankenphp 18082
 run_container roadrunner roadrunner 18083
+run_container node node-http 18085
 
 (
     cd "${repository}"
