@@ -46,6 +46,40 @@ foreach ($groups as $name => $rounds) {
     }
 }
 
+$failures = [];
+foreach ($runtimes as $name => $runtime) {
+    if (($runtime['errors'] ?? 0) !== 0) {
+        $failures[] = $name.' emitted benchmark errors';
+    }
+}
+
+$comparison = null;
+if (isset($runtimes['pam'], $runtimes['node-http'])) {
+    $pam = $runtimes['pam'];
+    $node = $runtimes['node-http'];
+    $nodeRps = (float) $node['requests_per_second_median'];
+    $nodeP95 = (float) $node['p95_milliseconds_median'];
+    $rpsRatio = $nodeRps > 0.0
+        ? (float) $pam['requests_per_second_median'] / $nodeRps
+        : 0.0;
+    $p95Ratio = $nodeP95 > 0.0
+        ? (float) $pam['p95_milliseconds_median'] / $nodeP95
+        : INF;
+    $comparison = [
+        'pam_to_node_rps_ratio' => $rpsRatio,
+        'pam_to_node_p95_ratio' => $p95Ratio,
+    ];
+
+    $minimumRpsRatio = (float) (getenv('PAM_BENCH_MIN_PAM_NODE_RPS_RATIO') ?: 0);
+    $maximumP95Ratio = (float) (getenv('PAM_BENCH_MAX_PAM_NODE_P95_RATIO') ?: 0);
+    if ($minimumRpsRatio > 0.0 && $rpsRatio < $minimumRpsRatio) {
+        $failures[] = sprintf('PAM/Node RPS ratio %.4f is below %.4f', $rpsRatio, $minimumRpsRatio);
+    }
+    if ($maximumP95Ratio > 0.0 && $p95Ratio > $maximumP95Ratio) {
+        $failures[] = sprintf('PAM/Node p95 ratio %.4f exceeds %.4f', $p95Ratio, $maximumP95Ratio);
+    }
+}
+
 $metadataPath = $directory.'/metadata.json';
 $report = [
     'schema' => 1,
@@ -63,6 +97,11 @@ $report = [
         ? json_decode((string) file_get_contents($metadataPath), true, flags: JSON_THROW_ON_ERROR)
         : [],
     'runtimes' => $runtimes,
+    'comparison' => $comparison,
+    'gate' => [
+        'passed' => $failures === [],
+        'failures' => $failures,
+    ],
 ];
 
 file_put_contents(
@@ -71,3 +110,6 @@ file_put_contents(
     LOCK_EX,
 );
 fwrite(STDOUT, json_encode($report, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES).PHP_EOL);
+if ($failures !== []) {
+    exit(1);
+}

@@ -44,6 +44,8 @@ jobs:
         run: composer install --working-dir=compat/laravel-smoke --no-interaction --no-progress --prefer-dist
       - name: Build release runtime
         run: cargo build --locked --release
+      - name: Test benchmark report and gates
+        run: php benchmarks/laravel/test-aggregate.php
       - name: Run isolated runtime matrix
         env:
           PAM_BENCH_DURATION_SECONDS: ${{ inputs.duration || '15' }}
