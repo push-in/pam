@@ -503,7 +503,7 @@ namespace Pam\Async {
                 while (true) {
                     $this->deadline?->throwIfExpired();
                     $now = microtime(true);
-                    $next = $this->deadline?->timestamp ?? INF;
+                    $next = $this->deadline === null ? INF : $this->deadline->timestamp;
                     $pending = false;
 
                     foreach ($this->children as $future) {
