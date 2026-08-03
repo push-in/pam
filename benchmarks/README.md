@@ -2,8 +2,12 @@
 
 Performance claims must compare the same application rather than empty handlers
 from unrelated stacks. The executable laboratory in `benchmarks/laravel`
-compares PAM, PHP-FPM + Nginx, Laravel Octane + Swoole, FrankenPHP and
-RoadRunner.
+compares PAM, PHP-FPM + Nginx, Laravel Octane + Swoole, FrankenPHP,
+RoadRunner, and a deliberately conservative Node.js HTTP ceiling. The Node
+baseline uses only the built-in HTTP server, the identical JSON response, four
+workers and the same container CPU/memory limits. Because it does not execute
+Laravel's framework stack, treat it as a ceiling rather than an equivalent
+application comparison.
 
 Run the complete pinned matrix:
 
@@ -55,6 +59,17 @@ p99/max latency and all connection, read, write, timeout and HTTP status errors.
 The runner also captures `docker stats`, host metadata and the exact Git commit.
 Repeat at multiple concurrency levels; the best throughput number is not useful
 if tail latency or errors collapse.
+
+The Node image is pinned by multi-architecture OCI digest (Node 24.18.1) and the
+server has no npm dependencies. `report.json` includes PAM-to-Node throughput
+and tail-latency ratios. Every runtime has a zero-error gate; optional release
+gates can require minimum PAM/Node throughput and maximum PAM/Node p95 ratios:
+
+```bash
+PAM_BENCH_MIN_PAM_NODE_RPS_RATIO=0.75 \
+PAM_BENCH_MAX_PAM_NODE_P95_RATIO=1.50 \
+scripts/benchmark-laravel.sh
+```
 
 ## Memory stability
 
