@@ -26,8 +26,8 @@ sha2 = "0.10.9"
 socket2 = { version = "0.6.5", features = ["all"] }
 tokio = { version = "1.53.1", features = ["macros", "net", "rt", "signal", "sync", "time"] }
 yawc = { version = "0.3.3", default-features = false, features = ["axum"] }
-wasmtime = { version = "47.0.2", default-features = false, features = ["cranelift", "runtime", "std"] }
-wasmtime-wasi = { version = "47.0.2", default-features = false, features = ["p1"] }
+wasmtime = { version = "47.0.3", default-features = false, features = ["cranelift", "runtime", "std"] }
+wasmtime-wasi = { version = "47.0.3", default-features = false, features = ["p1"] }
 
 [dev-dependencies]
 tungstenite = "0.29.0"
