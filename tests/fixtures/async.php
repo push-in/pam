@@ -92,12 +92,9 @@ $groupValues = concurrently([
 $groupConcurrent = microtime(true) - $groupStarted < 0.038;
 
 $cancelledSiblingCleaned = false;
+$failFastStarted = microtime(true);
 try {
     concurrently([
-        'failure' => static function (): never {
-            delay(0.01);
-            throw new RuntimeException('task failed');
-        },
         'sibling' => static function () use (&$cancelledSiblingCleaned): void {
             try {
                 delay(2.0);
@@ -105,12 +102,17 @@ try {
                 $cancelledSiblingCleaned = true;
             }
         },
+        'failure' => static function (): never {
+            delay(0.01);
+            throw new RuntimeException('task failed');
+        },
     ]);
 } catch (RuntimeException $error) {
     if ($error->getMessage() !== 'task failed') {
         throw $error;
     }
 }
+$groupFailedFast = microtime(true) - $failFastStarted < 0.25;
 
 $signalHandlerRegistered = false;
 $signalAsyncStateRestored = true;
@@ -162,6 +164,7 @@ echo json_encode([
     'groupConcurrent' => $groupConcurrent,
     'groupValues' => $groupValues,
     'cancelledSiblingCleaned' => $cancelledSiblingCleaned,
+    'groupFailedFast' => $groupFailedFast,
     'process' => $process->stdout,
     'processes' => array_map(static fn ($result): string => $result->stdout, $processes),
     'processesConcurrent' => $processesConcurrent,

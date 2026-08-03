@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Observe every `TaskGroup` child on each scheduler tick so failures cancel
+  siblings immediately, regardless of insertion order.
+
 ## 0.1.44 - 2026-08-01
 
 - Autolink official and community PAM Native plugins on iOS, including typed

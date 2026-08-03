@@ -443,6 +443,7 @@ fn runs_fibers_and_isolated_process_tasks() {
         serde_json::json!({"first": "one", "second": "two"})
     );
     assert_eq!(payload["cancelledSiblingCleaned"], true);
+    assert_eq!(payload["groupFailedFast"], true);
     assert!(
         payload["dns"]
             .as_array()
