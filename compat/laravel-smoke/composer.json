@@ -2,38 +2,25 @@
     "name": "pam/laravel-compatibility-smoke",
     "description": "Executable Laravel compatibility contract for Pam.",
     "type": "project",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
-        "laravel/framework": "^13.0",
-        "pushinbr/pam-laravel": "dev-main"
+        "laravel/framework": "^13.0"
     },
     "require-dev": {
         "inertiajs/inertia-laravel": "^3.1",
-        "laravel/octane": "^2.18",
         "laravel/pulse": "^1.7",
         "laravel/reverb": "^1.11",
         "laravel/sanctum": "^4.3",
         "laravel/scout": "^11.4",
         "laravel/telescope": "^5.21",
         "livewire/livewire": "^4.3",
-        "phpstan/phpstan": "^2.2",
-        "spiral/roadrunner-http": "^3.6",
-        "spiral/roadrunner-worker": "^3.6"
+        "phpstan/phpstan": "^2.2"
     },
     "config": {
         "platform-check": true,
         "sort-packages": true
     },
     "minimum-stability": "stable",
-    "prefer-stable": true,
-    "repositories": [
-        {
-            "type": "path",
-            "url": "../../packages/laravel",
-            "options": {
-                "symlink": false
-            }
-        }
-    ]
+    "prefer-stable": true
 }

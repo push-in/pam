@@ -9,15 +9,14 @@ pub fn run(
     arguments: impl IntoIterator<Item = OsString>,
 ) -> Result<u8, String> {
     let pam_binary = absolute_executable(pam_executable)?;
-    let arguments = arguments.into_iter().collect::<Vec<_>>();
-    let desktop_binary = desktop_executable(&pam_binary, &arguments);
+    let desktop_binary = desktop_executable(&pam_binary);
     let status = Command::new(&desktop_binary)
-        .args(&arguments)
+        .args(arguments)
         .env("PAM_BINARY", &pam_binary)
         .status()
         .map_err(|error| {
             format!(
-                "cannot start {}: {error}. Run `pam composer install` in the project or set {DESKTOP_BINARY_ENV}",
+                "cannot start {}: {error}. Install pam-desktop or set {DESKTOP_BINARY_ENV}",
                 Path::new(&desktop_binary).display(),
             )
         })?;
@@ -41,7 +40,7 @@ fn absolute_executable(executable: &OsStr) -> Result<PathBuf, String> {
         .map_err(|error| format!("cannot resolve the Pam executable: {error}"))
 }
 
-fn desktop_executable(pam_binary: &Path, arguments: &[OsString]) -> OsString {
+fn desktop_executable(pam_binary: &Path) -> OsString {
     if let Some(configured) = std::env::var_os(DESKTOP_BINARY_ENV)
         && !configured.is_empty()
     {
@@ -53,37 +52,7 @@ fn desktop_executable(pam_binary: &Path, arguments: &[OsString]) -> OsString {
         return sibling.into_os_string();
     }
 
-    for entry in arguments
-        .iter()
-        .rev()
-        .map(Path::new)
-        .filter(|path| path.exists())
-    {
-        if let Some(binary) = composer_desktop_executable(entry) {
-            return binary.into_os_string();
-        }
-    }
-
-    if let Ok(directory) = std::env::current_dir()
-        && let Some(binary) = composer_desktop_executable(&directory)
-    {
-        return binary.into_os_string();
-    }
-
     OsString::from(desktop_binary_name())
-}
-
-fn composer_desktop_executable(entry: &Path) -> Option<PathBuf> {
-    crate::composer::discover(entry)
-        .ok()
-        .flatten()
-        .map(|project| {
-            project
-                .vendor_directory
-                .join("bin")
-                .join(desktop_binary_name())
-        })
-        .filter(|binary| binary.is_file())
 }
 
 fn desktop_binary_name() -> &'static str {

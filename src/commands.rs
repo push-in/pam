@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::IsTerminal;
@@ -11,11 +11,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Instant;
 
 use crate::composer;
-use crate::package_coordinates;
 use crate::php::PhpRuntime;
 use crate::terminal::Terminal;
-use base64::Engine;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 pub fn inspect(executable: &OsStr, script: &Path, arguments: &[OsString]) -> Result<u8, String> {
@@ -170,7 +168,7 @@ impl InitTemplate {
             "mobile" | "android" | "mobile-pure" => Ok(Self::Mobile),
             "mobile-ui" | "android-ui" | "mobile+ui" => Ok(Self::MobileUi),
             _ => Err(format!(
-                "unknown init template {value:?}; expected raw, api, laravel, desktop, or mobile"
+                "unknown init template {value:?}; expected raw, api, laravel, desktop, mobile, or mobile-ui"
             )),
         }
     }
@@ -200,7 +198,7 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     ) && socket
     {
         return Err(
-            "the selected desktop or mobile preset does not use --socket; it exposes its own native event system".to_owned(),
+            "the desktop and mobile presets do not use --socket; they expose their own native event systems".to_owned(),
         );
     }
     if template == InitTemplate::Laravel {
@@ -236,386 +234,24 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     Ok(0)
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct BuildManifest {
-    pam_version: String,
+    pam_version: &'static str,
     target: String,
     entry: String,
     php_library: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<BuildSignature>,
     files: Vec<BuildFile>,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct BuildSignature {
-    algorithm: u8,
-    key_id: String,
-    file: String,
-}
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Serialize)]
 struct BuildFile {
     path: String,
     bytes: u64,
     sha256: String,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SnapshotManifest {
-    schema_version: u8,
-    pam_version: String,
-    native_abi_version: u32,
-    entry: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    signature: Option<BuildSignature>,
-    files: Vec<BuildFile>,
-}
-
-pub struct SnapshotPlan {
-    pub entry: PathBuf,
-    pub files: Vec<PathBuf>,
-}
-
-pub fn create_snapshot(
-    project: &Path,
-    entry: &Path,
-    output: &Path,
-    signing_key: Option<&Path>,
-) -> Result<u8, String> {
-    if output.exists() {
-        return Err(format!(
-            "refusing to overwrite snapshot {}; remove it intentionally first",
-            output.display()
-        ));
-    }
-    let project = canonical_project(project)?;
-    let entry = safe_snapshot_path(entry, "snapshot entry")?;
-    if !project.join(&entry).is_file() {
-        return Err(format!(
-            "snapshot entry {} is not a regular file",
-            project.join(&entry).display()
-        ));
-    }
-    let files = snapshot_files(&project)?;
-    let entry_name = entry.to_string_lossy().replace('\\', "/");
-    if !files.iter().any(|file| file.path == entry_name) {
-        return Err("snapshot entry must be a PHP file included in the snapshot".to_owned());
-    }
-    let signature_path = output.with_file_name(format!(
-        "{}.sig",
-        output
-            .file_name()
-            .and_then(OsStr::to_str)
-            .ok_or("snapshot output requires a UTF-8 filename")?
-    ));
-    if signature_path.exists() {
-        return Err(format!(
-            "refusing to overwrite snapshot signature {}",
-            signature_path.display()
-        ));
-    }
-    let signature = signing_key
-        .map(|key| -> Result<BuildSignature, String> {
-            Ok(BuildSignature {
-                algorithm: 1,
-                key_id: private_key_id(key)?,
-                file: signature_path
-                    .file_name()
-                    .and_then(OsStr::to_str)
-                    .ok_or("snapshot signature requires a UTF-8 filename")?
-                    .to_owned(),
-            })
-        })
-        .transpose()?;
-    let manifest = SnapshotManifest {
-        schema_version: 1,
-        pam_version: env!("CARGO_PKG_VERSION").to_owned(),
-        native_abi_version: crate::php::NATIVE_ABI_VERSION,
-        entry: entry_name,
-        signature,
-        files,
-    };
-    if let Some(parent) = output.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-    }
-    fs::write(
-        output,
-        serde_json::to_vec_pretty(&manifest)
-            .map_err(|error| format!("cannot serialize bootstrap snapshot: {error}"))?,
-    )
-    .map_err(|error| format!("cannot write {}: {error}", output.display()))?;
-    if let Some(key) = signing_key {
-        sign_manifest(output, key, &signature_path)?;
-    }
-
-    let ui = Terminal::stdout();
-    println!("{}", ui.success("● BOOTSTRAP SNAPSHOT CREATED"));
-    println!("{}", ui.rule());
-    println!(
-        "  {} {} PHP files",
-        ui.muted(format!("{:<12}", "Preload")),
-        manifest.files.len()
-    );
-    println!(
-        "  {} {}",
-        ui.muted(format!("{:<12}", "Output")),
-        output.display()
-    );
-    Ok(0)
-}
-
-pub fn verify_snapshot(
-    project: &Path,
-    manifest: &Path,
-    public_key: Option<&Path>,
-    require_signature: bool,
-) -> Result<u8, String> {
-    let plan = snapshot_plan(project, manifest, public_key, require_signature)?;
-    let ui = Terminal::stdout();
-    println!("{}", ui.success("● BOOTSTRAP SNAPSHOT VERIFIED"));
-    println!("{}", ui.rule());
-    println!(
-        "  {} {} PHP files",
-        ui.muted(format!("{:<12}", "Integrity")),
-        plan.files.len()
-    );
-    println!(
-        "  {} {}",
-        ui.muted(format!("{:<12}", "Entry")),
-        plan.entry.display()
-    );
-    Ok(0)
-}
-
-pub fn snapshot_plan(
-    project: &Path,
-    manifest_path: &Path,
-    public_key: Option<&Path>,
-    require_signature: bool,
-) -> Result<SnapshotPlan, String> {
-    let project = canonical_project(project)?;
-    let contents = fs::read(manifest_path)
-        .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
-    let manifest: SnapshotManifest = serde_json::from_slice(&contents)
-        .map_err(|error| format!("invalid bootstrap snapshot: {error}"))?;
-    if manifest.schema_version != 1 {
-        return Err(format!(
-            "unsupported bootstrap snapshot schema {}",
-            manifest.schema_version
-        ));
-    }
-    if manifest.pam_version != env!("CARGO_PKG_VERSION")
-        || manifest.native_abi_version != crate::php::NATIVE_ABI_VERSION
-    {
-        return Err(format!(
-            "snapshot runtime mismatch: expected PAM {} / ABI {}, found PAM {} / ABI {}",
-            env!("CARGO_PKG_VERSION"),
-            crate::php::NATIVE_ABI_VERSION,
-            manifest.pam_version,
-            manifest.native_abi_version,
-        ));
-    }
-    match (&manifest.signature, public_key) {
-        (Some(signature), Some(key)) => {
-            if signature.algorithm != 1 {
-                return Err("unsupported snapshot signature algorithm".to_owned());
-            }
-            let signature_file =
-                safe_snapshot_path(Path::new(&signature.file), "snapshot signature file")?;
-            if signature_file.components().count() != 1 {
-                return Err("snapshot signature must sit beside the manifest".to_owned());
-            }
-            let actual_key_id = public_key_id(key)?;
-            if actual_key_id != signature.key_id {
-                return Err(format!(
-                    "trusted public key does not match snapshot key ID {}",
-                    signature.key_id
-                ));
-            }
-            let signature_path = manifest_path
-                .parent()
-                .unwrap_or_else(|| Path::new("."))
-                .join(signature_file);
-            verify_manifest_signature(manifest_path, key, &signature_path)?;
-        }
-        (Some(_), None) => {
-            return Err(
-                "snapshot is signed; --public-key is required to establish trust".to_owned(),
-            );
-        }
-        (None, _) if require_signature => {
-            return Err("snapshot is unsigned and --require-signature was requested".to_owned());
-        }
-        (None, _) => {}
-    }
-    let entry = safe_snapshot_path(Path::new(&manifest.entry), "snapshot entry")?;
-    let expected = snapshot_files(&project)?;
-    if manifest.files != expected {
-        return Err(
-            "bootstrap snapshot does not match current PHP files; create a fresh snapshot"
-                .to_owned(),
-        );
-    }
-    let mut unique = HashSet::new();
-    let mut files = Vec::with_capacity(manifest.files.len());
-    for file in &manifest.files {
-        let relative = safe_snapshot_path(Path::new(&file.path), "snapshot file")?;
-        if !unique.insert(relative.clone()) {
-            return Err(format!("bootstrap snapshot duplicates {}", file.path));
-        }
-        let path = project.join(relative);
-        let canonical = fs::canonicalize(&path)
-            .map_err(|error| format!("cannot resolve snapshot file {}: {error}", path.display()))?;
-        if !canonical.starts_with(&project) {
-            return Err(format!("snapshot file escapes project: {}", path.display()));
-        }
-        files.push(canonical);
-    }
-    Ok(SnapshotPlan {
-        entry: project.join(entry),
-        files,
-    })
-}
-
-fn canonical_project(project: &Path) -> Result<PathBuf, String> {
-    let project = fs::canonicalize(project)
-        .map_err(|error| format!("cannot resolve project {}: {error}", project.display()))?;
-    if !project.is_dir() {
-        return Err(format!(
-            "snapshot project is not a directory: {}",
-            project.display()
-        ));
-    }
-    Ok(project)
-}
-
-fn safe_snapshot_path(path: &Path, label: &str) -> Result<PathBuf, String> {
-    if path.as_os_str().is_empty()
-        || path.is_absolute()
-        || path.components().any(|component| {
-            !matches!(
-                component,
-                std::path::Component::Normal(_) | std::path::Component::CurDir
-            )
-        })
-    {
-        return Err(format!("{label} must be a safe relative path"));
-    }
-    Ok(path.to_path_buf())
-}
-
-fn snapshot_files(project: &Path) -> Result<Vec<BuildFile>, String> {
-    fn visit(root: &Path, directory: &Path, files: &mut Vec<BuildFile>) -> Result<(), String> {
-        for entry in fs::read_dir(directory)
-            .map_err(|error| format!("cannot read {}: {error}", directory.display()))?
-        {
-            let entry = entry.map_err(|error| error.to_string())?;
-            let path = entry.path();
-            let file_type = entry
-                .file_type()
-                .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
-            if file_type.is_symlink() {
-                return Err(format!(
-                    "bootstrap snapshots reject symbolic links: {}",
-                    path.display()
-                ));
-            }
-            if file_type.is_dir() {
-                if matches!(
-                    entry.file_name().to_str(),
-                    Some(".git" | ".pam" | "node_modules" | "storage" | "target")
-                ) {
-                    continue;
-                }
-                visit(root, &path, files)?;
-                continue;
-            }
-            if !file_type.is_file()
-                || !path
-                    .extension()
-                    .and_then(OsStr::to_str)
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("php"))
-            {
-                continue;
-            }
-            if files.len() >= 100_000 {
-                return Err("bootstrap snapshot exceeds 100,000 PHP files".to_owned());
-            }
-            let contents = fs::read(&path)
-                .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-            if contents.len() > 64 * 1024 * 1024 {
-                return Err(format!(
-                    "snapshot PHP file exceeds 64 MiB: {}",
-                    path.display()
-                ));
-            }
-            let relative = path
-                .strip_prefix(root)
-                .map_err(|error| error.to_string())?
-                .to_string_lossy()
-                .replace('\\', "/");
-            files.push(BuildFile {
-                path: relative,
-                bytes: contents.len() as u64,
-                sha256: format!("{:x}", Sha256::digest(contents)),
-            });
-        }
-        Ok(())
-    }
-
-    let mut files = Vec::new();
-    visit(project, project, &mut files)?;
-    files.sort_by(|left, right| left.path.cmp(&right.path));
-    Ok(files)
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CycloneDxBom {
-    bom_format: &'static str,
-    spec_version: &'static str,
-    version: u8,
-    metadata: CycloneDxMetadata,
-    components: Vec<CycloneDxComponent>,
-}
-
-#[derive(Serialize)]
-struct CycloneDxMetadata {
-    component: CycloneDxComponent,
-}
-
-#[derive(Serialize)]
-struct CycloneDxComponent {
-    #[serde(rename = "type")]
-    component_type: &'static str,
-    name: String,
-    version: String,
-    purl: String,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    licenses: Vec<CycloneDxLicenseChoice>,
-}
-
-#[derive(Serialize)]
-struct CycloneDxLicenseChoice {
-    license: CycloneDxLicense,
-}
-
-#[derive(Serialize)]
-struct CycloneDxLicense {
-    id: String,
-}
-
-pub fn build(
-    project: &Path,
-    output: &Path,
-    entry: &Path,
-    signing_key: Option<&Path>,
-) -> Result<u8, String> {
+pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> {
     if output.exists() {
         return Err(format!(
             "refusing to overwrite build output {}; choose a new --output directory",
@@ -674,8 +310,6 @@ pub fn build(
     fs::copy(&php_library, library_directory.join(php_library_name))
         .map_err(|error| format!("cannot copy {}: {error}", php_library.display()))?;
 
-    write_sbom(project, output)?;
-
     let entry = entry.to_string_lossy();
     if entry.contains('\'') {
         return Err("build entry cannot contain a single quote".to_owned());
@@ -695,13 +329,11 @@ pub fn build(
             .map_err(|error| format!("cannot mark launcher executable: {error}"))?;
     }
 
-    let signature = signing_key.map(signature_metadata).transpose()?;
     let manifest = BuildManifest {
-        pam_version: env!("CARGO_PKG_VERSION").to_owned(),
+        pam_version: env!("CARGO_PKG_VERSION"),
         target: std::env::consts::ARCH.to_owned() + "-" + std::env::consts::OS,
         entry: entry.into_owned(),
         php_library: format!("lib/{}", php_library_name.to_string_lossy()),
-        signature,
         files: build_files(output)?,
     };
     fs::write(
@@ -710,13 +342,6 @@ pub fn build(
             .map_err(|error| format!("cannot serialize build manifest: {error}"))?,
     )
     .map_err(|error| format!("cannot write build manifest: {error}"))?;
-    if let Some(key) = signing_key {
-        sign_manifest(
-            &output.join("manifest.json"),
-            key,
-            &output.join("manifest.sig"),
-        )?;
-    }
 
     let ui = Terminal::stdout();
     println!("{}", ui.success("● PRODUCTION BUNDLE READY"));
@@ -732,1057 +357,6 @@ pub fn build(
         output.display()
     );
     Ok(0)
-}
-
-pub fn verify_bundle(
-    bundle: &Path,
-    public_key: Option<&Path>,
-    require_signature: bool,
-) -> Result<u8, String> {
-    let manifest_path = bundle.join("manifest.json");
-    let manifest_contents = fs::read(&manifest_path)
-        .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
-    let manifest: BuildManifest = serde_json::from_slice(&manifest_contents)
-        .map_err(|error| format!("invalid build manifest: {error}"))?;
-    match (&manifest.signature, public_key) {
-        (Some(signature), Some(key)) => {
-            if signature.algorithm != 1 || signature.file != "manifest.sig" {
-                return Err("unsupported bundle signature contract".to_owned());
-            }
-            let actual_key_id = public_key_id(key)?;
-            if actual_key_id != signature.key_id {
-                return Err(format!(
-                    "trusted public key does not match bundle key ID {}",
-                    signature.key_id
-                ));
-            }
-            verify_manifest_signature(&manifest_path, key, &bundle.join(&signature.file))?;
-        }
-        (Some(_), None) => {
-            return Err("bundle is signed; --public-key is required to establish trust".to_owned());
-        }
-        (None, _) if require_signature => {
-            return Err("bundle is unsigned and --require-signature was requested".to_owned());
-        }
-        (None, _) => {}
-    }
-    let expected = manifest
-        .files
-        .iter()
-        .map(|file| file.path.as_str())
-        .collect::<HashSet<_>>();
-    if expected.len() != manifest.files.len() {
-        return Err("build manifest contains duplicate file paths".to_owned());
-    }
-
-    for file in &manifest.files {
-        let relative = Path::new(&file.path);
-        if relative.is_absolute()
-            || relative.components().any(|component| {
-                !matches!(
-                    component,
-                    std::path::Component::Normal(_) | std::path::Component::CurDir
-                )
-            })
-        {
-            return Err(format!(
-                "build manifest contains unsafe path {:?}",
-                file.path
-            ));
-        }
-        let path = bundle.join(relative);
-        let metadata = fs::symlink_metadata(&path)
-            .map_err(|error| format!("missing bundle file {}: {error}", path.display()))?;
-        if !metadata.file_type().is_file() {
-            return Err(format!(
-                "bundle entry is not a regular file: {}",
-                path.display()
-            ));
-        }
-        if metadata.len() != file.bytes {
-            return Err(format!(
-                "bundle size mismatch for {}: expected {}, got {}",
-                file.path,
-                file.bytes,
-                metadata.len()
-            ));
-        }
-        let contents =
-            fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        let digest = format!("{:x}", Sha256::digest(contents));
-        if digest != file.sha256 {
-            return Err(format!("bundle digest mismatch for {}", file.path));
-        }
-    }
-
-    let actual = build_files(bundle)?;
-    let extras = actual
-        .iter()
-        .filter(|file| !expected.contains(file.path.as_str()))
-        .map(|file| file.path.as_str())
-        .collect::<Vec<_>>();
-    if !extras.is_empty() {
-        return Err(format!(
-            "bundle contains untracked files: {}",
-            extras.join(", ")
-        ));
-    }
-
-    let ui = Terminal::stdout();
-    println!("{}", ui.success("● BUNDLE VERIFIED"));
-    println!("{}", ui.rule());
-    println!(
-        "  {} {}",
-        ui.muted(format!("{:<12}", "Runtime")),
-        manifest.pam_version
-    );
-    println!(
-        "  {} {}",
-        ui.muted(format!("{:<12}", "Target")),
-        manifest.target
-    );
-    println!(
-        "  {} {} files",
-        ui.muted(format!("{:<12}", "Integrity")),
-        manifest.files.len()
-    );
-    println!(
-        "  {} {}",
-        ui.muted(format!("{:<12}", "Signature")),
-        manifest
-            .signature
-            .as_ref()
-            .map(|signature| format!("Ed25519 · {}", signature.key_id))
-            .unwrap_or_else(|| "not present".to_owned())
-    );
-    Ok(0)
-}
-
-fn signature_metadata(key: &Path) -> Result<BuildSignature, String> {
-    Ok(BuildSignature {
-        algorithm: 1,
-        key_id: private_key_id(key)?,
-        file: "manifest.sig".to_owned(),
-    })
-}
-
-fn private_key_id(key: &Path) -> Result<String, String> {
-    let output = Command::new("openssl")
-        .args(["pkey", "-in"])
-        .arg(key)
-        .args(["-pubout", "-outform", "DER"])
-        .output()
-        .map_err(|error| format!("cannot inspect Ed25519 signing key: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "invalid signing key: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(format!("{:x}", Sha256::digest(output.stdout)))
-}
-
-fn public_key_id(key: &Path) -> Result<String, String> {
-    let output = Command::new("openssl")
-        .args(["pkey", "-pubin", "-in"])
-        .arg(key)
-        .args(["-pubout", "-outform", "DER"])
-        .output()
-        .map_err(|error| format!("cannot inspect trusted public key: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "invalid trusted public key: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(format!("{:x}", Sha256::digest(output.stdout)))
-}
-
-fn sign_manifest(manifest: &Path, key: &Path, signature: &Path) -> Result<(), String> {
-    let output = Command::new("openssl")
-        .args(["pkeyutl", "-sign", "-rawin", "-inkey"])
-        .arg(key)
-        .arg("-in")
-        .arg(manifest)
-        .arg("-out")
-        .arg(signature)
-        .output()
-        .map_err(|error| format!("cannot sign bundle manifest: {error}"))?;
-    if !output.status.success() {
-        return Err(format!(
-            "cannot sign bundle manifest with Ed25519: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(())
-}
-
-fn verify_manifest_signature(manifest: &Path, key: &Path, signature: &Path) -> Result<(), String> {
-    let output = Command::new("openssl")
-        .args(["pkeyutl", "-verify", "-pubin", "-rawin", "-inkey"])
-        .arg(key)
-        .arg("-in")
-        .arg(manifest)
-        .arg("-sigfile")
-        .arg(signature)
-        .output()
-        .map_err(|error| format!("cannot verify bundle signature: {error}"))?;
-    if !output.status.success() {
-        return Err("bundle Ed25519 signature verification failed".to_owned());
-    }
-    Ok(())
-}
-
-pub fn prepare_recording(path: &Path, protected: &Path) -> Result<PathBuf, String> {
-    if let Some(parent) = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-    {
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-    }
-    let parent = path
-        .parent()
-        .filter(|parent| !parent.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let parent = fs::canonicalize(parent)
-        .map_err(|error| format!("cannot resolve {}: {error}", parent.display()))?;
-    let name = path
-        .file_name()
-        .ok_or_else(|| "recording output must name a file".to_owned())?;
-    let normalized = parent.join(name);
-    if normalized == protected {
-        return Err("recording output cannot overwrite the PHP entry point".to_owned());
-    }
-    fs::write(path, b"")
-        .map_err(|error| format!("cannot initialize recording {}: {error}", path.display()))?;
-    fs::canonicalize(&normalized)
-        .map_err(|error| format!("cannot resolve recording {}: {error}", path.display()))
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct FlightRecord {
-    schema_version: u8,
-    kind: u8,
-    sequence: u64,
-    request: RecordedRequest,
-    response: RecordedResponse,
-}
-
-#[derive(Deserialize)]
-struct RecordedRequest {
-    method: String,
-    target: String,
-    headers: BTreeMap<String, Vec<String>>,
-    body: RecordedBody,
-}
-
-#[derive(Deserialize)]
-struct RecordedResponse {
-    status: u16,
-    body: RecordedBody,
-}
-
-#[derive(Deserialize)]
-struct RecordedBody {
-    encoding: String,
-    data: String,
-    sha256: String,
-    truncated: bool,
-}
-
-pub fn replay(
-    recording: &Path,
-    base_url: &str,
-    secrets: &BTreeMap<String, String>,
-) -> Result<u8, String> {
-    let contents = fs::read_to_string(recording)
-        .map_err(|error| format!("cannot read {}: {error}", recording.display()))?;
-    let endpoint = HttpEndpoint::parse(base_url)?;
-    let mut replayed = 0_usize;
-    for (line_index, line) in contents.lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let record: FlightRecord = serde_json::from_str(line).map_err(|error| {
-            format!(
-                "invalid flight record at {}:{}: {error}",
-                recording.display(),
-                line_index + 1
-            )
-        })?;
-        if record.schema_version != 1 || record.kind != 1 {
-            return Err(format!(
-                "unsupported flight record schema/kind at sequence {}",
-                record.sequence
-            ));
-        }
-        if record.request.body.truncated {
-            return Err(format!(
-                "cannot replay sequence {} because its request body was truncated",
-                record.sequence
-            ));
-        }
-        let target = inject_secrets(&record.request.target, secrets)?;
-        let request_body = decode_recorded_body(&record.request.body)?;
-        let request_body = inject_secrets(&request_body, secrets)?;
-        let mut headers = Vec::new();
-        for (name, values) in &record.request.headers {
-            if matches!(
-                name.as_str(),
-                "host" | "connection" | "content-length" | "transfer-encoding"
-            ) {
-                continue;
-            }
-            for value in values {
-                headers.push((name.clone(), inject_secrets(value, secrets)?));
-            }
-        }
-        let response = endpoint.send(
-            &record.request.method,
-            &target,
-            &headers,
-            request_body.as_bytes(),
-        )?;
-        if response.status != record.response.status {
-            return Err(format!(
-                "replay diverged at sequence {}: expected HTTP {}, got {}",
-                record.sequence, record.response.status, response.status
-            ));
-        }
-        let digest = format!("{:x}", Sha256::digest(&response.body));
-        if digest != record.response.body.sha256 {
-            return Err(format!(
-                "replay diverged at sequence {}: response body digest differs",
-                record.sequence
-            ));
-        }
-        replayed += 1;
-    }
-    if replayed == 0 {
-        return Err("recording contains no HTTP interactions".to_owned());
-    }
-
-    let ui = Terminal::stdout();
-    println!("{}", ui.success("● REPLAY MATCHED"));
-    println!("{}", ui.rule());
-    println!(
-        "  {} {} HTTP interactions",
-        ui.muted(format!("{:<12}", "Verified")),
-        replayed
-    );
-    Ok(0)
-}
-
-fn decode_recorded_body(body: &RecordedBody) -> Result<String, String> {
-    match body.encoding.as_str() {
-        "utf8" => Ok(body.data.clone()),
-        "base64" => {
-            let bytes = base64::engine::general_purpose::STANDARD
-                .decode(&body.data)
-                .map_err(|error| format!("invalid base64 recorded body: {error}"))?;
-            String::from_utf8(bytes).map_err(|_| {
-                "binary request bodies are not replayable over this CLI yet".to_owned()
-            })
-        }
-        encoding => Err(format!("unsupported recorded body encoding {encoding:?}")),
-    }
-}
-
-fn inject_secrets(value: &str, secrets: &BTreeMap<String, String>) -> Result<String, String> {
-    let mut output = value.to_owned();
-    let mut offset = 0;
-    while let Some(relative) = output[offset..].find("[REDACTED:") {
-        let start = offset + relative;
-        let Some(relative_end) = output[start..].find(']') else {
-            return Err("recording contains an invalid redaction placeholder".to_owned());
-        };
-        let end = start + relative_end;
-        let key = &output[start + 10..end];
-        let secret = secrets.get(key).ok_or_else(|| {
-            format!("replay requires --secret-env {key}=ENV_VAR for a redacted input")
-        })?;
-        output.replace_range(start..=end, secret);
-        offset = start + secret.len();
-    }
-    for (key, secret) in secrets {
-        let encoded = format!("%5BREDACTED%3A{}%5D", key.replace(' ', "%20"));
-        output = output.replace(&encoded, secret);
-    }
-    if output.contains("%5BREDACTED%3A") {
-        return Err("replay requires a --secret-env mapping for a redacted query input".to_owned());
-    }
-    Ok(output)
-}
-
-struct HttpReplayResponse {
-    status: u16,
-    body: Vec<u8>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ContractCatalog {
-    schema_version: u8,
-    contracts: Vec<ContractDescriptor>,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ContractDescriptor {
-    kind: u8,
-    name: String,
-    php_class: String,
-    description: String,
-    #[serde(default)]
-    properties: Vec<ContractProperty>,
-    #[serde(default)]
-    cases: Vec<ContractCase>,
-}
-
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct ContractProperty {
-    name: String,
-    kind: u8,
-    #[serde(rename = "type")]
-    type_name: String,
-    nullable: bool,
-    description: String,
-    format: Option<String>,
-    item_type: Option<String>,
-    minimum: Option<serde_json::Number>,
-    maximum: Option<serde_json::Number>,
-}
-
-#[derive(Deserialize, Serialize)]
-struct ContractCase {
-    name: String,
-    value: i64,
-}
-
-pub fn contracts(
-    executable: &OsStr,
-    script: &Path,
-    arguments: &[OsString],
-    output: &Path,
-) -> Result<u8, String> {
-    if output.exists()
-        && output
-            .read_dir()
-            .map_err(|error| format!("cannot read {}: {error}", output.display()))?
-            .next()
-            .is_some()
-    {
-        return Err(format!(
-            "refusing to overwrite non-empty contract output {}",
-            output.display()
-        ));
-    }
-    let mut runtime = loaded_runtime(executable, script, arguments)?;
-    let catalog: ContractCatalog = serde_json::from_value(runtime.contracts_info()?)
-        .map_err(|error| format!("invalid typed contract catalog: {error}"))?;
-    if catalog.schema_version != 1 {
-        return Err(format!(
-            "unsupported typed contract schema {}",
-            catalog.schema_version
-        ));
-    }
-    validate_contract_catalog(&catalog)?;
-    fs::create_dir_all(output)
-        .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
-
-    let schemas = contract_schemas(&catalog, "#/$defs/");
-    let openapi_schemas = contract_schemas(&catalog, "#/components/schemas/");
-    write_json(
-        &output.join("contracts.schema.json"),
-        &serde_json::json!({
-            "$schema": "https://json-schema.org/draft/2020-12/schema",
-            "$id": "https://pam.dev/contracts.schema.json",
-            "$defs": schemas,
-        }),
-    )?;
-    write_json(
-        &output.join("openapi.components.json"),
-        &serde_json::json!({
-            "openapi": "3.1.0",
-            "info": {"title": "PAM generated contracts", "version": "1.0.0"},
-            "paths": {},
-            "components": {"schemas": openapi_schemas},
-        }),
-    )?;
-    write_json(
-        &output.join("contracts.mobile.json"),
-        &serde_json::to_value(&catalog.contracts)
-            .map_err(|error| format!("cannot serialize mobile contracts: {error}"))?,
-    )?;
-    write_json(
-        &output.join("contracts.forms.json"),
-        &form_contracts(&catalog),
-    )?;
-    write_json(
-        &output.join("contracts.mcp.json"),
-        &serde_json::json!({
-            "schemaVersion": 1,
-            "resources": catalog.contracts.iter().map(|contract| serde_json::json!({
-                "uri": format!("pam://contracts/{}", contract.name),
-                "name": contract.name,
-                "mimeType": "application/schema+json",
-                "schema": schemas.get(&contract.name),
-            })).collect::<Vec<_>>(),
-        }),
-    )?;
-    write_json(
-        &output.join("contracts.migrations.json"),
-        &migration_contracts(&catalog),
-    )?;
-    fs::write(output.join("contracts.ts"), typescript_contracts(&catalog))
-        .map_err(|error| format!("cannot write TypeScript contracts: {error}"))?;
-    fs::write(output.join("Contracts.kt"), kotlin_contracts(&catalog))
-        .map_err(|error| format!("cannot write Kotlin contracts: {error}"))?;
-    fs::write(output.join("CONTRACTS.md"), markdown_contracts(&catalog))
-        .map_err(|error| format!("cannot write contract documentation: {error}"))?;
-
-    let ui = Terminal::stdout();
-    println!("{}", ui.success("● TYPED CONTRACTS GENERATED"));
-    println!("{}", ui.rule());
-    println!(
-        "  {} {} contracts",
-        ui.muted(format!("{:<12}", "Catalog")),
-        catalog.contracts.len()
-    );
-    println!(
-        "  {} {}",
-        ui.muted(format!("{:<12}", "Output")),
-        output.display()
-    );
-    Ok(0)
-}
-
-fn validate_contract_catalog(catalog: &ContractCatalog) -> Result<(), String> {
-    let mut names = HashSet::new();
-    let mut classes = HashSet::new();
-    for contract in &catalog.contracts {
-        if !is_contract_identifier(&contract.name) {
-            return Err(format!(
-                "invalid generated contract name {:?}",
-                contract.name
-            ));
-        }
-        if !names.insert(contract.name.as_str()) || !classes.insert(contract.php_class.as_str()) {
-            return Err(format!("duplicate generated contract {}", contract.name));
-        }
-        match contract.kind {
-            1 if contract.cases.is_empty() => {}
-            2 if contract.properties.is_empty() && !contract.cases.is_empty() => {
-                let values = contract
-                    .cases
-                    .iter()
-                    .map(|case| case.value)
-                    .collect::<Vec<_>>();
-                if values != (1..=i64::try_from(values.len()).unwrap_or(0)).collect::<Vec<_>>() {
-                    return Err(format!(
-                        "contract enum {} is not sequential from 1",
-                        contract.name
-                    ));
-                }
-            }
-            kind => {
-                return Err(format!(
-                    "invalid generated contract kind {kind} for {}",
-                    contract.name
-                ));
-            }
-        }
-        let mut properties = HashSet::new();
-        for property in &contract.properties {
-            if !is_property_identifier(&property.name) || !properties.insert(property.name.as_str())
-            {
-                return Err(format!(
-                    "invalid or duplicate property {}.{}",
-                    contract.name, property.name
-                ));
-            }
-            if !(1..=7).contains(&property.kind) {
-                return Err(format!(
-                    "invalid property kind {} on {}.{}",
-                    property.kind, contract.name, property.name
-                ));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn is_contract_identifier(value: &str) -> bool {
-    value
-        .bytes()
-        .next()
-        .is_some_and(|byte| byte.is_ascii_uppercase())
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
-fn is_property_identifier(value: &str) -> bool {
-    value
-        .bytes()
-        .next()
-        .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-}
-
-fn contract_schemas(
-    catalog: &ContractCatalog,
-    reference_prefix: &str,
-) -> serde_json::Map<String, serde_json::Value> {
-    let names = catalog
-        .contracts
-        .iter()
-        .map(|contract| (contract.php_class.as_str(), contract.name.as_str()))
-        .collect::<BTreeMap<_, _>>();
-    catalog
-        .contracts
-        .iter()
-        .map(|contract| {
-            let schema = if contract.kind == 2 {
-                serde_json::json!({
-                    "type": "integer",
-                    "description": contract.description,
-                    "enum": contract.cases.iter().map(|case| case.value).collect::<Vec<_>>(),
-                    "x-enumNames": contract.cases.iter().map(|case| case.name.as_str()).collect::<Vec<_>>(),
-                })
-            } else {
-                let properties = contract
-                    .properties
-                    .iter()
-                    .map(|property| {
-                        (
-                            property.name.clone(),
-                            property_schema(property, &names, reference_prefix),
-                        )
-                    })
-                    .collect::<serde_json::Map<_, _>>();
-                let required = contract
-                    .properties
-                    .iter()
-                    .filter(|property| !property.nullable)
-                    .map(|property| property.name.as_str())
-                    .collect::<Vec<_>>();
-                serde_json::json!({
-                    "type": "object",
-                    "description": contract.description,
-                    "additionalProperties": false,
-                    "properties": properties,
-                    "required": required,
-                })
-            };
-            (contract.name.clone(), schema)
-        })
-        .collect()
-}
-
-fn property_schema(
-    property: &ContractProperty,
-    names: &BTreeMap<&str, &str>,
-    reference_prefix: &str,
-) -> serde_json::Value {
-    let mut schema = match property.kind {
-        1 => serde_json::json!({"type": "string"}),
-        2 => serde_json::json!({"type": "integer"}),
-        3 => serde_json::json!({"type": "number"}),
-        4 => serde_json::json!({"type": "boolean"}),
-        5 | 7 => serde_json::json!({
-            "$ref": format!(
-                "{}{}",
-                reference_prefix,
-                names.get(property.type_name.as_str()).copied().unwrap_or(&property.type_name)
-            )
-        }),
-        6 => serde_json::json!({
-            "type": "array",
-            "items": type_schema(
-                property.item_type.as_deref().unwrap_or("mixed"),
-                names,
-                reference_prefix
-            ),
-        }),
-        _ => serde_json::json!({}),
-    };
-    if let Some(object) = schema.as_object_mut() {
-        if !property.description.is_empty() {
-            object.insert(
-                "description".to_owned(),
-                serde_json::Value::String(property.description.clone()),
-            );
-        }
-        if let Some(format) = &property.format {
-            object.insert(
-                "format".to_owned(),
-                serde_json::Value::String(format.clone()),
-            );
-        }
-        if let Some(minimum) = &property.minimum {
-            object.insert(
-                "minimum".to_owned(),
-                serde_json::Value::Number(minimum.clone()),
-            );
-        }
-        if let Some(maximum) = &property.maximum {
-            object.insert(
-                "maximum".to_owned(),
-                serde_json::Value::Number(maximum.clone()),
-            );
-        }
-    }
-    if property.nullable {
-        serde_json::json!({"anyOf": [schema, {"type": "null"}]})
-    } else {
-        schema
-    }
-}
-
-fn type_schema(
-    type_name: &str,
-    names: &BTreeMap<&str, &str>,
-    reference_prefix: &str,
-) -> serde_json::Value {
-    match type_name {
-        "string" => serde_json::json!({"type": "string"}),
-        "int" => serde_json::json!({"type": "integer"}),
-        "float" => serde_json::json!({"type": "number"}),
-        "bool" => serde_json::json!({"type": "boolean"}),
-        _ => serde_json::json!({
-            "$ref": format!(
-                "{}{}",
-                reference_prefix,
-                names.get(type_name).copied().unwrap_or(type_name)
-            )
-        }),
-    }
-}
-
-fn form_contracts(catalog: &ContractCatalog) -> serde_json::Value {
-    serde_json::json!({
-        "schemaVersion": 1,
-        "forms": catalog.contracts.iter().filter(|contract| contract.kind == 1).map(|contract| {
-            serde_json::json!({
-                "name": contract.name,
-                "fields": contract.properties.iter().map(|property| serde_json::json!({
-                    "name": property.name,
-                    "control": match property.kind {
-                        4 => "checkbox",
-                        2 | 3 => "number",
-                        7 => "select",
-                        _ => "text",
-                    },
-                    "required": !property.nullable,
-                    "description": property.description,
-                    "format": property.format,
-                    "minimum": property.minimum,
-                    "maximum": property.maximum,
-                })).collect::<Vec<_>>(),
-            })
-        }).collect::<Vec<_>>(),
-    })
-}
-
-fn migration_contracts(catalog: &ContractCatalog) -> serde_json::Value {
-    serde_json::json!({
-        "schemaVersion": 1,
-        "advisory": true,
-        "tables": catalog.contracts.iter().filter(|contract| contract.kind == 1).map(|contract| {
-            serde_json::json!({
-                "source": contract.name,
-                "suggestedTable": to_snake_case(&contract.name),
-                "columns": contract.properties.iter().map(|property| serde_json::json!({
-                    "name": to_snake_case(&property.name),
-                    "type": match property.kind {
-                        2 | 7 => "integer",
-                        3 => "decimal",
-                        4 => "boolean",
-                        5 | 6 => "json",
-                        _ => "string",
-                    },
-                    "nullable": property.nullable,
-                })).collect::<Vec<_>>(),
-            })
-        }).collect::<Vec<_>>(),
-    })
-}
-
-fn typescript_contracts(catalog: &ContractCatalog) -> String {
-    let names = contract_name_map(catalog);
-    let mut output = String::from("// Generated by `pam contracts`. Do not edit.\n\n");
-    for contract in &catalog.contracts {
-        if contract.kind == 2 {
-            output.push_str(&format!("export enum {} {{\n", contract.name));
-            for case in &contract.cases {
-                output.push_str(&format!("  {} = {},\n", case.name, case.value));
-            }
-            output.push_str("}\n\n");
-            continue;
-        }
-        output.push_str(&format!("export interface {} {{\n", contract.name));
-        for property in &contract.properties {
-            let kind = language_type(property, &names, Language::TypeScript);
-            output.push_str(&format!(
-                "  readonly {}: {}{};\n",
-                property.name,
-                kind,
-                if property.nullable { " | null" } else { "" }
-            ));
-        }
-        output.push_str("}\n\n");
-    }
-    output
-}
-
-fn kotlin_contracts(catalog: &ContractCatalog) -> String {
-    let names = contract_name_map(catalog);
-    let mut output = String::from(
-        "// Generated by `pam contracts`. Do not edit.\npackage dev.pam.contracts\n\n",
-    );
-    for contract in &catalog.contracts {
-        if contract.kind == 2 {
-            output.push_str(&format!(
-                "enum class {}(val value: Int) {{\n",
-                contract.name
-            ));
-            for (index, case) in contract.cases.iter().enumerate() {
-                output.push_str(&format!(
-                    "    {}({}){}\n",
-                    case.name,
-                    case.value,
-                    if index + 1 == contract.cases.len() {
-                        ";"
-                    } else {
-                        ","
-                    }
-                ));
-            }
-            output.push_str("}\n\n");
-            continue;
-        }
-        output.push_str(&format!("data class {}(\n", contract.name));
-        for (index, property) in contract.properties.iter().enumerate() {
-            output.push_str(&format!(
-                "    val {}: {}{}{}\n",
-                property.name,
-                language_type(property, &names, Language::Kotlin),
-                if property.nullable { "?" } else { "" },
-                if index + 1 == contract.properties.len() {
-                    ""
-                } else {
-                    ","
-                }
-            ));
-        }
-        output.push_str(")\n\n");
-    }
-    output
-}
-
-#[derive(Clone, Copy)]
-enum Language {
-    TypeScript,
-    Kotlin,
-}
-
-fn language_type(
-    property: &ContractProperty,
-    names: &BTreeMap<&str, &str>,
-    language: Language,
-) -> String {
-    let scalar = match (language, property.kind) {
-        (Language::TypeScript, 1) => "string",
-        (Language::TypeScript, 2 | 3) => "number",
-        (Language::TypeScript, 4) => "boolean",
-        (Language::Kotlin, 1) => "String",
-        (Language::Kotlin, 2) => "Long",
-        (Language::Kotlin, 3) => "Double",
-        (Language::Kotlin, 4) => "Boolean",
-        (_, 5 | 7) => names
-            .get(property.type_name.as_str())
-            .copied()
-            .unwrap_or(&property.type_name),
-        (_, 6) => {
-            let item = property.item_type.as_deref().unwrap_or("mixed");
-            let item = match language {
-                Language::TypeScript => match item {
-                    "string" => "string",
-                    "int" | "float" => "number",
-                    "bool" => "boolean",
-                    _ => names.get(item).copied().unwrap_or(item),
-                },
-                Language::Kotlin => match item {
-                    "string" => "String",
-                    "int" => "Long",
-                    "float" => "Double",
-                    "bool" => "Boolean",
-                    _ => names.get(item).copied().unwrap_or(item),
-                },
-            };
-            return match language {
-                Language::TypeScript => format!("ReadonlyArray<{item}>"),
-                Language::Kotlin => format!("List<{item}>"),
-            };
-        }
-        _ => match language {
-            Language::TypeScript => "unknown",
-            Language::Kotlin => "Any",
-        },
-    };
-    scalar.to_owned()
-}
-
-fn contract_name_map(catalog: &ContractCatalog) -> BTreeMap<&str, &str> {
-    catalog
-        .contracts
-        .iter()
-        .map(|contract| (contract.php_class.as_str(), contract.name.as_str()))
-        .collect()
-}
-
-fn markdown_contracts(catalog: &ContractCatalog) -> String {
-    let mut output = String::from("# Generated contracts\n\n");
-    for contract in &catalog.contracts {
-        output.push_str(&format!(
-            "## `{}`\n\n{}\n\n",
-            contract.name, contract.description
-        ));
-        if contract.kind == 2 {
-            output.push_str("| Case | Value |\n| --- | ---: |\n");
-            for case in &contract.cases {
-                output.push_str(&format!("| `{}` | `{}` |\n", case.name, case.value));
-            }
-            output.push('\n');
-            continue;
-        }
-        output
-            .push_str("| Field | PHP type | Nullable | Description |\n| --- | --- | --- | --- |\n");
-        for property in &contract.properties {
-            output.push_str(&format!(
-                "| `{}` | `{}` | {} | {} |\n",
-                property.name,
-                property.type_name,
-                if property.nullable { "yes" } else { "no" },
-                property.description.replace('|', "\\|")
-            ));
-        }
-        output.push('\n');
-    }
-    output
-}
-
-fn to_snake_case(value: &str) -> String {
-    let mut output = String::new();
-    for (index, character) in value.chars().enumerate() {
-        if character.is_uppercase() && index > 0 {
-            output.push('_');
-        }
-        output.extend(character.to_lowercase());
-    }
-    output
-}
-
-fn write_json(path: &Path, value: &serde_json::Value) -> Result<(), String> {
-    fs::write(
-        path,
-        serde_json::to_vec_pretty(value)
-            .map_err(|error| format!("cannot serialize {}: {error}", path.display()))?,
-    )
-    .map_err(|error| format!("cannot write {}: {error}", path.display()))
-}
-
-fn write_sbom(project: &Path, output: &Path) -> Result<(), String> {
-    let mut components = vec![
-        CycloneDxComponent {
-            component_type: "application",
-            name: "pam-runtime".to_owned(),
-            version: env!("CARGO_PKG_VERSION").to_owned(),
-            purl: format!("pkg:cargo/pam@{}", env!("CARGO_PKG_VERSION")),
-            licenses: vec![CycloneDxLicenseChoice {
-                license: CycloneDxLicense {
-                    id: "MIT".to_owned(),
-                },
-            }],
-        },
-        CycloneDxComponent {
-            component_type: "framework",
-            name: "php".to_owned(),
-            version: "8.4".to_owned(),
-            purl: "pkg:generic/php@8.4".to_owned(),
-            licenses: Vec::new(),
-        },
-    ];
-    let lock_path = project.join("composer.lock");
-    if lock_path.is_file() {
-        let contents = fs::read(&lock_path)
-            .map_err(|error| format!("cannot read {}: {error}", lock_path.display()))?;
-        let lock: serde_json::Value = serde_json::from_slice(&contents)
-            .map_err(|error| format!("invalid {}: {error}", lock_path.display()))?;
-        for section in ["packages", "packages-dev"] {
-            for package in lock[section].as_array().into_iter().flatten() {
-                let Some(name) = package["name"].as_str() else {
-                    return Err(format!("{section} contains a package without a name"));
-                };
-                let Some(version) = package["version"].as_str() else {
-                    return Err(format!("{name} has no locked version"));
-                };
-                let licenses = package["license"]
-                    .as_array()
-                    .into_iter()
-                    .flatten()
-                    .filter_map(serde_json::Value::as_str)
-                    .map(|id| CycloneDxLicenseChoice {
-                        license: CycloneDxLicense { id: id.to_owned() },
-                    })
-                    .collect();
-                components.push(CycloneDxComponent {
-                    component_type: "library",
-                    name: name.to_owned(),
-                    version: version.to_owned(),
-                    purl: format!("pkg:composer/{name}@{version}"),
-                    licenses,
-                });
-            }
-        }
-    }
-    components.sort_by(|left, right| {
-        left.purl
-            .cmp(&right.purl)
-            .then_with(|| left.version.cmp(&right.version))
-    });
-    let bom = CycloneDxBom {
-        bom_format: "CycloneDX",
-        spec_version: "1.6",
-        version: 1,
-        metadata: CycloneDxMetadata {
-            component: CycloneDxComponent {
-                component_type: "application",
-                name: project
-                    .file_name()
-                    .and_then(OsStr::to_str)
-                    .unwrap_or("pam-application")
-                    .to_owned(),
-                version: "0.0.0".to_owned(),
-                purl: "pkg:generic/pam-application@0.0.0".to_owned(),
-                licenses: Vec::new(),
-            },
-        },
-        components,
-    };
-    let path = output.join("sbom.cdx.json");
-    fs::write(
-        &path,
-        serde_json::to_vec_pretty(&bom)
-            .map_err(|error| format!("cannot serialize CycloneDX SBOM: {error}"))?,
-    )
-    .map_err(|error| format!("cannot write {}: {error}", path.display()))
 }
 
 fn linked_php_library(executable: &Path) -> Result<PathBuf, String> {
@@ -1895,20 +469,13 @@ fn build_files(root: &Path) -> Result<Vec<BuildFile>, String> {
         for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
-            let file_type = entry.file_type().map_err(|error| error.to_string())?;
-            if file_type.is_symlink() {
-                return Err(format!(
-                    "bundle integrity does not permit symbolic links: {}",
-                    path.display()
-                ));
-            }
-            if file_type.is_dir() {
-                visit(root, &path, files)?;
-            } else if !matches!(
-                path.file_name().and_then(OsStr::to_str),
-                Some("manifest.json" | "manifest.sig")
-            ) && path.is_file()
+            if entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_dir()
             {
+                visit(root, &path, files)?;
+            } else if path.file_name() != Some(OsStr::new("manifest.json")) && path.is_file() {
                 let contents = fs::read(&path)
                     .map_err(|error| format!("cannot hash {}: {error}", path.display()))?;
                 files.push(BuildFile {
@@ -1991,6 +558,12 @@ fn choose_template(
         ui.heading(format!("{:<25}", "Mobile · Core")),
         ui.muted("Pure PAM Native primitives")
     );
+    println!(
+        "  {}  {} {}",
+        ui.accent("08"),
+        ui.heading(format!("{:<25}", "Mobile · Official UI")),
+        ui.muted("PAM Mobile UI design system · recommended for apps")
+    );
     print!("\n{} ", ui.command("Choose a preset [02] ›"));
     std::io::stdout()
         .flush()
@@ -2007,6 +580,7 @@ fn choose_template(
         "5" => Ok((InitTemplate::Laravel, true)),
         "6" => Ok((InitTemplate::Desktop, false)),
         "7" => Ok((InitTemplate::Mobile, false)),
+        "8" => Ok((InitTemplate::MobileUi, false)),
         value => Err(format!("invalid init preset {value:?}")),
     }
 }
@@ -2047,34 +621,22 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let version = package_coordinates::VERSION_CONSTRAINT;
+    let version = "^0.1";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.4")),
-        (
-            package_coordinates::API.to_owned(),
-            serde_json::json!(version),
-        ),
+        ("pam/api".to_owned(), serde_json::json!(version)),
     ]);
     if socket {
-        require.insert(
-            package_coordinates::SOCKET.to_owned(),
-            serde_json::json!(version),
-        );
+        require.insert("pam/socket".to_owned(), serde_json::json!(version));
     }
-    let require_dev = serde_json::Map::from_iter([
-        (
-            package_coordinates::TESTING.to_owned(),
-            serde_json::json!(version),
-        ),
-        ("phpunit/phpunit".to_owned(), serde_json::json!("^12.5")),
-    ]);
     let mut manifest = serde_json::json!({
         "name": "app/pam-project",
-        "description": "Application powered by the Pam persistent PHP runtime.",
         "type": "project",
-        "license": "proprietary",
         "require": require,
-        "require-dev": require_dev,
+        "require-dev": {
+            "pam/testing": version,
+            "phpunit/phpunit": "^12.5"
+        },
         "autoload": {"psr-4": {"App\\": "src/"}},
         "config": {"platform-check": true, "sort-packages": true},
         "scripts": {
@@ -2175,7 +737,7 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
     write_new(
         &directory.join("resources/inspector.html"),
         r##"<!doctype html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -2195,11 +757,11 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
                     <path class="spark" d="m23.8 7.4.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>
                 </svg>
                 <div>
-                    <span>secondary window</span>
+                    <span>janela secundária</span>
                     <h1>Runtime Inspector</h1>
                 </div>
             </div>
-            <button id="hide-button" type="button" aria-label="Hide Runtime Inspector">
+            <button id="hide-button" type="button" aria-label="Ocultar Runtime Inspector">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
                     <path d="m7 7 10 10M17 7 7 17"/>
                 </svg>
@@ -2208,27 +770,27 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
 
         <section class="summary" aria-labelledby="summary-title">
             <div>
-                <span class="eyebrow">PAM DESKTOP 1.1</span>
-                <h2 id="summary-title">One runtime.<br><strong>Multiple windows.</strong></h2>
+                <span class="eyebrow">PAM DESKTOP 0.5</span>
+                <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
             </div>
             <span class="online"><i aria-hidden="true"></i> worker online</span>
         </section>
 
-        <section class="metrics" aria-label="Runtime state">
+        <section class="metrics" aria-label="Estado da runtime">
             <article>
                 <span>window id</span>
                 <strong id="window-id">—</strong>
-                <small>context isolation</small>
+                <small>isolamento por contexto</small>
             </article>
             <article>
                 <span>protocol</span>
-                <strong>IPC v6</strong>
-                <small>typed contract</small>
+                <strong>IPC v5</strong>
+                <small>contrato tipado</small>
             </article>
             <article>
                 <span>renderer</span>
                 <strong>Servo</strong>
-                <small>native Rust host</small>
+                <small>host Rust nativo</small>
             </article>
         </section>
 
@@ -2236,15 +798,15 @@ fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
             <div class="section-heading">
                 <div>
                     <span>STREAM</span>
-                    <h2 id="events-title">Application events</h2>
+                    <h2 id="events-title">Eventos da aplicação</h2>
                 </div>
                 <span class="live"><i aria-hidden="true"></i> live</span>
             </div>
             <ol id="event-list" aria-live="polite">
                 <li>
-                    <time>now</time>
+                    <time>agora</time>
                     <span>inspector.ready</span>
-                    <small>waiting for PHP events</small>
+                    <small>aguardando eventos do PHP</small>
                 </li>
             </ol>
         </section>
@@ -2563,7 +1125,7 @@ li small {
         const title = document.createElement("span");
         const description = document.createElement("small");
 
-        time.textContent = new Intl.DateTimeFormat("en-US", {
+        time.textContent = new Intl.DateTimeFormat("pt-BR", {
             hour: "2-digit",
             minute: "2-digit",
             second: "2-digit",
@@ -2579,17 +1141,17 @@ li small {
     };
 
     if (!window.pam) {
-        appendEvent("bridge.error", "The Pam bridge did not load.");
+        appendEvent("bridge.error", "A bridge Pam não foi carregada.");
         hideButton.disabled = true;
         return;
     }
 
     windowId.textContent = window.pam.windowId;
-    window.pam.on("runtime.ready", ({ apiVersion, protocol }) => {
-        appendEvent("runtime.ready", `API v${apiVersion} · IPC v${protocol}`);
+    window.pam.on("runtime.ready", ({ protocol }) => {
+        appendEvent("runtime.ready", `IPC v${protocol} conectado`);
     });
     window.pam.on("pam.dev.reloaded", ({ kind }) => {
-        appendEvent("pam.dev.reloaded", kind === 1 ? "assets" : "PHP worker");
+        appendEvent("pam.dev.reloaded", kind === 1 ? "assets" : "worker PHP");
     });
     window.pam.on("pam.dev.error", ({ message }) => {
         appendEvent("pam.dev.error", message);
@@ -2602,7 +1164,7 @@ li small {
         } catch (error) {
             appendEvent(
                 "inspector.hide.failed",
-                error instanceof Error ? error.message : "Unknown failure",
+                error instanceof Error ? error.message : "Falha desconhecida",
             );
             hideButton.disabled = false;
         }
@@ -2613,7 +1175,7 @@ li small {
     }, { timeout: 2_000 }).catch((error) => {
         appendEvent(
             "client.ready.failed",
-            error instanceof Error ? error.message : "Unknown failure",
+            error instanceof Error ? error.message : "Falha desconhecida",
         );
     });
 })();
@@ -2623,19 +1185,15 @@ li small {
 }
 
 fn init_desktop(directory: &Path) -> Result<(), String> {
-    let require = serde_json::Map::from_iter([
-        ("php".to_owned(), serde_json::json!("^8.4")),
-        (
-            package_coordinates::DESKTOP.to_owned(),
-            serde_json::json!(package_coordinates::DESKTOP_VERSION_CONSTRAINT),
-        ),
-    ]);
     let mut manifest = serde_json::json!({
         "name": "app/pam-desktop-project",
         "description": "A PHP-first desktop application powered by Pam, Rust, and Servo.",
         "type": "project",
         "license": "proprietary",
-        "require": require,
+        "require": {
+            "php": "^8.4",
+            "pam/desktop": "^0.5"
+        },
         "autoload": {
             "psr-4": {
                 "App\\": "src/"
@@ -2668,45 +1226,34 @@ declare(strict_types=1);
 
 use Pam\Desktop\Application;
 use Pam\Desktop\ApplicationCategory;
-use Pam\Desktop\BackgroundJob;
 use Pam\Desktop\Capabilities;
 use Pam\Desktop\ClientEvent;
 use Pam\Desktop\CommandContext;
 use Pam\Desktop\CommandResult;
 use Pam\Desktop\EventContext;
 use Pam\Desktop\FileSystemRoot;
-use Pam\Desktop\GlobalShortcut;
-use Pam\Desktop\JobContext;
-use Pam\Desktop\Menu;
-use Pam\Desktop\MenuItem;
-use Pam\Desktop\Shell;
-use Pam\Desktop\ShellEffect;
-use Pam\Desktop\Tray;
-use Pam\Desktop\TrayCloseBehavior;
+use Pam\Desktop\Manifest;
 use Pam\Desktop\Window;
 use Pam\Desktop\WindowEffect;
 use Pam\Desktop\WindowTheme;
 
 require __DIR__.'/vendor/autoload.php';
 
-$app = Application::make(
-    id: 'com.pushin.pam-hello',
-    name: 'Pam Hello',
-    version: '1.0.0',
+$app = Application::create(
     window: Window::create('Pam Desktop · Hello')
-        ->load('resources/index.html')
         ->size(1120, 720)
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
+    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
+        ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
+        ->publisher('Pushin')
+        ->category(ApplicationCategory::Development)
+        ->excludeFromBundle('storage/hello.txt'),
 )
-    ->description('An elegant desktop application orchestrated in PHP.')
-    ->publisher('Pushin')
-    ->category(ApplicationCategory::Development)
-    ->excludeFromBundle('storage/hello.txt')
     ->window(
         'inspector',
         Window::create('Pam Desktop · Runtime Inspector')
-            ->load('resources/inspector.html')
+            ->entry('resources/inspector.html')
             ->minimumSize(480, 360)
             ->size(680, 520)
             ->visible(false)
@@ -2720,47 +1267,15 @@ $app = Application::make(
             ->notifications()
             ->dragAndDrop(),
     )
-    ->shell(
-        Shell::none()
-            ->menu(Menu::create(
-                'application',
-                'Pam Hello',
-                MenuItem::command('app.show', 'Show window', 'CmdOrCtrl+Shift+KeyP'),
-                MenuItem::command('inspector.show', 'Runtime Inspector'),
-                MenuItem::checkbox('background.enabled', 'Run in background', true),
-                MenuItem::separator(),
-                MenuItem::command('app.quit', 'Quit'),
-            ))
-            ->tray(
-                Tray::create('application', 'Pam Desktop · Hello')
-                    ->closeBehavior(TrayCloseBehavior::Hide),
-            )
-            ->shortcut(
-                GlobalShortcut::create('app.show', 'CmdOrCtrl+Shift+KeyP'),
-            ),
-    )
-    ->plugin(new App\HelloPlugin())
-    ->job(
-        'runtime.heartbeat',
-        BackgroundJob::every(30_000)->timeout(3_000),
-        static fn (JobContext $job): CommandResult =>
-            CommandResult::success([
-                'runId' => $job->runId,
-                'startedAtMs' => $job->startedAtMilliseconds,
-            ])->event(new ClientEvent(
-                name: 'runtime.heartbeat',
-                payload: ['runId' => $job->runId],
-            )),
-    )
     ->commandTimeout(10_000);
 
 $app->command('greet', static function (CommandContext $command): CommandResult {
-    $name = trim((string) $command->string('name', 'world'));
-    $name = $name !== '' ? mb_substr($name, 0, 40) : 'world';
+    $name = trim((string) $command->string('name', 'mundo'));
+    $name = $name !== '' ? mb_substr($name, 0, 40) : 'mundo';
 
     return CommandResult::success([
-        'message' => "Hello, {$name}.",
-        'detail' => 'This response left PHP, crossed the Rust host, and reached Servo.',
+        'message' => "Olá, {$name}.",
+        'detail' => 'Esta resposta saiu do PHP, atravessou o host Rust e chegou ao Servo.',
     ])
         ->effect(WindowEffect::title("Pam Desktop · {$name}", $command->windowId))
         ->event(new ClientEvent(
@@ -2788,77 +1303,11 @@ $app->on('client.ready', static fn (EventContext $event): CommandResult =>
     CommandResult::success()
         ->event(new ClientEvent(
             name: 'runtime.ready',
-            payload: [
-                'windowId' => $event->windowId,
-                'apiVersion' => Application::API_VERSION,
-                'protocol' => Application::PROTOCOL_VERSION,
-            ],
+            payload: ['windowId' => $event->windowId, 'protocol' => 5],
             windowId: $event->windowId,
         )));
 
-$app->on('pam.menu.selected', static function (EventContext $event): CommandResult {
-    static $backgroundEnabled = true;
-
-    return match ($event->string('id')) {
-        'app.show' => CommandResult::success()
-            ->effect(WindowEffect::visible(true))
-            ->effect(WindowEffect::focus()),
-        'inspector.show' => CommandResult::success()
-            ->effect(WindowEffect::visible(true, 'inspector'))
-            ->effect(WindowEffect::focus('inspector')),
-        'background.enabled' => CommandResult::success([
-            'enabled' => $backgroundEnabled = !$backgroundEnabled,
-        ])->effect(ShellEffect::menuChecked('background.enabled', $backgroundEnabled)),
-        'app.quit' => CommandResult::success()->effect(WindowEffect::close()),
-        default => CommandResult::success(),
-    };
-});
-
-$app->on('pam.shortcut.changed', static fn (EventContext $event): CommandResult =>
-    $event->integer('state') === 1
-        ? CommandResult::success()
-            ->effect(WindowEffect::visible(true))
-            ->effect(WindowEffect::focus())
-        : CommandResult::success());
-
 $app->run();
-"#,
-    )?;
-    fs::create_dir_all(directory.join("src"))
-        .map_err(|error| format!("cannot create desktop source directory: {error}"))?;
-    write_new(
-        &directory.join("src/HelloPlugin.php"),
-        r#"<?php
-
-declare(strict_types=1);
-
-namespace App;
-
-use Pam\Desktop\Application;
-use Pam\Desktop\CommandContext;
-use Pam\Desktop\Plugin;
-
-final class HelloPlugin implements Plugin
-{
-    public function identifier(): string
-    {
-        return 'hello.runtime';
-    }
-
-    public function register(Application $application): void
-    {
-        $application->command(
-            'runtime.snapshot',
-            static fn (CommandContext $command): array => [
-                'php' => PHP_VERSION,
-                'os' => PHP_OS_FAMILY,
-                'architecture' => php_uname('m'),
-                'windowId' => $command->windowId,
-                'plugin' => 'hello.runtime',
-            ],
-        );
-    }
-}
 "#,
     )?;
     write_new(
@@ -2923,7 +1372,7 @@ final class HelloPlugin implements Plugin
             <div class="runtime-status" aria-label="Estado da runtime">
                 <span class="status-pulse" aria-hidden="true"></span>
                 <span>runtime online</span>
-                <kbd>1.0</kbd>
+                <kbd>0.5</kbd>
             </div>
         </header>
 
@@ -3015,20 +1464,9 @@ final class HelloPlugin implements Plugin
                         </p>
                     </section>
 
-                    <section class="update-console" aria-labelledby="extension-title">
-                        <div>
-                            <span>STABLE API · 1.0</span>
-                            <h2 id="extension-title">Plugins PHP + Rust isolado</h2>
-                            <p id="extension-status" role="status" aria-live="polite">
-                                PHP compõe a aplicação; plugins Rust rodam em processos supervisionados.
-                            </p>
-                        </div>
-                        <button id="extension-button" type="button">Consultar plugin</button>
-                    </section>
-
                     <section class="update-console" aria-labelledby="update-title">
                         <div>
-                            <span>SIGNED UPDATES</span>
+                            <span>SIGNED UPDATES · 0.5</span>
                             <h2 id="update-title">Atualizações com rollback</h2>
                             <p id="update-status" role="status" aria-live="polite">
                                 Desativadas por padrão; a chave pública fica no manifesto PHP.
@@ -3110,7 +1548,7 @@ final class HelloPlugin implements Plugin
                 </article>
                 <article>
                     <span>contract</span>
-                    <strong>API v1 · IPC v6</strong>
+                    <strong>IPC v5</strong>
                     <small>tipado e versionado</small>
                 </article>
             </section>
@@ -4135,8 +2573,6 @@ footer kbd {
     const openFileButton = document.querySelector("#open-file-button");
     const copyButton = document.querySelector("#copy-button");
     const notifyButton = document.querySelector("#notify-button");
-    const extensionButton = document.querySelector("#extension-button");
-    const extensionStatus = document.querySelector("#extension-status");
     const updateButton = document.querySelector("#update-button");
     const updateStatus = document.querySelector("#update-status");
 
@@ -4153,8 +2589,8 @@ footer kbd {
             await operation();
         } catch (error) {
             nativeStatus.textContent = error instanceof Error
-                ? `Failed · ${error.message}`
-                : "The native operation failed.";
+                ? `Falhou · ${error.message}`
+                : "A operação nativa falhou.";
         } finally {
             button.disabled = false;
         }
@@ -4163,74 +2599,42 @@ footer kbd {
     if (!window.pam) {
         setState(
             "error",
-            "bridge unavailable",
-            "The Pam bridge did not load.",
-            "Open this project with composer desktop:dev.",
+            "bridge indisponível",
+            "A bridge Pam não foi carregada.",
+            "Abra este projeto com `pam desktop dev .`.",
         );
         form.querySelectorAll("button, input").forEach((element) => {
             element.disabled = true;
         });
         inspectorButton.disabled = true;
-        extensionButton.disabled = true;
         updateButton.disabled = true;
         return;
     }
 
-    if (window.pam.apiVersion !== 1) {
-        setState(
-            "error",
-            "incompatible API",
-            `This application requires API v1; the host provided v${window.pam.apiVersion}.`,
-            "Install a PAM Desktop 1.x host to continue.",
-        );
-        form.querySelectorAll("button, input").forEach((element) => {
-            element.disabled = true;
-        });
-        inspectorButton.disabled = true;
-        extensionButton.disabled = true;
-        updateButton.disabled = true;
-        return;
-    }
-
-    eventStatus.textContent = "API v1 · events connecting…";
-    window.pam.on("runtime.ready", ({ apiVersion, protocol }) => {
-        eventStatus.textContent = `API v${apiVersion} · IPC v${protocol} online`;
+    window.pam.on("runtime.ready", ({ protocol }) => {
+        eventStatus.textContent = `eventos online · IPC v${protocol}`;
     });
     window.pam.on("hello.completed", ({ name: completedName }) => {
         eventStatus.textContent = `hello.completed · ${completedName}`;
     });
     window.pam.on("inspector.opened", () => {
-        eventStatus.textContent = "inspector window opened";
+        eventStatus.textContent = "janela inspector aberta";
     });
     window.pam.on("pam.dev.reloaded", ({ kind }) => {
         eventStatus.textContent = kind === 1
-            ? "assets reloaded"
-            : "PHP worker restarted";
+            ? "assets recarregados"
+            : "worker PHP reiniciado";
     });
     window.pam.on("pam.dev.error", ({ message: reloadError }) => {
-        eventStatus.textContent = `hot reload failed · ${reloadError}`;
-    });
-    window.pam.on("pam.menu.selected", ({ id }) => {
-        eventStatus.textContent = `native menu · ${id}`;
-    });
-    window.pam.on("pam.tray.activated", ({ button: trayButton }) => {
-        eventStatus.textContent = `tray activated · button ${trayButton}`;
-    });
-    window.pam.on("pam.shortcut.changed", ({ id, state }) => {
-        if (state === 1) {
-            eventStatus.textContent = `global shortcut · ${id}`;
-        }
-    });
-    window.pam.on("pam.job.completed", ({ id, runId }) => {
-        extensionStatus.textContent = `${id} · run #${runId} completed`;
+        eventStatus.textContent = `hot reload falhou · ${reloadError}`;
     });
     window.pam.on("pam.drag.enter", ({ name }) => {
         dropZone.dataset.active = "true";
-        nativeStatus.textContent = `Ready to receive ${name}.`;
+        nativeStatus.textContent = `Pronto para receber ${name}.`;
     });
     window.pam.on("pam.drag.leave", () => {
         delete dropZone.dataset.active;
-        nativeStatus.textContent = "The file left the window.";
+        nativeStatus.textContent = "O arquivo saiu da janela.";
     });
     window.pam.on("pam.drag.drop", async ({ files }) => {
         delete dropZone.dataset.active;
@@ -4242,22 +2646,22 @@ footer kbd {
                 nativeStatus.textContent = `${file.name} · ${contents.slice(0, 90)}`;
             } else {
                 const entries = await window.pam.fs.list(file);
-                nativeStatus.textContent = `${file.name} · ${entries.length} items`;
+                nativeStatus.textContent = `${file.name} · ${entries.length} itens`;
             }
         } catch (error) {
             nativeStatus.textContent = error instanceof Error
-                ? `Drop blocked · ${error.message}`
-                : "The dropped item could not be read.";
+                ? `Drop bloqueado · ${error.message}`
+                : "Não foi possível ler o item solto.";
         }
     });
     window.pam.on("pam.drag.error", ({ message: dragError }) => {
         delete dropZone.dataset.active;
-        nativeStatus.textContent = `Drop blocked · ${dragError}`;
+        nativeStatus.textContent = `Drop bloqueado · ${dragError}`;
     });
     window.pam.on("pam.update.changed", ({ state, availableVersion }) => {
         updateStatus.textContent = state === 4
-            ? `Version ${availableVersion} is available and signed.`
-            : `Updater state · ${state}`;
+            ? `Versão ${availableVersion} disponível e assinada.`
+            : `Estado do updater · ${state}`;
     });
     window.pam.on("pam.update.error", ({ message: updateError }) => {
         updateStatus.textContent = `Updater · ${updateError}`;
@@ -4268,7 +2672,7 @@ footer kbd {
     }, { timeout: 2_000 }).catch((error) => {
         eventStatus.textContent = error instanceof Error
             ? error.message
-            : "events unavailable";
+            : "eventos indisponíveis";
     });
 
     inspectorButton.addEventListener("click", async () => {
@@ -4278,9 +2682,9 @@ footer kbd {
         } catch (error) {
             setState(
                 "error",
-                "window did not open",
-                error instanceof Error ? error.message : "The inspector could not be opened.",
-                "The worker is still running; try again.",
+                "janela não abriu",
+                error instanceof Error ? error.message : "Não foi possível abrir o inspector.",
+                "O worker continua ativo; tente novamente.",
             );
         } finally {
             inspectorButton.disabled = false;
@@ -4290,7 +2694,7 @@ footer kbd {
     saveNoteButton.addEventListener("click", () => {
         void runNative(saveNoteButton, async () => {
             const target = { root: "data", path: "hello.txt" };
-            const text = `Hello from Pam Desktop at ${new Date().toLocaleString("en-US")}.`;
+            const text = `Olá de Pam Desktop em ${new Date().toLocaleString("pt-BR")}.`;
             await window.pam.fs.writeText(target, text);
             const persisted = await window.pam.fs.readText(target);
             nativeStatus.textContent = `storage/hello.txt · ${persisted}`;
@@ -4300,11 +2704,11 @@ footer kbd {
     openFileButton.addEventListener("click", () => {
         void runNative(openFileButton, async () => {
             const file = await window.pam.dialog.openFile({
-                title: "Open a text file with Pam Desktop",
-                filters: [{ name: "Text", extensions: ["txt", "md", "json"] }],
+                title: "Abrir um texto com Pam Desktop",
+                filters: [{ name: "Texto", extensions: ["txt", "md", "json"] }],
             });
             if (!file) {
-                nativeStatus.textContent = "Selection cancelled.";
+                nativeStatus.textContent = "Seleção cancelada.";
                 return;
             }
             const contents = await window.pam.fs.readText(file);
@@ -4314,7 +2718,7 @@ footer kbd {
 
     copyButton.addEventListener("click", () => {
         void runNative(copyButton, async () => {
-            const greeting = `Hello, ${name.value.trim() || "world"}!`;
+            const greeting = `Olá, ${name.value.trim() || "mundo"}!`;
             await window.pam.clipboard.writeText(greeting);
             nativeStatus.textContent = `Clipboard · ${greeting}`;
         });
@@ -4324,30 +2728,11 @@ footer kbd {
         void runNative(notifyButton, async () => {
             await window.pam.notification.show({
                 title: "Pam Desktop",
-                body: "Authorized by PHP. Delivered by Rust.",
+                body: "PHP autorizou; Rust entregou.",
                 urgency: 2,
             });
-            nativeStatus.textContent = "Notification delivered to the system.";
+            nativeStatus.textContent = "Notificação entregue ao sistema.";
         });
-    });
-
-    extensionButton.addEventListener("click", async () => {
-        extensionButton.disabled = true;
-        try {
-            const snapshot = await window.pam.invoke(
-                "runtime.snapshot",
-                null,
-                { timeout: 3_000 },
-            );
-            extensionStatus.textContent =
-                `${snapshot.plugin} · PHP ${snapshot.php} · ${snapshot.os}/${snapshot.architecture}`;
-        } catch (error) {
-            extensionStatus.textContent = error instanceof Error
-                ? `Plugin PHP · ${error.message}`
-                : "The PHP plugin could not be queried.";
-        } finally {
-            extensionButton.disabled = false;
-        }
     });
 
     updateButton.addEventListener("click", async () => {
@@ -4355,12 +2740,12 @@ footer kbd {
         try {
             const update = await window.pam.updater.status();
             updateStatus.textContent = update.state === 1
-                ? "Updater disabled. Configure Updates::from() in the PHP manifest."
-                : `State ${update.state} · current version ${update.currentVersion}`;
+                ? "Updater desativado. Configure Updates::from() no manifesto PHP."
+                : `Estado ${update.state} · versão atual ${update.currentVersion}`;
         } catch (error) {
             updateStatus.textContent = error instanceof Error
                 ? `Updater · ${error.message}`
-                : "The updater could not be queried.";
+                : "Não foi possível consultar o updater.";
         } finally {
             updateButton.disabled = false;
         }
@@ -4372,22 +2757,22 @@ footer kbd {
         button.setAttribute("aria-busy", "true");
         setState(
             "loading",
-            "running in PHP",
-            "Sending a typed command to the worker…",
-            "The host keeps the interface responsive during the operation.",
+            "executando no PHP",
+            "Enviando um comando tipado para o worker…",
+            "O host mantém a interface responsiva durante a operação.",
         );
 
         try {
             const result = await window.pam.invoke("greet", {
                 name: name.value.trim(),
             }, { timeout: 5_000 });
-            setState("success", "response received", result.message, result.detail);
+            setState("success", "resposta recebida", result.message, result.detail);
         } catch (error) {
             setState(
                 "error",
-                "command interrupted",
-                error instanceof Error ? error.message : "The command could not be executed.",
-                "Check the PHP worker and try again.",
+                "comando interrompido",
+                error instanceof Error ? error.message : "Não foi possível executar o comando.",
+                "Confira o worker PHP e tente novamente.",
             );
         } finally {
             button.disabled = false;
@@ -4397,16 +2782,6 @@ footer kbd {
 })();
 "##,
     )?;
-    fs::write(
-        directory.join("resources/index.html"),
-        include_str!("templates/desktop/index.html"),
-    )
-    .map_err(|error| format!("cannot write desktop interface: {error}"))?;
-    fs::write(
-        directory.join("resources/styles.css"),
-        include_str!("templates/desktop/styles.css"),
-    )
-    .map_err(|error| format!("cannot write desktop styles: {error}"))?;
     write_desktop_inspector(directory)?;
     Ok(())
 }
@@ -4415,16 +2790,14 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
     let native_repository = local_native_repository();
     let native_package = native_repository
         .as_ref()
-        .map(|repository| repository.package.clone())
-        .unwrap_or_else(|| package_coordinates::NATIVE.to_string());
+        .map(|repository| repository.package.as_str())
+        .unwrap_or("pushinbr/pam-native");
     let mut requirements = serde_json::json!({
         "php": "^8.4"
     });
-    requirements[&native_package] =
-        serde_json::json!(package_coordinates::NATIVE_VERSION_CONSTRAINT);
+    requirements[native_package] = serde_json::json!("^0.1");
     if with_official_ui {
-        requirements[package_coordinates::MOBILE_UI] =
-            serde_json::json!(package_coordinates::MOBILE_UI_VERSION_CONSTRAINT);
+        requirements["pushinbr/pam-mobile-ui"] = serde_json::json!("^0.1");
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
@@ -4454,23 +2827,24 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
             "mobile:dev": "pam mobile dev .",
             "mobile:build": "pam mobile build . --release",
             "mobile:benchmark": "pam mobile benchmark .",
-            "mobile:profile": "pam mobile profile .",
-            "mobile:devtools": "pam mobile devtools ."
+            "mobile:profile": "pam mobile profile ."
         }
     });
-    if with_official_ui && native_package != package_coordinates::NATIVE {
+    if with_official_ui && native_package != "pushinbr/pam-native" {
         // Source checkouts may still expose the legacy package identity while
         // the public pushinbr namespace migration is being completed.
         manifest["replace"] = serde_json::json!({
-            package_coordinates::NATIVE: package_coordinates::NATIVE_LOCAL_VERSION
+            "pushinbr/pam-native": env!("CARGO_PKG_VERSION")
         });
     }
     let mut repositories = Vec::new();
     if let Some(repository) = native_repository {
         repositories.push(repository.definition);
     }
-    if with_official_ui && let Some(repository) = local_mobile_ui_repository() {
-        repositories.push(repository);
+    if with_official_ui {
+        if let Some(repository) = local_mobile_ui_repository() {
+            repositories.push(repository);
+        }
     }
     if !repositories.is_empty() {
         manifest["repositories"] = serde_json::json!(repositories);
@@ -4483,30 +2857,28 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
     )?;
     write_new(
         &directory.join("pam-native.json"),
-        &format!(
-            r#"{{
-    "$schema": "vendor/{native_package}/resources/pam-native.schema.json",
+        r#"{
+    "$schema": "vendor/pushinbr/pam-native/resources/pam-native.schema.json",
     "version": 1,
     "applicationId": "app.pam.hello",
     "name": "Pam Hello",
     "entry": "index.php",
-    "runtime": {{
+    "runtime": {
         "php": "8.5",
         "channel": "stable"
-    }},
+    },
     "versionCode": 1,
     "versionName": "0.1.0",
-    "android": {{
+    "android": {
         "minSdk": 26,
         "targetSdk": 36,
         "permissions": [],
         "deepLinks": []
-    }},
+    },
     "modules": [],
     "views": []
-}}
+}
 "#,
-        ),
     )?;
     let entry = if with_official_ui {
         r#"<?php
@@ -4515,13 +2887,13 @@ declare(strict_types=1);
 
 use App\Hello;
 use Pam\MobileUi\Enum\ThemeMode;
-use Pam\MobileUi\MobileUi;
+use Pam\MobileUi\PamUI;
 use Pam\Native\App;
 
 require __DIR__.'/vendor/autoload.php';
 
 App::components(__DIR__.'/src', __DIR__.'/.pam-native/components');
-MobileUi::mode(ThemeMode::System);
+PamUI::mode(ThemeMode::System);
 App::run(App::make(Hello::class));
 "#
     } else {
@@ -4644,17 +3016,15 @@ final class Hello extends Component
         .map_err(|error| format!("cannot create VS Code settings directory: {error}"))?;
     write_new(
         &directory.join(".vscode/settings.json"),
-        &format!(
-            r#"{{
-    "files.associations": {{
+        r#"{
+    "files.associations": {
         "*.pam": "html"
-    }},
+    },
     "html.customData": [
-        "./vendor/{native_package}/resources/pam-native.custom-data.json"
+        "./vendor/pushinbr/pam-native/resources/pam-native.custom-data.json"
     ]
-}}
+}
 "#,
-        ),
     )
 }
 
@@ -4694,18 +3064,6 @@ fn init_laravel(executable: &OsStr, options: &InitOptions) -> Result<u8, String>
     if !directory.join(".env").is_file() && directory.join(".env.example").is_file() {
         fs::copy(directory.join(".env.example"), directory.join(".env"))
             .map_err(|error| format!("cannot create Laravel .env: {error}"))?;
-    }
-    if options.install {
-        run_composer_in(
-            executable,
-            directory,
-            &[
-                "require",
-                "pushinbr/pam-laravel:^0.1",
-                "--no-interaction",
-                "--no-progress",
-            ],
-        )?;
     }
 
     let socket_setup = if options.socket {
@@ -4816,25 +3174,18 @@ fn local_packages_repository() -> Option<serde_json::Value> {
         .join("packages/api/composer.json")
         .is_file()
         .then(|| {
-            let versions = package_coordinates::ALL
-                .into_iter()
-                .filter(|package| {
-                    *package != package_coordinates::SKELETON
-                        && *package != package_coordinates::DESKTOP
-                })
-                .map(|package| {
-                    (
-                        package.to_owned(),
-                        serde_json::json!(package_coordinates::LOCAL_VERSION),
-                    )
-                })
-                .collect::<serde_json::Map<_, _>>();
             serde_json::json!({
                 "type": "path",
                 "url": packages.to_string_lossy(),
                 "options": {
                     "symlink": true,
-                    "versions": versions
+                    "versions": {
+                        "pam/core-api": "0.1.0",
+                        "pam/api": "0.1.0",
+                        "pam/psr-bridge": "0.1.0",
+                        "pam/socket": "0.1.0",
+                        "pam/testing": "0.1.0"
+                    }
                 }
             })
         })
@@ -4860,8 +3211,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": true,
                     "versions": {
-                        package_coordinates::DESKTOP:
-                            package_coordinates::DESKTOP_LOCAL_VERSION
+                        "pam/desktop": "0.5.0"
                     }
                 }
             })
@@ -4900,9 +3250,9 @@ fn local_native_repository() -> Option<LocalComposerRepository> {
                 "type": "path",
                 "url": path.to_string_lossy(),
                 "options": {
-                    "symlink": false,
+                    "symlink": true,
                     "versions": {
-                        package.clone(): package_coordinates::NATIVE_LOCAL_VERSION
+                        package.clone(): env!("CARGO_PKG_VERSION")
                     }
                 }
             });
@@ -4937,10 +3287,9 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "type": "path",
                 "url": path.to_string_lossy(),
                 "options": {
-                    "symlink": false,
+                    "symlink": true,
                     "versions": {
-                        package_coordinates::MOBILE_UI:
-                            package_coordinates::MOBILE_UI_LOCAL_VERSION
+                        "pushinbr/pam-mobile-ui": "0.1.0"
                     }
                 }
             })
@@ -5201,107 +3550,6 @@ impl HttpEndpoint {
             .map_err(|error| error.to_string())?;
         Ok(response)
     }
-
-    fn send(
-        &self,
-        method: &str,
-        target: &str,
-        headers: &[(String, String)],
-        body: &[u8],
-    ) -> Result<HttpReplayResponse, String> {
-        if method.is_empty()
-            || !method
-                .bytes()
-                .all(|byte| byte.is_ascii_uppercase() || byte == b'-')
-        {
-            return Err(format!("recording contains invalid HTTP method {method:?}"));
-        }
-        if !target.starts_with('/') || target.contains('\r') || target.contains('\n') {
-            return Err("recording contains an unsafe HTTP target".to_owned());
-        }
-        let mut stream = TcpStream::connect((self.host.as_str(), self.port))
-            .map_err(|error| format!("cannot connect to replay target: {error}"))?;
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(30)))
-            .map_err(|error| error.to_string())?;
-        write!(
-            stream,
-            "{method} {target} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\nContent-Length: {}\r\n",
-            self.host,
-            body.len()
-        )
-        .map_err(|error| error.to_string())?;
-        for (name, value) in headers {
-            if name.contains('\r')
-                || name.contains('\n')
-                || value.contains('\r')
-                || value.contains('\n')
-            {
-                return Err("recording contains an unsafe HTTP header".to_owned());
-            }
-            write!(stream, "{name}: {value}\r\n").map_err(|error| error.to_string())?;
-        }
-        stream
-            .write_all(b"\r\n")
-            .and_then(|()| stream.write_all(body))
-            .map_err(|error| error.to_string())?;
-        let mut response = Vec::new();
-        stream
-            .read_to_end(&mut response)
-            .map_err(|error| error.to_string())?;
-        let boundary = response
-            .windows(4)
-            .position(|window| window == b"\r\n\r\n")
-            .ok_or("HTTP replay response has no header boundary")?;
-        let head = std::str::from_utf8(&response[..boundary])
-            .map_err(|_| "HTTP replay response headers are not UTF-8")?;
-        let status = head
-            .lines()
-            .next()
-            .and_then(|line| line.split_whitespace().nth(1))
-            .ok_or("HTTP replay response status is missing")?
-            .parse::<u16>()
-            .map_err(|_| "HTTP replay response status is invalid")?;
-        let mut body = response[boundary + 4..].to_vec();
-        if head.lines().any(|line| {
-            line.split_once(':').is_some_and(|(name, value)| {
-                name.eq_ignore_ascii_case("transfer-encoding")
-                    && value.trim().eq_ignore_ascii_case("chunked")
-            })
-        }) {
-            body = decode_chunked_body(&body)?;
-        }
-        Ok(HttpReplayResponse { status, body })
-    }
-}
-
-fn decode_chunked_body(input: &[u8]) -> Result<Vec<u8>, String> {
-    let mut output = Vec::new();
-    let mut offset = 0;
-    loop {
-        let line_end = input[offset..]
-            .windows(2)
-            .position(|window| window == b"\r\n")
-            .map(|position| offset + position)
-            .ok_or("invalid chunked replay response")?;
-        let size_text = std::str::from_utf8(&input[offset..line_end])
-            .map_err(|_| "invalid chunk size")?
-            .split(';')
-            .next()
-            .unwrap_or("");
-        let size = usize::from_str_radix(size_text, 16).map_err(|_| "invalid HTTP chunk size")?;
-        offset = line_end + 2;
-        if size == 0 {
-            break;
-        }
-        let end = offset.checked_add(size).ok_or("HTTP chunk size overflow")?;
-        if end + 2 > input.len() || &input[end..end + 2] != b"\r\n" {
-            return Err("truncated chunked replay response".to_owned());
-        }
-        output.extend_from_slice(&input[offset..end]);
-        offset = end + 2;
-    }
-    Ok(output)
 }
 
 pub fn default_script(target: Option<OsString>) -> PathBuf {

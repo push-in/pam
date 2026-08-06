@@ -1,8 +1,8 @@
 {
-    "name": "pushinbr/pam-api",
+    "name": "pam/api",
     "description": "Elegant HTTP routing and middleware for the Pam runtime.",
     "type": "library",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "keywords": [
         "http",
         "middleware",
@@ -17,11 +17,11 @@
     },
     "require": {
         "php": "^8.4",
-        "pushinbr/pam-core-api": "^0.1"
+        "pam/core-api": "^0.1"
     },
     "suggest": {
-        "pushinbr/pam-psr-bridge": "PSR-7, PSR-15 and PSR-17 interoperability.",
-        "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
+        "pam/psr-bridge": "PSR-7, PSR-15 and PSR-17 interoperability.",
+        "pam/socket": "High-level event and room APIs for Pam WebSockets."
     },
     "autoload": {
         "classmap": [

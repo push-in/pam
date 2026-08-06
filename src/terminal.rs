@@ -23,15 +23,18 @@ impl Terminal {
     }
 
     fn new(output: Output) -> Self {
-        let interactive = match output {
+        let is_terminal = match output {
             Output::Stdout => io::stdout().is_terminal(),
             Output::Stderr => io::stderr().is_terminal(),
         };
-        let color = interactive
+        let color = is_terminal
             && env::var_os("NO_COLOR").is_none()
             && env::var("TERM").map_or(true, |term| term != "dumb")
             && env::var("PAM_COLOR").map_or(true, |value| value != "never");
-        Self { interactive, color }
+        Self {
+            interactive: is_terminal,
+            color,
+        }
     }
 
     fn paint(&self, value: impl std::fmt::Display, code: &str) -> String {
@@ -155,49 +158,9 @@ pub fn print_help(executable: &OsStr) {
                 "artisan [args...]",
                 "Run the Laravel console inside Embed SAPI",
             ),
-            (
-                "up | status | restart | stop",
-                "Manage a Laravel PAM process manifest",
-            ),
-            (
-                "check-production | health | leaks",
-                "Run Laravel production diagnostics",
-            ),
-            (
-                "capacity | deploy | remote",
-                "Plan capacity and operate local or remote Laravel releases",
-            ),
-            (
-                "rollback | logs | workers | queues | scheduler | scale",
-                "Use concise PAM Cloud operation aliases",
-            ),
-            (
-                "nightwatch | compatibility | autoscale | mcp",
-                "Certify, observe, scale, and expose controlled Laravel AI tooling",
-            ),
             ("exec <script.php>", "Execute a PHP script explicitly"),
-            (
-                "sandbox <manifest>",
-                "Execute PHP under Landlock/seccomp capabilities",
-            ),
             ("composer [args...]", "Run the embedded Composer toolchain"),
             ("test [path]", "Run Pest or PHPUnit inside Pam"),
-            (
-                "snapshot create|verify|run",
-                "Build and execute integrity-checked source snapshots",
-            ),
-            (
-                "supply-chain [path]",
-                "Audit Composer provenance, policy and capabilities",
-            ),
-            (
-                "wasi run <module.wasm>",
-                "Run WebAssembly with denied-by-default WASI capabilities",
-            ),
-            (
-                "rpc validate|generate|wasi",
-                "Validate typed RPC and execute bounded WASI services",
-            ),
         ],
     );
     command_group(
@@ -211,10 +174,6 @@ pub fn print_help(executable: &OsStr) {
             ("inspect [index.php]", "Print runtime capabilities as JSON"),
             ("routes [index.php]", "Print registered routes as JSON"),
             (
-                "contracts [index.php]",
-                "Generate schemas, clients, mobile bindings and docs",
-            ),
-            (
                 "diagnostics [index.php]",
                 "Print the complete runtime snapshot",
             ),
@@ -223,14 +182,6 @@ pub fn print_help(executable: &OsStr) {
                 "Inspect one diagnostics subsystem",
             ),
             ("profile | trace", "Capture profiling or trace diagnostics"),
-            (
-                "record [index.php]",
-                "Record redacted HTTP interactions for deterministic replay",
-            ),
-            (
-                "replay <recording>",
-                "Replay and verify recorded HTTP interactions",
-            ),
             ("top [admin-url]", "Stream live runtime metrics"),
             ("benchmark <url>", "Measure throughput and latency"),
         ],
@@ -246,10 +197,6 @@ pub fn print_help(executable: &OsStr) {
             (
                 "build [directory]",
                 "Build a self-contained production bundle",
-            ),
-            (
-                "verify [bundle]",
-                "Verify every file in a production bundle",
             ),
             (
                 "desktop <command>",
@@ -313,10 +260,6 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "--admin-address IP:PORT",
                     "Expose health and metrics control plane",
                 ),
-                (
-                    "--admin-token-env NAME",
-                    "Enable authenticated reload/drain mutations using this secret",
-                ),
                 ("--graceful-timeout MS", "Worker shutdown deadline"),
                 ("--startup-timeout MS", "Worker readiness deadline"),
                 ("--restart-backoff MS", "Initial crash restart delay"),
@@ -324,14 +267,17 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &[
                 "start index.php --workers 4",
-                "start index.php --workers 8 --admin-address 127.0.0.1:3010 --admin-token-env PAM_ADMIN_TOKEN",
+                "start index.php --workers 8 --admin-address 127.0.0.1:3010",
             ],
         ),
         "init" => (
             "Scaffold a production-ready Pam project.",
             "init [directory] [options]",
             &[
-                ("--template PRESET", "raw, api, laravel, desktop, or mobile"),
+                (
+                    "--template PRESET",
+                    "raw, api, laravel, desktop, mobile, or mobile-ui",
+                ),
                 ("--socket", "Add Pam Socket support"),
                 ("--no-install", "Create files without installing packages"),
                 ("--no-interaction", "Use API when no preset is supplied"),
@@ -340,6 +286,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "init my-api --template api",
                 "init my-app --template laravel --socket",
                 "init native-app --template mobile --no-install",
+                "init ui-app --template mobile-ui --no-install",
             ],
         ),
         "build" => (
@@ -351,190 +298,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "Application entry point; default: index.php",
                 ),
                 ("--output DIR", "New bundle directory; default: dist"),
-                (
-                    "--signing-key FILE",
-                    "Sign manifest with an Ed25519 private key",
-                ),
             ],
             &[
                 "build .",
                 "build . --entry public/index.php --output release",
-            ],
-        ),
-        "verify" => (
-            "Verify the integrity and completeness of a production bundle.",
-            "verify [bundle] [options]",
-            &[
-                (
-                    "--public-key FILE",
-                    "Trusted Ed25519 public key for signature verification",
-                ),
-                ("--require-signature", "Reject unsigned production bundles"),
-            ],
-            &[
-                "verify dist",
-                "verify ./release --public-key release.pub --require-signature",
-            ],
-        ),
-        "record" => (
-            "Run an application with the bounded, redacting HTTP flight recorder.",
-            "record [index.php] [options] [-- script-arguments...]",
-            &[
-                (
-                    "--output FILE",
-                    "JSONL output; default: .pam/recordings/latest.jsonl",
-                ),
-                (
-                    "--max-body-bytes N",
-                    "Maximum captured bytes per body; default: 65536",
-                ),
-                (
-                    "--max-bytes N",
-                    "Maximum total recording size; default: 67108864",
-                ),
-            ],
-            &[
-                "record index.php",
-                "record public/index.php --output .pam/incidents/checkout.jsonl",
-            ],
-        ),
-        "sandbox" => (
-            "Run untrusted PHP with fail-closed kernel-enforced capabilities.",
-            "sandbox <pam.capabilities.json> -- <script.php> [arguments...]",
-            &[],
-            &["sandbox pam.capabilities.json -- plugin.php"],
-        ),
-        "contracts" => (
-            "Generate every external contract from attributed PHP DTOs and enums.",
-            "contracts [index.php] [--output DIR]",
-            &[(
-                "--output DIR",
-                "Generated artifact directory; default: generated/contracts",
-            )],
-            &[
-                "contracts index.php",
-                "contracts bootstrap/contracts.php --output generated/api",
-            ],
-        ),
-        "rpc" => (
-            "Validate typed service boundaries, generate SDKs, and invoke capability-safe WASI guests.",
-            "rpc <validate|generate|wasi> [arguments] [options]",
-            &[
-                (
-                    "--contracts FILE",
-                    "Generated contracts.mobile.json catalog",
-                ),
-                (
-                    "--output DIR",
-                    "Generated TypeScript, Python, Rust, manifest and docs directory",
-                ),
-                ("--fuel N", "Maximum WASI instructions for one RPC call"),
-                (
-                    "--memory-bytes N",
-                    "Maximum linear memory for one WASI RPC guest",
-                ),
-                (
-                    "--request-id ID",
-                    "Stable correlation/idempotency identifier for a WASI call",
-                ),
-            ],
-            &[
-                "rpc validate pam.rpc.json --contracts generated/contracts/contracts.mobile.json",
-                "rpc generate pam.rpc.json --contracts generated/contracts/contracts.mobile.json --output generated/rpc",
-                "rpc wasi pam.rpc.json service.wasm createOrder request.json --contracts generated/contracts/contracts.mobile.json",
-            ],
-        ),
-        "snapshot" => (
-            "Create, verify, or run a deterministic integrity-checked PHP source snapshot.",
-            "snapshot <create|verify|run> [arguments] [options]",
-            &[
-                ("--entry FILE", "Create entry point; default: index.php"),
-                (
-                    "--output FILE",
-                    "Create manifest; default: PROJECT/.pam/bootstrap.snapshot.json",
-                ),
-                ("--signing-key FILE", "Sign a created snapshot with Ed25519"),
-                (
-                    "--project DIR",
-                    "Project root for verify or run; default: .",
-                ),
-                ("--public-key FILE", "Trusted Ed25519 key for verify or run"),
-                ("--require-signature", "Reject unsigned snapshots"),
-                (
-                    "--",
-                    "Pass remaining arguments to the entry point when running",
-                ),
-            ],
-            &[
-                "snapshot create . --entry public/index.php",
-                "snapshot verify .pam/bootstrap.snapshot.json --project .",
-                "snapshot run .pam/bootstrap.snapshot.json --project .",
-            ],
-        ),
-        "supply-chain" => (
-            "Audit Composer scripts, plugins, maintainers, licenses, provenance, advisories and capabilities.",
-            "supply-chain [directory] [options]",
-            &[
-                ("--policy FILE", "PAM supply-chain policy JSON"),
-                (
-                    "--capabilities FILE",
-                    "Package capability manifest to audit",
-                ),
-                ("--output FILE", "Write the deterministic JSON report"),
-                ("--offline", "Skip advisories and mark them as unchecked"),
-            ],
-            &[
-                "supply-chain . --policy pam.supply-chain.json",
-                "supply-chain package --capabilities package/pam.capabilities.json --offline",
-            ],
-        ),
-        "wasi" => (
-            "Run a WASIp1 module with bounded resources and denied-by-default capabilities.",
-            "wasi run <module.wasm> [options] [-- guest-arguments...]",
-            &[
-                ("--stdin FILE", "Provide bounded binary stdin from a file"),
-                (
-                    "--env NAME",
-                    "Expose one selected host environment variable",
-                ),
-                (
-                    "--read-dir HOST=GUEST",
-                    "Preopen one host directory read-only",
-                ),
-                (
-                    "--write-dir HOST=GUEST",
-                    "Preopen one host directory with write access",
-                ),
-                ("--fuel N", "Instruction budget; default: 100000000"),
-                ("--memory-bytes N", "Linear-memory limit; default: 67108864"),
-                (
-                    "--max-output-bytes N",
-                    "Per-stream output limit; default: 8388608",
-                ),
-                ("--timeout-ms N", "Wall deadline; default: 30000"),
-            ],
-            &[
-                "wasi run plugin.wasm",
-                "wasi run transform.wasm --stdin request.json -- --compact",
-                "wasi run report.wasm --read-dir ./data=data --memory-bytes 134217728",
-            ],
-        ),
-        "replay" => (
-            "Replay a recording against a live runtime and detect divergence.",
-            "replay <recording.jsonl> [options]",
-            &[
-                (
-                    "--url URL",
-                    "Runtime base URL; default: http://127.0.0.1:3000",
-                ),
-                (
-                    "--secret-env NAME=ENV_VAR",
-                    "Inject a redacted input from an environment variable",
-                ),
-            ],
-            &[
-                "replay .pam/recordings/latest.jsonl",
-                "PAM_TEST_TOKEN=value replay incident.jsonl --secret-env token=PAM_TEST_TOKEN",
             ],
         ),
         "test" => (
@@ -551,184 +318,6 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             "doctor [path]",
             &[],
             &["doctor", "doctor ./my-project"],
-        ),
-        "up" => (
-            "Start every process in the Laravel PAM manifest.",
-            "up [name]",
-            &[],
-            &["up", "up web"],
-        ),
-        "status" => (
-            "Inspect processes in the Laravel PAM manifest.",
-            "status [name]",
-            &[],
-            &["status", "status queue"],
-        ),
-        "restart" => (
-            "Restart processes in the Laravel PAM manifest.",
-            "restart [name]",
-            &[],
-            &["restart", "restart web"],
-        ),
-        "stop" => (
-            "Stop processes in the Laravel PAM manifest.",
-            "stop [name]",
-            &[],
-            &["stop", "stop queue"],
-        ),
-        "check-production" => (
-            "Validate a Laravel application before production deployment.",
-            "check-production [--json]",
-            &[("--json", "Print a machine-readable report")],
-            &["check-production", "check-production --json"],
-        ),
-        "compatibility" => (
-            "Certify the Laravel runtime or inspect a package contract.",
-            "compatibility [package] [options]",
-            &[
-                ("--refresh", "Run a fresh compatibility probe"),
-                ("--json", "Print a machine-readable report"),
-            ],
-            &[
-                "compatibility",
-                "compatibility laravel/nightwatch --refresh --json",
-            ],
-        ),
-        "health" => (
-            "Run the Laravel application health checks.",
-            "health",
-            &[],
-            &["health"],
-        ),
-        "leaks" => (
-            "Inspect persistent-worker leak diagnostics.",
-            "leaks [--json]",
-            &[("--json", "Print a machine-readable report")],
-            &["leaks", "leaks --json"],
-        ),
-        "capacity" => (
-            "Estimate safe worker capacity for the available memory.",
-            "capacity [options]",
-            &[
-                ("--memory-mb N", "Total memory budget; default: 512"),
-                ("--worker-mb N", "Expected memory per worker; default: 96"),
-                (
-                    "--reserve-percent N",
-                    "Reserved memory percentage; default: 20",
-                ),
-            ],
-            &["capacity --memory-mb 2048 --worker-mb 128"],
-        ),
-        "deploy" => (
-            "Deploy locally, to PAM Cloud, or through Laravel Forge.",
-            "deploy [destination] [options]",
-            &[
-                ("--rollback", "Restore the previous release"),
-                ("--local", "Treat destination as a local release directory"),
-                ("--release ID", "Deploy a specific remote release"),
-            ],
-            &[
-                "deploy production",
-                "deploy ./release --local",
-                "deploy production --rollback",
-            ],
-        ),
-        "remote" => (
-            "Operate PAM Cloud or Laravel Forge targets.",
-            "remote <action> [target] [options]",
-            &[
-                ("--process NAME", "Process to scale"),
-                ("--instances N", "Desired process count, from 1 to 128"),
-                ("--release ID", "Release identifier for deploy"),
-                ("--lines N", "Log line count; default: 200"),
-                ("--json", "Print a machine-readable response"),
-            ],
-            &[
-                "remote status production",
-                "remote logs production --lines 500",
-                "remote scale production --process queue --instances 4",
-            ],
-        ),
-        "rollback" => (
-            "Roll back a remote deployment target.",
-            "rollback [target] [--json]",
-            &[("--json", "Print a machine-readable response")],
-            &["rollback production"],
-        ),
-        "logs" => (
-            "Read logs from a remote deployment target.",
-            "logs [target] [options]",
-            &[
-                ("--lines N", "Log line count; default: 200"),
-                ("--json", "Print a machine-readable response"),
-            ],
-            &["logs production --lines 500"],
-        ),
-        "workers" => (
-            "Inspect workers on a remote deployment target.",
-            "workers [target] [--json]",
-            &[("--json", "Print a machine-readable response")],
-            &["workers production"],
-        ),
-        "queues" => (
-            "Inspect queues on a remote deployment target.",
-            "queues [target] [--json]",
-            &[("--json", "Print a machine-readable response")],
-            &["queues production"],
-        ),
-        "scheduler" => (
-            "Inspect the scheduler on a remote deployment target.",
-            "scheduler [target] [--json]",
-            &[("--json", "Print a machine-readable response")],
-            &["scheduler production"],
-        ),
-        "scale" => (
-            "Scale a remote PAM process.",
-            "scale [target] --process NAME --instances N",
-            &[
-                ("--process NAME", "Process to scale"),
-                ("--instances N", "Desired process count, from 1 to 128"),
-            ],
-            &["scale production --process queue --instances 4"],
-        ),
-        "nightwatch" => (
-            "Validate and configure Laravel Nightwatch for PAM workers.",
-            "nightwatch [options]",
-            &[
-                (
-                    "--install-process",
-                    "Add the Nightwatch agent to the process manifest",
-                ),
-                ("--json", "Print a machine-readable report"),
-            ],
-            &["nightwatch", "nightwatch --install-process --json"],
-        ),
-        "autoscale" => (
-            "Reconcile local worker capacity against live metrics.",
-            "autoscale [process] [options]",
-            &[
-                ("--cpu N", "Current average CPU percentage"),
-                ("--p95 N", "Current p95 latency in milliseconds"),
-                ("--metrics-url URL", "Live JSON metrics endpoint"),
-                ("--watch", "Reconcile continuously"),
-                ("--interval N", "Watch interval in seconds; default: 15"),
-            ],
-            &[
-                "autoscale queue --cpu 75 --p95 120",
-                "autoscale queue --metrics-url http://127.0.0.1:3010/metrics --watch",
-            ],
-        ),
-        "mcp" => (
-            "Serve diagnostics and controlled operations over MCP stdio.",
-            "mcp",
-            &[],
-            &["mcp"],
-        ),
-        "forge-script" => (
-            "Generate a Laravel Forge deployment script.",
-            "forge-script [--output FILE]",
-            &[("--output FILE", "Write the script to a file")],
-            &["forge-script", "forge-script --output deploy.sh"],
         ),
         "top" => (
             "Display live metrics from a Pam cluster control plane.",
@@ -749,12 +338,16 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &["benchmark http://127.0.0.1:3000/health --requests 1000 --concurrency 32"],
         ),
         "mobile" => (
-            "Build native Android applications powered by PHP.",
+            "Build native Android and iOS applications powered by PHP.",
             "mobile <command> [project] [options]",
             &[
                 ("doctor", "Validate Android and Pam Native toolchains"),
                 ("prepare", "Stage the project and generate its Android host"),
                 ("codegen", "Regenerate Kotlin native-module bindings"),
+                (
+                    "ios:prepare",
+                    "Generate the autolinked Swift plugin package",
+                ),
                 ("build | run | dev", "Build, launch, or hot-reload the app"),
                 (
                     "benchmark | profile",
@@ -764,7 +357,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("plugin:list | plugin:doctor", "Inspect native plugins"),
                 (
                     "runtime:list | runtime:info",
-                    "Inspect selectable PAM-owned PHP runtimes",
+                    "Inspect selectable embedded PHP runtimes",
                 ),
                 (
                     "runtime:use | runtime:update",

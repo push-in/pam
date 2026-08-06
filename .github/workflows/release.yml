@@ -15,91 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  android-runtime:
-    name: Build PAM-owned verified PHP Android runtimes
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-      - uses: actions/checkout@v7
-        with:
-          repository: push-in/pam-native
-          ref: v0.6.1
-          path: pam-native
-          persist-credentials: false
-      - name: Install pinned Android NDK
-        run: >-
-          "${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
-          "ndk;27.1.12297006"
-      - uses: dtolnay/rust-toolchain@1.97.1
-        with:
-          targets: aarch64-linux-android,x86_64-linux-android
-      - name: Build every verified PHP Android runtime
-        run: |
-          runtime-builder/android/build.sh --php 8.4 all
-          runtime-builder/android/build.sh --php 8.5 all
-      - name: Build both Pam Native engine ABIs
-        run: |
-          toolchain="${ANDROID_HOME}/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${toolchain}/aarch64-linux-android26-clang"
-          export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="${toolchain}/x86_64-linux-android26-clang"
-          cargo build --locked --release \
-            --manifest-path pam-native/Cargo.toml \
-            -p pam-native-engine \
-            --target aarch64-linux-android
-          cargo build --locked --release \
-            --manifest-path pam-native/Cargo.toml \
-            -p pam-native-engine \
-            --target x86_64-linux-android
-      - name: Package Android runtime
-        run: |
-          tar -czf pam-android-runtime.tar.gz \
-            runtime/android \
-            runtime/catalog.json \
-            pam-native/target/aarch64-linux-android/release/libpam_native_engine.a \
-            pam-native/target/x86_64-linux-android/release/libpam_native_engine.a
-          sha256sum pam-android-runtime.tar.gz > \
-            pam-android-runtime.tar.gz.sha256
-      - name: Attest Android runtime bundle
-        if: github.event.repository.visibility == 'public'
-        uses: actions/attest@v4
-        with:
-          subject-path: pam-android-runtime.tar.gz
-      - uses: actions/upload-artifact@v7
-        with:
-          name: pam-android-runtime
-          path: |
-            pam-android-runtime.tar.gz
-            pam-android-runtime.tar.gz.sha256
-          if-no-files-found: error
-
-  composer-packages:
-    name: Verify public Composer packages
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-      - uses: shivammathur/setup-php@v2
-        with:
-          php-version: '8.4'
-          tools: composer:v2
-      - name: Wait for and install every public package release
-        env:
-          PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
-          PAM_PACKAGIST_TIMEOUT_SECONDS: 1200
-          PAM_PACKAGIST_POLL_SECONDS: 10
-        run: scripts/verify-packagist-release.sh "${PAM_RELEASE_TAG}"
-
   build:
-    needs:
-      - android-runtime
     strategy:
       fail-fast: false
       matrix:
@@ -122,28 +38,10 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             ca-certificates curl git gnupg software-properties-common sudo \
             unzip zstd
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
-      - uses: actions/checkout@v7
-        with:
-          repository: push-in/pam-native
-          ref: v0.6.1
-          path: pam-native
-          persist-credentials: false
-      - uses: actions/download-artifact@v8
-        with:
-          name: pam-android-runtime
-          path: android-runtime
-      - name: Install verified PHP Android runtime
-        run: |
-          (
-            cd android-runtime
-            sha256sum --check pam-android-runtime.tar.gz.sha256
-          )
-          tar -xzf android-runtime/pam-android-runtime.tar.gz \
-            -C .
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: dtolnay/rust-toolchain@1.88.0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
@@ -174,10 +72,6 @@ jobs:
           compat/laravel-smoke/vendor/bin/phpstan analyse -c compat/laravel-smoke/phpstan.neon --no-progress
           ./target/debug/pam test compat/composer-smoke --phpunit --colors=never
           ./target/debug/pam test compat/composer-smoke --pest --colors=never
-          ./target/debug/pam supply-chain compat/composer-smoke \
-            --output "${RUNNER_TEMP}/composer-supply-chain.json"
-          ./target/debug/pam supply-chain compat/laravel-smoke \
-            --output "${RUNNER_TEMP}/laravel-supply-chain.json"
           cargo build --locked --release
       - name: Package self-contained runtime
         env:
@@ -192,7 +86,7 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: dist/*.tar.gz
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: pam-${{ matrix.target }}
           path: |
@@ -202,20 +96,18 @@ jobs:
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))
-    needs:
-      - build
-      - composer-packages
+    needs: build
     runs-on: ubuntu-24.04
     permissions:
       contents: write
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
           persist-credentials: false
-      - uses: actions/download-artifact@v8
+      - uses: actions/download-artifact@v4
         with:
           pattern: pam-*
           path: dist

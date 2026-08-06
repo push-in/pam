@@ -10,3 +10,7 @@
 /compat/composer-smoke/vendor/
 /compat/composer-smoke/.phpunit.cache/
 /compat/laravel-smoke/vendor/
+/ecosystem/certification-app/.pam-native/
+/ecosystem/certification-app/vendor/
+/ecosystem/pam-native-laravel-sync/vendor/
+/ecosystem/pam-native-laravel-sync/.phpunit.cache/

@@ -8,19 +8,11 @@
 
 Write elegant PHP. Keep Composer. Serve HTTP, WebSockets, and asynchronous I/O from memory—without rebuilding your application for every request.
 
-[![Documentation](https://img.shields.io/badge/docs-push--in.github.io-5b50d6?style=flat-square)](https://push-in.github.io/pam-docs/introduction/)
 ![Status](https://img.shields.io/badge/status-experimental-f59e0b?style=flat-square)
 ![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
-![Rust](https://img.shields.io/badge/Rust-1.94%2B-000000?style=flat-square&logo=rust&logoColor=white)
+![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?style=flat-square&logo=rust&logoColor=white)
 ![HTTP](https://img.shields.io/badge/HTTP-1.1%20%7C%202%20%7C%203-2563eb?style=flat-square)
-![License](https://img.shields.io/badge/license-MIT-22c55e?style=flat-square)
-
-**[Documentation](https://push-in.github.io/pam-docs/introduction/) ·
-[How PAM works](https://push-in.github.io/pam-docs/runtime/how-pam-works/) ·
-[Laravel](https://push-in.github.io/pam-docs/laravel/overview/) ·
-[Native mobile](https://push-in.github.io/pam-docs/native/overview/) ·
-[Desktop](https://push-in.github.io/pam-docs/desktop/overview/) ·
-[Contributing](CONTRIBUTING.md)**
+![License](https://img.shields.io/badge/license-Apache%202.0-22c55e?style=flat-square)
 
 </div>
 
@@ -32,20 +24,19 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
-PAM is what happens when PHP is treated as a serious long-lived application
-platform instead of a language that must restart its world for every request.
-It keeps the ecosystem developers already know, moves scheduling and systems
-work into Rust, and extends the same philosophy from servers to Laravel,
-native mobile, and desktop applications.
-
-The ambition is large, and the standard is larger: typed contracts, bounded
-resources, executable compatibility matrices, reproducible releases, crash
-recovery, observability, and documentation that says exactly what is proven.
-
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.35`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> Pam is currently experimental (`0.1.1`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
 
-**Explore:** [Quick start](#quick-start) · [Laravel production](docs/laravel-platform.md) · [Mobile](docs/mobile.md) · [WASI and typed RPC](docs/wasi-and-rpc.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
+## PAM ecosystem
+
+- [PAM Native](https://github.com/push-in/pam-native) — build real Android and
+  iOS applications in PHP without JavaScript or WebViews.
+- [PAM Native Nitro](https://github.com/push-in/pam-native-nitro) —
+  high-performance offline-first data for PAM Native.
+- [Official documentation](https://push-in.github.io/pam-docs/introduction/) —
+  architecture, installation and public contracts for the whole platform.
+
+**Explore:** [Quick start](#quick-start) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
 ## Why Pam?
 
@@ -73,11 +64,11 @@ The result is a runtime designed for APIs, real-time systems, streaming, backgro
 | Area | Where it lives |
 | --- | --- |
 | Runtime core | Persistent Zend Engine, Tokio scheduler, Fibers, HTTP transport, streams, async I/O, process and diagnostics |
-| `pushinbr/pam-api` | Expressive routing, route parameters, middleware, error handling and package discovery |
-| `pushinbr/pam-socket` | RFC 6455 events, rooms, broadcasts, acknowledgements, adapters and resume support |
-| `pushinbr/pam-psr-bridge` | PSR-7, PSR-15 and PSR-17 interoperability using the official interfaces |
-| `pushinbr/pam-testing` | Fast in-memory HTTP client and fluent response assertions |
-| `pushinbr/pam-core-api` | Small, versioned contracts for packages that extend Pam |
+| `pam/api` | Expressive routing, route parameters, middleware, error handling and package discovery |
+| `pam/socket` | RFC 6455 events, rooms, broadcasts, acknowledgements, adapters and resume support |
+| `pam/psr-bridge` | PSR-7, PSR-15 and PSR-17 interoperability using the official interfaces |
+| `pam/testing` | Fast in-memory HTTP client and fluent response assertions |
+| `pam/core-api` | Small, versioned contracts for packages that extend Pam |
 | Pam Desktop | Separate Servo host plus a typed Composer package for building desktop applications with PHP |
 | Composer | Normal `composer.json`, `composer.lock`, PSR-4, custom vendor directories, and `vendor/autoload.php` |
 | Production | Master/worker mode, crash recovery, watchdog, graceful drain, worker recycling, generational reload |
@@ -120,7 +111,7 @@ there is no accidental dependency on `/etc/php`.
 <details>
 <summary>Building PAM itself from source</summary>
 
-Runtime contributors need Rust 1.94+, a C toolchain, matching PHP 8.4 development
+Runtime contributors need Rust 1.88+, a C toolchain, matching PHP 8.4 development
 headers and the Embed library:
 
 ```bash
@@ -203,23 +194,18 @@ pam init realtime-laravel --template laravel --socket
 Run `pam init` without a template in a terminal for the interactive preset picker.
 Use `--no-install` to generate/download source without resolving dependencies.
 See [Laravel on Pam](docs/laravel.md) for lifecycle and production details.
-Existing applications can add `pushinbr/pam-laravel` for production checks,
-bounded observability, request-state guards, process manifests and atomic
-deploy/rollback commands.
-The executable [SaaS API reference](examples/laravel-saas-api) demonstrates the
-recommended controller, request, service, repository, resource, enum, migration
-and endpoint-test boundaries.
 
 ### Mobile preset
 
-Create a native mobile app backed by PAM Native:
+The CLI offers two native mobile starting points:
 
 ```bash
 pam init native-core --template mobile
 ```
 
-The `mobile` preset starts with the explicit PAM Native PHP tree and renders
-through the native element tree, Rust diff engine, and platform UI thread.
+`mobile` starts with the explicit PAM Native PHP tree and no component-library
+dependency. It renders through the PAM Native element tree, Rust diff engine
+and platform UI-thread commit path.
 
 ### Desktop applications with Servo
 
@@ -237,39 +223,26 @@ pam desktop build .
 
 `pam desktop` is the public command; it delegates to the separately distributed
 `pam-desktop` host and identifies the current Pam executable to its PHP worker.
-The 1.0 starter demonstrates the stable Linux API, multiple windows,
-bidirectional events, command timeouts, crash recovery, development hot reload
-and explicit native
+The 0.5 starter demonstrates multiple windows, bidirectional events, command
+timeouts, crash recovery, development hot reload and explicit native
 capabilities. Window configuration and application policy remain in PHP, local
 HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
 versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
 notifications and drag-and-drop grants are opt-in. Application identity,
-category, icon and signed-update policy also live in the typed application DSL.
-Menus, tray, close-to-tray behavior, global shortcuts, background jobs and
-composable PHP plugins are configured through the same public application API.
-Native Rust plugins remain process-isolated and can be scaffolded with
-`pam desktop plugin new`:
+category, icon and signed-update policy also live in a typed PHP manifest:
 
 ```php
-$app = Application::make(
-    id: 'com.pushin.pam-hello',
-    name: 'Pam Hello',
-    window: Window::create('Pam Desktop · Hello')
-        ->load('resources/index.html')
-        ->size(1120, 720),
-)
-    ->description('PHP elegante em uma janela nativa.')
+Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
     ->publisher('Pushin')
     ->category(ApplicationCategory::Development);
 ```
 
-`pam desktop build` creates a self-contained, update-ready Linux package.
-`--format deb` adds a Debian package. Bundles include the Pam worker, PHP
-runtime libraries, Servo host, vendored PHP application and native plugins,
-Linux metadata, icon and a SHA-256 integrity manifest. Feed signing and
-automatic updates remain behind explicit PHP policy and a pinned Ed25519 public
-key. Windows/macOS packager code is preserved upstream, but the current release
-pipeline generates Linux x86-64 artifacts only.
+`pam desktop build` creates a self-contained, update-ready package for Linux,
+macOS or Windows. `--format deb` adds a Debian package; `--format native`
+creates a DMG or MSIX on its native host. Bundles include the Pam worker, PHP
+runtime libraries, Servo host, vendored PHP application, platform metadata,
+icon and a SHA-256 integrity manifest. Feed signing and automatic updates remain
+behind explicit PHP policy and a pinned Ed25519 public key.
 
 Native capabilities remain explicit:
 
@@ -297,10 +270,9 @@ The local bridge binds to a random loopback port, requires a cryptographically
 random per-process token and matching origin, applies a restrictive CSP, and
 prevents static assets from escaping the project. Deadlined or cancelled
 commands terminate the compromised worker and prepare a fresh generation
-without replaying possible side effects. Pam Desktop 1.x freezes public API `1`,
-worker protocol `6` and the Rust plugin SDK `1` for Linux x86-64. Servo 0.4
-continues evolving; stability of PAM's contracts is not a claim of
-feature-for-feature Electron parity.
+without replaying possible side effects. Pam Desktop is alpha software alongside
+Servo 0.4; it is suited to prototypes and controlled applications, not yet a
+claim of Electron feature parity.
 
 ## A small core, a Composer ecosystem
 
@@ -314,11 +286,11 @@ pam binary
 └── lifecycle, workers, health, metrics and diagnostics
 
 Composer
-├── pushinbr/pam-api          routing + middleware (the Express-like layer)
-├── pushinbr/pam-socket       realtime events (the Socket.IO-like layer)
-├── pushinbr/pam-psr-bridge   standards interoperability
-├── pushinbr/pam-testing      in-memory application tests
-├── pushinbr/pam-desktop  desktop application model (separate repository)
+├── pam/api          routing + middleware (the Express-like layer)
+├── pam/socket       realtime events (the Socket.IO-like layer)
+├── pam/psr-bridge   standards interoperability
+├── pam/testing      in-memory application tests
+├── pam/desktop      desktop application model (separate repository)
 └── every existing compatible PHP package
 ```
 
@@ -337,17 +309,17 @@ Server::create(static fn (Request $request, Response $response): Response =>
 Install only the higher-level pieces your application needs:
 
 ```bash
-pam composer require pushinbr/pam-api
-pam composer require pushinbr/pam-socket          # optional
-pam composer require pushinbr/pam-psr-bridge      # optional
-pam composer require --dev pushinbr/pam-testing   # optional
+pam composer require pam/api
+pam composer require pam/socket          # optional
+pam composer require pam/psr-bridge      # optional
+pam composer require --dev pam/testing   # optional
 ```
 
 See [Packages and extension model](docs/packages.md) for stability, discovery and publishing rules.
 
 ## The API programming model
 
-`pushinbr/pam-api` is the optional, Express-like API:
+`pam/api` is the optional, Express-like API:
 
 ```php
 <?php
@@ -408,7 +380,7 @@ pam test .
 
 Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and loads the normal Composer autoloader. Your lockfile remains the source of truth.
 
-Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pushinbr/pam-api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
+Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pam/api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
 
 The executable compatibility project currently covers real behavior from:
 
@@ -514,15 +486,6 @@ Subprocesses receive their own Unix process group. On timeout, Pam sends `TERM`,
 Amp Futures can be passed to `Pam\Async\await()`. Revolt remains driven by the package's own driver for compatibility; use Pam's native operations on the hottest paths.
 
 See [Async runtime](docs/async-runtime.md) for the execution model.
-Use [Durable workflows](docs/durable-workflows.md) for persisted retries,
-idempotent starts, leased multi-process scheduling, resumable timers and
-reverse-order compensation.
-Use [Typed contracts](docs/typed-contracts.md) to generate JSON Schema, OpenAPI,
-TypeScript, Kotlin, mobile, form, migration, MCP and reference artifacts from
-PHP DTOs and sequential integer enums.
-Use [WASI and typed RPC](docs/wasi-and-rpc.md) to run capability-denied
-WebAssembly modules, validate requests and responses against those contracts,
-and generate TypeScript, Python and Rust SDKs.
 
 ## Streaming and backpressure
 
@@ -547,7 +510,7 @@ $app->get('/events', static function ($request, $response) {
 
 ## WebSockets on the same port
 
-Install `pushinbr/pam-socket`; HTTP and RFC 6455 WebSockets then share the same runtime listener:
+Install `pam/socket`; HTTP and RFC 6455 WebSockets then share the same runtime listener:
 
 ```php
 use Pam\Socket\Server as SocketServer;
@@ -637,8 +600,7 @@ Production is a supervised cluster:
 pam start index.php \
   --workers 10 \
   --max-requests 10000000 \
-  --admin-address 127.0.0.1:3010 \
-  --admin-token-env PAM_ADMIN_TOKEN
+  --admin-address 127.0.0.1:3010
 ```
 
 The production master:
@@ -658,30 +620,9 @@ curl --fail http://127.0.0.1:3010/live
 curl --fail http://127.0.0.1:3010/startup
 curl --fail http://127.0.0.1:3010/ready
 curl --fail http://127.0.0.1:3010/metrics
-
-curl --fail --request POST \
-  --header "Authorization: Bearer ${PAM_ADMIN_TOKEN}" \
-  http://127.0.0.1:3010/reload
-
-curl --fail --request POST \
-  --header "Authorization: Bearer ${PAM_ADMIN_TOKEN}" \
-  http://127.0.0.1:3010/drain
 ```
 
-Reload returns `202` before the readiness-gated generation change; a failed
-replacement leaves the healthy generation serving. Drain stops new work and
-waits for workers up to the configured graceful timeout. The secret is read by
-the master and removed from worker environments. Mutations are disabled unless
-the token environment is configured.
-
-Do not expose the admin listener directly to the public Internet. Keep it behind
-localhost, a private control network or an authenticated proxy even when the
-Bearer token is enabled.
-
-For multiple hosts, [Distributed cluster services](docs/cluster-services.md)
-adds Redis-backed discovery, mTLS, fenced locks, singleton cron, shared rate
-limits, circuit breakers, bounded queues and expiring presence. Redis Streams
-and NATS continue to provide multi-node WebSocket pub/sub.
+Do not expose the admin listener directly to the public Internet.
 
 ## TLS, HTTP/3, and security controls
 
@@ -756,8 +697,6 @@ pam fibers index.php
 pam connections index.php
 pam profile index.php
 PAM_TRACE=1 pam trace index.php
-pam record index.php --output .pam/incidents/latest.jsonl
-pam replay .pam/incidents/latest.jsonl --url http://127.0.0.1:3000
 ```
 
 ## CLI
@@ -775,15 +714,6 @@ pam inspect [index.php]                             inspect PHP, INI, ABI, and e
 pam diagnostics [index.php]                         complete runtime snapshot
 pam heap|fibers|connections [index.php]             focused diagnostic views
 pam profile|trace [index.php]                       profiling and structured events
-pam record [index.php] --output recording.jsonl     bounded redacted flight recorder
-pam replay recording.jsonl --url http://host        replay and detect divergence
-pam sandbox policy.json -- plugin.php               kernel capability sandbox
-pam contracts [index.php] --output generated/contracts
-                                                    generate typed boundary artifacts
-pam snapshot create|verify|run                      integrity-checked cold starts
-pam supply-chain [directory] --policy policy.json  Composer trust/policy gate
-pam wasi run module.wasm [capability options]       bounded denied-by-default WASI
-pam rpc validate|generate|wasi [arguments]          typed SDK and WASI RPC boundary
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
@@ -791,8 +721,7 @@ pam init [directory] --template raw|api|laravel|desktop|mobile
                                                     scaffold and install a project
 pam init [directory] --template api --socket        add native Socket support
 pam init [directory] --no-interaction               accept the default API preset
-pam build [directory] --entry index.php --output dist [--signing-key key]
-pam verify [bundle] [--public-key key] [--require-signature]
+pam build [directory] --entry index.php --output dist
 ```
 
 `pam dev` watches PHP files, `.env`, `composer.json`, and `composer.lock`, while ignoring heavy/generated directories. A syntax error does not kill the watcher; fix the file and save again.
@@ -833,8 +762,7 @@ count, hardware and response contract have been measured under that protocol.
 
 ```bash
 pam composer install --no-dev --classmap-authoritative
-pam build . --entry index.php --output dist --signing-key release.key
-pam verify dist --public-key release.pub --require-signature
+pam build . --entry index.php --output dist
 ./dist/bin/pam-run
 ```
 
@@ -846,19 +774,10 @@ dist/
 ├── bin/pam         optimized runtime
 ├── bin/pam-run     isolated launcher
 ├── lib/libphp*.so    exact linked PHP Embed ABI
-├── manifest.json     size and SHA-256 for every packaged file
-├── manifest.sig      optional Ed25519 signature
-└── sbom.cdx.json     deterministic CycloneDX 1.6 inventory
+└── manifest.json     size and SHA-256 for every packaged file
 ```
 
-The builder refuses to overwrite its destination, escape the project through `..`, package unsafe symlinks, include the output recursively, or bundle a Composer project without an installed autoloader. `pam verify` also rejects missing, extra, modified, duplicate and symlinked files. Signed bundles require an external trusted public key; they do not trust a key carried inside the artifact.
-
-Read [Kernel sandbox, flight recorder and trusted bundles](docs/security-and-replay.md)
-for the integer capability manifest, redaction/replay contract and Ed25519 key flow.
-Read [Bootstrap source snapshots](docs/bootstrap-snapshots.md) for deterministic,
-optionally signed cold-start integrity and its explicit Embed/OPcache boundary.
-Read [Composer supply-chain gate](docs/supply-chain.md) for scripts, plugins,
-maintainers, licenses, provenance, advisories and capability policy.
+The builder refuses to overwrite its destination, escape the project through `..`, package unsafe symlinks, include the output recursively, or bundle a Composer project without an installed autoloader.
 
 Bundles are relocatable, but the target still needs a compatible Linux system ABI and the native dependencies required by PHP and its enabled extensions. Use the provided `Dockerfile` when you need a controlled userspace as well.
 
@@ -936,12 +855,11 @@ The integration suite starts real servers and covers CLI behavior, hot reload, m
 
 Latest local release gate:
 
-- **62 Rust and end-to-end tests passed**;
+- **38 Rust and end-to-end tests passed**;
 - **PHPStan level 9 passed with no errors**;
 - **PHPUnit passed inside the Embed SAPI with 7 tests and 43 assertions; Pest passed inside Embed**;
-- **generated TypeScript, Python and Rust RPC SDK syntax gates passed**;
 - **Composer audit reported no known advisories in either locked contract**;
-- **Cargo audit reported no known vulnerabilities across 283 locked dependencies**.
+- **Cargo audit reported no known vulnerabilities across 193 locked dependencies**.
 
 The optimized 10,000-request runtime soak measured a `51 MiB` post-warmup baseline
 and high-water mark with `0 MiB` sustained growth. The mixed Laravel/package soak
@@ -990,7 +908,9 @@ Bug reports are most useful with the Pam version, PHP Embed version, `pam doctor
 
 ## License
 
-Pam is released under the [MIT License](LICENSE).
+PAM is free and open-source software under the [Apache License 2.0](LICENSE).
+You may use, modify, and distribute it—including commercially—subject to the
+license terms. See the plain-language [licensing guide](LICENSING.md).
 
 ---
 

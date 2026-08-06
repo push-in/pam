@@ -14,14 +14,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/checkout@v7
-        with:
-          repository: push-in/pam-native
-          ref: v0.6.1
-          path: pam-native
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy,rustfmt
       - uses: shivammathur/setup-php@v2
@@ -46,21 +40,21 @@ jobs:
           for package in packages/*/composer.json; do
             composer validate --strict --no-check-lock --no-check-publish "$package"
           done
+          composer validate --strict --no-check-lock --no-check-publish pam-native/packages/native/composer.json
+          scripts/package-release.sh validate
       - name: Install locked Composer dependencies
         run: |
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
       - name: Format
-        run: |
-          cargo fmt --all -- --check
-          python3 -m json.tool runtime/catalog.json >/dev/null
-          bash -n runtime-builder/android/build.sh
+        run: cargo fmt --all -- --check
       - name: Lint
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Rust and integration tests
-        run: cargo test --locked --all-targets --all-features -- --test-threads=1
-      - name: Validate generated RPC SDK syntax
-        run: scripts/check-generated-rpc.sh
+        run: |
+          cargo test --locked --all-targets --all-features -- --test-threads=1
+          cargo test --locked --manifest-path pam-native/Cargo.toml
+          php pam-native/packages/native/tests/run.php
       - name: PHP static analysis
         run: |
           compat/composer-smoke/vendor/bin/phpstan analyse -c compat/composer-smoke/phpstan.neon --no-progress
@@ -71,42 +65,16 @@ jobs:
         run: |
           ./target/debug/pam test compat/composer-smoke --phpunit -c phpunit.xml
           ./target/debug/pam test compat/composer-smoke --pest
-      - name: Supply-chain policy gate
-        run: |
-          ./target/debug/pam supply-chain compat/composer-smoke \
-            --output "${RUNNER_TEMP}/composer-supply-chain.json"
-          ./target/debug/pam supply-chain compat/laravel-smoke \
-            --output "${RUNNER_TEMP}/laravel-supply-chain.json"
       - name: Build release binary
         run: cargo build --locked --release
-      - name: Create Android runtime packaging fixture
-        run: |
-          for runtime_id in 8.4.23-r1 8.5.8-r1; do
-            for android_abi in arm64-v8a x86_64; do
-              runtime="runtime/android/${runtime_id}/${android_abi}"
-              mkdir -p \
-                "${runtime}/lib" \
-                "${runtime}/include/php/main" \
-                "${runtime}/include/php/sapi/embed"
-              printf 'fixture\n' > "${runtime}/lib/libphp.a"
-              printf '/* fixture */\n' > "${runtime}/include/php/main/php.h"
-              printf '/* fixture */\n' > \
-                "${runtime}/include/php/sapi/embed/php_embed.h"
-              printf '{"runtimeId":"%s","androidAbi":"%s"}\n' \
-                "${runtime_id}" "${android_abi}" > "${runtime}/runtime.json"
-            done
-          done
-          for rust_target in aarch64-linux-android x86_64-linux-android; do
-            engine="pam-native/target/${rust_target}/release"
-            mkdir -p "${engine}"
-            printf 'fixture\n' > "${engine}/libpam_native_engine.a"
-          done
       - name: Smoke test isolated runtime bundle
         run: |
           runtime_dist=$(mktemp -d)
           trap 'rm -rf -- "$runtime_dist"' EXIT
           ./scripts/package-runtime.sh \
             target/release/pam ci linux-x86_64 "$runtime_dist"
+          test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/native/android/settings.gradle.kts"
+          test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/native/packages/native/composer.json"
           "$runtime_dist/pam-ci-linux-x86_64/bin/pam-run" -r '
           foreach (["curl", "intl", "mbstring", "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "sockets", "xml", "zip"] as $extension) {
               if (!extension_loaded($extension)) {
@@ -115,7 +83,7 @@ jobs:
               }
           }
           '
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@v4
         with:
           name: pam-linux-x86_64
           path: target/release/pam

@@ -1,9 +1,0 @@
-/.env
-/vendor/
-/database/*.sqlite
-/bootstrap/cache/*.php
-/storage/framework/*
-!/storage/framework/cache/
-!/storage/framework/sessions/
-!/storage/framework/views/
-/storage/logs/*.log

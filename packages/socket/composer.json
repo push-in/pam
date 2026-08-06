@@ -1,8 +1,8 @@
 {
-    "name": "pushinbr/pam-socket",
+    "name": "pam/socket",
     "description": "Expressive socket API for Pam WebSockets.",
     "type": "library",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "keywords": [
         "pam",
         "php",
@@ -16,7 +16,7 @@
     },
     "require": {
         "php": "^8.4",
-        "pushinbr/pam-core-api": "^0.1"
+        "pam/core-api": "^0.1"
     },
     "autoload": {
         "psr-4": {

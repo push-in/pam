@@ -19,7 +19,7 @@ final readonly class RuntimeCompatibility
     public static function discover(): self
     {
         if (!class_exists(Api::class)) {
-            throw new \RuntimeException('pushinbr/pam-core-api requires the Pam runtime.');
+            throw new \RuntimeException('pam/core-api requires the Pam runtime.');
         }
 
         return new self(

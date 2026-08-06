@@ -61,37 +61,6 @@ impl ServerProcess {
         server
     }
 
-    fn start_with_recording() -> (Self, PathBuf) {
-        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
-        let port = probe.local_addr().unwrap().port();
-        drop(probe);
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_nanos();
-        let directory =
-            std::env::temp_dir().join(format!("pam-recorder-test-{}-{unique}", std::process::id()));
-        fs::create_dir(&directory).unwrap();
-        let recording = directory.join("flight.jsonl");
-        let child = Command::new(env!("CARGO_BIN_EXE_pam"))
-            .arg("tests/fixtures/recorder-server.php")
-            .env("PAM_TEST_PORT", port.to_string())
-            .env("PAM_RECORD_PATH", &recording)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("Pam recording server should start");
-        let mut server = Self {
-            child,
-            port,
-            temporary_directory: Some(directory),
-            certificate: None,
-        };
-        server.wait_until_ready();
-        (server, recording)
-    }
-
     fn start_tls() -> Self {
         let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
         let port = probe.local_addr().unwrap().port();
@@ -168,64 +137,6 @@ impl ServerProcess {
         stream.read_to_string(&mut response).unwrap();
         response
     }
-}
-
-#[test]
-fn records_bounded_redacted_http_interactions() {
-    let (server, recording) = ServerProcess::start_with_recording();
-    let body = r#"{"name":"Pam","password":"must-not-leak"}"#;
-    let response = server.http_request(&format!(
-        "POST /echo?token=must-not-leak HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer must-not-leak\r\nX-Pam-Test: recorder\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
-        body.len(),
-    ));
-    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-
-    let contents = fs::read_to_string(&recording).unwrap();
-    assert!(!contents.contains("must-not-leak"), "{contents}");
-    let entry: serde_json::Value = serde_json::from_str(contents.trim()).unwrap();
-    assert_eq!(entry["schemaVersion"], 1);
-    assert_eq!(entry["kind"], 1);
-    assert_eq!(entry["sequence"], 1);
-    assert_eq!(entry["request"]["method"], "POST");
-    assert_eq!(
-        entry["request"]["headers"]["authorization"][0],
-        "[REDACTED:authorization]"
-    );
-    assert_eq!(
-        entry["request"]["body"]["data"],
-        r#"{"name":"Pam","password":"[REDACTED:password]"}"#
-    );
-    assert_eq!(entry["response"]["status"], 200);
-
-    let replay = Command::new(env!("CARGO_BIN_EXE_pam"))
-        .arg("replay")
-        .arg(&recording)
-        .arg("--url")
-        .arg(format!("http://127.0.0.1:{}", server.port))
-        .args([
-            "--secret-env",
-            "authorization=PAM_TEST_AUTHORIZATION",
-            "--secret-env",
-            "token=PAM_TEST_TOKEN",
-            "--secret-env",
-            "password=PAM_TEST_PASSWORD",
-        ])
-        .env("PAM_TEST_AUTHORIZATION", "Bearer must-not-leak")
-        .env("PAM_TEST_TOKEN", "must-not-leak")
-        .env("PAM_TEST_PASSWORD", "must-not-leak")
-        .output()
-        .unwrap();
-    assert!(
-        replay.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&replay.stdout),
-        String::from_utf8_lossy(&replay.stderr),
-    );
-    assert!(
-        String::from_utf8_lossy(&replay.stdout).contains("REPLAY MATCHED"),
-        "{}",
-        String::from_utf8_lossy(&replay.stdout)
-    );
 }
 
 #[test]

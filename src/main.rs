@@ -12,14 +12,9 @@ mod desktop;
 mod dev;
 mod doctor;
 mod mobile;
-mod package_coordinates;
 mod php;
-mod rpc;
-mod sandbox;
 mod server;
-mod supply_chain;
 mod terminal;
-mod wasi;
 mod worker_state;
 
 const EX_USAGE: u8 = 64;
@@ -175,99 +170,11 @@ fn run() -> Result<u8, CliError> {
         return run_script(&executable, &script, arguments);
     }
 
-    if matches!(
-        script_arg.to_string_lossy().as_ref(),
-        "up" | "status"
-            | "restart"
-            | "stop"
-            | "check-production"
-            | "compatibility"
-            | "health"
-            | "leaks"
-            | "capacity"
-            | "deploy"
-            | "remote"
-            | "rollback"
-            | "logs"
-            | "workers"
-            | "queues"
-            | "scheduler"
-            | "scale"
-            | "nightwatch"
-            | "autoscale"
-            | "mcp"
-            | "forge-script"
-    ) {
-        let command = script_arg.to_string_lossy();
-        let remaining_arguments = raw_args.collect::<Vec<_>>();
-        if remaining_arguments
-            .first()
-            .is_some_and(|argument| argument == "--help" || argument == "-h")
-        {
-            if terminal::print_command_help(&executable, command.as_ref()) {
-                return Ok(0);
-            }
-            return Err(CliError::Commands(format!(
-                "no focused help is available for {command:?}"
-            )));
-        }
-        let mut arguments = if matches!(command.as_ref(), "up" | "status" | "restart" | "stop") {
-            vec![
-                OsString::from("pam:process"),
-                OsString::from(command.as_ref()),
-            ]
-        } else if matches!(
-            command.as_ref(),
-            "rollback" | "logs" | "workers" | "queues" | "scheduler" | "scale"
-        ) {
-            vec![
-                OsString::from("pam:remote"),
-                OsString::from(command.as_ref()),
-            ]
-        } else {
-            vec![OsString::from(format!("pam:{command}"))]
-        };
-        arguments.extend(remaining_arguments);
-        let script = resolve_script(OsStr::new("artisan"))?;
-        // SAFETY: Artisan owns this single-threaded PHP lifecycle before worker startup.
-        unsafe {
-            env::set_var("PAM_CLI_MODE", "1");
-            env::set_var("APP_RUNNING_IN_CONSOLE", "true");
-        }
-        return run_script(&executable, &script, arguments);
-    }
-
     if script_arg == "exec" {
         let script = raw_args
             .next()
             .ok_or_else(|| CliError::Commands("exec requires a PHP script".to_owned()))?;
         let script = resolve_script(&script)?;
-        return run_script(&executable, &script, raw_args.collect());
-    }
-
-    if script_arg == "sandbox" {
-        let manifest = raw_args.next().ok_or_else(|| {
-            CliError::Commands("sandbox requires a capability manifest".to_owned())
-        })?;
-        if manifest == "--help" || manifest == "-h" {
-            terminal::print_command_help(&executable, "sandbox");
-            return Ok(0);
-        }
-        let separator = raw_args.next().ok_or_else(|| {
-            CliError::Commands("sandbox requires `-- <script.php> [arguments...]`".to_owned())
-        })?;
-        if separator != "--" {
-            return Err(CliError::Commands(
-                "sandbox requires `--` before the PHP entry point".to_owned(),
-            ));
-        }
-        let script = raw_args
-            .next()
-            .ok_or_else(|| CliError::Commands("sandbox requires a PHP entry point".to_owned()))?;
-        let manifest = resolve_script(&manifest)?;
-        let script = resolve_script(&script)?;
-        let policy = sandbox::Policy::load(&manifest).map_err(CliError::Commands)?;
-        policy.apply().map_err(CliError::Commands)?;
         return run_script(&executable, &script, raw_args.collect());
     }
 
@@ -282,129 +189,6 @@ fn run() -> Result<u8, CliError> {
         };
     }
 
-    if script_arg == "snapshot" {
-        return snapshot_command(&executable, raw_args.collect());
-    }
-
-    if script_arg == "supply-chain" {
-        let mut project = PathBuf::from(".");
-        let mut policy = None;
-        let mut capabilities = None;
-        let mut output = None;
-        let mut offline = false;
-        let mut positional = false;
-        while let Some(argument) = raw_args.next() {
-            match argument.to_string_lossy().as_ref() {
-                "--help" | "-h" => {
-                    terminal::print_command_help(&executable, "supply-chain");
-                    return Ok(0);
-                }
-                "--policy" => {
-                    policy = Some(PathBuf::from(raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--policy requires a JSON file".to_owned())
-                    })?));
-                }
-                "--capabilities" => {
-                    capabilities = Some(PathBuf::from(raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--capabilities requires a JSON file".to_owned())
-                    })?));
-                }
-                "--output" => {
-                    output = Some(PathBuf::from(raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--output requires a JSON file".to_owned())
-                    })?));
-                }
-                "--offline" => offline = true,
-                option if option.starts_with('-') => {
-                    return Err(CliError::Commands(format!(
-                        "unknown supply-chain option: {option}"
-                    )));
-                }
-                _ if !positional => {
-                    project = PathBuf::from(argument);
-                    positional = true;
-                }
-                _ => {
-                    return Err(CliError::Commands(
-                        "supply-chain accepts one project directory".to_owned(),
-                    ));
-                }
-            }
-        }
-        return supply_chain::run(
-            &executable,
-            supply_chain::Options {
-                project,
-                policy,
-                capabilities,
-                output,
-                offline,
-            },
-        )
-        .map_err(CliError::Commands);
-    }
-
-    if script_arg == "wasi" {
-        let arguments = raw_args.collect::<Vec<_>>();
-        if arguments
-            .iter()
-            .take(2)
-            .any(|argument| argument == "--help" || argument == "-h")
-        {
-            terminal::print_command_help(&executable, "wasi");
-            return Ok(0);
-        }
-        return wasi::run(arguments).map_err(CliError::Commands);
-    }
-
-    if script_arg == "rpc" {
-        let arguments = raw_args.collect::<Vec<_>>();
-        if arguments
-            .iter()
-            .take(2)
-            .any(|argument| argument == "--help" || argument == "-h")
-        {
-            terminal::print_command_help(&executable, "rpc");
-            return Ok(0);
-        }
-        return rpc::run(arguments).map_err(CliError::Commands);
-    }
-
-    if script_arg == "contracts" {
-        let mut script = OsString::from("index.php");
-        let mut output = PathBuf::from("generated/contracts");
-        let mut positional = false;
-        while let Some(argument) = raw_args.next() {
-            match argument.to_string_lossy().as_ref() {
-                "--help" | "-h" => {
-                    terminal::print_command_help(&executable, "contracts");
-                    return Ok(0);
-                }
-                "--output" => {
-                    output = PathBuf::from(raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--output requires a directory".to_owned())
-                    })?);
-                }
-                option if option.starts_with('-') => {
-                    return Err(CliError::Commands(format!(
-                        "unknown contracts option: {option}"
-                    )));
-                }
-                _ if !positional => {
-                    script = argument;
-                    positional = true;
-                }
-                _ => {
-                    return Err(CliError::Commands(
-                        "contracts accepts one PHP entry point".to_owned(),
-                    ));
-                }
-            }
-        }
-        let script = resolve_script(&script)?;
-        return commands::contracts(&executable, &script, &[], &output).map_err(CliError::Commands);
-    }
-
     if script_arg == "test" {
         let mut arguments = raw_args.collect::<Vec<_>>();
         let target = if arguments
@@ -416,148 +200,6 @@ fn run() -> Result<u8, CliError> {
             resolve_target(OsStr::new("."))?
         };
         return commands::test(&executable, &target, arguments).map_err(CliError::Commands);
-    }
-
-    if script_arg == "record" {
-        let mut script = OsString::from("index.php");
-        let mut output = PathBuf::from(".pam/recordings/latest.jsonl");
-        let mut max_body_bytes = None;
-        let mut max_bytes = None;
-        let mut positional = false;
-        let mut script_arguments = Vec::new();
-        let mut passthrough = false;
-        while let Some(argument) = raw_args.next() {
-            if passthrough {
-                script_arguments.push(argument);
-                continue;
-            }
-            match argument.to_string_lossy().as_ref() {
-                "--help" | "-h" => {
-                    terminal::print_command_help(&executable, "record");
-                    return Ok(0);
-                }
-                "--" => passthrough = true,
-                "--output" => {
-                    output = PathBuf::from(raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--output requires a JSONL file".to_owned())
-                    })?);
-                }
-                "--max-body-bytes" => {
-                    let value = raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--max-body-bytes requires an integer".to_owned())
-                    })?;
-                    let parsed = value.to_string_lossy().parse::<u64>().map_err(|_| {
-                        CliError::Commands(
-                            "--max-body-bytes requires a positive integer".to_owned(),
-                        )
-                    })?;
-                    if parsed == 0 {
-                        return Err(CliError::Commands(
-                            "--max-body-bytes requires a positive integer".to_owned(),
-                        ));
-                    }
-                    max_body_bytes = Some(value);
-                }
-                "--max-bytes" => {
-                    let value = raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--max-bytes requires an integer".to_owned())
-                    })?;
-                    let parsed = value.to_string_lossy().parse::<u64>().map_err(|_| {
-                        CliError::Commands("--max-bytes requires a positive integer".to_owned())
-                    })?;
-                    if parsed == 0 {
-                        return Err(CliError::Commands(
-                            "--max-bytes requires a positive integer".to_owned(),
-                        ));
-                    }
-                    max_bytes = Some(value);
-                }
-                option if option.starts_with('-') => {
-                    return Err(CliError::Commands(format!(
-                        "unknown record option: {option}"
-                    )));
-                }
-                _ if !positional => {
-                    script = argument;
-                    positional = true;
-                }
-                _ => {
-                    return Err(CliError::Commands(
-                        "put PHP script arguments after `--`".to_owned(),
-                    ));
-                }
-            }
-        }
-        let script = resolve_script(&script)?;
-        let recording =
-            commands::prepare_recording(&output, &script).map_err(CliError::Commands)?;
-        // SAFETY: recorder configuration is finalized before PHP or Tokio starts.
-        unsafe {
-            env::set_var("PAM_RECORD_PATH", &recording);
-            if let Some(value) = max_body_bytes {
-                env::set_var("PAM_RECORD_MAX_BODY_BYTES", value);
-            }
-            if let Some(value) = max_bytes {
-                env::set_var("PAM_RECORD_MAX_BYTES", value);
-            }
-        }
-        eprintln!("Pam flight recorder writing to {}", recording.display());
-        return run_script(&executable, &script, script_arguments);
-    }
-
-    if script_arg == "replay" {
-        let mut recording = None;
-        let mut url = OsString::from("http://127.0.0.1:3000");
-        let mut secrets = std::collections::BTreeMap::new();
-        while let Some(argument) = raw_args.next() {
-            match argument.to_string_lossy().as_ref() {
-                "--help" | "-h" => {
-                    terminal::print_command_help(&executable, "replay");
-                    return Ok(0);
-                }
-                "--url" => {
-                    url = raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--url requires an HTTP base URL".to_owned())
-                    })?;
-                }
-                "--secret-env" => {
-                    let mapping = raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--secret-env requires NAME=ENV_VAR".to_owned())
-                    })?;
-                    let mapping = mapping.to_string_lossy();
-                    let (name, environment) = mapping.split_once('=').ok_or_else(|| {
-                        CliError::Commands("--secret-env requires NAME=ENV_VAR".to_owned())
-                    })?;
-                    if name.is_empty() || environment.is_empty() {
-                        return Err(CliError::Commands(
-                            "--secret-env requires NAME=ENV_VAR".to_owned(),
-                        ));
-                    }
-                    let value = env::var(environment).map_err(|_| {
-                        CliError::Commands(format!(
-                            "environment variable {environment:?} is not set"
-                        ))
-                    })?;
-                    secrets.insert(name.to_owned(), value);
-                }
-                option if option.starts_with('-') => {
-                    return Err(CliError::Commands(format!(
-                        "unknown replay option: {option}"
-                    )));
-                }
-                _ if recording.is_none() => recording = Some(argument),
-                _ => {
-                    return Err(CliError::Commands(
-                        "replay accepts one recording file".to_owned(),
-                    ));
-                }
-            }
-        }
-        let recording = recording
-            .ok_or_else(|| CliError::Commands("replay requires a recording file".to_owned()))?;
-        let recording = resolve_target(&recording)?;
-        return commands::replay(&recording, &url.to_string_lossy(), &secrets)
-            .map_err(CliError::Commands);
     }
 
     if matches!(
@@ -638,7 +280,8 @@ fn run() -> Result<u8, CliError> {
                 "--template" => {
                     let value = raw_args.next().ok_or_else(|| {
                         CliError::Commands(
-                            "--template requires raw, api, laravel, desktop, or mobile".to_owned(),
+                            "--template requires raw, api, laravel, desktop, mobile, or mobile-ui"
+                                .to_owned(),
                         )
                     })?;
                     template = Some(
@@ -685,7 +328,6 @@ fn run() -> Result<u8, CliError> {
         let mut target = OsString::from(".");
         let mut output = OsString::from("dist");
         let mut entry = OsString::from("index.php");
-        let mut signing_key = None;
         let mut positional = false;
         while let Some(argument) = raw_args.next() {
             match argument.to_string_lossy().as_ref() {
@@ -698,11 +340,6 @@ fn run() -> Result<u8, CliError> {
                     entry = raw_args.next().ok_or_else(|| {
                         CliError::Commands("--entry requires a PHP file".to_owned())
                     })?;
-                }
-                "--signing-key" => {
-                    signing_key = Some(raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--signing-key requires an Ed25519 key".to_owned())
-                    })?);
                 }
                 option if option.starts_with('-') => {
                     return Err(CliError::Commands(format!(
@@ -726,48 +363,7 @@ fn run() -> Result<u8, CliError> {
         } else {
             target.join(output)
         };
-        let signing_key = signing_key.as_deref().map(resolve_script).transpose()?;
-        return commands::build(&target, &output, Path::new(&entry), signing_key.as_deref())
-            .map_err(CliError::Commands);
-    }
-
-    if script_arg == "verify" {
-        let mut target = OsString::from("dist");
-        let mut positional = false;
-        let mut public_key = None;
-        let mut require_signature = false;
-        while let Some(argument) = raw_args.next() {
-            match argument.to_string_lossy().as_ref() {
-                "--help" | "-h" => {
-                    terminal::print_command_help(&executable, "verify");
-                    return Ok(0);
-                }
-                "--public-key" => {
-                    public_key = Some(raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--public-key requires an Ed25519 key".to_owned())
-                    })?);
-                }
-                "--require-signature" => require_signature = true,
-                option if option.starts_with('-') => {
-                    return Err(CliError::Commands(format!(
-                        "unknown verify option: {option}"
-                    )));
-                }
-                _ if !positional => {
-                    target = argument;
-                    positional = true;
-                }
-                _ => {
-                    return Err(CliError::Commands(
-                        "verify accepts one bundle directory".to_owned(),
-                    ));
-                }
-            }
-        }
-        let target = resolve_target(&target)?;
-        let public_key = public_key.as_deref().map(resolve_script).transpose()?;
-        return commands::verify_bundle(&target, public_key.as_deref(), require_signature)
-            .map_err(CliError::Commands);
+        return commands::build(&target, &output, Path::new(&entry)).map_err(CliError::Commands);
     }
 
     if script_arg == "benchmark" {
@@ -810,125 +406,6 @@ fn run_script(
     }
 
     Ok(0)
-}
-
-fn snapshot_command(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, CliError> {
-    let mut arguments = arguments.into_iter();
-    let action = arguments.next().unwrap_or_else(|| OsString::from("--help"));
-    if action == "--help" || action == "-h" {
-        terminal::print_command_help(executable, "snapshot");
-        return Ok(0);
-    }
-    match action.to_string_lossy().as_ref() {
-        "create" => {
-            let mut project = PathBuf::from(".");
-            let mut entry = PathBuf::from("index.php");
-            let mut output = None;
-            let mut signing_key = None;
-            let mut positional = false;
-            while let Some(argument) = arguments.next() {
-                match argument.to_string_lossy().as_ref() {
-                    "--entry" => {
-                        entry = PathBuf::from(arguments.next().ok_or_else(|| {
-                            CliError::Commands("--entry requires a PHP file".to_owned())
-                        })?);
-                    }
-                    "--output" => {
-                        output = Some(PathBuf::from(arguments.next().ok_or_else(|| {
-                            CliError::Commands("--output requires a file".to_owned())
-                        })?));
-                    }
-                    "--signing-key" => {
-                        signing_key = Some(PathBuf::from(arguments.next().ok_or_else(|| {
-                            CliError::Commands("--signing-key requires a file".to_owned())
-                        })?));
-                    }
-                    option if option.starts_with('-') => {
-                        return Err(CliError::Commands(format!(
-                            "unknown snapshot create option: {option}"
-                        )));
-                    }
-                    _ if !positional => {
-                        project = PathBuf::from(argument);
-                        positional = true;
-                    }
-                    _ => {
-                        return Err(CliError::Commands(
-                            "snapshot create accepts one project directory".to_owned(),
-                        ));
-                    }
-                }
-            }
-            let output = output.unwrap_or_else(|| project.join(".pam/bootstrap.snapshot.json"));
-            commands::create_snapshot(&project, &entry, &output, signing_key.as_deref())
-                .map_err(CliError::Commands)
-        }
-        "verify" | "run" => {
-            let manifest = PathBuf::from(arguments.next().ok_or_else(|| {
-                CliError::Commands(format!(
-                    "snapshot {} requires a manifest",
-                    action.to_string_lossy()
-                ))
-            })?);
-            let mut project = PathBuf::from(".");
-            let mut public_key = None;
-            let mut require_signature = false;
-            let mut script_arguments = Vec::new();
-            let mut passthrough = false;
-            while let Some(argument) = arguments.next() {
-                if passthrough {
-                    script_arguments.push(argument);
-                    continue;
-                }
-                match argument.to_string_lossy().as_ref() {
-                    "--project" => {
-                        project = PathBuf::from(arguments.next().ok_or_else(|| {
-                            CliError::Commands("--project requires a directory".to_owned())
-                        })?);
-                    }
-                    "--public-key" => {
-                        public_key = Some(PathBuf::from(arguments.next().ok_or_else(|| {
-                            CliError::Commands("--public-key requires a file".to_owned())
-                        })?));
-                    }
-                    "--require-signature" => require_signature = true,
-                    "--" if action == "run" => passthrough = true,
-                    option if option.starts_with('-') => {
-                        return Err(CliError::Commands(format!(
-                            "unknown snapshot {} option: {option}",
-                            action.to_string_lossy()
-                        )));
-                    }
-                    _ => {
-                        return Err(CliError::Commands(format!(
-                            "unexpected snapshot {} argument",
-                            action.to_string_lossy()
-                        )));
-                    }
-                }
-            }
-            if action == "verify" {
-                return commands::verify_snapshot(
-                    &project,
-                    &manifest,
-                    public_key.as_deref(),
-                    require_signature,
-                )
-                .map_err(CliError::Commands);
-            }
-            let plan = commands::snapshot_plan(
-                &project,
-                &manifest,
-                public_key.as_deref(),
-                require_signature,
-            )
-            .map_err(CliError::Commands)?;
-            run_script(executable, &plan.entry, script_arguments)
-        }
-        value => Err(CliError::Commands(format!(
-            "unknown snapshot action {value:?}; expected create, verify, or run"
-        ))),
-    }
 }
 
 fn resolve_script(script: &OsStr) -> Result<PathBuf, CliError> {

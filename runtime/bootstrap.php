@@ -824,14 +824,6 @@ namespace Pam\Internal {
             return json_encode($routes, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         }
 
-        public static function contractsInfo(): string
-        {
-            return json_encode(
-                \Pam\Contract\Compiler::discover(),
-                JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
-            );
-        }
-
         public static function beginHttpDispatch(
             string $method,
             string $target,
@@ -977,7 +969,6 @@ namespace Pam\Internal {
             $response = new Response();
             $temporaryUploads = [];
             $outputLevel = ob_get_level();
-            $recordStarted = (int) hrtime(true);
 
             try {
                 $path = parse_url($target, PHP_URL_PATH) ?: '/';
@@ -1132,15 +1123,6 @@ namespace Pam\Internal {
                 unset($request, $response, $handler, $result, $psrResponse);
             }
 
-            \Pam\Replay\FlightRecorder::captureHttp(
-                is_string($profileRequestId ?? null) ? $profileRequestId : '',
-                $method,
-                $target,
-                is_array($headers ?? null) ? $headers : [],
-                $body,
-                $serialized,
-                $recordStarted,
-            );
             return $serialized;
         }
 

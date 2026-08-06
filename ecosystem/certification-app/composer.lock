@@ -1,0 +1,841 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "b66bbeeb2fe86c59bb3e31b47dbf7d09",
+    "packages": [
+        {
+            "name": "pushinbr/pam-native",
+            "version": "0.6.2",
+            "dist": {
+                "type": "path",
+                "url": "../../pam-native/packages/native",
+                "reference": "df19a5edfd825d523f56d483c19387ca7df9d9e6"
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "bin": [
+                "bin/pam-native-format",
+                "bin/pam-native-optimize"
+            ],
+            "type": "library",
+            "extra": {
+                "pam-native": {
+                    "manifest-schema": "resources/pam-native.schema.json",
+                    "plugin-schema": "resources/pam-native.plugin.schema.json",
+                    "template-custom-data": "resources/pam-native.custom-data.json",
+                    "protocol": 1
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\": "src/"
+                }
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Build fast native Android and iOS applications with PHP and PAM.",
+            "homepage": "https://github.com/push-in/pam-native",
+            "keywords": [
+                "android",
+                "mobile",
+                "native",
+                "pam",
+                "php"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam-native/issues",
+                "source": "https://github.com/push-in/pam-native"
+            },
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-auth",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-auth",
+                "reference": "a8257084fac480bf4d96d7c600f5ff6be793e1aa"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Auth\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Secure sessions, encrypted credential vaults and OAuth 2.1/PKCE primitives for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-background-transfer",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-background-transfer",
+                "reference": "14a183641f5a8d6038ec4d81c27e694c0a48e3e3"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\BackgroundTransfer\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Durable background uploads and downloads for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-bluetooth",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-bluetooth",
+                "reference": "b48e113a2b473fcdc70045b0e03e02dc814dce17"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Bluetooth\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Lifecycle-safe Bluetooth LE scanning, GATT and notifications for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-devtools",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-devtools",
+                "reference": "dc7ea9a7063a13228b5c3cf619216280e93461dc"
+            },
+            "require": {
+                "ext-json": "*",
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\DevTools\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Deterministic timeline, state snapshots, network inspection and performance marks for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-feature-flags",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-feature-flags",
+                "reference": "06039f8fa743b3f9da2ebc3a9361cf02dc151b20"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\FeatureFlags\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Typed targeting, deterministic rollouts and offline feature-flag snapshots for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-firebase",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-firebase",
+                "reference": "7a7a28509b77080dc3ed367644eb743256c3ffa9"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0",
+                "pushinbr/pam-native-feature-flags": "^0.1.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Firebase\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Production Firebase Analytics, Remote Config, Messaging, Crashlytics and multi-app integration for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-health",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-health",
+                "reference": "8df555986ccad00ccafd5ed8bc936db0c29e611c"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Health\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Health Connect and HealthKit authorization, reads and writes for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-intents",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-intents",
+                "reference": "b518262a3c6ce7be95da36a00682df1413a3e2d9"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Intents\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Android dynamic shortcuts and Apple App Intents for PAM Native routes.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-live-activities",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-live-activities",
+                "reference": "d5c40ce65720b19ddc24c99a96a95a0f86cd553b"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\LiveActivities\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "ActivityKit Live Activities and Android ongoing live notifications for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-maps",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-maps",
+                "reference": "b48330ede3ffe51841962551bc629b259a22ebd6"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Maps\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Declarative native maps, cameras, markers and overlays for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-media",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-media",
+                "reference": "25326821877744e7e22f51d5d73d70e49d0220b8"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Media\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Native media inspection and thumbnail generation for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-nfc",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-nfc",
+                "reference": "6a8fb245b186c8760d572cd9b5b809b21359b612"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Nfc\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Lifecycle-safe NDEF reading and writing for PAM Native on Android and iOS.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-observability",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-observability",
+                "reference": "6d664387e9b4b271de52ebd8e1f7d787d00f65ce"
+            },
+            "require": {
+                "ext-json": "*",
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Observability\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Vendor-neutral traces, metrics, logs and crash context for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-payments",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-payments",
+                "reference": "4052800205b92ba218320440e62775aa657d0950"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Payments\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "PCI-conscious Stripe PaymentSheet payments for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-realtime",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-realtime",
+                "reference": "7056bc95e374ea35441a7840d1c90243264512c8"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Realtime\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Persistent native WebSocket connections with bounded event queues for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-scanner",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-scanner",
+                "reference": "445b091030871455497206cf5252ba3d11ada81b"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Scanner\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Real-time QR and barcode scanning with native camera previews for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-share-extension",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-share-extension",
+                "reference": "5a88f6ebc6c4a988a0fceae07aa6590ad016f1a4"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\ShareExtension\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Receive text, URLs and files through native Android shares and an iOS Share Extension.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-subscriptions",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-subscriptions",
+                "reference": "f10a82d31fff5b690f0fcd75ac51960109180dff"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Subscriptions\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "StoreKit 2 and Google Play Billing subscriptions for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-sync",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-sync",
+                "reference": "ea57414ac40541a492ffc589bd2fd3a1ba74da41"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Sync\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Offline-first outbox, cursors, conflict resolution and incremental synchronization for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-video",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-video",
+                "reference": "220e4a3956c112a8142ccc275c56d8ff896caf6b"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Video\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Adaptive streaming, subtitles and native Media3/AVPlayer playback for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-native-widgets",
+            "version": "0.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../pam-native-widgets",
+                "reference": "f4229d47451993d6103a1351d311bdd17b17ddc7"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-native": "^0.6.0"
+            },
+            "type": "pam-native-plugin",
+            "extra": {
+                "pam-native": {
+                    "plugin": "pam-native.plugin.json"
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Native\\Widgets\\": "src/"
+                }
+            },
+            "scripts": {
+                "test": [
+                    "php tests/run.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Android App Widgets and iOS WidgetKit timelines for PAM Native.",
+            "transport-options": {
+                "symlink": false,
+                "relative": true
+            }
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "^8.4"
+    },
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
+}

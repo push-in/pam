@@ -1,61 +1,54 @@
 {
     "owner": "push-in",
-    "runtimePackages": [
-        {
-            "name": "pushinbr/pam-desktop",
-            "constraint": "^1.1",
-            "description": "PHP-first desktop application API powered by PAM, Rust, and Servo."
-        }
-    ],
     "packages": [
         {
-            "name": "pushinbr/pam-core-api",
+            "name": "pam/core-api",
             "path": "packages/core-api",
             "repository": "pam-core-api",
             "deploySecret": "PAM_CORE_API_DEPLOY_KEY",
             "description": "Stable PHP contracts for packages that extend the PAM runtime."
         },
         {
-            "name": "pushinbr/pam-api",
+            "name": "pam/api",
             "path": "packages/api",
             "repository": "pam-api",
             "deploySecret": "PAM_API_DEPLOY_KEY",
             "description": "Elegant HTTP routing and middleware for the PAM runtime."
         },
         {
-            "name": "pushinbr/pam-socket",
+            "name": "pam/socket",
             "path": "packages/socket",
             "repository": "pam-socket",
             "deploySecret": "PAM_SOCKET_DEPLOY_KEY",
             "description": "Event-oriented socket APIs for PAM WebSockets."
         },
         {
-            "name": "pushinbr/pam-psr-bridge",
+            "name": "pam/psr-bridge",
             "path": "packages/psr-bridge",
             "repository": "pam-psr-bridge",
             "deploySecret": "PAM_PSR_BRIDGE_DEPLOY_KEY",
             "description": "PSR-7, PSR-15 and PSR-17 interoperability for PAM."
         },
         {
-            "name": "pushinbr/pam-testing",
+            "name": "pam/testing",
             "path": "packages/testing",
             "repository": "pam-testing",
             "deploySecret": "PAM_TESTING_DEPLOY_KEY",
             "description": "In-memory HTTP testing utilities for PAM applications."
         },
         {
-            "name": "pushinbr/pam-skeleton",
+            "name": "pam/skeleton",
             "path": "packages/skeleton",
             "repository": "pam-skeleton",
             "deploySecret": "PAM_SKELETON_DEPLOY_KEY",
             "description": "Production-ready starter application for the PAM runtime."
         },
         {
-            "name": "pushinbr/pam-laravel",
-            "path": "packages/laravel",
-            "repository": "pam-laravel",
-            "deploySecret": "PAM_LARAVEL_DEPLOY_KEY",
-            "description": "Production tooling, lifecycle safety, observability and deployment for Laravel on PAM."
+            "name": "pam/native",
+            "path": "pam-native/packages/native",
+            "repository": "pam-native",
+            "deploySecret": "PAM_NATIVE_DEPLOY_KEY",
+            "description": "Native Android UI, lifecycle, templates and system APIs for persistent PHP."
         }
     ]
 }

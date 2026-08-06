@@ -1473,10 +1473,9 @@ fn validate_ios_binding(package: &str, kind: &str, class: Option<&str>) -> Resul
 }
 
 fn parse_release_version(value: &str) -> Result<(u32, u32, u32), String> {
-    let normalized = value.strip_prefix('v').unwrap_or(value);
-    let release = normalized
+    let release = value
         .split_once(['-', '+'])
-        .map_or(normalized, |(release, _)| release);
+        .map_or(value, |(release, _)| release);
     let numbers = release
         .split('.')
         .map(|part| {
@@ -4309,9 +4308,5 @@ mod tests {
         assert!(!valid_swift_class_name("PamFirebase/FirebaseModule"));
         assert!(!valid_swift_class_name("PamFirebase..FirebaseModule"));
         assert!(!valid_swift_class_name("1FirebaseModule"));
-
-        assert_eq!(parse_release_version("v0.6.1"), Ok((0, 6, 1)));
-        assert_eq!(parse_release_version("1.2.3-beta.1"), Ok((1, 2, 3)));
-        assert!(parse_release_version("version-1.2.3").is_err());
     }
 }

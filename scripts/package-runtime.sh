@@ -13,7 +13,6 @@ pam_target=$3
 output_directory=$4
 package="pam-${pam_version}-${pam_target}"
 package_root="${output_directory}/${package}"
-expected_native_version=0.6.1
 
 test -x "${pam_binary}" || {
     echo "PAM binary is not executable: ${pam_binary}" >&2
@@ -40,7 +39,6 @@ mkdir -p \
     "${package_root}/bin" \
     "${package_root}/etc/conf.d" \
     "${package_root}/lib/php/extensions" \
-    "${package_root}/share/pam/runtime" \
     "${package_root}/share/pam/native"
 
 cp "${pam_binary}" "${package_root}/bin/pam"
@@ -50,54 +48,7 @@ test -f pam-native/Cargo.toml || {
     echo "Pam Native SDK source is missing from the release checkout." >&2
     exit 66
 }
-native_version=$(
-    sed -n 's/^version = "\([^"]*\)"$/\1/p' pam-native/Cargo.toml |
-        head -n 1
-)
-test "${native_version}" = "${expected_native_version}" || {
-    echo "Expected PAM Native ${expected_native_version}, found ${native_version}." >&2
-    exit 66
-}
-test -f runtime/catalog.json || {
-    echo "PAM runtime catalog is missing." >&2
-    exit 66
-}
-for runtime_id in 8.4.23-r1 8.5.8-r1; do
-  for android_abi in arm64-v8a x86_64; do
-    android_runtime="runtime/android/${runtime_id}/${android_abi}"
-    test -s "${android_runtime}/lib/libphp.a" || {
-        echo "PHP Android runtime library is missing for ${runtime_id}/${android_abi}." >&2
-        exit 66
-    }
-    test -f "${android_runtime}/include/php/main/php.h" || {
-        echo "PHP Android headers are missing for ${runtime_id}/${android_abi}." >&2
-        exit 66
-    }
-    test -f "${android_runtime}/include/php/sapi/embed/php_embed.h" || {
-        echo "PHP Android Embed headers are missing for ${runtime_id}/${android_abi}." >&2
-        exit 66
-    }
-    test -f "${android_runtime}/runtime.json" || {
-        echo "PHP Android runtime provenance is missing for ${runtime_id}/${android_abi}." >&2
-        exit 66
-    }
-  done
-done
-for android_abi in arm64-v8a x86_64; do
-    case "${android_abi}" in
-        arm64-v8a) rust_target=aarch64-linux-android ;;
-        x86_64) rust_target=x86_64-linux-android ;;
-    esac
-    engine_library="pam-native/target/${rust_target}/release/libpam_native_engine.a"
-    test -s "${engine_library}" || {
-        echo "Prebuilt Pam Native engine is missing for ${android_abi}." >&2
-        exit 66
-    }
-done
-cp runtime/catalog.json "${package_root}/share/pam/runtime/catalog.json"
-cp -R runtime/android "${package_root}/share/pam/runtime/android"
 tar \
-    --exclude='./.git' \
     --exclude='./target' \
     --exclude='./examples' \
     --exclude='./runtime-builder' \
@@ -108,13 +59,7 @@ tar \
     --exclude='*/local.properties' \
     -C pam-native -cf - . |
     tar -C "${package_root}/share/pam/native" -xf -
-for rust_target in aarch64-linux-android x86_64-linux-android; do
-    engine_directory="${package_root}/share/pam/native/target/${rust_target}/release"
-    mkdir -p "${engine_directory}"
-    cp \
-        "pam-native/target/${rust_target}/release/libpam_native_engine.a" \
-        "${engine_directory}/"
-done
+
 copy_dependencies() {
     ldd "$1" | awk '$2 == "=>" { print $1 "|" $3 }' |
         while IFS='|' read -r library_name library_path; do
@@ -180,7 +125,7 @@ exec "$PAM_HOME/bin/pam" "$@"
 EOF
 chmod 0755 "${package_root}/bin/pam" "${package_root}/bin/pam-run"
 
-cp LICENSE README.md "${package_root}/"
+cp LICENSE LICENSING.md README.md "${package_root}/"
 tar -C "${output_directory}" -czf "${output_directory}/${package}.tar.gz" "${package}"
 (
     cd "${output_directory}"

@@ -7,7 +7,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
-use crate::control_plane::{ClusterSnapshot, ControlAction, ControlPlane, SharedClusterSnapshot};
+use crate::control_plane::{ClusterSnapshot, ControlPlane, SharedClusterSnapshot};
 use crate::worker_state::{
     WORKER_STATE_PATH_ENV, WorkerLifecycle, WorkerRuntimeRecord, epoch_millis, read,
 };
@@ -32,8 +32,6 @@ pub struct StartOptions {
     pub restart_backoff: Duration,
     pub watchdog_grace: Duration,
     pub admin_address: Option<SocketAddr>,
-    pub admin_token: Option<String>,
-    pub admin_token_environment: Option<String>,
 }
 
 impl StartOptions {
@@ -52,8 +50,6 @@ impl StartOptions {
         let mut restart_backoff = Duration::from_millis(100);
         let mut watchdog_grace = Duration::from_millis(250);
         let mut admin_address = None;
-        let mut admin_token = None;
-        let mut admin_token_environment = None;
         let mut script_args = Vec::new();
 
         while let Some(argument) = arguments.next() {
@@ -84,29 +80,6 @@ impl StartOptions {
                 "--admin-address" => {
                     admin_address = Some(parse_address(arguments.next(), "--admin-address")?);
                 }
-                "--admin-token-env" => {
-                    let name = arguments
-                        .next()
-                        .ok_or_else(|| "--admin-token-env requires a variable name".to_owned())?
-                        .into_string()
-                        .map_err(|_| "--admin-token-env requires valid UTF-8".to_owned())?;
-                    if name.is_empty()
-                        || !name
-                            .bytes()
-                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-                    {
-                        return Err("--admin-token-env requires a safe variable name".to_owned());
-                    }
-                    let token = std::env::var(&name)
-                        .map_err(|_| format!("administrative token variable {name} is not set"))?;
-                    if token.is_empty() || token.len() > 4_096 {
-                        return Err(
-                            "administrative token must contain 1 to 4096 UTF-8 bytes".to_owned()
-                        );
-                    }
-                    admin_token = Some(token);
-                    admin_token_environment = Some(name);
-                }
                 "--" => {
                     script_args.extend(arguments);
                     break;
@@ -121,9 +94,6 @@ impl StartOptions {
         if workers > 256 {
             return Err("--workers cannot exceed 256".to_owned());
         }
-        if admin_token.is_some() && admin_address.is_none() {
-            return Err("--admin-token-env requires --admin-address".to_owned());
-        }
 
         Ok(Self {
             script,
@@ -135,8 +105,6 @@ impl StartOptions {
             restart_backoff,
             watchdog_grace,
             admin_address,
-            admin_token,
-            admin_token_environment,
         })
     }
 }
@@ -210,13 +178,10 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
         generation,
         workers: Vec::new(),
     }));
-    let (control_plane, admin_actions) = if let Some(address) = options.admin_address {
-        let (control_plane, actions) =
-            ControlPlane::start(address, snapshot.clone(), options.admin_token.clone())?;
-        (Some(control_plane), Some(actions))
-    } else {
-        (None, None)
-    };
+    let control_plane = options
+        .admin_address
+        .map(|address| ControlPlane::start(address, snapshot.clone()))
+        .transpose()?;
     if let Some(control_plane) = &control_plane {
         eprintln!(
             "Pam control plane listening on http://{}",
@@ -255,14 +220,29 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
             }
             _ = terminate.recv() => break,
             _ = reload.recv() => {
-                reload_generation(
+                let next_generation = generation + 1;
+                let mut replacements = spawn_generation(
                     executable,
                     &options,
+                    next_generation,
                     runtime_directory.path(),
-                    &snapshot,
-                    &mut generation,
-                    &mut workers,
-                ).await;
+                )?;
+                match wait_generation_ready(&mut replacements, options.startup_timeout).await {
+                    Ok(()) => {
+                        generation = next_generation;
+                        set_cluster_health(&snapshot, true, true, generation, &replacements);
+                        terminate_workers(&mut workers, options.graceful_timeout).await;
+                        workers = replacements;
+                        eprintln!("Pam master activated worker generation {generation}");
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "pam: generation {next_generation} failed readiness; keeping generation {generation}: {error}"
+                        );
+                        terminate_workers(&mut replacements, options.graceful_timeout).await;
+                        set_cluster_health(&snapshot, true, true, generation, &workers);
+                    }
+                }
             }
             _ = checks.tick() => {
                 for index in (0..workers.len()).rev() {
@@ -308,21 +288,6 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                     }
                 }
                 set_cluster_health(&snapshot, true, true, generation, &workers);
-                let action = admin_actions.as_ref().and_then(|actions| actions.try_recv().ok());
-                match action {
-                    Some(ControlAction::Reload) => {
-                        reload_generation(
-                            executable,
-                            &options,
-                            runtime_directory.path(),
-                            &snapshot,
-                            &mut generation,
-                            &mut workers,
-                        ).await;
-                    }
-                    Some(ControlAction::Drain) => break,
-                    None => {}
-                }
             }
         }
     }
@@ -331,47 +296,6 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
     terminate_workers(&mut workers, options.graceful_timeout).await;
     set_cluster_health(&snapshot, false, false, generation, &workers);
     Ok(0)
-}
-
-async fn reload_generation(
-    executable: &OsStr,
-    options: &StartOptions,
-    runtime_directory: &Path,
-    snapshot: &SharedClusterSnapshot,
-    generation: &mut u64,
-    workers: &mut Vec<Worker>,
-) {
-    let next_generation = generation.saturating_add(1);
-    let mut replacements = match spawn_generation(
-        executable,
-        options,
-        next_generation,
-        runtime_directory,
-    ) {
-        Ok(replacements) => replacements,
-        Err(error) => {
-            eprintln!(
-                "pam: cannot spawn generation {next_generation}; keeping generation {generation}: {error}"
-            );
-            return;
-        }
-    };
-    match wait_generation_ready(&mut replacements, options.startup_timeout).await {
-        Ok(()) => {
-            *generation = next_generation;
-            set_cluster_health(snapshot, true, true, *generation, &replacements);
-            terminate_workers(workers, options.graceful_timeout).await;
-            *workers = replacements;
-            eprintln!("Pam master activated worker generation {generation}");
-        }
-        Err(error) => {
-            eprintln!(
-                "pam: generation {next_generation} failed readiness; keeping generation {generation}: {error}"
-            );
-            terminate_workers(&mut replacements, options.graceful_timeout).await;
-            set_cluster_health(snapshot, true, true, *generation, workers);
-        }
-    }
 }
 
 fn spawn_generation(
@@ -403,8 +327,7 @@ fn spawn_worker(
         ));
     }
     let max_requests = staggered_max_requests(options, id);
-    let mut command = Command::new(executable);
-    command
+    let child = Command::new(executable)
         .arg("__worker")
         .arg(&options.script)
         .args(&options.script_args)
@@ -414,11 +337,7 @@ fn spawn_worker(
         .env(WORKER_STATE_PATH_ENV, &state_path)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    if let Some(name) = &options.admin_token_environment {
-        command.env_remove(name);
-    }
-    let child = command
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|error| format!("cannot start worker {id}: {error}"))?;
     Ok(Worker {

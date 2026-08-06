@@ -1,8 +1,8 @@
 {
-    "name": "pushinbr/pam-skeleton",
+    "name": "pam/skeleton",
     "description": "Production-ready starter application for the Pam runtime.",
     "type": "project",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "keywords": [
         "application",
         "pam",
@@ -16,12 +16,12 @@
     },
     "require": {
         "php": "^8.4",
-        "pushinbr/pam-api": "^0.1",
-        "pushinbr/pam-psr-bridge": "^0.1",
-        "pushinbr/pam-socket": "^0.1"
+        "pam/api": "^0.1",
+        "pam/psr-bridge": "^0.1",
+        "pam/socket": "^0.1"
     },
     "require-dev": {
-        "pushinbr/pam-testing": "^0.1",
+        "pam/testing": "^0.1",
         "phpunit/phpunit": "^12.5"
     },
     "autoload": {

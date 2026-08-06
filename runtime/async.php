@@ -3,10 +3,6 @@
 declare(strict_types=1);
 
 namespace Pam\Async {
-    final class CancelledException extends \RuntimeException
-    {
-    }
-
     enum OperationKind: int
     {
         case Timer = 1;
@@ -253,9 +249,6 @@ namespace Pam\Async {
                 try {
                     $this->result = $operation();
                     $this->state = FutureState::Fulfilled;
-                } catch (CancelledException $error) {
-                    $this->error = $error;
-                    $this->state = FutureState::Cancelled;
                 } catch (\Throwable $error) {
                     $this->error = $error;
                     $this->state = FutureState::Rejected;
@@ -299,26 +292,9 @@ namespace Pam\Async {
 
         public function cancel(): void
         {
-            if ($this->isComplete()) {
-                Scheduler::unregister($this);
-                return;
-            }
-
-            $error = new CancelledException('The asynchronous operation was cancelled.');
-            if ($this->state === FutureState::Running && $this->fiber->isSuspended()) {
-                try {
-                    $this->fiber->throw($error);
-                } catch (CancelledException) {
-                    // The Fiber did not intercept cancellation. The state below still
-                    // records the terminal result and the Fiber has been unwound.
-                } catch (\Throwable $thrown) {
-                    $this->error = $thrown;
-                    $this->state = FutureState::Rejected;
-                }
-            }
             if (!$this->isComplete()) {
                 $this->state = FutureState::Cancelled;
-                $this->error = $error;
+                $this->error = new \RuntimeException('The asynchronous operation was cancelled.');
             }
             Scheduler::unregister($this);
         }
@@ -458,102 +434,6 @@ namespace Pam\Async {
         public function close(): void { $this->closed = true; }
     }
 
-    /**
-     * A lexical lifetime for asynchronous work.
-     *
-     * Every child must finish before the group returns. The first failure or a
-     * shared deadline cancels every unfinished sibling and is rethrown to the
-     * caller after child Fibers have executed their cleanup blocks.
-     */
-    final class TaskGroup
-    {
-        /** @var array<array-key, Future> */
-        private array $children = [];
-        private bool $joined = false;
-
-        public function __construct(private readonly ?Deadline $deadline = null)
-        {
-        }
-
-        public function spawn(string|int $key, callable $operation): Future
-        {
-            if ($this->joined) {
-                throw new \LogicException('Cannot add work after a task group has joined.');
-            }
-            if (array_key_exists($key, $this->children)) {
-                throw new \InvalidArgumentException("Task group key {$key} already exists.");
-            }
-
-            return $this->children[$key] = async(function () use ($operation): mixed {
-                $this->deadline?->throwIfExpired();
-                $result = $operation();
-                $this->deadline?->throwIfExpired();
-                return $result;
-            });
-        }
-
-        /** @return array<array-key, mixed> */
-        public function join(): array
-        {
-            if ($this->joined) {
-                throw new \LogicException('A task group can only be joined once.');
-            }
-            $this->joined = true;
-            try {
-                while (true) {
-                    $this->deadline?->throwIfExpired();
-                    $now = microtime(true);
-                    $next = $this->deadline === null ? INF : $this->deadline->timestamp;
-                    $pending = false;
-
-                    foreach ($this->children as $future) {
-                        if (!$future->isComplete()) {
-                            $future->advance($now);
-                        }
-                        if ($future->state() === FutureState::Rejected
-                            || $future->state() === FutureState::Cancelled) {
-                            $future->unwrap();
-                        }
-                        if (!$future->isComplete()) {
-                            $pending = true;
-                            $next = min($next, max($now, $future->resumeAt()));
-                        }
-                    }
-
-                    if (!$pending) {
-                        break;
-                    }
-                    delay(max(0.0, min(0.01, $next - microtime(true))));
-                }
-            } catch (\Throwable $error) {
-                $this->cancel();
-                throw $error;
-            }
-
-            $results = [];
-            foreach ($this->children as $key => $future) {
-                $results[$key] = $future->unwrap();
-                Scheduler::unregister($future);
-            }
-
-            return $results;
-        }
-
-        public function cancel(): void
-        {
-            foreach ($this->children as $future) {
-                $future->cancel();
-            }
-        }
-
-        public function __destruct()
-        {
-            if (!$this->joined) {
-                $this->cancel();
-            }
-        }
-    }
-
     final class Mutex
     {
         private bool $locked = false;
@@ -637,22 +517,6 @@ namespace Pam\Async {
     function async(callable $operation): Future
     {
         return new Future($operation);
-    }
-
-    /**
-     * @param iterable<array-key, mixed> $operations
-     * @return array<array-key, mixed>
-     */
-    function concurrently(iterable $operations, ?Deadline $deadline = null): array
-    {
-        $group = new TaskGroup($deadline);
-        foreach ($operations as $key => $operation) {
-            if (!is_callable($operation)) {
-                throw new \InvalidArgumentException('Concurrent operations must be callable.');
-            }
-            $group->spawn($key, $operation);
-        }
-        return $group->join();
     }
 
     function await(object $future, ?float $timeout = null): mixed

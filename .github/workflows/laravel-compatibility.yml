@@ -61,8 +61,8 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.97.1
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
@@ -101,11 +101,6 @@ jobs:
               --no-progress
           fi
           ../../target/debug/pam artisan package:discover
-          ../../target/debug/pam artisan list --raw | grep pam:check-production
-          ../../target/debug/pam artisan route:list --name=pam --json |
-            jq -e 'map(.uri) | index("__pam/health") != null'
-          ../../target/debug/pam artisan pam:capacity --memory-mb=512 --worker-mb=96
-          ../../target/debug/pam artisan pam:migrate-from-octane --json
           composer validate --strict
       - name: Validate PAM against Laravel
         run: |
@@ -114,9 +109,6 @@ jobs:
           compat/laravel-smoke/vendor/bin/phpstan analyse \
             -c compat/laravel-smoke/phpstan.neon \
             --no-progress
-          php compat/laravel-smoke/telemetry-smoke.php
-          php compat/laravel-smoke/remote-smoke.php
-          php compat/laravel-smoke/process-supervisor-smoke.php
       - name: Validate MySQL, PostgreSQL, Redis and database queues
         working-directory: compat/laravel-smoke
         env:

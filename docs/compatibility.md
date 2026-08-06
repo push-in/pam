@@ -9,9 +9,9 @@ outro diretório.
 | Categoria | Situação |
 | --- | --- |
 | Pacotes pure PHP e PSR-4 | Compatíveis pelo autoloader normal |
-| `pushinbr/pam-api` | Rotas e middleware opcionais instalados pelo Composer |
-| `pushinbr/pam-socket` | Eventos e rooms opcionais sobre o transporte WebSocket nativo |
-| PSR-7, PSR-15 e PSR-17 | Fornecidos por `pushinbr/pam-psr-bridge` com as interfaces oficiais |
+| `pam/api` | Rotas e middleware opcionais instalados pelo Composer |
+| `pam/socket` | Eventos e rooms opcionais sobre o transporte WebSocket nativo |
+| PSR-7, PSR-15 e PSR-17 | Fornecidos por `pam/psr-bridge` com as interfaces oficiais |
 | PSR-3 | Consumido quando `psr/log` está instalado |
 | PHPUnit e Pest | Executados dentro da Embed SAPI por `pam test` |
 | Amp, Revolt e ReactPHP | Carregados e exercitados por timers/futures na suíte smoke |
@@ -66,8 +66,7 @@ uploads, Flysystem, Blade, Livewire, Inertia, Scout, Reverb e gravação real de
 Telescope/Pulse. Também valida injeção request-scoped em Events/Bus, locale,
 serialização segura por worker, streaming progressivo, cancelamento por
 desconexão, limites de resposta, downloads `Range` e `HEAD`. As classes de
-integração pertencem ao binário; o pacote oficial `pushinbr/pam-laravel`
-complementa o host com ferramentas operacionais, sem substituir
+integração pertencem ao binário; nenhum fork ou pacote `pam/laravel` substitui
 código do framework.
 
 ## Event loops de terceiros

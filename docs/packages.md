@@ -8,20 +8,20 @@ lifecycle and diagnostics. Composer owns every optional application feature.
 
 | Package | Responsibility |
 | --- | --- |
-| `pushinbr/pam-core-api` | Stable contracts and runtime capability checks for package authors |
-| `pushinbr/pam-api` | HTTP router, middleware pipeline, error boundary and provider discovery |
-| `pushinbr/pam-socket` | Event-oriented WebSocket API, rooms, broadcasts and distributed adapters |
-| `pushinbr/pam-psr-bridge` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
-| `pushinbr/pam-testing` | In-memory HTTP client and fluent response assertions |
-| `pushinbr/pam-skeleton` | Minimal production-oriented project template |
+| `pam/core-api` | Stable contracts and runtime capability checks for package authors |
+| `pam/api` | HTTP router, middleware pipeline, error boundary and provider discovery |
+| `pam/socket` | Event-oriented WebSocket API, rooms, broadcasts and distributed adapters |
+| `pam/psr-bridge` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
+| `pam/testing` | In-memory HTTP client and fluent response assertions |
+| `pam/skeleton` | Minimal production-oriented project template |
 
 Applications should depend on packages directly. There is no hidden Pam lockfile,
 global package store or alternative registry.
 
 ```bash
-pam composer require pushinbr/pam-api
-pam composer require pushinbr/pam-socket
-pam composer require --dev pushinbr/pam-testing
+pam composer require pam/api
+pam composer require pam/socket
+pam composer require --dev pam/testing
 ```
 
 ## Package discovery
@@ -32,7 +32,7 @@ A Composer package can register one or more providers:
 {
     "name": "acme/pam-health",
     "require": {
-        "pushinbr/pam-core-api": "^0.1"
+        "pam/core-api": "^0.1"
     },
     "extra": {
         "pam": {
@@ -63,7 +63,7 @@ final class HealthServiceProvider implements ServiceProviderInterface
 }
 ```
 
-`pushinbr/pam-api` reads `vendor/composer/installed.json`, validates every provider,
+`pam/api` reads `vendor/composer/installed.json`, validates every provider,
 deduplicates it and writes data-only `.pam/cache/packages.json` using an atomic rename. The
 cache is invalidated when Composer metadata or the lockfile changes. Set
 `PAM_DISABLE_PACKAGE_DISCOVERY=1` to disable discovery and register providers
@@ -87,12 +87,12 @@ distribution mirrors place each package's `composer.json` at the repository root
 
 | Package | Distribution mirror |
 | --- | --- |
-| `pushinbr/pam-core-api` | `push-in/pam-core-api` |
-| `pushinbr/pam-api` | `push-in/pam-api` |
-| `pushinbr/pam-socket` | `push-in/pam-socket` |
-| `pushinbr/pam-psr-bridge` | `push-in/pam-psr-bridge` |
-| `pushinbr/pam-testing` | `push-in/pam-testing` |
-| `pushinbr/pam-skeleton` | `push-in/pam-skeleton` |
+| `pam/core-api` | `push-in/pam-core-api` |
+| `pam/api` | `push-in/pam-api` |
+| `pam/socket` | `push-in/pam-socket` |
+| `pam/psr-bridge` | `push-in/pam-psr-bridge` |
+| `pam/testing` | `push-in/pam-testing` |
+| `pam/skeleton` | `push-in/pam-skeleton` |
 
 Do not commit directly to a mirror. Package changes, issues and pull requests
 belong in `push-in/pam`.
@@ -104,7 +104,7 @@ workflow validates every manifest, constructs an isolated history for each
 immutable tag to the corresponding mirror. Re-running a release is idempotent
 only when an existing mirror tag resolves to the exact expected split commit.
 
-`pushinbr/pam-core-api` remains the compatibility seam: packages constrain its version and
+`pam/core-api` remains the compatibility seam: packages constrain its version and
 check runtime ABI capabilities instead of depending on Pam's Rust implementation.
 Breaking PHP contracts require a new major package version; breaking native
 ownership or signatures require a new native ABI.

@@ -2837,7 +2837,7 @@ fn encode_hex(bytes: &[u8]) -> String {
 }
 
 fn decode_hex(value: &str) -> Option<Vec<u8>> {
-    if !value.len().is_multiple_of(2) {
+    if value.len() % 2 != 0 {
         return None;
     }
     value

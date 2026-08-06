@@ -1,0 +1,262 @@
+{
+    "name": "pushinbr/pam-native-ecosystem-certification",
+    "description": "Cross-package certification application for the official PAM Native ecosystem.",
+    "type": "project",
+    "license": "Apache-2.0",
+    "repositories": [
+        {
+            "type": "path",
+            "url": "../../pam-native/packages/native",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native": "0.6.2"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-auth",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-auth": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-background-transfer",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-background-transfer": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-bluetooth",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-bluetooth": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-devtools",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-devtools": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-health",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-health": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-intents",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-intents": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-live-activities",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-live-activities": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-maps",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-maps": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-media",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-media": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-nfc",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-nfc": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-observability",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-observability": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-feature-flags",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-feature-flags": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-firebase",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-firebase": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-payments",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-payments": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-realtime",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-realtime": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-scanner",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-scanner": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-share-extension",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-share-extension": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-subscriptions",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-subscriptions": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-sync",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-sync": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-widgets",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-widgets": "0.1.0"
+                }
+            }
+        },
+        {
+            "type": "path",
+            "url": "../pam-native-video",
+            "options": {
+                "symlink": false,
+                "versions": {
+                    "pushinbr/pam-native-video": "0.1.0"
+                }
+            }
+        }
+    ],
+    "require": {
+        "php": "^8.4",
+        "pushinbr/pam-native": "0.6.2",
+        "pushinbr/pam-native-auth": "0.1.0",
+        "pushinbr/pam-native-background-transfer": "0.1.0",
+        "pushinbr/pam-native-bluetooth": "0.1.0",
+        "pushinbr/pam-native-devtools": "0.1.0",
+        "pushinbr/pam-native-firebase": "0.1.0",
+        "pushinbr/pam-native-feature-flags": "0.1.0",
+        "pushinbr/pam-native-health": "0.1.0",
+        "pushinbr/pam-native-intents": "0.1.0",
+        "pushinbr/pam-native-live-activities": "0.1.0",
+        "pushinbr/pam-native-maps": "0.1.0",
+        "pushinbr/pam-native-media": "0.1.0",
+        "pushinbr/pam-native-nfc": "0.1.0",
+        "pushinbr/pam-native-observability": "0.1.0",
+        "pushinbr/pam-native-payments": "0.1.0",
+        "pushinbr/pam-native-realtime": "0.1.0",
+        "pushinbr/pam-native-scanner": "0.1.0",
+        "pushinbr/pam-native-share-extension": "0.1.0",
+        "pushinbr/pam-native-subscriptions": "0.1.0",
+        "pushinbr/pam-native-sync": "0.1.0",
+        "pushinbr/pam-native-widgets": "0.1.0",
+        "pushinbr/pam-native-video": "0.1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Pam\\EcosystemCertification\\": "src/"
+        }
+    },
+    "config": {
+        "platform-check": true,
+        "sort-packages": true
+    }
+}

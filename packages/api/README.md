@@ -1,11 +1,11 @@
-# pushinbr/pam-api
+# pam/api
 
 The optional Express-like HTTP layer for Pam: route parameters, 404/405 handling,
 a precompiled middleware pipeline, error boundaries and Composer provider
 discovery.
 
 ```bash
-pam composer require pushinbr/pam-api
+pam composer require pam/api
 ```
 
 ```php
@@ -16,3 +16,8 @@ $app->get('/users/{id}', static fn ($request, $response) =>
     $response->json(['id' => $request->route('id')]));
 $app->listen(3000);
 ```
+
+## License
+
+Free and open-source under the [Apache License 2.0](LICENSE). You may use,
+modify, and distribute this package for any purpose, including commercially.

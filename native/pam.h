@@ -25,7 +25,6 @@ int pam_php_runtime_info(char **output, size_t *output_length);
 int pam_php_runtime_metrics(char **output, size_t *output_length);
 int pam_php_runtime_diagnostics(char **output, size_t *output_length);
 int pam_php_routes_info(char **output, size_t *output_length);
-int pam_php_contracts_info(char **output, size_t *output_length);
 int pam_php_dispatch_http(
     const char *method,
     size_t method_length,

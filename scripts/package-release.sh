@@ -31,55 +31,43 @@ validate_map() {
     jq -e '
         .owner == "push-in"
         and (.packages | length == 7)
-        and (.runtimePackages | length == 1)
         and ([.packages[].name] | length == (unique | length))
-        and ([.runtimePackages[].name] | length == (unique | length))
         and ([.packages[].path] | length == (unique | length))
         and ([.packages[].repository] | length == (unique | length))
         and ([.packages[].deploySecret] | length == (unique | length))
         and all(
             .packages[];
-            (.name | test("^pushinbr/pam-[a-z0-9-]+$"))
-            and (.path | test("^packages/[a-z0-9-]+$"))
+            (.name | test("^pam/[a-z0-9-]+$"))
+            and (.path | test("^(packages/[a-z0-9-]+|pam-native/packages/native)$"))
             and (.repository | test("^pam-[a-z0-9-]+$"))
             and (.deploySecret | test("^PAM_[A-Z0-9_]+_DEPLOY_KEY$"))
-            and (.description | length > 0)
-        )
-        and all(
-            .runtimePackages[];
-            (.name | test("^pushinbr/pam-[a-z0-9-]+$"))
-            and (.constraint | test("^\\^[0-9]+\\.[0-9]+$"))
             and (.description | length > 0)
         )
     ' "${package_map}" >/dev/null || fail "packages/packages.json is invalid"
 }
 
-validate_coordinates() {
-    local legacy_pattern
-    legacy_pattern='pam/(api|core-api|desktop|psr-bridge|skeleton|socket|testing)'
-
-    if git -C "${repository_root}" grep -nE "${legacy_pattern}" -- .; then
-        fail "legacy pam/* Composer coordinates remain in tracked files"
-    fi
-
-    jq -e '
-        ([.packages[].name] + [.runtimePackages[].name]) as $packages
-        | all(
-            (.packages + .runtimePackages)[];
-            .name as $name
-            | ($name | startswith("pushinbr/pam-"))
-        )
-        and ($packages | length == ($packages | unique | length))
-    ' "${package_map}" >/dev/null ||
-        fail "first-party Composer coordinates are inconsistent"
-}
-
 validate_packages() {
     require_command composer
-    require_command git
     require_command jq
     validate_map
-    validate_coordinates
+
+    test -f "${repository_root}/LICENSE" ||
+        fail "root Apache 2.0 license is missing"
+    test -f "${repository_root}/LICENSING.md" ||
+        fail "root licensing guide is missing"
+    grep -Fq 'Apache License' "${repository_root}/LICENSE" ||
+        fail "root license is not Apache 2.0"
+    grep -Fq 'Version 2.0, January 2004' "${repository_root}/LICENSE" ||
+        fail "root Apache license version is not 2.0"
+    for native_license in \
+        pam-native/LICENSE \
+        pam-native/crates/pam-native-engine/LICENSE \
+        pam-native/crates/pam-native-protocol/LICENSE; do
+        cmp -s \
+            "${repository_root}/LICENSE" \
+            "${repository_root}/${native_license}" ||
+            fail "${native_license} differs from the root Apache license"
+    done
 
     local owner
     owner=$(jq -er '.owner' "${package_map}")
@@ -92,6 +80,8 @@ validate_packages() {
         test -f "${manifest}" || fail "composer.json is missing: ${package_path}"
         test -f "${directory}/README.md" || fail "README.md is missing: ${package_path}"
         test -f "${directory}/LICENSE" || fail "LICENSE is missing: ${package_path}"
+        cmp -s "${repository_root}/LICENSE" "${directory}/LICENSE" ||
+            fail "${package_path}/LICENSE differs from the root Apache license"
 
         local manifest_name
         manifest_name=$(jq -er '.name' "${manifest}")
@@ -103,7 +93,7 @@ validate_packages() {
             --arg issues "https://github.com/${owner}/pam/issues" \
             '
                 (has("version") | not)
-                and .license == "MIT"
+                and .license == "Apache-2.0"
                 and .type != null
                 and .description != null
                 and (.keywords | type == "array" and length > 0)
@@ -165,7 +155,7 @@ verify_split() (
     local package_name=$1
     local split_ref=$2
     local expected_files
-    expected_files='^(LICENSE|README\.md|composer\.json|config/|src/|stubs/|tests/|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
+    expected_files='^(LICENSE|README\.md|PROTOCOL\.md|composer\.json|src/|tests/|benchmarks/|resources/|phpstan\.neon|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
 
     local temporary_directory
     temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/pam-package.XXXXXX")
@@ -214,11 +204,11 @@ case "${command_name}" in
         ;;
     split)
         test "$#" -ge 2 && test "$#" -le 3 ||
-            fail "usage: $0 split <pushinbr/pam-package> [git-ref]"
+            fail "usage: $0 split <pam/package> [git-ref]"
         split_package "$2" "${3:-HEAD}"
         ;;
     verify-split)
-        test "$#" -eq 3 || fail "usage: $0 verify-split <pushinbr/pam-package> <git-ref>"
+        test "$#" -eq 3 || fail "usage: $0 verify-split <pam/package> <git-ref>"
         verify_split "$2" "$3"
         ;;
     *)

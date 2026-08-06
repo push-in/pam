@@ -1,7 +1,7 @@
 {
     "name": "pam/composer-compatibility-smoke",
     "description": "Executable compatibility contract for Composer packages supported by Pam.",
-    "license": "MIT",
+    "license": "Apache-2.0",
     "type": "project",
     "repositories": [
         {
@@ -10,11 +10,11 @@
             "options": {
                 "symlink": true,
                 "versions": {
-                    "pushinbr/pam-core-api": "0.1.0",
-                    "pushinbr/pam-api": "0.1.0",
-                    "pushinbr/pam-psr-bridge": "0.1.0",
-                    "pushinbr/pam-socket": "0.1.0",
-                    "pushinbr/pam-testing": "0.1.0"
+                    "pam/core-api": "0.1.0",
+                    "pam/api": "0.1.0",
+                    "pam/psr-bridge": "0.1.0",
+                    "pam/socket": "0.1.0",
+                    "pam/testing": "0.1.0"
                 }
             }
         }
@@ -30,9 +30,9 @@
         "open-telemetry/api": "^1.4",
         "open-telemetry/exporter-otlp": "^1.4",
         "open-telemetry/sdk": "^1.15",
-        "pushinbr/pam-api": "^0.1",
-        "pushinbr/pam-psr-bridge": "^0.1",
-        "pushinbr/pam-socket": "^0.1",
+        "pam/api": "^0.1",
+        "pam/psr-bridge": "^0.1",
+        "pam/socket": "^0.1",
         "psr/http-factory": "^1.1",
         "psr/http-message": "^2.0",
         "psr/http-server-handler": "^1.0",
@@ -44,7 +44,7 @@
         "symfony/http-kernel": "^8.0"
     },
     "require-dev": {
-        "pushinbr/pam-testing": "^0.1",
+        "pam/testing": "^0.1",
         "pestphp/pest": "^4.7",
         "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "12.5.30"

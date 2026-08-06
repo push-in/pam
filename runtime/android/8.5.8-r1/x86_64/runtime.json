@@ -1,0 +1,20 @@
+{
+    "schemaVersion": 2,
+    "runtimeId": "8.5.8-r1",
+    "phpVersion": "8.5.8",
+    "runtimeRevision": 1,
+    "sourceUrl": "https://www.php.net/distributions/php-8.5.8.tar.xz",
+    "sourceSha256": "58910198d19e873048fe87cdfe16bc790025417ede3d1651bfa1c4b533d573f2",
+    "androidAbi": "x86_64",
+    "androidApi": 26,
+    "ndkVersion": "27.1.12297006",
+    "extensions": [
+        "ctype",
+        "filter",
+        "opcache",
+        "phar",
+        "session",
+        "tokenizer",
+        "uri"
+    ]
+}

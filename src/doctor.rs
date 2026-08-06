@@ -190,13 +190,7 @@ pub fn run(executable: &OsStr, target: &Path) -> Result<u8, String> {
                 &mut failed,
             );
             if !generated_platform_check {
-                println!(
-                    "{}",
-                    ui.status(
-                        "info",
-                        "Composer has no generated platform check; run `pam composer check-platform-reqs`."
-                    )
-                );
+                println!("{}", ui.status("info", "Composer has no generated platform check; run `pam composer check-platform-reqs`."));
             }
         }
         None => println!("{}", ui.status("info", "Composer project: not found")),
