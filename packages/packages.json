@@ -42,13 +42,6 @@
             "repository": "pam-skeleton",
             "deploySecret": "PAM_SKELETON_DEPLOY_KEY",
             "description": "Production-ready starter application for the PAM runtime."
-        },
-        {
-            "name": "pam/native",
-            "path": "pam-native/packages/native",
-            "repository": "pam-native",
-            "deploySecret": "PAM_NATIVE_DEPLOY_KEY",
-            "description": "Native Android UI, lifecycle, templates and system APIs for persistent PHP."
         }
     ]
 }

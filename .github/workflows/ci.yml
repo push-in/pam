@@ -15,6 +15,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+      - name: Check out the pinned PAM Native SDK
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: 9ae491e31f9c5dea3485172c9966af0628277340
+          path: pam-native
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy,rustfmt
@@ -40,7 +47,6 @@ jobs:
           for package in packages/*/composer.json; do
             composer validate --strict --no-check-lock --no-check-publish "$package"
           done
-          composer validate --strict --no-check-lock --no-check-publish pam-native/packages/native/composer.json
           scripts/package-release.sh validate
       - name: Install locked Composer dependencies
         run: |

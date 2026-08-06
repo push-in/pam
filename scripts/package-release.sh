@@ -30,7 +30,7 @@ package_field() {
 validate_map() {
     jq -e '
         .owner == "push-in"
-        and (.packages | length == 7)
+        and (.packages | length == 6)
         and ([.packages[].name] | length == (unique | length))
         and ([.packages[].path] | length == (unique | length))
         and ([.packages[].repository] | length == (unique | length))
@@ -38,7 +38,7 @@ validate_map() {
         and all(
             .packages[];
             (.name | test("^pam/[a-z0-9-]+$"))
-            and (.path | test("^(packages/[a-z0-9-]+|pam-native/packages/native)$"))
+            and (.path | test("^packages/[a-z0-9-]+$"))
             and (.repository | test("^pam-[a-z0-9-]+$"))
             and (.deploySecret | test("^PAM_[A-Z0-9_]+_DEPLOY_KEY$"))
             and (.description | length > 0)
@@ -59,16 +59,6 @@ validate_packages() {
         fail "root license is not Apache 2.0"
     grep -Fq 'Version 2.0, January 2004' "${repository_root}/LICENSE" ||
         fail "root Apache license version is not 2.0"
-    for native_license in \
-        pam-native/LICENSE \
-        pam-native/crates/pam-native-engine/LICENSE \
-        pam-native/crates/pam-native-protocol/LICENSE; do
-        cmp -s \
-            "${repository_root}/LICENSE" \
-            "${repository_root}/${native_license}" ||
-            fail "${native_license} differs from the root Apache license"
-    done
-
     local owner
     owner=$(jq -er '.owner' "${package_map}")
 
