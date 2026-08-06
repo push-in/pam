@@ -2899,8 +2899,7 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         registry.as_bytes(),
     )?;
     targets.push_str(&format!(
-        "        .target(\n            name: \"PamNativePlugins\",\n            dependencies: [{}],\n            path: \"Sources/PamNativePlugins\"\n        ),\n",
-        aggregate_dependencies
+        "        .target(\n            name: \"PamNativePlugins\",\n            dependencies: [{aggregate_dependencies}],\n            path: \"Sources/PamNativePlugins\"\n        ),\n"
     ));
     let external_dependencies = package_dependencies
         .values()
