@@ -192,12 +192,18 @@ jobs:
           launch=$(xcrun simctl launch --terminate-running-process "${simulator}" app.pam.hello)
           pid=${launch##*: }
           sleep 5
-          ps -p "${pid}" >/dev/null
-          xcrun simctl io "${simulator}" screenshot "${RUNNER_TEMP}/pam-ios-fixture/simulator.png"
+          xcrun simctl io "${simulator}" screenshot \
+            "${RUNNER_TEMP}/pam-ios-fixture/simulator.png" || true
           xcrun simctl spawn "${simulator}" log show \
-            --style compact --last 2m \
-            --predicate 'process == "PAM App"' \
-            >"${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
+            --style compact --debug --last 5m \
+            --predicate 'process == "PAM App" OR eventMessage CONTAINS[c] "app.pam.hello"' \
+            >"${RUNNER_TEMP}/pam-ios-fixture/simulator.log" || true
+          crash_source="${HOME}/Library/Developer/CoreSimulator/Devices/${simulator}/data/Library/Logs/CrashReporter"
+          if test -d "${crash_source}"; then
+            mkdir -p "${RUNNER_TEMP}/pam-ios-fixture/crashes"
+            cp -R "${crash_source}/." "${RUNNER_TEMP}/pam-ios-fixture/crashes/"
+          fi
+          ps -p "${pid}" >/dev/null
           ! grep -E 'Pam Native failed to start|PHP (fatal|parse) error' \
             "${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
       - uses: actions/upload-artifact@v5
@@ -209,4 +215,5 @@ jobs:
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/DerivedData/Logs
             ${{ runner.temp }}/pam-ios-fixture/simulator.png
             ${{ runner.temp }}/pam-ios-fixture/simulator.log
+            ${{ runner.temp }}/pam-ios-fixture/crashes
           if-no-files-found: warn
