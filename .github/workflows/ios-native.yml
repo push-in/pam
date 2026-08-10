@@ -29,9 +29,30 @@ defaults:
 
 jobs:
   runtime-host:
-    name: PHP runtime, generated host, and simulator build
+    name: ${{ matrix.profile }} runtime, generated host, and simulator build
     runs-on: macos-15
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: php84-baseline
+            php: '8.4'
+            runtime_id: 8.4.23-r1
+            ios_minimum: '15.0'
+            plugins: share-extension health media
+            extensions: PamShareExtension
+            cache_salt: php84-v1
+          - profile: php85-extensions
+            php: '8.5'
+            runtime_id: 8.5.8-r1
+            ios_minimum: '18.0'
+            plugins: share-extension health media widgets intents live-activities
+            extensions: PamShareExtension PamWidgets PamAppIntents PamLiveActivities
+            cache_salt: c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
+    env:
+      PAM_CERTIFICATION_PLUGINS: ${{ matrix.plugins }}
+      PAM_EXPECTED_EXTENSIONS: ${{ matrix.extensions }}
     steps:
       - uses: actions/checkout@v5
       - name: Check out the pinned PAM Native SDK
@@ -60,6 +81,24 @@ jobs:
           ref: 7fbb48c7eeff8a0303f4b90b91f82bce7c4db691
           path: certification-plugins/media
           persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-widgets
+          ref: b7d9106a1ba8a83af0be576ec863e72ea5b31ead
+          path: certification-plugins/widgets
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-intents
+          ref: b32e2daae135cedd58d8dd7ed45e76410ceec4b4
+          path: certification-plugins/intents
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-live-activities
+          ref: 48caf73cfcff6fea54d42d41a426e1777b62d303
+          path: certification-plugins/live-activities
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
@@ -68,7 +107,7 @@ jobs:
           key: pam-native-ios-runtime
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.5'
+          php-version: ${{ matrix.php }}
           tools: composer:v2
           coverage: none
       - name: Restore verified PHP/XCFramework runtime
@@ -76,31 +115,31 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            runtime/ios/8.5.8-r1
-            runtime/macos/8.5.8-r1
-          key: pam-ios-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('runtime/catalog.json', 'runtime-builder/ios/build.sh', 'pam-native/Cargo.lock', 'pam-native/crates/**/Cargo.toml') }}-c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
+            runtime/ios/${{ matrix.runtime_id }}
+            runtime/macos/${{ matrix.runtime_id }}
+          key: pam-ios-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('runtime/catalog.json', 'runtime-builder/ios/build.sh', 'pam-native/Cargo.lock', 'pam-native/crates/**/Cargo.toml') }}-${{ matrix.cache_salt }}
       - name: Build verified PHP and engine XCFrameworks
         if: steps.runtime-cache.outputs.cache-hit != 'true'
-        run: runtime-builder/ios/build.sh --php 8.5 all
+        run: runtime-builder/ios/build.sh --php "${{ matrix.php }}" all
       - name: Validate restored or built runtime
         run: |
-          test -x runtime/macos/8.5.8-r1/bin/php-config
-          test -f runtime/macos/8.5.8-r1/lib/libphp.dylib
-          test -f runtime/ios/8.5.8-r1/PamPhp.xcframework/Info.plist
-          test -f runtime/ios/8.5.8-r1/PamNativeEngine.xcframework/Info.plist
-          test -f runtime/ios/8.5.8-r1/runtime.json
+          test -x "runtime/macos/${{ matrix.runtime_id }}/bin/php-config"
+          test -f "runtime/macos/${{ matrix.runtime_id }}/lib/libphp.dylib"
+          test -f "runtime/ios/${{ matrix.runtime_id }}/PamPhp.xcframework/Info.plist"
+          test -f "runtime/ios/${{ matrix.runtime_id }}/PamNativeEngine.xcframework/Info.plist"
+          test -f "runtime/ios/${{ matrix.runtime_id }}/runtime.json"
       - name: Save verified PHP/XCFramework runtime immediately
         if: steps.runtime-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
           path: |
-            runtime/ios/8.5.8-r1
-            runtime/macos/8.5.8-r1
-          key: pam-ios-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('runtime/catalog.json', 'runtime-builder/ios/build.sh', 'pam-native/Cargo.lock', 'pam-native/crates/**/Cargo.toml') }}-c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
+            runtime/ios/${{ matrix.runtime_id }}
+            runtime/macos/${{ matrix.runtime_id }}
+          key: pam-ios-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('runtime/catalog.json', 'runtime-builder/ios/build.sh', 'pam-native/Cargo.lock', 'pam-native/crates/**/Cargo.toml') }}-${{ matrix.cache_salt }}
       - name: Build PAM CLI
         run: |
-          php_config=$(find runtime/macos -type f -path '*/bin/php-config' -print -quit)
-          test -n "${php_config}"
+          php_config="runtime/macos/${{ matrix.runtime_id }}/bin/php-config"
+          test -x "${php_config}"
           php_sdk=$(dirname "$(dirname "${php_config}")")
           PHP_CONFIG="${php_config}" \
           PAM_PHP_LIB_DIR="${php_sdk}/lib" \
@@ -113,24 +152,31 @@ jobs:
             --template mobile --platform ios \
             --name 'PAM App' --application-id app.pam.hello \
             --no-install --no-interaction
+          jq --arg php "${{ matrix.php }}" --arg minimum "${{ matrix.ios_minimum }}" \
+            '.runtime.php = $php | .ios.minimumVersion = $minimum' \
+            "${fixture}/pam-native.json" >"${fixture}/pam-native.json.tmp"
+          mv "${fixture}/pam-native.json.tmp" "${fixture}/pam-native.json"
           test "$(jq -r '.name' "${fixture}/pam-native.json")" = 'PAM App'
           test "$(jq -r '.applicationId' "${fixture}/pam-native.json")" = app.pam.hello
+          test "$(jq -r '.runtime.php' "${fixture}/pam-native.json")" = "${{ matrix.php }}"
+          test "$(jq -r '.ios.minimumVersion' "${fixture}/pam-native.json")" = "${{ matrix.ios_minimum }}"
+          composer validate --working-dir="${fixture}" --strict
+          composer install \
+            --working-dir="${fixture}" --no-dev --no-interaction --prefer-dist --dry-run
           composer install \
             --working-dir="${fixture}" --no-dev --no-interaction --prefer-dist
-          for plugin in share-extension health media; do
+          packages=()
+          for plugin in ${PAM_CERTIFICATION_PLUGINS}; do
             composer config --working-dir="${fixture}" \
               "repositories.certification-${plugin}" \
               "{\"type\":\"path\",\"url\":\"${GITHUB_WORKSPACE}/certification-plugins/${plugin}\",\"options\":{\"symlink\":false}}"
+            packages+=("pushinbr/pam-native-${plugin}:@dev")
           done
           composer require --working-dir="${fixture}" \
-            pushinbr/pam-native-share-extension:@dev \
-            pushinbr/pam-native-health:@dev \
-            pushinbr/pam-native-media:@dev \
+            "${packages[@]}" \
             --update-no-dev --no-interaction --prefer-dist --dry-run
           composer require --working-dir="${fixture}" \
-            pushinbr/pam-native-share-extension:@dev \
-            pushinbr/pam-native-health:@dev \
-            pushinbr/pam-native-media:@dev \
+            "${packages[@]}" \
             --update-no-dev --no-interaction --prefer-dist
           target/debug/pam mobile ios:doctor "${fixture}"
           target/debug/pam mobile ios:prepare "${fixture}"
@@ -146,6 +192,10 @@ jobs:
             "${fixture}/.pam-native/ios/App/App/PamNativeApp.entitlements"
           grep -q 'PamShareExtension' \
             "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
+          for extension in ${PAM_EXPECTED_EXTENSIONS}; do
+            grep -q "${extension}" \
+              "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
+          done
           printf 'PAM_IOS_FIXTURE=%s\n' "${fixture}" >>"${GITHUB_ENV}"
       - name: Validate and build generated Xcode project
         run: |
@@ -159,8 +209,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
           test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app"
-          test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PamShareExtension.appex"
-          test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app/PlugIns/PamShareExtension.appex"
+          products="${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator"
+          for extension in ${PAM_EXPECTED_EXTENSIONS}; do
+            test -d "${products}/${extension}.appex"
+            test -d "${products}/PAM App.app/PlugIns/${extension}.appex"
+          done
       - name: Install, launch, and certify the generated app
         run: |
           simulator=$(xcrun simctl list devices available --json | python3 -c '
@@ -228,7 +281,7 @@ jobs:
       - uses: actions/upload-artifact@v5
         if: always()
         with:
-          name: pam-native-ios-generated-host
+          name: pam-native-ios-generated-host-${{ matrix.profile }}
           path: |
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/PamNativeApp.xcodeproj
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/DerivedData/Logs
