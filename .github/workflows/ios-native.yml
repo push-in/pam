@@ -203,6 +203,13 @@ jobs:
             mkdir -p "${RUNNER_TEMP}/pam-ios-fixture/crashes"
             cp -R "${crash_source}/." "${RUNNER_TEMP}/pam-ios-fixture/crashes/"
           fi
+          host_crashes="${HOME}/Library/Logs/DiagnosticReports"
+          if test -d "${host_crashes}"; then
+            mkdir -p "${RUNNER_TEMP}/pam-ios-fixture/crashes/host"
+            find "${host_crashes}" -type f -mmin -10 \
+              \( -name 'PAM App*' -o -name '*app.pam.hello*' \) \
+              -exec cp {} "${RUNNER_TEMP}/pam-ios-fixture/crashes/host/" \;
+          fi
           ps -p "${pid}" >/dev/null
           ! grep -E 'Pam Native failed to start|PHP (fatal|parse) error' \
             "${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
