@@ -193,6 +193,9 @@ with open("${install}/runtime.json", "w", encoding="utf-8") as stream:
 PY
 }
 
+if [[ ${slice_selector} == all ]]; then
+    build_macos_embed_sdk
+fi
 if [[ ${slice_selector} == all || ${slice_selector} == device ]]; then
     build_php_slice device-arm64 iphoneos arm64 aarch64-apple-darwin -miphoneos-version-min
     build_engine_slice aarch64-apple-ios
@@ -205,7 +208,6 @@ if [[ ${slice_selector} == all || ${slice_selector} == simulator ]]; then
 fi
 
 if [[ ${slice_selector} == all ]]; then
-    build_macos_embed_sdk
     simulator=${build_root}/simulator
     mkdir -p "${simulator}/php" "${simulator}/engine"
     lipo -create \
