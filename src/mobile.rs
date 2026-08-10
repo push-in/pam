@@ -4042,7 +4042,8 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         .collect::<Result<Vec<_>, _>>()?;
     let pam_native_path = native_home.join("ios");
     let manifest = format!(
-        "// swift-tools-version: 5.9\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"PamNativePlugins\",\n    platforms: [.iOS(.v15)],\n    products: [.library(name: \"PamNativePlugins\", targets: [\"PamNativePlugins\"])],\n    dependencies: [\n        .package(path: {}),{}\n    ],\n    targets: [\n{}    ]\n)\n",
+        "// swift-tools-version: 5.9\n\nimport PackageDescription\n\nlet package = Package(\n    name: \"PamNativePlugins\",\n    platforms: [.iOS({})],\n    products: [.library(name: \"PamNativePlugins\", targets: [\"PamNativePlugins\"])],\n    dependencies: [\n        .package(path: {}),{}\n    ],\n    targets: [\n{}    ]\n)\n",
+        swift_string(&project.manifest.ios.minimum_version),
         swift_string(&pam_native_path.to_string_lossy()),
         if external_dependencies.is_empty() {
             String::new()
@@ -5440,6 +5441,7 @@ mod tests {
                 "name": "Plugins",
                 "entry": "index.php",
                 "android": {"minSdk": 26, "targetSdk": 36},
+                "ios": {"minimumVersion": "18.0"},
                 "modules": [],
                 "views": []
             }"#,
@@ -5563,6 +5565,7 @@ mod tests {
         let swift_package =
             fs::read_to_string(root.join(".pam-native/ios/PamNativePlugins/Package.swift"))
                 .expect("generated Swift Package.swift");
+        assert!(swift_package.contains("platforms: [.iOS(\"18.0\")]"));
         assert!(swift_package.contains(".linkedFramework(\"AuthenticationServices\")"));
         assert!(swift_package.contains(
             ".package(url: \"https://github.com/apple/swift-collections.git\", exact: \"1.1.0\")"

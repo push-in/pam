@@ -21,11 +21,11 @@ machine output. Package authors can use the [CLI extension contract](extending-c
 | PAM API | Persistent HTTP and realtime services | `pam init app --template api` |
 | PAM Laravel | Laravel hosted by the persistent runtime | [`laravel.md`](laravel.md) |
 | PAM Native | Android and iOS applications in PHP | [`../pam-native/README.md`](../pam-native/README.md) |
-
-PAM Native está sendo certificado por plataforma. O contrato de produção
-Os contratos operacionais e checklists por plataforma estão em
-[Android](android.md) e [iOS](ios.md).
 | PAM Desktop | Servo-hosted desktop applications | `pam init app --template desktop` |
+
+PAM Native is certified with real generated hosts on Android and iOS. The
+operational contracts and release checklists live in [Android](android.md) and
+[iOS](ios.md).
 
 Every product requires the PAM CLI. Official releases manage their private PHP
 runtime and verified Composer toolchain; product SDKs and plugins are project

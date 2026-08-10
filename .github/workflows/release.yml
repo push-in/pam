@@ -45,7 +45,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 3a415204d7df236ff10fedb9a172fde9330f9e51
+          ref: c5ddabb9248674b80c85b114db512ade89b215cf
           path: pam-native
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
@@ -130,7 +130,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 3a415204d7df236ff10fedb9a172fde9330f9e51
+          ref: c5ddabb9248674b80c85b114db512ade89b215cf
           path: pam-native
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0

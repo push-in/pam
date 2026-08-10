@@ -3,6 +3,12 @@
 O Android é a primeira plataforma certificada do PAM Native. Todos os comandos
 partem da raiz do projeto, onde está o `pam-native.json`.
 
+Se você ainda não possui o PAM, comece pela
+[instalação única do CLI](getting-started.md#install). Depois crie o projeto com
+`pam init meu-app --template mobile`. O CLI detecta Android pelo contexto do
+projeto; os comandos `pam mobile ...` são aliases explícitos para CI e automação
+avançada.
+
 ## Preparar o ambiente
 
 Instale Java 17 ou superior, Rust, Android SDK 36, NDK `27.1.12297006`, CMake
@@ -10,8 +16,8 @@ Instale Java 17 ou superior, Rust, Android SDK 36, NDK `27.1.12297006`, CMake
 
 ```bash
 pam doctor --fix
-pam mobile doctor .
-pam mobile prepare .
+pam doctor
+pam build
 ```
 
 O doctor valida também os targets Rust e os runtimes PHP verificados para
@@ -20,11 +26,11 @@ O doctor valida também os targets Rust e os runtimes PHP verificados para
 ## Desenvolver
 
 ```bash
-pam mobile devices .
-pam mobile run .
-pam mobile dev .
-pam mobile logs .
-pam mobile devtools .
+pam devices
+pam run
+pam dev
+pam logs
+pam devtools
 ```
 
 `run` detecta a ABI do aparelho conectado. `dev` mantém o runtime em modo debug
@@ -41,8 +47,8 @@ export PAM_ANDROID_KEY_ALIAS=release
 export PAM_ANDROID_KEYSTORE_PASSWORD='...'
 export PAM_ANDROID_KEY_PASSWORD='...'
 
-pam mobile sign .
-pam mobile package .
+pam sign
+pam package
 ```
 
 `package` recusa uma release sem assinatura. A pasta `dist/` recebe:
