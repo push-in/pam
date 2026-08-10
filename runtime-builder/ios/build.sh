@@ -143,17 +143,22 @@ build_engine_slice() {
 
 build_macos_embed_sdk() {
     local host_arch
+    local sdk_path
     local build=${build_root}/build-macos-host
     local install=${pam_root}/runtime/macos/${runtime_id}
     host_arch=$(uname -m)
+    sdk_path=$(xcrun --sdk macosx --show-sdk-path)
     rm -rf -- "${install}"
     mkdir -p "${build}" "${install}"
     (
         cd "${build}"
-        CC="$(xcrun --sdk macosx --find clang)" \
+        if ! CC="$(xcrun --sdk macosx --find clang)" \
         CXX="$(xcrun --sdk macosx --find clang++)" \
         AR="$(xcrun --sdk macosx --find ar)" \
         RANLIB="$(xcrun --sdk macosx --find ranlib)" \
+        CFLAGS="-O2 -fPIC -arch ${host_arch} -isysroot ${sdk_path}" \
+        CPPFLAGS="-arch ${host_arch} -isysroot ${sdk_path}" \
+        LDFLAGS="-arch ${host_arch} -isysroot ${sdk_path}" \
         "${source_root}/configure" \
             --prefix="${install}" \
             --enable-embed=shared \
@@ -161,7 +166,10 @@ build_macos_embed_sdk() {
             --enable-ctype --enable-filter --enable-session --enable-tokenizer --enable-phar \
             --without-pear --without-iconv --without-libxml --without-openssl \
             --without-zlib --without-curl --without-sqlite3 --without-pdo-sqlite \
-            "${opcache_options[@]}" --with-pcre-jit=no
+            "${opcache_options[@]}" --with-pcre-jit=no; then
+            tail -n 120 config.log >&2
+            return 1
+        fi
         make -j"${PAM_BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}"
         make install
     )
