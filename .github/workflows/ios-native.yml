@@ -210,7 +210,17 @@ jobs:
               \( -name 'PAM App*' -o -name '*app.pam.hello*' \) \
               -exec cp {} "${RUNNER_TEMP}/pam-ios-fixture/crashes/host/" \;
           fi
-          ps -p "${pid}" >/dev/null
+          if ! ps -p "${pid}" >/dev/null; then
+            debug_launch=$(xcrun simctl launch --terminate-running-process \
+              --wait-for-debugger "${simulator}" app.pam.hello)
+            debug_pid=${debug_launch##*: }
+            lldb --batch \
+              -o "process attach --pid ${debug_pid}" \
+              -o continue \
+              -o 'thread backtrace all' \
+              >"${RUNNER_TEMP}/pam-ios-fixture/lldb.log" 2>&1 || true
+            exit 1
+          fi
           ! grep -E 'Pam Native failed to start|PHP (fatal|parse) error' \
             "${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
       - uses: actions/upload-artifact@v5
@@ -222,5 +232,6 @@ jobs:
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/DerivedData/Logs
             ${{ runner.temp }}/pam-ios-fixture/simulator.png
             ${{ runner.temp }}/pam-ios-fixture/simulator.log
+            ${{ runner.temp }}/pam-ios-fixture/lldb.log
             ${{ runner.temp }}/pam-ios-fixture/crashes
           if-no-files-found: warn
