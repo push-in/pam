@@ -214,10 +214,12 @@ jobs:
             debug_launch=$(xcrun simctl launch --terminate-running-process \
               --wait-for-debugger "${simulator}" app.pam.hello)
             debug_pid=${debug_launch##*: }
-            lldb --batch \
+            perl -e '$seconds = shift; alarm $seconds; exec @ARGV' 60 \
+              lldb --batch \
               -o "process attach --pid ${debug_pid}" \
+              -o 'process handle SIGBUS --stop true --notify true --pass false' \
               -o continue \
-              -o 'thread backtrace all' \
+              -k 'thread backtrace all' \
               >"${RUNNER_TEMP}/pam-ios-fixture/lldb.log" 2>&1 || true
             exit 1
           fi
