@@ -39,7 +39,8 @@ mkdir -p \
     "${package_root}/bin" \
     "${package_root}/etc/conf.d" \
     "${package_root}/lib/php/extensions" \
-    "${package_root}/share/pam/native"
+    "${package_root}/share/pam/native" \
+    "${package_root}/share/pam/runtime"
 
 cp "${pam_binary}" "${package_root}/bin/pam"
 cp "${php_library}" "${package_root}/lib/libphp.so"
@@ -59,6 +60,7 @@ tar \
     --exclude='*/local.properties' \
     -C pam-native -cf - . |
     tar -C "${package_root}/share/pam/native" -xf -
+cp runtime/catalog.json "${package_root}/share/pam/runtime/catalog.json"
 
 copy_dependencies() {
     ldd "$1" | awk '$2 == "=>" { print $1 "|" $3 }' |

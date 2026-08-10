@@ -107,9 +107,81 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
 
+  build-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: macos-arm64
+          - runner: macos-15-intel
+            target: macos-x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+      - name: Check out the pinned PAM Native SDK
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: 9464b4ed77170cb8e097fe44ed4941145d8ee1f5
+          path: pam-native
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pam-release-${{ matrix.target }}
+      - name: Build verified iOS and macOS PHP runtimes
+        run: runtime-builder/ios/build.sh --php 8.5 all
+      - name: Build PAM for macOS
+        run: |
+          php_config=$(find runtime/macos -type f -path '*/bin/php-config' -print -quit)
+          test -n "${php_config}"
+          php_sdk=$(dirname "$(dirname "${php_config}")")
+          PHP_CONFIG="${php_config}" \
+          PAM_PHP_LIB_DIR="${php_sdk}/lib" \
+            cargo build --locked --release
+          printf 'PAM_MACOS_PHP_SDK=%s\n' "${php_sdk}" >>"${GITHUB_ENV}"
+          DYLD_LIBRARY_PATH="${php_sdk}/lib" target/release/pam --version
+      - name: Package relocatable macOS runtime
+        env:
+          PAM_TARGET: ${{ matrix.target }}
+          PAM_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          mkdir -p dist
+          scripts/package-runtime-macos.sh \
+            target/release/pam "${PAM_MACOS_PHP_SDK}" \
+            "${PAM_VERSION}" "${PAM_TARGET}" dist
+          archive=$(find dist -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "${archive}"
+          extract_root=${RUNNER_TEMP}/pam-macos-smoke
+          mkdir -p "${extract_root}"
+          tar -xzf "${archive}" -C "${extract_root}"
+          "${extract_root}/pam-${PAM_VERSION}-${PAM_TARGET}/bin/pam-run" --version
+      - name: Attest release archive
+        if: github.event.repository.visibility == 'public'
+        uses: actions/attest@v4
+        with:
+          subject-path: dist/*.tar.gz
+      - uses: actions/upload-artifact@v5
+        with:
+          name: pam-${{ matrix.target }}
+          path: |
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))
-    needs: build
+    needs: [build, build-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -85,6 +85,7 @@ jobs:
             target/release/pam ci linux-x86_64 "$runtime_dist"
           test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/native/android/settings.gradle.kts"
           test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/native/packages/native/composer.json"
+          test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/runtime/catalog.json"
           "$runtime_dist/pam-ci-linux-x86_64/bin/pam-run" -r '
           foreach (["curl", "intl", "mbstring", "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "sockets", "xml", "zip"] as $extension) {
               if (!extension_loaded($extension)) {

@@ -81,9 +81,9 @@ The result is a runtime designed for APIs, real-time systems, streaming, backgro
 
 ### 1. Install the runtime
 
-Pam currently ships prebuilt Linux releases for x86_64 and ARM64. Official
-archives target glibc 2.35 or newer and bundle non-system shared libraries used
-by the runtime and its reviewed PHP extensions.
+PAM ships prebuilt Linux and macOS releases for x86_64 and ARM64. Linux archives
+target glibc 2.35 or newer; macOS archives also contain the verified iOS PHP and
+engine XCFrameworks used by `pam mobile ios:*`.
 
 ```bash
 curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
@@ -878,7 +878,7 @@ Pam is ambitious, but the boundaries matter:
 - **Socket.IO is not implemented.** Pam speaks standard RFC 6455 WebSocket, not Engine.IO.
 - **HTTP/3 currently covers request/response.** WebSockets continue to use the HTTP/1.1 upgrade path; WebTransport and WebSocket over HTTP/3 are not implemented.
 - **Persistent application rules apply.** Frameworks and packages must not retain request-specific state in globals or singletons.
-- **Platform scope is currently Linux/Unix.** PHP 8.4 Embed must be ABI-compatible with the PHP CLI and extensions used by the application.
+- **Host scope is Linux and macOS.** Windows users can use WSL for server projects; native Windows host binaries are not part of 1.0.
 
 Experimental does not mean careless. It means the contracts are explicit, the test suite is aggressive, and production adoption should still begin with staging, soak tests, representative traffic, and a rollback plan.
 

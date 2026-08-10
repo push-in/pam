@@ -50,23 +50,32 @@ EOF
         ;;
 esac
 
-for command_name in curl tar sha256sum mktemp uname awk find grep sed head readlink; do
+for command_name in curl tar mktemp uname awk find grep sed head readlink; do
     require_command "${command_name}"
 done
 
-test "$(uname -s)" = "Linux" || fail "prebuilt PAM releases currently support Linux only"
-
-case "$(uname -m)" in
-    x86_64|amd64)
+case "$(uname -s):$(uname -m)" in
+    Linux:x86_64|Linux:amd64)
         release_target=linux-x86_64
+        checksum_command=sha256sum
         ;;
-    aarch64|arm64)
+    Linux:aarch64|Linux:arm64)
         release_target=linux-aarch64
+        checksum_command=sha256sum
+        ;;
+    Darwin:arm64|Darwin:aarch64)
+        release_target=macos-arm64
+        checksum_command=shasum
+        ;;
+    Darwin:x86_64|Darwin:amd64)
+        release_target=macos-x86_64
+        checksum_command=shasum
         ;;
     *)
-        fail "unsupported architecture: $(uname -m)"
+        fail "unsupported platform: $(uname -s) $(uname -m)"
         ;;
 esac
+require_command "${checksum_command}"
 
 if test -z "${requested_version}"; then
     release_metadata=$(mktemp "${TMPDIR:-/tmp}/pam-release.XXXXXX")
@@ -102,7 +111,11 @@ download \
 
 (
     cd "${temporary_directory}"
-    sha256sum --check "${archive_name}.sha256"
+    if test "${checksum_command}" = shasum; then
+        shasum -a 256 --check "${archive_name}.sha256"
+    else
+        sha256sum --check "${archive_name}.sha256"
+    fi
 )
 
 tar -tzf "${temporary_directory}/${archive_name}" |
@@ -112,8 +125,7 @@ tar -tzf "${temporary_directory}/${archive_name}" |
     ' ||
     fail "release archive contains a path outside ${archive_root}"
 
-tar --no-same-owner --no-same-permissions \
-    -xzf "${temporary_directory}/${archive_name}" \
+tar -xzf "${temporary_directory}/${archive_name}" \
     -C "${temporary_directory}"
 
 if find "${temporary_directory}/${archive_root}" -type l -print -quit | grep -q .; then

@@ -17,11 +17,13 @@ rm pam-install.sh
 pam doctor .
 ```
 
-O instalador detecta x86_64/ARM64, valida SHA-256, rejeita caminhos e symlinks
-inesperados no arquivo e mantém cada versão em um diretório próprio. O launcher
-define `LD_LIBRARY_PATH`, `PHPRC`, `PHP_INI_SCAN_DIR` e o diretório privado de
-extensões antes de iniciar o runtime. Somente quem compila o PAM a partir do
-código-fonte precisa do SDK PHP Embed.
+O instalador detecta Linux/macOS e x86_64/ARM64, valida SHA-256, rejeita caminhos
+e symlinks inesperados no arquivo e mantém cada versão em um diretório próprio.
+O launcher define o caminho privado da `libphp` (`LD_LIBRARY_PATH` ou
+`DYLD_LIBRARY_PATH`), `PHPRC`, `PHP_INI_SCAN_DIR` e o diretório de extensões antes
+de iniciar o runtime. No macOS, o mesmo artefato inclui os XCFrameworks
+verificados necessários para gerar aplicativos iOS. Somente quem compila o PAM a
+partir do código-fonte precisa do SDK PHP Embed.
 
 ## Inicialização
 
