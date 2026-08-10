@@ -41,18 +41,21 @@ jobs:
             runtime_id: 8.4.23-r1
             ios_minimum: '15.0'
             plugins: share-extension health media
-            extensions: PamShareExtension
+            foundation_extensions: PamShareExtension
+            extensionkit_extensions: ''
             cache_salt: php84-v1
           - profile: php85-extensions
             php: '8.5'
             runtime_id: 8.5.8-r1
             ios_minimum: '18.0'
             plugins: share-extension health media widgets intents live-activities
-            extensions: PamShareExtension PamWidgets PamAppIntents PamLiveActivities
+            foundation_extensions: PamShareExtension PamWidgets PamLiveActivities
+            extensionkit_extensions: PamAppIntents
             cache_salt: c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
     env:
       PAM_CERTIFICATION_PLUGINS: ${{ matrix.plugins }}
-      PAM_EXPECTED_EXTENSIONS: ${{ matrix.extensions }}
+      PAM_FOUNDATION_EXTENSIONS: ${{ matrix.foundation_extensions }}
+      PAM_EXTENSIONKIT_EXTENSIONS: ${{ matrix.extensionkit_extensions }}
     steps:
       - uses: actions/checkout@v5
       - name: Check out the pinned PAM Native SDK
@@ -192,8 +195,14 @@ jobs:
             "${fixture}/.pam-native/ios/App/App/PamNativeApp.entitlements"
           grep -q 'PamShareExtension' \
             "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
-          for extension in ${PAM_EXPECTED_EXTENSIONS}; do
+          for extension in ${PAM_FOUNDATION_EXTENSIONS} ${PAM_EXTENSIONKIT_EXTENSIONS}; do
             grep -q "${extension}" \
+              "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
+          done
+          for extension in ${PAM_EXTENSIONKIT_EXTENSIONS}; do
+            grep -q 'com.apple.appintents-extension' \
+              "${fixture}/.pam-native/ios/App/Extensions/${extension}/Info.plist"
+            grep -q 'com.apple.product-type.extensionkit-extension' \
               "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
           done
           printf 'PAM_IOS_FIXTURE=%s\n' "${fixture}" >>"${GITHUB_ENV}"
@@ -210,9 +219,13 @@ jobs:
             build
           test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app"
           products="${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator"
-          for extension in ${PAM_EXPECTED_EXTENSIONS}; do
+          for extension in ${PAM_FOUNDATION_EXTENSIONS}; do
             test -d "${products}/${extension}.appex"
             test -d "${products}/PAM App.app/PlugIns/${extension}.appex"
+          done
+          for extension in ${PAM_EXTENSIONKIT_EXTENSIONS}; do
+            test -d "${products}/${extension}.app"
+            test -d "${products}/PAM App.app/Extensions/${extension}.app"
           done
       - name: Install, launch, and certify the generated app
         run: |
