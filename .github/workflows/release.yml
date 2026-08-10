@@ -140,10 +140,12 @@ jobs:
         with:
           key: pam-release-${{ matrix.target }}
       - name: Build verified iOS and macOS PHP runtimes
-        run: runtime-builder/ios/build.sh --php 8.5 all
+        run: |
+          runtime-builder/ios/build.sh --php 8.4 all
+          runtime-builder/ios/build.sh --php 8.5 all
       - name: Build PAM for macOS
         run: |
-          php_config=$(find runtime/macos -type f -path '*/bin/php-config' -print -quit)
+          php_config=$(find runtime/macos/8.5.* -type f -path '*/bin/php-config' -print -quit)
           test -n "${php_config}"
           php_sdk=$(dirname "$(dirname "${php_config}")")
           PHP_CONFIG="${php_config}" \
