@@ -2321,7 +2321,7 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
         fs::create_dir_all(&sources_root)
             .map_err(|error| format!("cannot create iOS extension {name}: {error}"))?;
         for source in &extension.source_dirs {
-            copy_tree(&canonical_plugin_path(plugin, source)?, &sources_root, &[])?;
+            copy_ios_extension_sources(&canonical_plugin_path(plugin, source)?, &sources_root)?;
         }
         for resources in &extension.resource_dirs {
             fs::create_dir_all(&resources_root)
@@ -2614,6 +2614,38 @@ fn collect_tree_files(root: &Path) -> Result<Vec<PathBuf>, String> {
     visit(root, &mut files)?;
     files.sort();
     Ok(files)
+}
+
+fn copy_ios_extension_sources(source: &Path, destination: &Path) -> Result<(), String> {
+    for entry in fs::read_dir(source)
+        .map_err(|error| format!("cannot read {}: {error}", source.display()))?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("cannot inspect {}: {error}", entry.path().display()))?;
+        if file_type.is_symlink() {
+            return Err(format!(
+                "refusing symlink in iOS extension sources: {}",
+                entry.path().display()
+            ));
+        }
+        let target = destination.join(entry.file_name());
+        if file_type.is_dir() {
+            fs::create_dir_all(&target)
+                .map_err(|error| format!("cannot create {}: {error}", target.display()))?;
+            copy_ios_extension_sources(&entry.path(), &target)?;
+        } else if file_type.is_file()
+            && !matches!(
+                entry.path().extension().and_then(OsStr::to_str),
+                Some("plist" | "entitlements")
+            )
+        {
+            fs::copy(entry.path(), &target)
+                .map_err(|error| format!("cannot copy {}: {error}", entry.path().display()))?;
+        }
+    }
+    Ok(())
 }
 
 fn xcode_file_type(path: &Path) -> &'static str {
