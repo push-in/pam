@@ -110,7 +110,11 @@ jobs:
         run: |
           fixture=${RUNNER_TEMP}/pam-ios-fixture
           target/debug/pam init "${fixture}" \
-            --template mobile --platform ios --no-install --no-interaction
+            --template mobile --platform ios \
+            --name 'PAM App' --application-id app.pam.hello \
+            --no-install --no-interaction
+          test "$(jq -r '.name' "${fixture}/pam-native.json")" = 'PAM App'
+          test "$(jq -r '.applicationId' "${fixture}/pam-native.json")" = app.pam.hello
           composer install \
             --working-dir="${fixture}" --no-dev --no-interaction --prefer-dist
           for plugin in share-extension health media; do
@@ -132,6 +136,10 @@ jobs:
           target/debug/pam mobile ios:prepare "${fixture}"
           test -f "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
           ! grep -R '__PAM_' "${fixture}/.pam-native/ios/App"
+          grep -q 'PRODUCT_NAME = "PAM App"' \
+            "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
+          grep -q 'PRODUCT_BUNDLE_IDENTIFIER = app.pam.hello' \
+            "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
           grep -q 'NSCameraUsageDescription' "${fixture}/.pam-native/ios/App/App/Info.plist"
           grep -q 'NSMicrophoneUsageDescription' "${fixture}/.pam-native/ios/App/App/Info.plist"
           grep -q 'com.apple.developer.healthkit' \
