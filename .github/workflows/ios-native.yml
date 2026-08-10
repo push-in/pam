@@ -38,7 +38,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 9464b4ed77170cb8e097fe44ed4941145d8ee1f5
+          ref: c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
           path: pam-native
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
@@ -52,8 +52,24 @@ jobs:
           php-version: '8.5'
           tools: composer:v2
           coverage: none
+      - name: Restore verified PHP/XCFramework runtime
+        id: runtime-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            runtime/ios/8.5.8-r1
+            runtime/macos/8.5.8-r1
+          key: pam-ios-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('runtime/catalog.json', 'runtime-builder/ios/build.sh', 'pam-native/Cargo.lock', 'pam-native/crates/**/Cargo.toml') }}-c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
       - name: Build verified PHP and engine XCFrameworks
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
         run: runtime-builder/ios/build.sh --php 8.5 all
+      - name: Validate restored or built runtime
+        run: |
+          test -x runtime/macos/8.5.8-r1/bin/php-config
+          test -f runtime/macos/8.5.8-r1/lib/libphp.dylib
+          test -f runtime/ios/8.5.8-r1/PamPhp.xcframework/Info.plist
+          test -f runtime/ios/8.5.8-r1/PamNativeEngine.xcframework/Info.plist
+          test -f runtime/ios/8.5.8-r1/runtime.json
       - name: Build PAM CLI
         run: |
           php_config=$(find runtime/macos -type f -path '*/bin/php-config' -print -quit)

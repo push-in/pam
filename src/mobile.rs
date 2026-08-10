@@ -2166,7 +2166,14 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
     copy_tree(&generated_plugins, &host_plugins, &[".build", ".swiftpm"])?;
     stage_project_at(project, &runtime_destination.join("PamBundle"))?;
 
+    let has_app_entitlements = merge_ios_app_metadata(project, &workspace)?;
+
     let team = std::env::var("PAM_IOS_DEVELOPMENT_TEAM").unwrap_or_default();
+    let code_sign_entitlements = if has_app_entitlements {
+        "CODE_SIGN_ENTITLEMENTS = App/PamNativeApp.entitlements; "
+    } else {
+        ""
+    };
     replace_ios_placeholders(
         &workspace.join("PamNativeApp.xcodeproj/project.pbxproj"),
         &[
@@ -2188,6 +2195,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
                 project.manifest.ios.minimum_version.as_str(),
             ),
             ("__PAM_DEVELOPMENT_TEAM__", team.as_str()),
+            ("__PAM_CODE_SIGN_ENTITLEMENTS__", code_sign_entitlements),
         ],
     )?;
     replace_ios_placeholders(
@@ -2198,6 +2206,160 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
         ],
     )?;
     Ok(workspace)
+}
+
+fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, String> {
+    let application_id = &project.manifest.application_id;
+    let info_path = workspace.join("App/Info.plist");
+    let mut info = read_apple_plist(&info_path)?;
+    let mut entitlements = serde_json::json!({});
+    let mut has_entitlements = false;
+
+    for plugin in &project.plugins {
+        let ios = &plugin.manifest.ios;
+        if let Some(path) = &ios.info_plist {
+            let path = canonical_plugin_path(plugin, path)?;
+            let value = replace_plist_application_id(read_apple_plist(&path)?, application_id);
+            merge_plist_value(
+                &mut info,
+                value,
+                &format!("plugin {} Info.plist", plugin.package),
+            )?;
+        }
+        for (key, value) in &ios.usage_descriptions {
+            let object = info.as_object_mut().ok_or_else(|| {
+                format!(
+                    "{} must contain a top-level dictionary",
+                    info_path.display()
+                )
+            })?;
+            match object.get(key) {
+                Some(existing) if existing != value => {
+                    return Err(format!(
+                        "plugin {} conflicts with the existing iOS value for {key}",
+                        plugin.package
+                    ));
+                }
+                Some(_) => {}
+                None => {
+                    object.insert(key.clone(), serde_json::Value::String(value.clone()));
+                }
+            }
+        }
+        if let Some(path) = &ios.entitlements {
+            let path = canonical_plugin_path(plugin, path)?;
+            let value = replace_plist_application_id(read_apple_plist(&path)?, application_id);
+            merge_plist_value(
+                &mut entitlements,
+                value,
+                &format!("plugin {} entitlements", plugin.package),
+            )?;
+            has_entitlements = true;
+        }
+    }
+
+    write_apple_plist(&info_path, &info)?;
+    if has_entitlements {
+        write_apple_plist(
+            &workspace.join("App/PamNativeApp.entitlements"),
+            &entitlements,
+        )?;
+    }
+    Ok(has_entitlements)
+}
+
+fn read_apple_plist(path: &Path) -> Result<serde_json::Value, String> {
+    let output = Command::new("plutil")
+        .args(["-convert", "json", "-o", "-"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("cannot start plutil for {}: {error}", path.display()))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot read Apple property list {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("invalid property list {}: {error}", path.display()))
+}
+
+fn write_apple_plist(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    let mut bytes = serde_json::to_vec_pretty(value)
+        .map_err(|error| format!("cannot encode {}: {error}", path.display()))?;
+    bytes.push(b'\n');
+    write_atomic(path, &bytes)?;
+    let output = Command::new("plutil")
+        .args(["-convert", "xml1"])
+        .arg(path)
+        .output()
+        .map_err(|error| format!("cannot start plutil for {}: {error}", path.display()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "cannot write Apple property list {}: {}",
+            path.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ))
+    }
+}
+
+fn replace_plist_application_id(
+    value: serde_json::Value,
+    application_id: &str,
+) -> serde_json::Value {
+    match value {
+        serde_json::Value::String(value) => {
+            serde_json::Value::String(value.replace("$(PAM_NATIVE_APPLICATION_ID)", application_id))
+        }
+        serde_json::Value::Array(values) => serde_json::Value::Array(
+            values
+                .into_iter()
+                .map(|value| replace_plist_application_id(value, application_id))
+                .collect(),
+        ),
+        serde_json::Value::Object(values) => serde_json::Value::Object(
+            values
+                .into_iter()
+                .map(|(key, value)| (key, replace_plist_application_id(value, application_id)))
+                .collect(),
+        ),
+        value => value,
+    }
+}
+
+fn merge_plist_value(
+    target: &mut serde_json::Value,
+    incoming: serde_json::Value,
+    source: &str,
+) -> Result<(), String> {
+    match (target, incoming) {
+        (serde_json::Value::Object(target), serde_json::Value::Object(incoming)) => {
+            for (key, value) in incoming {
+                if let Some(existing) = target.get_mut(&key) {
+                    merge_plist_value(existing, value, source)
+                        .map_err(|error| format!("{error} at {key}"))?;
+                } else {
+                    target.insert(key, value);
+                }
+            }
+            Ok(())
+        }
+        (serde_json::Value::Array(target), serde_json::Value::Array(incoming)) => {
+            for value in incoming {
+                if !target.contains(&value) {
+                    target.push(value);
+                }
+            }
+            Ok(())
+        }
+        (target, incoming) if *target == incoming => Ok(()),
+        _ => Err(format!(
+            "conflicting Apple property-list values from {source}"
+        )),
+    }
 }
 
 fn replace_ios_placeholders(path: &Path, replacements: &[(&str, &str)]) -> Result<(), String> {
@@ -4657,6 +4819,47 @@ mod tests {
         assert!(valid_mime_type("application/vnd.example+json"));
         assert!(!valid_mime_type("image"));
         assert!(!valid_mime_type("image/<script>"));
+    }
+
+    #[test]
+    fn ios_property_lists_merge_capabilities_without_losing_values() {
+        let mut target = serde_json::json!({
+            "com.apple.security.application-groups": ["group.app.pam.demo.pam-native"],
+            "existing": true
+        });
+        merge_plist_value(
+            &mut target,
+            serde_json::json!({
+                "com.apple.security.application-groups": [
+                    "group.app.pam.demo.pam-native",
+                    "group.app.pam.demo.shared"
+                ],
+                "com.apple.developer.healthkit": true
+            }),
+            "test plugin",
+        )
+        .expect("compatible capabilities");
+        assert_eq!(
+            target["com.apple.security.application-groups"],
+            serde_json::json!(["group.app.pam.demo.pam-native", "group.app.pam.demo.shared"])
+        );
+        assert_eq!(target["com.apple.developer.healthkit"], true);
+        assert!(
+            merge_plist_value(
+                &mut target,
+                serde_json::json!({"existing": false}),
+                "conflicting plugin"
+            )
+            .is_err()
+        );
+
+        let replaced = replace_plist_application_id(
+            serde_json::json!({
+                "groups": ["group.$(PAM_NATIVE_APPLICATION_ID).pam-native"]
+            }),
+            "app.pam.demo",
+        );
+        assert_eq!(replaced["groups"][0], "group.app.pam.demo.pam-native");
     }
 
     #[test]
