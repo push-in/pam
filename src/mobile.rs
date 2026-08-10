@@ -2412,11 +2412,7 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
         }
 
         let is_extensionkit = extension.kind == IosExtensionKind::Intents;
-        let product_name = if is_extensionkit {
-            format!("{name}.app")
-        } else {
-            format!("{name}.appex")
-        };
+        let product_name = format!("{name}.appex");
         let product_file_type = if is_extensionkit {
             "wrapper.extensionkit-extension"
         } else {

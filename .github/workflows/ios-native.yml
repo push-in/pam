@@ -224,8 +224,8 @@ jobs:
             test -d "${products}/PAM App.app/PlugIns/${extension}.appex"
           done
           for extension in ${PAM_EXTENSIONKIT_EXTENSIONS}; do
-            test -d "${products}/${extension}.app"
-            test -d "${products}/PAM App.app/Extensions/${extension}.app"
+            test -d "${products}/${extension}.appex"
+            test -d "${products}/PAM App.app/Extensions/${extension}.appex"
           done
       - name: Install, launch, and certify the generated app
         run: |
