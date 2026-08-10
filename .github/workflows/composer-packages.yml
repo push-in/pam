@@ -96,7 +96,7 @@ jobs:
     needs:
       - prepare
       - split
-    if: github.event_name == 'push' || inputs.publish
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -113,6 +113,13 @@ jobs:
         with:
           php-version: '8.4'
           tools: composer:v2
+      - name: Require the completed PAM GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: >-
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}"
+          --jq '.draft == false and .prerelease == false' | grep -qx true
       - name: Configure the scoped mirror deploy key
         env:
           DEPLOY_KEY: ${{ secrets[matrix.deploySecret] }}

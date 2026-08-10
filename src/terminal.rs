@@ -37,6 +37,10 @@ impl Terminal {
         }
     }
 
+    pub fn interactive(&self) -> bool {
+        self.interactive
+    }
+
     fn paint(&self, value: impl std::fmt::Display, code: &str) -> String {
         if self.color {
             format!("\x1b[{code}m{value}\x1b[0m")
@@ -102,6 +106,90 @@ impl Terminal {
             print!("\x1b[2J\x1b[H");
         }
     }
+}
+
+pub fn launcher(executable: &OsStr) -> Result<u8, String> {
+    use std::io::Write;
+    use std::process::Command;
+
+    let ui = Terminal::stdout();
+    println!("{}", ui.brand("PAM — PHP, Always in Memory"));
+    println!("{}", ui.rule());
+    println!();
+    println!("{}", ui.heading("What do you want to do?"));
+    println!("  {}  Create a project", ui.accent("1"));
+    println!("  {}  Open this project", ui.accent("2"));
+    println!("  {}  Check my environment", ui.accent("3"));
+    println!("  {}  Show command reference", ui.accent("4"));
+    println!("  {}  Update PAM", ui.accent("5"));
+    print!("\n{} ", ui.command("Choose [1] ›"));
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("cannot display PAM launcher: {error}"))?;
+    let mut answer = String::new();
+    std::io::stdin()
+        .read_line(&mut answer)
+        .map_err(|error| format!("cannot read PAM launcher choice: {error}"))?;
+    let executable_path = std::env::current_exe().unwrap_or_else(|_| executable.into());
+    match answer.trim() {
+        "" | "1" => {
+            print!("{} ", ui.command("Project directory ›"));
+            std::io::stdout()
+                .flush()
+                .map_err(|error| format!("cannot display project prompt: {error}"))?;
+            let mut directory = String::new();
+            std::io::stdin()
+                .read_line(&mut directory)
+                .map_err(|error| format!("cannot read project directory: {error}"))?;
+            let directory = directory.trim();
+            if directory.is_empty() {
+                return Err("a project directory is required".to_owned());
+            }
+            child_status(Command::new(executable_path).arg("init").arg(directory))
+        }
+        "2" => {
+            print!("{} ", ui.command("Project directory [.] ›"));
+            std::io::stdout()
+                .flush()
+                .map_err(|error| format!("cannot display project prompt: {error}"))?;
+            let mut directory = String::new();
+            std::io::stdin()
+                .read_line(&mut directory)
+                .map_err(|error| format!("cannot read project directory: {error}"))?;
+            let directory = directory.trim();
+            let directory = if directory.is_empty() { "." } else { directory };
+            let directory = std::fs::canonicalize(directory)
+                .map_err(|error| format!("cannot open project directory {directory}: {error}"))?;
+            if !directory.is_dir() {
+                return Err(format!(
+                    "project path is not a directory: {}",
+                    directory.display()
+                ));
+            }
+            child_status(
+                Command::new(executable_path)
+                    .arg("info")
+                    .current_dir(directory),
+            )
+        }
+        "3" => child_status(Command::new(executable_path).arg("doctor")),
+        "4" => {
+            print_help(executable);
+            Ok(0)
+        }
+        "5" => child_status(Command::new(executable_path).arg("self-update")),
+        value => Err(format!("unknown launcher choice {value:?}")),
+    }
+}
+
+fn child_status(command: &mut std::process::Command) -> Result<u8, String> {
+    let status = command
+        .status()
+        .map_err(|error| format!("cannot start PAM command: {error}"))?;
+    Ok(status
+        .code()
+        .and_then(|code| u8::try_from(code).ok())
+        .unwrap_or(1))
 }
 
 pub fn print_help(executable: &OsStr) {
@@ -188,16 +276,36 @@ pub fn print_help(executable: &OsStr) {
     );
     command_group(
         &ui,
+        "PROJECT",
+        &[
+            ("new | init [directory]", "Create a guided PAM project"),
+            ("info", "Describe the current project and active toolchain"),
+            ("packages", "Explore official ecosystem capabilities"),
+            ("add | remove <capability>", "Manage an official capability"),
+            ("make:*", "Generate project-native source files"),
+            (
+                "format | lint",
+                "Format and statically validate project code",
+            ),
+            ("outdated", "Inspect direct dependency updates"),
+            ("commands", "List application and package commands"),
+            (
+                "editor:install [editor]",
+                "Install or print PAM language-editor integration",
+            ),
+        ],
+    );
+    command_group(
+        &ui,
         "SHIP",
         &[
-            (
-                "init [directory]",
-                "Create a raw, API, Laravel, desktop, or mobile app",
-            ),
             (
                 "build [directory]",
                 "Build a self-contained production bundle",
             ),
+            ("package", "Create a signed platform distributable"),
+            ("sign", "Validate release-signing configuration"),
+            ("release [--check]", "Run every local release gate"),
             (
                 "desktop <command>",
                 "Develop and diagnose a Pam Desktop app",
@@ -218,6 +326,11 @@ pub fn print_help(executable: &OsStr) {
         "  {} {}",
         ui.command(format!("{:<25}", format!("{program} --version"))),
         ui.muted("Print the installed version")
+    );
+    eprintln!(
+        "  {} {}",
+        ui.command(format!("{:<25}", format!("{program} self-update"))),
+        ui.muted("Install the latest verified release")
     );
     eprintln!();
     eprintln!(
@@ -279,6 +392,16 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "raw, api, laravel, desktop, mobile, or mobile-ui",
                 ),
                 ("--socket", "Add Pam Socket support"),
+                ("--name NAME", "Human-readable mobile application name"),
+                (
+                    "--application-id ID",
+                    "Mobile bundle/application identifier",
+                ),
+                (
+                    "--starter PRESET",
+                    "blank, tabs, auth, ecommerce, chat, or showcase",
+                ),
+                ("--platform TARGET", "android, ios, or all"),
                 ("--no-install", "Create files without installing packages"),
                 ("--no-interaction", "Use API when no preset is supplied"),
             ],
@@ -314,10 +437,19 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &["test", "test . --pest --filter RuntimeTest"],
         ),
         "doctor" => (
-            "Audit the embedded runtime and project compatibility.",
-            "doctor [path]",
-            &[],
-            &["doctor", "doctor ./my-project"],
+            "Audit and optionally repair the active project toolchain.",
+            "doctor [path] [options]",
+            &[
+                ("--fix", "Apply safe repairs after dependency preflight"),
+                ("--ci", "Disable interactive/color output for automation"),
+                ("--json", "Emit a stable structured diagnostic envelope"),
+            ],
+            &[
+                "doctor",
+                "doctor --fix",
+                "doctor ./my-project --ci",
+                "doctor --json",
+            ],
         ),
         "top" => (
             "Display live metrics from a Pam cluster control plane.",
@@ -337,23 +469,76 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &["benchmark http://127.0.0.1:3000/health --requests 1000 --concurrency 32"],
         ),
+        "package" => (
+            "Create a versioned platform distributable and SHA-256 checksum.",
+            "package [options]",
+            &[
+                (
+                    "--entry FILE",
+                    "Server entry point; inferred by project type",
+                ),
+                ("--output DIR", "Artifact directory; default: dist"),
+            ],
+            &[
+                "package",
+                "package --entry public/index.php --output artifacts",
+            ],
+        ),
+        "console" => (
+            "Open the contextual interactive application console.",
+            "console [arguments...]",
+            &[],
+            &[
+                "console",
+                "console --execute=\"App\\Models\\User::count()\"",
+            ],
+        ),
+        "editor:install" => (
+            "Install or print PAM Native language support for your editor.",
+            "editor:install [vscode|neovim|helix] [options]",
+            &[("--force", "Replace an existing VS Code extension")],
+            &["editor:install vscode", "editor:install neovim"],
+        ),
+        "self-update" => (
+            "Install a release through PAM's HTTPS and SHA-256 verified channel.",
+            "self-update [vMAJOR.MINOR.PATCH] [options]",
+            &[(
+                "--check",
+                "Report whether the requested/latest release differs",
+            )],
+            &["self-update --check", "self-update v1.0.0"],
+        ),
         "mobile" => (
             "Build native Android and iOS applications powered by PHP.",
             "mobile <command> [project] [options]",
             &[
-                ("doctor", "Validate Android and Pam Native toolchains"),
+                ("doctor", "Validate the Android and PAM Native toolchain"),
                 ("prepare", "Stage the project and generate its Android host"),
                 ("codegen", "Regenerate Kotlin native-module bindings"),
                 (
-                    "ios:prepare",
-                    "Generate the autolinked Swift plugin package",
+                    "ios:doctor | ios:prepare",
+                    "Validate and generate the iOS host",
+                ),
+                ("ios:build | ios:run", "Build or launch on an iOS Simulator"),
+                (
+                    "ios:devices | ios:logs",
+                    "Inspect iOS simulators and application logs",
+                ),
+                (
+                    "ios:sign | ios:package",
+                    "Validate signing and export a signed IPA",
                 ),
                 ("build | run | dev", "Build, launch, or hot-reload the app"),
+                (
+                    "sign | package",
+                    "Validate signing and create signed APK/AAB release artifacts",
+                ),
                 (
                     "benchmark | profile",
                     "Measure performance or create a baseline profile",
                 ),
                 ("devtools", "Toggle the live performance overlay"),
+                ("logs | devices", "Inspect app logs and connected targets"),
                 ("plugin:list | plugin:doctor", "Inspect native plugins"),
                 (
                     "runtime:list | runtime:info",
@@ -371,9 +556,34 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "mobile devtools .",
                 "mobile runtime:use 8.5 .",
                 "mobile make:screen Dashboard .",
+                "mobile ios:doctor .",
+                "mobile ios:run .",
             ],
         ),
-        _ => return false,
+        _ => {
+            let Some(spec) = crate::catalog::COMMANDS
+                .iter()
+                .find(|spec| spec.name == command)
+            else {
+                return false;
+            };
+            eprintln!(
+                "{}  {}",
+                ui.brand(format!("PAM / {}", command.to_uppercase())),
+                ui.muted(spec.summary)
+            );
+            eprintln!("{}", ui.rule());
+            eprintln!();
+            eprintln!("{}", ui.heading("USAGE"));
+            eprintln!("  {} {} [options]", ui.command(program), command);
+            eprintln!();
+            eprintln!("{}", ui.heading("DISCOVER"));
+            eprintln!(
+                "  {}",
+                ui.muted("Run the command without options for contextual guidance.")
+            );
+            return true;
+        }
     };
 
     eprintln!(

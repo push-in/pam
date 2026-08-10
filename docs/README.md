@@ -1,0 +1,63 @@
+# PAM documentation
+
+PAM is one ecosystem operated through one command: `pam`. Start with the user
+journey; open architecture and protocol references only when you need them.
+
+## Start here
+
+1. [Install PAM and create a project](getting-started.md)
+2. Run `pam` for the guided launcher
+3. Run `pam doctor --fix` inside the project
+4. Run `pam dev`
+5. Use the generated [CLI reference](cli-reference.md)
+
+The practical [CLI workflow guide](cli.md) explains contextual behavior and
+machine output. Package authors can use the [CLI extension contract](extending-cli.md).
+
+## Products
+
+| Product | Build | Start |
+| --- | --- | --- |
+| PAM API | Persistent HTTP and realtime services | `pam init app --template api` |
+| PAM Laravel | Laravel hosted by the persistent runtime | [`laravel.md`](laravel.md) |
+| PAM Native | Android and iOS applications in PHP | [`../pam-native/README.md`](../pam-native/README.md) |
+
+PAM Native está sendo certificado por plataforma. O contrato de produção
+Os contratos operacionais e checklists por plataforma estão em
+[Android](android.md) e [iOS](ios.md).
+| PAM Desktop | Servo-hosted desktop applications | `pam init app --template desktop` |
+
+Every product requires the PAM CLI. Official releases manage their private PHP
+runtime and verified Composer toolchain; product SDKs and plugins are project
+dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
+
+## Guides
+
+- [Composer packages and ecosystem boundaries](packages.md)
+- [CLI workflow and automation](cli.md)
+- [Application and package commands](extending-cli.md)
+- [Laravel lifecycle and production behavior](laravel.md)
+- [Async runtime](async-runtime.md)
+- [Production operations](production.md)
+- [Compatibility](compatibility.md)
+
+PAM Native maintains its focused guides under
+[`pam-native/docs`](../pam-native/docs/README.md), including components,
+navigation, capabilities, performance, plugins, and release validation.
+
+## Concepts and internals
+
+- [Architecture](architecture.md)
+- [Native API](native-api.md)
+- [Runtime and protocol documentation](../README.md#how-it-works)
+
+## Documentation contract
+
+- Quick starts install PAM before invoking `pam init`.
+- Contextual commands are shown first; explicit `pam mobile`/`pam desktop`
+  forms are documented as advanced automation interfaces.
+- Coded project types, starters, platforms, states, and variants are sequential
+  integer enums beginning at `1`.
+- CLI reference content is generated from the command catalog with
+  `pam docs:generate` and verified in CI with `--check`.
+- Copyable examples must be executable or covered by a smoke contract.

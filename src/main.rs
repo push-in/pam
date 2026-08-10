@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+mod catalog;
 mod cluster;
 mod commands;
 mod composer;
@@ -11,13 +12,18 @@ mod control_plane;
 mod desktop;
 mod dev;
 mod doctor;
+mod ecosystem;
+mod editor;
 mod mobile;
 mod php;
+mod project;
+mod quality;
+mod self_update;
 mod server;
+mod ship;
 mod terminal;
 mod worker_state;
 
-const EX_USAGE: u8 = 64;
 const EX_NOINPUT: u8 = 66;
 const EX_SOFTWARE: u8 = 70;
 
@@ -27,7 +33,7 @@ fn main() -> ExitCode {
         Err(error) => {
             let ui = terminal::Terminal::stderr();
             eprintln!("{} {}", ui.danger("× ERROR"), error);
-            if matches!(error, CliError::Usage | CliError::Commands(_)) {
+            if matches!(error, CliError::Commands(_)) {
                 eprintln!(
                     "{}",
                     ui.muted("  Run `pam --help` to see commands and examples.")
@@ -42,13 +48,36 @@ fn run() -> Result<u8, CliError> {
     let mut raw_args = env::args_os();
     let executable = raw_args.next().unwrap_or_else(|| OsString::from("pam"));
     let Some(mut script_arg) = raw_args.next() else {
+        if terminal::Terminal::stdout().interactive() {
+            return terminal::launcher(&executable).map_err(CliError::Commands);
+        }
         print_usage(&executable);
-        return Err(CliError::Usage);
+        return Ok(0);
     };
 
     let mut ini_entries = Vec::new();
+    let mut ini_file = None::<OsString>;
     loop {
-        let directive = if script_arg == "-d" {
+        if script_arg == "-c" {
+            ini_file = Some(
+                raw_args
+                    .next()
+                    .ok_or_else(|| CliError::Commands("-c requires a php.ini path".to_owned()))?,
+            );
+            script_arg = raw_args.next().ok_or_else(|| {
+                CliError::Commands("a PHP script or -r is required after -c".to_owned())
+            })?;
+            continue;
+        }
+        if script_arg.to_string_lossy().starts_with("-c") && script_arg.to_string_lossy().len() > 2
+        {
+            ini_file = Some(OsString::from(&script_arg.to_string_lossy()[2..]));
+            script_arg = raw_args.next().ok_or_else(|| {
+                CliError::Commands("a PHP script or -r is required after -c".to_owned())
+            })?;
+            continue;
+        }
+        let directive = if script_arg == "-d" || script_arg == "--define" {
             raw_args
                 .next()
                 .ok_or_else(|| CliError::Commands("-d requires name=value".to_owned()))?
@@ -78,6 +107,16 @@ fn run() -> Result<u8, CliError> {
         // SAFETY: CLI parsing happens before PHP or the Tokio runtime starts threads.
         unsafe { env::set_var("PAM_INI_ENTRIES", ini_entries.join("\n") + "\n") };
     }
+    if let Some(ini_file) = ini_file {
+        let ini_file = ini_file
+            .into_string()
+            .map_err(|_| CliError::Commands("-c path must be valid UTF-8".to_owned()))?;
+        if ini_file.is_empty() || ini_file.contains(['\n', '\r', '\0']) {
+            return Err(CliError::Commands("invalid -c php.ini path".to_owned()));
+        }
+        // SAFETY: CLI parsing occurs before PHP or worker threads are initialized.
+        unsafe { env::set_var("PHPRC", ini_file) };
+    }
 
     if script_arg == "--help" || script_arg == "-h" {
         print_usage(&executable);
@@ -106,6 +145,47 @@ fn run() -> Result<u8, CliError> {
         return Ok(0);
     }
 
+    if script_arg == "completion" {
+        let shell = raw_args.next().ok_or_else(|| {
+            CliError::Commands("completion requires bash, zsh, fish, or powershell".to_owned())
+        })?;
+        if raw_args.next().is_some() {
+            return Err(CliError::Commands(
+                "completion accepts one shell".to_owned(),
+            ));
+        }
+        print!(
+            "{}",
+            catalog::completion(&shell.to_string_lossy()).map_err(CliError::Commands)?
+        );
+        return Ok(0);
+    }
+
+    if script_arg == "editor:install" {
+        return editor::install(raw_args).map_err(CliError::Commands);
+    }
+
+    if script_arg == "self-update" {
+        return self_update::run(raw_args).map_err(CliError::Commands);
+    }
+
+    if script_arg == "docs:generate" {
+        let mut check = false;
+        let mut path = PathBuf::from("docs/cli-reference.md");
+        for argument in raw_args {
+            if argument == "--check" {
+                check = true;
+            } else if path == Path::new("docs/cli-reference.md") {
+                path = PathBuf::from(argument);
+            } else {
+                return Err(CliError::Commands(
+                    "docs:generate accepts one output path".to_owned(),
+                ));
+            }
+        }
+        return catalog::write_reference(&path, check).map_err(CliError::Commands);
+    }
+
     if script_arg == "-r" {
         let source = raw_args
             .next()
@@ -124,7 +204,30 @@ fn run() -> Result<u8, CliError> {
         return php.execute_code(&source).map_err(CliError::Runtime);
     }
 
+    if script_arg == "new" {
+        script_arg = OsString::from("init");
+    }
+
     if script_arg == "dev" {
+        if let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Native
+        {
+            if project::native_platforms(&context).map_err(CliError::Commands)? == [2] {
+                let mut arguments = vec![OsString::from("ios:dev"), context.root.into_os_string()];
+                arguments.extend(raw_args);
+                return mobile::run(arguments).map_err(CliError::Commands);
+            }
+            let mut arguments = vec![OsString::from("dev"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return mobile::run(arguments).map_err(CliError::Commands);
+        }
+        if let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Desktop
+        {
+            let mut arguments = vec![OsString::from("dev"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return desktop::run(&executable, arguments).map_err(CliError::Commands);
+        }
         let dev_script = raw_args
             .next()
             .unwrap_or_else(|| OsString::from("index.php"));
@@ -139,8 +242,116 @@ fn run() -> Result<u8, CliError> {
     }
 
     if script_arg == "doctor" {
-        let target = raw_args.next().unwrap_or_else(|| OsString::from("."));
+        let mut fix = false;
+        let mut ci = false;
+        let mut json = false;
+        let mut target = None;
+        for argument in raw_args {
+            match argument.to_string_lossy().as_ref() {
+                "--fix" => fix = true,
+                "--ci" => ci = true,
+                "--json" => json = true,
+                option if option.starts_with('-') => {
+                    return Err(CliError::Commands(format!(
+                        "unknown doctor option: {option}"
+                    )));
+                }
+                _ if target.is_none() => target = Some(argument),
+                _ => {
+                    return Err(CliError::Commands(
+                        "doctor accepts at most one project path".to_owned(),
+                    ));
+                }
+            }
+        }
+        if ci {
+            // SAFETY: command parsing occurs before any runtime worker threads exist.
+            unsafe { env::set_var("PAM_COLOR", "never") };
+        }
+        let target = target.unwrap_or_else(|| OsString::from("."));
         let target = resolve_target(&target)?;
+        if json {
+            if fix {
+                return Err(CliError::Commands(
+                    "doctor --json cannot be combined with --fix; repair first, then audit"
+                        .to_owned(),
+                ));
+            }
+            let output = std::process::Command::new(&executable)
+                .args(["doctor", "--ci"])
+                .arg(&target)
+                .output()
+                .map_err(|error| {
+                    CliError::Commands(format!("cannot run structured doctor audit: {error}"))
+                })?;
+            let context = project::discover(&target);
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema": 1,
+                    "healthy": output.status.success(),
+                    "exitCode": output.status.code().unwrap_or(1),
+                    "root": context.as_ref().map(|context| &context.root),
+                    "projectType": context.as_ref().map(|context| context.kind as u8),
+                    "diagnostics": String::from_utf8_lossy(&output.stdout).trim_end(),
+                    "errors": String::from_utf8_lossy(&output.stderr).trim_end(),
+                }))
+                .map_err(|error| CliError::Commands(error.to_string()))?
+            );
+            return Ok(if output.status.success() { 0 } else { 1 });
+        }
+        let context = project::discover(&target);
+        if fix {
+            let context = context.as_ref().ok_or_else(|| {
+                CliError::Commands(
+                    "`pam doctor --fix` requires a recognizable PAM project".to_owned(),
+                )
+            })?;
+            if project::ensure_manifest(context).map_err(CliError::Commands)? {
+                println!("Created {}", context.root.join("pam.json").display());
+            }
+            if ecosystem::repair_dependencies(&executable, &context.root)
+                .map_err(CliError::Commands)?
+            {
+                println!("Installed the project's locked Composer dependencies.");
+            }
+            if context.kind == project::ProjectKind::Native {
+                ecosystem::refresh_native(&executable, &context.root)
+                    .map_err(CliError::Commands)?;
+                println!("Regenerated PAM Native bindings and plugin integration.");
+            }
+        }
+        if let Some(context) = context.as_ref() {
+            project::validate_context(context).map_err(CliError::Commands)?;
+        }
+        if let Some(context) = context.as_ref()
+            && context.kind == project::ProjectKind::Native
+        {
+            if project::native_platforms(context).map_err(CliError::Commands)? == [2] {
+                return mobile::run(vec![
+                    OsString::from("ios:doctor"),
+                    context.root.clone().into_os_string(),
+                ])
+                .map_err(CliError::Commands);
+            }
+            return mobile::run(vec![
+                OsString::from("doctor"),
+                context.root.clone().into_os_string(),
+            ])
+            .map_err(CliError::Commands);
+        }
+        if let Some(context) = context.as_ref()
+            && context.kind == project::ProjectKind::Desktop
+        {
+            return desktop::run(
+                &executable,
+                vec![
+                    OsString::from("doctor"),
+                    context.root.clone().into_os_string(),
+                ],
+            )
+            .map_err(CliError::Commands);
+        }
         return doctor::run(&executable, &target).map_err(CliError::Doctor);
     }
 
@@ -191,6 +402,35 @@ fn run() -> Result<u8, CliError> {
 
     if script_arg == "test" {
         let mut arguments = raw_args.collect::<Vec<_>>();
+        if let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Desktop
+            && !context.root.join("vendor/bin/pest").is_file()
+            && !context.root.join("vendor/bin/phpunit").is_file()
+        {
+            if !arguments.is_empty() {
+                return Err(CliError::Commands(
+                    "this desktop project does not have a configured PHP test runner".to_owned(),
+                ));
+            }
+            println!(
+                "No application test runner is configured; PAM Desktop shell contracts are validated by its release artifact."
+            );
+            return Ok(0);
+        }
+        if let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Raw
+            && !context.root.join("composer.json").is_file()
+        {
+            if !arguments.is_empty() {
+                return Err(CliError::Commands(
+                    "raw projects without Composer do not have a configured test runner".to_owned(),
+                ));
+            }
+            println!(
+                "No test runner is configured for this raw PAM project; runtime contracts are covered by `pam doctor`."
+            );
+            return Ok(0);
+        }
         let target = if arguments
             .first()
             .is_some_and(|argument| !argument.to_string_lossy().starts_with('-'))
@@ -207,6 +447,14 @@ fn run() -> Result<u8, CliError> {
         "diagnostics" | "heap" | "fibers" | "connections" | "profile" | "trace"
     ) {
         let command = script_arg.to_string_lossy().into_owned();
+        if command == "profile"
+            && let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Native
+        {
+            let mut arguments = vec![OsString::from("profile"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return mobile::run(arguments).map_err(CliError::Commands);
+        }
         if command == "profile" {
             // SAFETY: CLI parsing happens before PHP or the Tokio runtime starts any threads.
             unsafe { env::set_var("PAM_PROFILE", "1") };
@@ -271,6 +519,10 @@ fn run() -> Result<u8, CliError> {
         let mut socket = false;
         let mut install = true;
         let mut interaction = true;
+        let mut application_id = None;
+        let mut application_name = None;
+        let mut mobile_starter = None;
+        let mut mobile_platforms = Vec::new();
         while let Some(argument) = raw_args.next() {
             match argument.to_string_lossy().as_ref() {
                 "--help" | "-h" => {
@@ -292,6 +544,50 @@ fn run() -> Result<u8, CliError> {
                 "--socket" => socket = true,
                 "--no-install" => install = false,
                 "--no-interaction" => interaction = false,
+                "--application-id" => {
+                    application_id = Some(
+                        raw_args
+                            .next()
+                            .ok_or_else(|| {
+                                CliError::Commands("--application-id requires a value".to_owned())
+                            })?
+                            .into_string()
+                            .map_err(|_| {
+                                CliError::Commands("application ID must be valid UTF-8".to_owned())
+                            })?,
+                    );
+                }
+                "--name" => {
+                    application_name = Some(
+                        raw_args
+                            .next()
+                            .ok_or_else(|| {
+                                CliError::Commands("--name requires a value".to_owned())
+                            })?
+                            .into_string()
+                            .map_err(|_| {
+                                CliError::Commands(
+                                    "application name must be valid UTF-8".to_owned(),
+                                )
+                            })?,
+                    );
+                }
+                "--starter" => {
+                    let value = raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--starter requires a preset".to_owned())
+                    })?;
+                    mobile_starter = Some(
+                        commands::MobileStarter::parse(&value.to_string_lossy())
+                            .map_err(CliError::Commands)?,
+                    );
+                }
+                "--platform" => {
+                    let value = raw_args.next().ok_or_else(|| {
+                        CliError::Commands("--platform requires android, ios, or all".to_owned())
+                    })?;
+                    mobile_platforms = commands::MobilePlatform::parse(&value.to_string_lossy())
+                        .map_err(CliError::Commands)?;
+                }
                 option if option.starts_with('-') => {
                     return Err(CliError::Commands(format!("unknown init option: {option}")));
                 }
@@ -314,6 +610,10 @@ fn run() -> Result<u8, CliError> {
                 socket,
                 install,
                 interaction,
+                application_id,
+                application_name,
+                mobile_starter,
+                mobile_platforms,
             },
         )
         .map_err(CliError::Commands);
@@ -324,7 +624,335 @@ fn run() -> Result<u8, CliError> {
         return composer::run(&executable, &arguments).map_err(CliError::Commands);
     }
 
+    if script_arg == "console" {
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam console` must run inside a PAM project".to_owned())
+        })?;
+        if context.kind != project::ProjectKind::Laravel {
+            return Err(CliError::Commands(format!(
+                "`pam console` is currently available for Laravel projects; {} projects can register a namespaced command such as app:console in pam.json",
+                context.kind.label()
+            )));
+        }
+        let script = resolve_script(context.root.join("artisan").as_os_str())?;
+        let mut arguments = vec![OsString::from("tinker")];
+        arguments.extend(raw_args);
+        // SAFETY: this console owns a single-threaded PHP lifecycle and no workers exist yet.
+        unsafe {
+            env::set_var("PAM_CLI_MODE", "1");
+            env::set_var("APP_RUNNING_IN_CONSOLE", "true");
+        }
+        return run_script(&executable, &script, arguments);
+    }
+
+    if script_arg == "info" {
+        let json = match raw_args.next() {
+            None => false,
+            Some(value) if value == "--json" => true,
+            Some(value) => {
+                return Err(CliError::Commands(format!(
+                    "unknown info option: {}",
+                    value.to_string_lossy()
+                )));
+            }
+        };
+        if raw_args.next().is_some() {
+            return Err(CliError::Commands("info accepts only --json".to_owned()));
+        }
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam info` must run inside a PAM project".to_owned())
+        })?;
+        return project::info(&context, json).map_err(CliError::Commands);
+    }
+
+    if script_arg == "commands" {
+        let json = match raw_args.next() {
+            None => false,
+            Some(value) if value == "--json" => true,
+            Some(value) => {
+                return Err(CliError::Commands(format!(
+                    "unknown commands option: {}",
+                    value.to_string_lossy()
+                )));
+            }
+        };
+        if raw_args.next().is_some() {
+            return Err(CliError::Commands(
+                "commands accepts only --json".to_owned(),
+            ));
+        }
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam commands` must run inside a PAM project".to_owned())
+        })?;
+        let commands = project::registered_commands(&context).map_err(CliError::Commands)?;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&serde_json::json!({
+                    "schema": 1,
+                    "commands": commands.iter().map(|command| serde_json::json!({
+                        "name": command.name,
+                        "description": command.description,
+                    })).collect::<Vec<_>>(),
+                }))
+                .map_err(|error| CliError::Commands(error.to_string()))?
+            );
+        } else if commands.is_empty() {
+            println!("No application or package commands are registered.");
+        } else {
+            for command in commands {
+                println!("{:<28} {}", command.name, command.description);
+            }
+        }
+        return Ok(0);
+    }
+
+    if script_arg == "packages" {
+        let json = match raw_args.next() {
+            None => false,
+            Some(value) if value == "--json" => true,
+            Some(value) => {
+                return Err(CliError::Commands(format!(
+                    "unknown packages option: {}",
+                    value.to_string_lossy()
+                )));
+            }
+        };
+        if raw_args.next().is_some() {
+            return Err(CliError::Commands(
+                "packages accepts only --json".to_owned(),
+            ));
+        }
+        let context = current_project();
+        return ecosystem::list(context.as_ref().map(|context| context.root.as_path()), json)
+            .map_err(CliError::Commands);
+    }
+
+    if script_arg == "format" {
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam format` must run inside a PAM project".to_owned())
+        })?;
+        let mut check = false;
+        let mut paths = Vec::new();
+        for argument in raw_args {
+            if argument == "--check" {
+                check = true;
+            } else {
+                paths.push(argument);
+            }
+        }
+        return quality::format(&executable, &context.root, check, paths)
+            .map_err(CliError::Commands);
+    }
+
+    if script_arg == "lint" {
+        if raw_args.next().is_some() {
+            return Err(CliError::Commands(
+                "lint does not accept arguments".to_owned(),
+            ));
+        }
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam lint` must run inside a PAM project".to_owned())
+        })?;
+        return quality::lint(&executable, &context.root).map_err(CliError::Commands);
+    }
+
+    if script_arg == "outdated" {
+        let mut direct = true;
+        for argument in raw_args {
+            match argument.to_string_lossy().as_ref() {
+                "--all" => direct = false,
+                option => {
+                    return Err(CliError::Commands(format!(
+                        "unknown outdated option: {option}"
+                    )));
+                }
+            }
+        }
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam outdated` must run inside a PAM project".to_owned())
+        })?;
+        return quality::outdated(&executable, &context.root, direct).map_err(CliError::Commands);
+    }
+
+    if script_arg == "release" {
+        let check_only = match raw_args.next() {
+            None => false,
+            Some(value) if value == "--check" => true,
+            Some(value) => {
+                return Err(CliError::Commands(format!(
+                    "unknown release option: {}",
+                    value.to_string_lossy()
+                )));
+            }
+        };
+        if raw_args.next().is_some() {
+            return Err(CliError::Commands(
+                "release accepts only --check".to_owned(),
+            ));
+        }
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam release` must run inside a PAM project".to_owned())
+        })?;
+        return ship::release(&executable, &context.root, context.kind, check_only)
+            .map_err(CliError::Commands);
+    }
+
+    if script_arg == "package" {
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam package` must run inside a PAM project".to_owned())
+        })?;
+        if context.kind == project::ProjectKind::Desktop {
+            let mut arguments = vec![OsString::from("build"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return desktop::run(&executable, arguments).map_err(CliError::Commands);
+        }
+        if context.kind != project::ProjectKind::Native {
+            return ship::package_server(&context.root, context.kind, raw_args)
+                .map_err(CliError::Commands);
+        }
+        if project::native_platforms(&context).map_err(CliError::Commands)? == [2] {
+            let mut arguments = vec![OsString::from("ios:package"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return mobile::run(arguments).map_err(CliError::Commands);
+        }
+        let mut arguments = vec![OsString::from("package"), context.root.into_os_string()];
+        arguments.extend(raw_args);
+        return mobile::run(arguments).map_err(CliError::Commands);
+    }
+
+    if matches!(
+        script_arg.to_string_lossy().as_ref(),
+        "run" | "logs" | "devices" | "devtools" | "sign"
+    ) {
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands(format!(
+                "`pam {}` must run inside a PAM project",
+                script_arg.to_string_lossy()
+            ))
+        })?;
+        if script_arg == "run" && context.kind == project::ProjectKind::Desktop {
+            let mut arguments = vec![OsString::from("run"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return desktop::run(&executable, arguments).map_err(CliError::Commands);
+        }
+        if context.kind != project::ProjectKind::Native {
+            return Err(CliError::Commands(format!(
+                "`pam {}` is not available for {} projects",
+                script_arg.to_string_lossy(),
+                context.kind.label()
+            )));
+        }
+        let only_ios = project::native_platforms(&context).map_err(CliError::Commands)? == [2];
+        let delegated = if only_ios {
+            match script_arg.to_string_lossy().as_ref() {
+                "run" => OsString::from("ios:run"),
+                "logs" => OsString::from("ios:logs"),
+                "devices" => OsString::from("ios:devices"),
+                "sign" => OsString::from("ios:sign"),
+                _ => script_arg,
+            }
+        } else {
+            script_arg
+        };
+        let mut arguments = vec![delegated, context.root.into_os_string()];
+        arguments.extend(raw_args);
+        return mobile::run(arguments).map_err(CliError::Commands);
+    }
+
+    if script_arg == "add" || script_arg == "remove" {
+        let capability = raw_args.next().ok_or_else(|| {
+            CliError::Commands(format!(
+                "pam {} requires a capability name",
+                script_arg.to_string_lossy()
+            ))
+        })?;
+        if raw_args.next().is_some() {
+            return Err(CliError::Commands(format!(
+                "pam {} accepts one capability at a time",
+                script_arg.to_string_lossy()
+            )));
+        }
+        let capability = capability
+            .into_string()
+            .map_err(|_| CliError::Commands("capability name must be valid UTF-8".to_owned()))?;
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands(format!(
+                "`pam {}` must run inside a PAM project",
+                script_arg.to_string_lossy()
+            ))
+        })?;
+        return if script_arg == "add" {
+            ecosystem::add(&executable, &context.root, &capability)
+        } else {
+            ecosystem::remove(&executable, &context.root, &capability)
+        }
+        .map_err(CliError::Commands);
+    }
+
+    if script_arg.to_string_lossy().starts_with("make:") {
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("generator commands must run inside a PAM project".to_owned())
+        })?;
+        if context.kind == project::ProjectKind::Native {
+            let mut arguments = vec![script_arg];
+            arguments.extend(raw_args);
+            if arguments.len() == 2 {
+                arguments.push(context.root.into_os_string());
+            }
+            return mobile::run(arguments).map_err(CliError::Commands);
+        }
+        if context.kind == project::ProjectKind::Laravel {
+            let script = resolve_script(context.root.join("artisan").as_os_str())?;
+            let mut arguments = vec![script_arg];
+            arguments.extend(raw_args);
+            // SAFETY: generators run in Artisan's single-threaded console lifecycle.
+            unsafe {
+                env::set_var("PAM_CLI_MODE", "1");
+                env::set_var("APP_RUNNING_IN_CONSOLE", "true");
+            }
+            return run_script(&executable, &script, arguments);
+        }
+        let command_name = script_arg.to_string_lossy();
+        if let Some(command) = project::registered_commands(&context)
+            .map_err(CliError::Commands)?
+            .into_iter()
+            .find(|command| command.name == command_name)
+        {
+            return run_script(&executable, &command.script, raw_args.collect());
+        }
+        return Err(CliError::Commands(format!(
+            "{} does not provide {}; register a namespaced make:* command in pam.json to extend it",
+            context.kind.label(),
+            command_name,
+        )));
+    }
+
     if script_arg == "build" {
+        if let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Native
+        {
+            if project::native_platforms(&context).map_err(CliError::Commands)? == [2] {
+                let mut arguments =
+                    vec![OsString::from("ios:build"), context.root.into_os_string()];
+                arguments.extend(raw_args);
+                return mobile::run(arguments).map_err(CliError::Commands);
+            }
+            let mut arguments = vec![
+                OsString::from("build"),
+                context.root.into_os_string(),
+                OsString::from("--release"),
+            ];
+            arguments.extend(raw_args);
+            return mobile::run(arguments).map_err(CliError::Commands);
+        }
+        if let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Desktop
+        {
+            let mut arguments = vec![OsString::from("build"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return desktop::run(&executable, arguments).map_err(CliError::Commands);
+        }
         let mut target = OsString::from(".");
         let mut output = OsString::from("dist");
         let mut entry = OsString::from("index.php");
@@ -367,6 +995,13 @@ fn run() -> Result<u8, CliError> {
     }
 
     if script_arg == "benchmark" {
+        if let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Native
+        {
+            let mut arguments = vec![OsString::from("benchmark"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return mobile::run(arguments).map_err(CliError::Commands);
+        }
         let url = raw_args
             .next()
             .ok_or_else(|| CliError::Commands("benchmark requires an HTTP URL".to_owned()))?;
@@ -383,9 +1018,24 @@ fn run() -> Result<u8, CliError> {
         return run_script(&executable, &script, raw_args.collect());
     }
 
+    if let Some(context) = current_project() {
+        let command_name = script_arg.to_string_lossy();
+        if let Some(command) = project::registered_commands(&context)
+            .map_err(CliError::Commands)?
+            .into_iter()
+            .find(|command| command.name == command_name)
+        {
+            return run_script(&executable, &command.script, raw_args.collect());
+        }
+    }
     let script = resolve_script(&script_arg)?;
     let script_args = raw_args.collect::<Vec<_>>();
     run_script(&executable, &script, script_args)
+}
+
+fn current_project() -> Option<project::ProjectContext> {
+    let directory = env::current_dir().ok()?;
+    project::discover(&directory)
 }
 
 fn run_script(
@@ -475,7 +1125,6 @@ fn print_dev_usage(executable: &OsStr) {
 
 #[derive(Debug)]
 enum CliError {
-    Usage,
     ScriptUnavailable {
         path: PathBuf,
         source: std::io::Error,
@@ -492,7 +1141,6 @@ enum CliError {
 impl CliError {
     fn exit_code(&self) -> u8 {
         match self {
-            Self::Usage => EX_USAGE,
             Self::ScriptUnavailable { .. } | Self::NotAFile(_) => EX_NOINPUT,
             Self::Dev(_)
             | Self::Cluster(_)
@@ -507,7 +1155,6 @@ impl CliError {
 impl std::fmt::Display for CliError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Usage => write!(formatter, "a PHP script is required"),
             Self::ScriptUnavailable { path, source } => {
                 write!(formatter, "cannot open {}: {source}", path.display())
             }

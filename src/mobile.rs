@@ -100,6 +100,8 @@ struct NativeManifest {
     #[serde(default)]
     android: AndroidOptions,
     #[serde(default)]
+    ios: IosOptions,
+    #[serde(default)]
     modules: Vec<NativeModule>,
     #[serde(default)]
     views: Vec<NativeView>,
@@ -141,6 +143,8 @@ struct RuntimeRelease {
     source_sha256: String,
     android_api: u32,
     ndk_version: String,
+    #[serde(default = "default_ios_minimum_version")]
+    ios_minimum_version: String,
     extensions: Vec<String>,
 }
 
@@ -162,6 +166,7 @@ struct ResolvedRuntime {
     id: String,
     release: RuntimeRelease,
     root: PathBuf,
+    ios_root: PathBuf,
 }
 
 fn default_php_series() -> String {
@@ -195,6 +200,21 @@ impl Default for AndroidOptions {
             permissions: Vec::new(),
             deep_links: Vec::new(),
             share_targets: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct IosOptions {
+    #[serde(default = "default_ios_minimum_version")]
+    minimum_version: String,
+}
+
+impl Default for IosOptions {
+    fn default() -> Self {
+        Self {
+            minimum_version: default_ios_minimum_version(),
         }
     }
 }
@@ -583,24 +603,32 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         }
         "ios:prepare" => {
             let project = load_project(&parse_project_only(arguments)?)?;
-            let native_home = native_home()?;
-            write_plugin_lock(&project)?;
-            write_ios_plugin_plan(&project)?;
-            write_ios_plugin_package(&project, &native_home)?;
+            let workspace = prepare_ios(&project)?;
             println!(
-                "Prepared iOS plugin package for {} at {}",
+                "Prepared {} for iOS at {}",
                 project.manifest.name,
-                project
-                    .root
-                    .join(".pam-native/ios/PamNativePlugins")
-                    .display()
+                workspace.display()
             );
             Ok(0)
         }
+        "ios:doctor" => doctor_ios(parse_project_only(arguments)?),
+        "ios:build" => build_ios(parse_project_only(arguments)?, false).map(|_| 0),
+        "ios:run" => run_ios(parse_project_only(arguments)?),
+        "ios:dev" => dev_ios(parse_project_only(arguments)?),
+        "ios:sign" => signing_status_ios(parse_project_only(arguments)?),
+        "ios:package" => package_ios(parse_project_only(arguments)?),
+        "ios:logs" => logs_ios(parse_project_only(arguments)?),
+        "ios:devices" => devices_ios(parse_project_only(arguments)?),
         "build" => {
             let options = parse_options(arguments, true)?;
             build(options).map(|_| 0)
         }
+        "package" => {
+            let mut options = parse_options(arguments, true)?;
+            options.mode = BuildMode::Release;
+            package_android(options)
+        }
+        "sign" => signing_status(parse_project_only(arguments)?),
         "run" => {
             let mut options = parse_options(arguments, true)?;
             if options.abis == default_abis() {
@@ -621,6 +649,8 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "benchmark" => benchmark(parse_project_only(arguments)?),
         "profile" => baseline_profile(parse_project_only(arguments)?),
         "devtools" => toggle_devtools(parse_project_only(arguments)?),
+        "logs" => logs(parse_project_only(arguments)?),
+        "devices" => devices(parse_project_only(arguments)?),
         "plugin:list" => list_plugins(parse_project_only(arguments)?),
         "plugin:doctor" => doctor_plugins(parse_project_only(arguments)?),
         "runtime:list" => list_runtimes(parse_project_only(arguments)?),
@@ -634,6 +664,46 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             "unknown mobile command {unknown:?}; run `pam mobile --help`"
         )),
     }
+}
+
+fn logs(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let application_id = debug_application_id(&project);
+    println!("Streaming Android logs for {application_id}. Press Ctrl+C to stop.");
+    let status = Command::new("adb")
+        .args([
+            "logcat",
+            &format!("--pid={}", android_pid(&application_id)?),
+        ])
+        .status()
+        .map_err(|error| format!("cannot start adb logcat: {error}"))?;
+    Ok(if status.success() { 0 } else { 1 })
+}
+
+fn android_pid(application_id: &str) -> Result<String, String> {
+    let output = Command::new("adb")
+        .args(["shell", "pidof", application_id])
+        .output()
+        .map_err(|error| format!("cannot query {application_id}: {error}"))?;
+    let pid = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+    if output.status.success() && !pid.is_empty() {
+        Ok(pid)
+    } else {
+        Err(format!(
+            "{application_id} is not running on the connected Android device"
+        ))
+    }
+}
+
+fn devices(project_path: PathBuf) -> Result<u8, String> {
+    load_project(&project_path)?;
+    println!("Android devices");
+    command_status("adb", &["devices", "-l"])?;
+    if cfg!(target_os = "macos") {
+        println!("\niOS simulators");
+        command_status("xcrun", &["simctl", "list", "devices", "available"])?;
+    }
+    Ok(0)
 }
 
 struct RuntimeUseOptions {
@@ -840,6 +910,11 @@ fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), Strin
     }
     if manifest.android.target_sdk > 36 {
         return Err("this Pam Native release supports targetSdk up to 36".to_owned());
+    }
+    let ios_version = parse_ios_version(&manifest.ios.minimum_version)
+        .ok_or_else(|| "ios.minimumVersion must use major.minor format".to_owned())?;
+    if ios_version < (15, 0) {
+        return Err("PAM Native requires iOS 15.0 or newer".to_owned());
     }
     validate_relative_path(&manifest.entry)?;
     if !root.join(&manifest.entry).is_file() {
@@ -1629,14 +1704,14 @@ fn valid_swift_class_name(value: &str) -> bool {
 }
 
 fn valid_ios_version(value: &str) -> bool {
+    parse_ios_version(value).is_some()
+}
+
+fn parse_ios_version(value: &str) -> Option<(u32, u32)> {
     let mut parts = value.split('.');
-    let major = parts.next();
-    let minor = parts.next();
-    parts.next().is_none()
-        && major
-            .is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
-        && minor
-            .is_some_and(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    parts.next().is_none().then_some((major, minor))
 }
 
 fn native_home() -> Result<PathBuf, String> {
@@ -1727,6 +1802,7 @@ fn resolve_runtime(project: &Project, pam_home: &Path) -> Result<ResolvedRuntime
         .clone();
     Ok(ResolvedRuntime {
         root: pam_home.join("runtime/android").join(&id),
+        ios_root: pam_home.join("runtime/ios").join(&id),
         id,
         release,
     })
@@ -1860,12 +1936,11 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
             project.manifest.name, project.manifest.application_id
         ),
     );
-    healthy &= command_exists("java");
-    check(
-        "Java 17+",
-        command_exists("java"),
-        tool_version("java", &["-version"]),
-    );
+    let java_version = tool_version("java", &["-version"]);
+    let java_ready =
+        command_exists("java") && java_major_version(&java_version).is_some_and(|v| v >= 17);
+    healthy &= java_ready;
+    check("Java 17+", java_ready, java_version);
     healthy &= command_exists("cargo");
     check(
         "Rust",
@@ -1881,12 +1956,40 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
             .map(|path| path.display().to_string())
             .unwrap_or_else(|error| error.clone()),
     );
+    let ndk_version = &runtime.release.ndk_version;
     let ndk = sdk
         .as_ref()
-        .map(|path| path.join("ndk/27.1.12297006"))
+        .map(|path| path.join("ndk").join(ndk_version))
         .is_ok_and(|path| path.is_dir());
     healthy &= ndk;
-    check("Android NDK 27.1", ndk, "27.1.12297006".to_owned());
+    check("Android NDK", ndk, ndk_version.clone());
+    let platform = sdk
+        .as_ref()
+        .map(|path| {
+            path.join(format!(
+                "platforms/android-{}",
+                project.manifest.android.target_sdk
+            ))
+        })
+        .is_ok_and(|path| path.is_dir());
+    healthy &= platform;
+    check(
+        "Android platform",
+        platform,
+        format!("android-{}", project.manifest.android.target_sdk),
+    );
+    let cmake = sdk
+        .as_ref()
+        .map(|path| path.join("cmake/3.22.1"))
+        .is_ok_and(|path| path.is_dir());
+    healthy &= cmake;
+    check("CMake", cmake, "3.22.1".to_owned());
+    let adb = sdk
+        .as_ref()
+        .map(|path| path.join("platform-tools/adb"))
+        .is_ok_and(|path| path.is_file());
+    healthy &= adb;
+    check("ADB", adb, "Android platform-tools".to_owned());
     for abi in default_abis() {
         let ready = runtime_ready_at(&runtime.root, abi);
         healthy &= ready;
@@ -1920,6 +2023,420 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
     } else {
         Err("Pam Native doctor found blocking Android requirements".to_owned())
     }
+}
+
+fn ios_runtime_ready(runtime: &ResolvedRuntime) -> bool {
+    runtime
+        .ios_root
+        .join("PamPhp.xcframework/Info.plist")
+        .is_file()
+        && runtime
+            .ios_root
+            .join("PamNativeEngine.xcframework/Info.plist")
+            .is_file()
+        && runtime.ios_root.join("runtime.json").is_file()
+}
+
+fn doctor_ios(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
+    let mut healthy = cfg!(target_os = "macos");
+    println!("Pam Native iOS doctor\n");
+    check(
+        "macOS host",
+        cfg!(target_os = "macos"),
+        std::env::consts::OS.to_owned(),
+    );
+    let xcode = command_exists("xcodebuild");
+    healthy &= xcode;
+    check("Xcode", xcode, tool_version("xcodebuild", &["-version"]));
+    let simctl = command_exists("xcrun");
+    healthy &= simctl;
+    check(
+        "Xcode command line tools",
+        simctl,
+        tool_version("xcrun", &["--version"]),
+    );
+    let runtime_ready = ios_runtime_ready(&runtime);
+    healthy &= runtime_ready;
+    check(
+        &format!("PHP {} iOS runtime", runtime.release.php_version),
+        runtime_ready,
+        runtime.ios_root.display().to_string(),
+    );
+    let targets = installed_rust_targets().unwrap_or_default();
+    for target in [
+        "aarch64-apple-ios",
+        "aarch64-apple-ios-sim",
+        "x86_64-apple-ios",
+    ] {
+        let available = targets.contains(target);
+        healthy &= available;
+        check(
+            &format!("Rust target ({target})"),
+            available,
+            if available {
+                "installed".to_owned()
+            } else {
+                format!("run: rustup target add {target}")
+            },
+        );
+    }
+    if healthy {
+        println!("\nPam Native is ready to build iOS applications.");
+        Ok(0)
+    } else {
+        Err("Pam Native doctor found blocking iOS requirements".to_owned())
+    }
+}
+
+fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
+    let native_home = native_home()?;
+    let runtime = resolve_runtime(project, &pam_home()?)?;
+    if !ios_runtime_ready(&runtime) {
+        return Err(format!(
+            "verified PHP {} iOS runtime is missing; build it on macOS with `runtime-builder/ios/build.sh --php {} all` (expected {})",
+            runtime.release.php_version,
+            project.manifest.runtime.php,
+            runtime.ios_root.display()
+        ));
+    }
+    write_runtime_lock(project, &runtime)?;
+    write_plugin_lock(project)?;
+    write_ios_plugin_plan(project)?;
+
+    let source = native_home.join("ios-host");
+    let workspace = project.root.join(".pam-native/ios/App");
+    fs::create_dir_all(&workspace)
+        .map_err(|error| format!("cannot create {}: {error}", workspace.display()))?;
+    prune_tree(&source, &workspace, &["build", "DerivedData"])?;
+    copy_tree(&source, &workspace, &["build", "DerivedData"])?;
+
+    let sdk = workspace.join("PamNativeSDK/ios");
+    fs::create_dir_all(&sdk)
+        .map_err(|error| format!("cannot create {}: {error}", sdk.display()))?;
+    copy_tree(&native_home.join("ios"), &sdk, &[".build", ".swiftpm"])?;
+
+    let bridge = workspace.join("Bridge");
+    fs::create_dir_all(bridge.join("include"))
+        .map_err(|error| format!("cannot create iOS bridge directory: {error}"))?;
+    fs::copy(
+        native_home.join("ios/Sources/PamNative/Bridge/pam_native_ios_bridge.cpp"),
+        bridge.join("pam_native_ios_bridge.cpp"),
+    )
+    .map_err(|error| format!("cannot stage iOS bridge: {error}"))?;
+    fs::copy(
+        native_home.join("ios/include/pam_native_ios_bridge.h"),
+        bridge.join("include/pam_native_ios_bridge.h"),
+    )
+    .map_err(|error| format!("cannot stage iOS bridge header: {error}"))?;
+
+    let runtime_destination = workspace.join("Runtime");
+    fs::create_dir_all(&runtime_destination)
+        .map_err(|error| format!("cannot create iOS runtime directory: {error}"))?;
+    for framework in ["PamPhp.xcframework", "PamNativeEngine.xcframework"] {
+        let destination = runtime_destination.join(framework);
+        if destination.exists() {
+            fs::remove_dir_all(&destination)
+                .map_err(|error| format!("cannot replace {}: {error}", destination.display()))?;
+        }
+        copy_tree(&runtime.ios_root.join(framework), &destination, &[])?;
+    }
+
+    write_ios_plugin_package(project, &workspace.join("PamNativeSDK"))?;
+    let generated_plugins = project.root.join(".pam-native/ios/PamNativePlugins");
+    let host_plugins = workspace.join("PamNativePlugins");
+    if host_plugins.exists() {
+        fs::remove_dir_all(&host_plugins)
+            .map_err(|error| format!("cannot replace {}: {error}", host_plugins.display()))?;
+    }
+    copy_tree(&generated_plugins, &host_plugins, &[".build", ".swiftpm"])?;
+    stage_project_at(project, &runtime_destination.join("PamBundle"))?;
+
+    let team = std::env::var("PAM_IOS_DEVELOPMENT_TEAM").unwrap_or_default();
+    replace_ios_placeholders(
+        &workspace.join("PamNativeApp.xcodeproj/project.pbxproj"),
+        &[
+            (
+                "__PAM_APPLICATION_ID__",
+                project.manifest.application_id.as_str(),
+            ),
+            ("__PAM_APPLICATION_NAME__", project.manifest.name.as_str()),
+            (
+                "__PAM_VERSION_CODE__",
+                &project.manifest.version_code.to_string(),
+            ),
+            (
+                "__PAM_VERSION_NAME__",
+                project.manifest.version_name.as_str(),
+            ),
+            (
+                "__PAM_IOS_MINIMUM__",
+                project.manifest.ios.minimum_version.as_str(),
+            ),
+            ("__PAM_DEVELOPMENT_TEAM__", team.as_str()),
+        ],
+    )?;
+    replace_ios_placeholders(
+        &workspace.join("App/PamAppDelegate.swift"),
+        &[
+            ("__PAM_ENTRY_BASENAME__", "index"),
+            ("__PAM_ENTRY_EXTENSION__", "php"),
+        ],
+    )?;
+    Ok(workspace)
+}
+
+fn replace_ios_placeholders(path: &Path, replacements: &[(&str, &str)]) -> Result<(), String> {
+    let mut contents = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    for (placeholder, value) in replacements {
+        if value.contains(['\n', '\r', '\0', '"']) {
+            return Err(format!("unsafe iOS project value for {placeholder}"));
+        }
+        contents = contents.replace(placeholder, value);
+    }
+    write_atomic(path, contents.as_bytes())
+}
+
+fn build_ios(project_path: PathBuf, release: bool) -> Result<PathBuf, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("iOS builds require macOS with Xcode".to_owned());
+    }
+    let project = load_project(&project_path)?;
+    let workspace = prepare_ios(&project)?;
+    let configuration = if release { "Release" } else { "Debug" };
+    let derived = workspace.join("DerivedData");
+    let status = Command::new("xcodebuild")
+        .args([
+            "-project",
+            "PamNativeApp.xcodeproj",
+            "-scheme",
+            "PamNativeApp",
+            "-configuration",
+            configuration,
+            "-destination",
+            "generic/platform=iOS Simulator",
+            "-derivedDataPath",
+        ])
+        .arg(&derived)
+        .args(["CODE_SIGNING_ALLOWED=NO", "build"])
+        .current_dir(&workspace)
+        .status()
+        .map_err(|error| format!("cannot start xcodebuild: {error}"))?;
+    if !status.success() {
+        return Err(format!("xcodebuild exited with {status}"));
+    }
+    let app = derived
+        .join("Build/Products")
+        .join(format!("{configuration}-iphonesimulator"))
+        .join(format!("{}.app", project.manifest.name));
+    if !app.is_dir() {
+        return Err(format!("Xcode did not produce {}", app.display()));
+    }
+    println!("Built {}", app.display());
+    Ok(app)
+}
+
+fn booted_ios_simulator() -> Result<String, String> {
+    let output = Command::new("xcrun")
+        .args(["simctl", "list", "devices", "booted", "--json"])
+        .output()
+        .map_err(|error| format!("cannot query iOS simulators: {error}"))?;
+    if !output.status.success() {
+        return Err("cannot query booted iOS simulators".to_owned());
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("invalid simctl response: {error}"))?;
+    value["devices"]
+        .as_object()
+        .into_iter()
+        .flat_map(|runtimes| runtimes.values())
+        .filter_map(serde_json::Value::as_array)
+        .flatten()
+        .find_map(|device| device["udid"].as_str().map(str::to_owned))
+        .ok_or_else(|| {
+            "no booted iOS simulator; open Simulator or run `xcrun simctl boot <udid>`".to_owned()
+        })
+}
+
+fn run_ios(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let simulator = booted_ios_simulator()?;
+    let app = build_ios(project.root.clone(), false)?;
+    install_and_launch_ios(&project, &simulator, &app)?;
+    Ok(0)
+}
+
+fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Result<(), String> {
+    command_status(
+        "xcrun",
+        &["simctl", "install", simulator, &app.to_string_lossy()],
+    )?;
+    command_status(
+        "xcrun",
+        &[
+            "simctl",
+            "launch",
+            simulator,
+            &project.manifest.application_id,
+        ],
+    )?;
+    println!("Started {} on {simulator}", project.manifest.application_id);
+    Ok(())
+}
+
+fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let simulator = booted_ios_simulator()?;
+    let app = build_ios(project.root.clone(), false)?;
+    install_and_launch_ios(&project, &simulator, &app)?;
+    let mut fingerprint = project_fingerprint(&project.root)?;
+    println!(
+        "Watching {} for iOS changes. Press Ctrl+C to stop.",
+        project.root.display()
+    );
+    loop {
+        std::thread::sleep(Duration::from_millis(350));
+        let next = project_fingerprint(&project.root)?;
+        if next == fingerprint {
+            continue;
+        }
+        fingerprint = next;
+        println!("Change detected; rebuilding {}…", project.manifest.name);
+        match build_ios(project.root.clone(), false)
+            .and_then(|app| install_and_launch_ios(&project, &simulator, &app))
+        {
+            Ok(()) => println!("Reloaded {}.", project.manifest.name),
+            Err(error) => eprintln!("iOS rebuild failed: {error}"),
+        }
+    }
+}
+
+fn devices_ios(project_path: PathBuf) -> Result<u8, String> {
+    load_project(&project_path)?;
+    command_status("xcrun", &["simctl", "list", "devices", "available"])?;
+    Ok(0)
+}
+
+fn logs_ios(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    let simulator = booted_ios_simulator()?;
+    let predicate = format!("process == {:?}", project.manifest.name);
+    command_status(
+        "xcrun",
+        &[
+            "simctl",
+            "spawn",
+            &simulator,
+            "log",
+            "stream",
+            "--level",
+            "debug",
+            "--predicate",
+            &predicate,
+        ],
+    )?;
+    Ok(0)
+}
+
+fn validate_ios_signing(project: &Project) -> Result<(String, PathBuf), String> {
+    let team = std::env::var("PAM_IOS_DEVELOPMENT_TEAM")
+        .map_err(|_| "PAM_IOS_DEVELOPMENT_TEAM is required for an iOS release".to_owned())?;
+    if team.len() != 10 || !team.bytes().all(|byte| byte.is_ascii_alphanumeric()) {
+        return Err("PAM_IOS_DEVELOPMENT_TEAM must be a 10-character Apple team ID".to_owned());
+    }
+    let options = std::env::var_os("PAM_IOS_EXPORT_OPTIONS_PLIST")
+        .map(PathBuf::from)
+        .ok_or_else(|| {
+            "PAM_IOS_EXPORT_OPTIONS_PLIST must point to release export options".to_owned()
+        })?;
+    if !options.is_file() {
+        return Err(format!(
+            "iOS export options do not exist: {}",
+            options.display()
+        ));
+    }
+    let _ = project;
+    Ok((team, options))
+}
+
+fn signing_status_ios(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    match validate_ios_signing(&project) {
+        Ok((team, options)) => {
+            println!(
+                "iOS release signing is configured for team {team} with {}.",
+                options.display()
+            );
+            Ok(0)
+        }
+        Err(error) => {
+            println!("{error}");
+            Ok(1)
+        }
+    }
+}
+
+fn package_ios(project_path: PathBuf) -> Result<u8, String> {
+    if !cfg!(target_os = "macos") {
+        return Err("iOS packaging requires macOS with Xcode".to_owned());
+    }
+    let project = load_project(&project_path)?;
+    let (team, export_options) = validate_ios_signing(&project)?;
+    let workspace = prepare_ios(&project)?;
+    let archive = workspace.join("build/PamNativeApp.xcarchive");
+    let export = workspace.join("build/export");
+    let status = Command::new("xcodebuild")
+        .args([
+            "-project",
+            "PamNativeApp.xcodeproj",
+            "-scheme",
+            "PamNativeApp",
+            "-configuration",
+            "Release",
+            "-destination",
+            "generic/platform=iOS",
+            "-archivePath",
+        ])
+        .arg(&archive)
+        .arg(format!("DEVELOPMENT_TEAM={team}"))
+        .args(["-allowProvisioningUpdates", "archive"])
+        .current_dir(&workspace)
+        .status()
+        .map_err(|error| format!("cannot archive iOS application: {error}"))?;
+    if !status.success() {
+        return Err(format!("iOS archive failed with {status}"));
+    }
+    let status = Command::new("xcodebuild")
+        .args(["-exportArchive", "-archivePath"])
+        .arg(&archive)
+        .args(["-exportPath"])
+        .arg(&export)
+        .args(["-exportOptionsPlist"])
+        .arg(&export_options)
+        .arg("-allowProvisioningUpdates")
+        .status()
+        .map_err(|error| format!("cannot export iOS application: {error}"))?;
+    if !status.success() {
+        return Err(format!("iOS export failed with {status}"));
+    }
+    let ipa = files_in(&export)?
+        .into_iter()
+        .find(|path| path.extension() == Some(OsStr::new("ipa")))
+        .ok_or_else(|| format!("Xcode did not produce an IPA in {}", export.display()))?;
+    let dist = project.root.join("dist");
+    fs::create_dir_all(&dist)
+        .map_err(|error| format!("cannot create {}: {error}", dist.display()))?;
+    let destination = dist.join(format!(
+        "{}-{}-ios.ipa",
+        project.manifest.name.to_ascii_lowercase().replace(' ', "-"),
+        project.manifest.version_name
+    ));
+    fs::copy(&ipa, &destination).map_err(|error| format!("cannot copy IPA: {error}"))?;
+    write_artifact_checksum(&destination)?;
+    println!("Packaged {}", destination.display());
+    Ok(0)
 }
 
 fn list_plugins(project_path: PathBuf) -> Result<u8, String> {
@@ -2018,6 +2535,17 @@ fn tool_version(command: &str, arguments: &[&str]) -> String {
             }
         })
         .unwrap_or_else(|error| error.to_string())
+}
+
+fn java_major_version(version_output: &str) -> Option<u32> {
+    let marker = version_output.find("version \"")? + "version \"".len();
+    let version = version_output.get(marker..)?.split('"').next()?;
+    let first = version.split('.').next()?.parse::<u32>().ok()?;
+    if first == 1 {
+        version.split('.').nth(1)?.parse().ok()
+    } else {
+        Some(first)
+    }
 }
 
 fn command_exists(command: &str) -> bool {
@@ -2883,11 +3411,16 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
         ));
     }
 
-    let aggregate_dependencies = target_names
+    let aggregate_target_dependencies = target_names
         .iter()
         .map(|target| swift_string(target))
         .collect::<Vec<_>>()
         .join(", ");
+    let aggregate_dependencies = if aggregate_target_dependencies.is_empty() {
+        ".product(name: \"PamNative\", package: \"ios\")".to_owned()
+    } else {
+        format!(".product(name: \"PamNative\", package: \"ios\"), {aggregate_target_dependencies}")
+    };
     let registry = format!(
         "{}\npublic enum PamNativePluginRegistry {{\n    public static func modules() -> [String: NativeModule] {{\n        [\n{}\n        ]\n    }}\n\n    public static func views() -> [String: NativeViewFactory] {{\n        [\n{}\n        ]\n    }}\n}}\n",
         registry_imports,
@@ -3036,15 +3569,18 @@ fn generate_views(project: &Project, workspace: &Path) -> Result<(), String> {
 }
 
 fn stage_project(project: &Project, workspace: &Path) -> Result<(), String> {
-    let destination = workspace.join("app/src/main/assets/pam");
+    stage_project_at(project, &workspace.join("app/src/main/assets/pam"))
+}
+
+fn stage_project_at(project: &Project, destination: &Path) -> Result<(), String> {
     if destination.exists() {
-        fs::remove_dir_all(&destination)
+        fs::remove_dir_all(destination)
             .map_err(|error| format!("cannot clean {}: {error}", destination.display()))?;
     }
-    fs::create_dir_all(&destination)
+    fs::create_dir_all(destination)
         .map_err(|error| format!("cannot create {}: {error}", destination.display()))?;
     let mut budget = CopyBudget::default();
-    copy_project_files(&project.root, &project.root, &destination, &mut budget)?;
+    copy_project_files(&project.root, &project.root, destination, &mut budget)?;
     if project.manifest.entry != Path::new("index.php") {
         let entry = project.manifest.entry.to_string_lossy().replace('\\', "/");
         if entry.contains('\'') {
@@ -3056,7 +3592,7 @@ fn stage_project(project: &Project, workspace: &Path) -> Result<(), String> {
                 .as_bytes(),
         )?;
     }
-    let version = directory_digest(&destination)?;
+    let version = directory_digest(destination)?;
     write_atomic(
         &destination.join("manifest.sha256"),
         format!("{version}\n").as_bytes(),
@@ -3270,6 +3806,145 @@ fn build(options: MobileOptions) -> Result<BuiltApk, String> {
     })
 }
 
+fn package_android(options: MobileOptions) -> Result<u8, String> {
+    let signing_project = load_project(&options.project)?;
+    validate_android_signing(&signing_project)?;
+    let built = build(options)?;
+    let workspace = built.project.root.join(".pam-native/android");
+    let gradlew = workspace.join("gradlew");
+    let status = Command::new(&gradlew)
+        .args([":app:bundleRelease", "--stacktrace"])
+        .env(
+            "GRADLE_USER_HOME",
+            built.project.root.join(".pam-native/gradle-home"),
+        )
+        .current_dir(&workspace)
+        .status()
+        .map_err(|error| format!("cannot create Android App Bundle: {error}"))?;
+    if !status.success() {
+        return Err(format!("Android App Bundle failed with {status}"));
+    }
+    let source = workspace.join("app/build/outputs/bundle/release/app-release.aab");
+    if !source.is_file() {
+        return Err(format!("Gradle did not produce {}", source.display()));
+    }
+    let output = built.project.root.join("dist");
+    fs::create_dir_all(&output)
+        .map_err(|error| format!("cannot create {}: {error}", output.display()))?;
+    let name = built
+        .project
+        .manifest
+        .name
+        .to_ascii_lowercase()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let destination = output.join(format!(
+        "{}-{}-android.aab",
+        name.trim_matches('-'),
+        built.project.manifest.version_name
+    ));
+    fs::copy(&source, &destination)
+        .map_err(|error| format!("cannot copy {}: {error}", destination.display()))?;
+    write_artifact_checksum(&destination)?;
+    let apk_destination = output.join(format!(
+        "{}-{}-android.apk",
+        name.trim_matches('-'),
+        built.project.manifest.version_name
+    ));
+    fs::copy(&built.path, &apk_destination)
+        .map_err(|error| format!("cannot copy {}: {error}", apk_destination.display()))?;
+    write_artifact_checksum(&apk_destination)?;
+    let metadata = serde_json::json!({
+        "schemaVersion": 1,
+        "platform": 1,
+        "applicationId": built.project.manifest.application_id,
+        "versionCode": built.project.manifest.version_code,
+        "versionName": built.project.manifest.version_name,
+        "runtime": built.project.manifest.runtime.php,
+        "artifacts": [
+            destination.file_name().unwrap_or_default().to_string_lossy(),
+            apk_destination.file_name().unwrap_or_default().to_string_lossy()
+        ]
+    });
+    let metadata_path = output.join("android-release.json");
+    let mut metadata_bytes = serde_json::to_vec_pretty(&metadata)
+        .map_err(|error| format!("cannot serialize Android release metadata: {error}"))?;
+    metadata_bytes.push(b'\n');
+    write_atomic(&metadata_path, &metadata_bytes)?;
+    println!("Packaged {}", destination.display());
+    println!("Packaged {}", apk_destination.display());
+    println!("Metadata {}", metadata_path.display());
+    Ok(0)
+}
+
+fn write_artifact_checksum(path: &Path) -> Result<(), String> {
+    let bytes =
+        fs::read(path).map_err(|error| format!("cannot hash {}: {error}", path.display()))?;
+    let checksum = format!(
+        "{:x}  {}\n",
+        Sha256::digest(bytes),
+        path.file_name().unwrap_or_default().to_string_lossy()
+    );
+    let extension = format!(
+        "{}.sha256",
+        path.extension().unwrap_or_default().to_string_lossy()
+    );
+    fs::write(path.with_extension(extension), checksum)
+        .map_err(|error| format!("cannot write package checksum: {error}"))
+}
+
+fn signing_status(project_path: PathBuf) -> Result<u8, String> {
+    let project = load_project(&project_path)?;
+    match validate_android_signing(&project) {
+        Ok(()) => {
+            println!(
+                "Android release signing is configured for {}.",
+                project.manifest.name
+            );
+            Ok(0)
+        }
+        Err(error) => {
+            println!("{error}");
+            Ok(1)
+        }
+    }
+}
+
+fn validate_android_signing(project: &Project) -> Result<(), String> {
+    let required = [
+        "PAM_ANDROID_KEYSTORE",
+        "PAM_ANDROID_KEY_ALIAS",
+        "PAM_ANDROID_KEYSTORE_PASSWORD",
+        "PAM_ANDROID_KEY_PASSWORD",
+    ];
+    let missing = required
+        .into_iter()
+        .filter(|name| std::env::var_os(name).is_none_or(|value| value.is_empty()))
+        .collect::<Vec<_>>();
+    if !missing.is_empty() {
+        return Err(format!(
+            "Android release signing is not configured for {}. Set: {}. PAM never writes signing passwords into the project.",
+            project.manifest.name,
+            missing.join(", ")
+        ));
+    }
+    let keystore = PathBuf::from(std::env::var_os("PAM_ANDROID_KEYSTORE").unwrap_or_default());
+    if !keystore.is_file() {
+        return Err(format!(
+            "Android keystore does not exist: {}",
+            keystore.display()
+        ));
+    }
+    Ok(())
+}
+
 fn benchmark(project_path: PathBuf) -> Result<u8, String> {
     run_android_performance_suite(
         project_path,
@@ -3363,7 +4038,7 @@ fn generate_screen(options: GeneratorOptions) -> Result<u8, String> {
     let component_path = project
         .root
         .join("src/Screens")
-        .join(format!("{}.pam.php", options.name));
+        .join(format!("{}.pam", options.name));
     ensure_available(&[&component_path])?;
     let component = format!(
         r#"<?php
@@ -3418,7 +4093,7 @@ fn generate_component(options: GeneratorOptions) -> Result<u8, String> {
     let component_path = project
         .root
         .join("src/Components")
-        .join(format!("{}.pam.php", options.name));
+        .join(format!("{}.pam", options.name));
     ensure_available(&[&component_path])?;
     let component = format!(
         r#"<?php
@@ -3706,6 +4381,7 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
             "shell",
             "am",
             "start",
+            "-W",
             "-n",
             &format!("{application_id}/dev.pam.nativeapp.PamActivity"),
         ],
@@ -3949,6 +4625,14 @@ mod tests {
     use super::*;
 
     #[test]
+    fn detects_supported_java_major_versions() {
+        assert_eq!(java_major_version("openjdk version \"17.0.12\""), Some(17));
+        assert_eq!(java_major_version("java version \"1.8.0_402\""), Some(8));
+        assert_eq!(java_major_version("openjdk version \"21\""), Some(21));
+        assert_eq!(java_major_version("not java"), None);
+    }
+
+    #[test]
     fn generator_names_are_safe_and_human_readable() {
         assert!(valid_pascal_name("Checkout"));
         assert!(valid_pascal_name("HTTPClient2"));
@@ -4025,7 +4709,7 @@ mod tests {
             project: root.clone(),
         })
         .expect("screen");
-        assert!(root.join("src/Screens/Orders.pam.php").is_file());
+        assert!(root.join("src/Screens/Orders.pam").is_file());
         assert!(
             generate_screen(GeneratorOptions {
                 name: "Orders".to_owned(),
@@ -4039,7 +4723,7 @@ mod tests {
             project: root.clone(),
         })
         .expect("component");
-        assert!(root.join("src/Components/MetricCard.pam.php").is_file());
+        assert!(root.join("src/Components/MetricCard.pam").is_file());
 
         generate_native_view(GeneratorOptions {
             name: "CameraPreview".to_owned(),

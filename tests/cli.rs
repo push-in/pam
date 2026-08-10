@@ -7,8 +7,18 @@ use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use sha2::{Digest, Sha256};
+
 fn run_pam(arguments: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(arguments)
+        .output()
+        .expect("pam should start")
+}
+
+fn run_pam_in(directory: &std::path::Path, arguments: &[&str]) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pam"))
+        .current_dir(directory)
         .args(arguments)
         .output()
         .expect("pam should start")
@@ -60,6 +70,135 @@ fn executes_inline_php_with_ini_entries() {
 }
 
 #[test]
+fn accepts_php_cli_ini_options_for_composer_tool_workers() {
+    let ini = temporary_path("tool-worker.ini");
+    fs::write(&ini, "precision=7\n").unwrap();
+    let output = run_pam(&[
+        "-c",
+        ini.to_str().unwrap(),
+        "-d",
+        "memory_limit=256M",
+        "-r",
+        "echo ini_get('precision'), '|', ini_get('memory_limit');",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "7|256M");
+    fs::remove_file(ini).unwrap();
+}
+
+#[test]
+fn initializes_and_discovers_a_contextual_native_project() {
+    let parent = temporary_path("contextual-native");
+    let project = parent.join("shop");
+    fs::create_dir_all(&parent).unwrap();
+    let created = run_pam_in(
+        &parent,
+        &[
+            "init",
+            "shop",
+            "--template",
+            "mobile",
+            "--name",
+            "PAM Shop",
+            "--application-id",
+            "com.example.shop",
+            "--starter",
+            "ecommerce",
+            "--platform",
+            "android",
+            "--no-install",
+            "--no-interaction",
+        ],
+    );
+    assert!(
+        created.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&created.stdout),
+        String::from_utf8_lossy(&created.stderr),
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.join("pam.json")).unwrap()).unwrap();
+    assert_eq!(manifest["type"], 2);
+    assert_eq!(manifest["name"], "shop");
+    assert_eq!(manifest["native"]["applicationId"], "com.example.shop");
+    assert_eq!(manifest["native"]["starter"], 4);
+    assert_eq!(manifest["native"]["platforms"], serde_json::json!([1]));
+    let composer: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.join("composer.json")).unwrap()).unwrap();
+    assert_eq!(composer["require"]["pushinbr/pam-native"], "^0.6");
+    let native: serde_json::Value =
+        serde_json::from_slice(&fs::read(project.join("pam-native.json")).unwrap()).unwrap();
+    assert_eq!(native["applicationId"], "com.example.shop");
+    assert_eq!(native["name"], "PAM Shop");
+    assert!(native.get("starter").is_none());
+    assert!(native.get("platforms").is_none());
+
+    let info = run_pam_in(&project, &["info", "--json"]);
+    assert!(
+        info.status.success(),
+        "{}",
+        String::from_utf8_lossy(&info.stderr)
+    );
+    let payload: serde_json::Value = serde_json::from_slice(&info.stdout).unwrap();
+    assert_eq!(payload["type"], 2);
+    assert_eq!(payload["typeLabel"], "PAM Native");
+    assert_eq!(payload["root"], project.to_string_lossy().as_ref());
+    fs::remove_dir_all(parent).unwrap();
+}
+
+#[test]
+fn discovers_ecosystem_and_runs_extensible_project_commands() {
+    let packages = run_pam(&["packages", "--json"]);
+    assert!(packages.status.success());
+    let catalog: serde_json::Value = serde_json::from_slice(&packages.stdout).unwrap();
+    assert_eq!(catalog["schema"], 1);
+    assert!(
+        catalog["packages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|package| {
+                package["alias"] == "native" && package["composer"] == "pushinbr/pam-native"
+            })
+    );
+
+    let project = temporary_path("custom-command");
+    fs::create_dir_all(project.join("bin")).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":5,"name":"commands","commands":{"app:greet":{"script":"bin/greet.php","description":"Greet from the app"},"make:report":{"script":"bin/greet.php","description":"Generate a report"}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("bin/greet.php"),
+        "<?php echo 'hello '.($argv[1] ?? 'world').'!';\n",
+    )
+    .unwrap();
+
+    let commands = run_pam_in(&project, &["commands", "--json"]);
+    assert!(commands.status.success());
+    let commands: serde_json::Value = serde_json::from_slice(&commands.stdout).unwrap();
+    assert!(
+        commands["commands"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|command| command["name"] == "app:greet")
+    );
+    let greeting = run_pam_in(&project, &["app:greet", "PAM"]);
+    assert!(greeting.status.success());
+    assert_eq!(String::from_utf8_lossy(&greeting.stdout), "hello PAM!");
+    let generated = run_pam_in(&project, &["make:report", "monthly"]);
+    assert!(generated.status.success());
+    assert_eq!(String::from_utf8_lossy(&generated.stdout), "hello monthly!");
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[test]
 fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
     let diagnostics = run_pam(&["diagnostics", fixture("hello.php").to_str().unwrap()]);
     assert!(
@@ -94,6 +233,11 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
     let bundle = temporary_path("build-bundle");
     fs::create_dir(&project).unwrap();
     fs::copy(fixture("hello.php"), project.join("index.php")).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":5,"name":"portable-test","version":"1.2.3"}"#,
+    )
+    .unwrap();
     let output = run_pam(&[
         "build",
         project.to_str().unwrap(),
@@ -117,6 +261,23 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
     assert_eq!(
         String::from_utf8_lossy(&bundled.stdout),
         "Hello from PHP!\n"
+    );
+    let packaged = run_pam_in(&project, &["package"]);
+    assert!(
+        packaged.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&packaged.stdout),
+        String::from_utf8_lossy(&packaged.stderr),
+    );
+    let archive = project.join(format!(
+        "dist/portable-test-1.2.3-{}-{}.tar.gz",
+        std::env::consts::OS,
+        std::env::consts::ARCH
+    ));
+    let checksum = fs::read_to_string(archive.with_extension("gz.sha256")).unwrap();
+    assert_eq!(
+        checksum.split_whitespace().next().unwrap(),
+        format!("{:x}", Sha256::digest(fs::read(&archive).unwrap()))
     );
     fs::remove_dir_all(project).unwrap();
     fs::remove_dir_all(bundle).unwrap();
@@ -408,6 +569,30 @@ fn delegates_desktop_commands_and_exposes_the_pam_binary() {
         "PAM_BINARY was not propagated: {stdout}",
     );
 
+    fs::write(
+        directory.join("pam.json"),
+        r#"{"schema":1,"type":4,"name":"desktop","version":"0.1.0"}"#,
+    )
+    .unwrap();
+    fs::write(
+        directory.join("composer.json"),
+        r#"{"name":"app/desktop","require":{"pam/desktop":"^0.5"}}"#,
+    )
+    .unwrap();
+    let package = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .arg("package")
+        .current_dir(&directory)
+        .env("PAM_DESKTOP_BINARY", &desktop)
+        .output()
+        .unwrap();
+    assert_eq!(package.status.code(), Some(23));
+    let package_output = String::from_utf8_lossy(&package.stdout);
+    assert!(package_output.contains("args=build|"), "{package_output}");
+
+    let tests = run_pam_in(&directory, &["test"]);
+    assert!(tests.status.success());
+    assert!(String::from_utf8_lossy(&tests.stdout).contains("No application test runner"));
+
     fs::remove_dir_all(directory).unwrap();
 }
 
@@ -432,6 +617,29 @@ fn doctor_uses_embed_without_requiring_a_php_cli() {
             && report.contains("Pam uses PHP Embed directly"),
         "{report}"
     );
+}
+
+#[test]
+fn exposes_structured_doctor_and_offline_update_checks() {
+    let doctor = run_pam(&["doctor", fixture("hello.php").to_str().unwrap(), "--json"]);
+    assert!(doctor.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    assert_eq!(report["schema"], 1);
+    assert_eq!(report["healthy"], true);
+    assert!(
+        report["diagnostics"]
+            .as_str()
+            .unwrap()
+            .contains("PHP Embed version")
+    );
+
+    let update = run_pam(&[
+        "self-update",
+        concat!("v", env!("CARGO_PKG_VERSION")),
+        "--check",
+    ]);
+    assert!(update.status.success());
+    assert!(String::from_utf8_lossy(&update.stdout).contains("is up to date"));
 }
 
 #[test]
@@ -527,8 +735,8 @@ fn initializes_mobile_with_tree_default_and_pam_components_enabled() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.php")).unwrap();
     assert!(
-        manifest_json["require"]["pushinbr/pam-native"] == "^0.1"
-            || manifest_json["require"]["pam/native"] == "^0.1"
+        manifest_json["require"]["pushinbr/pam-native"] == "^0.6"
+            || manifest_json["require"]["pam/native"] == "^0.6"
     );
     assert!(!manifest.contains("pushinbr/pam-mobile-ui"));
     assert!(entry.contains("App::components(__DIR__.'/src'"));
@@ -564,13 +772,13 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
-    let hello = fs::read_to_string(directory.join("src/Hello.pam.php")).unwrap();
+    let hello = fs::read_to_string(directory.join("src/Hello.pam")).unwrap();
     assert!(
-        manifest_json["require"]["pushinbr/pam-native"] == "^0.1"
-            || (manifest_json["require"]["pam/native"] == "^0.1"
+        manifest_json["require"]["pushinbr/pam-native"] == "^0.6"
+            || (manifest_json["require"]["pam/native"] == "^0.6"
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
-    assert!(manifest.contains("\"pushinbr/pam-mobile-ui\": \"^0.1\""));
+    assert!(manifest.contains("\"pushinbr/pam-mobile-ui\": \"^0.6\""));
     assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));

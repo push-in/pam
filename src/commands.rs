@@ -181,6 +181,53 @@ pub struct InitOptions {
     pub socket: bool,
     pub install: bool,
     pub interaction: bool,
+    pub application_id: Option<String>,
+    pub application_name: Option<String>,
+    pub mobile_starter: Option<MobileStarter>,
+    pub mobile_platforms: Vec<MobilePlatform>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum MobileStarter {
+    Blank = 1,
+    Tabs = 2,
+    Authentication = 3,
+    Ecommerce = 4,
+    Chat = 5,
+    Showcase = 6,
+}
+
+impl MobileStarter {
+    pub fn parse(value: &str) -> Result<Self, String> {
+        match value {
+            "blank" => Ok(Self::Blank),
+            "tabs" => Ok(Self::Tabs),
+            "auth" | "authentication" => Ok(Self::Authentication),
+            "ecommerce" | "commerce" => Ok(Self::Ecommerce),
+            "chat" => Ok(Self::Chat),
+            "showcase" => Ok(Self::Showcase),
+            _ => Err("starter requires blank, tabs, auth, ecommerce, chat, or showcase".to_owned()),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+pub enum MobilePlatform {
+    Android = 1,
+    Ios = 2,
+}
+
+impl MobilePlatform {
+    pub fn parse(value: &str) -> Result<Vec<Self>, String> {
+        match value {
+            "android" => Ok(vec![Self::Android]),
+            "ios" => Ok(vec![Self::Ios]),
+            "all" | "both" => Ok(vec![Self::Android, Self::Ios]),
+            _ => Err("platform requires android, ios, or all".to_owned()),
+        }
+    }
 }
 
 pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> {
@@ -191,6 +238,9 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     )?;
     options.template = Some(template);
     options.socket = socket;
+    if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
+        configure_mobile_options(&mut options)?;
+    }
 
     if matches!(
         template,
@@ -222,16 +272,163 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     } else if template == InitTemplate::Desktop {
         init_desktop(directory)?;
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
-        init_mobile(directory, template == InitTemplate::MobileUi)?;
+        init_mobile(directory, template == InitTemplate::MobileUi, &options)?;
     } else {
         init_api(directory, socket)?;
     }
+    write_pam_manifest(directory, template, &options)?;
 
     if options.install && directory.join("composer.json").is_file() {
         run_composer_in(executable, directory, &["install", "--no-interaction"])?;
     }
     print_init_success(directory, template, socket);
     Ok(0)
+}
+
+fn configure_mobile_options(options: &mut InitOptions) -> Result<(), String> {
+    let interactive = options.interaction && std::io::stdin().is_terminal();
+    let default_name = options
+        .directory
+        .file_name()
+        .and_then(OsStr::to_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("PAM App")
+        .replace(['-', '_'], " ");
+    if options.application_name.is_none() {
+        options.application_name = Some(if interactive {
+            prompt_value("Application name", &default_name)?
+        } else {
+            default_name.clone()
+        });
+    }
+    if options.application_id.is_none() {
+        let slug = default_name
+            .to_ascii_lowercase()
+            .chars()
+            .map(|character| {
+                if character.is_ascii_alphanumeric() {
+                    character
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>()
+            .trim_matches('_')
+            .to_owned();
+        let slug = if slug.starts_with(|character: char| character.is_ascii_lowercase()) {
+            slug
+        } else {
+            format!("project_{slug}")
+        };
+        let default_id = format!("app.pam.{slug}");
+        options.application_id = Some(if interactive {
+            prompt_value("Application ID", &default_id)?
+        } else {
+            default_id
+        });
+    }
+    let application_id = options.application_id.as_deref().unwrap_or_default();
+    if !valid_application_id(application_id) {
+        return Err(
+            "application ID must contain at least two dot-separated lowercase identifier segments"
+                .to_owned(),
+        );
+    }
+    if options.mobile_starter.is_none() {
+        options.mobile_starter = Some(if interactive {
+            let choice = prompt_value(
+                "Starter: 1 Blank, 2 Tabs, 3 Auth, 4 E-commerce, 5 Chat, 6 Showcase",
+                "1",
+            )?;
+            match choice.as_str() {
+                "1" => MobileStarter::Blank,
+                "2" => MobileStarter::Tabs,
+                "3" => MobileStarter::Authentication,
+                "4" => MobileStarter::Ecommerce,
+                "5" => MobileStarter::Chat,
+                "6" => MobileStarter::Showcase,
+                _ => return Err(format!("invalid mobile starter choice {choice:?}")),
+            }
+        } else {
+            MobileStarter::Blank
+        });
+    }
+    if options.mobile_platforms.is_empty() {
+        options.mobile_platforms = if interactive {
+            MobilePlatform::parse(&prompt_value("Platforms: android, ios, or all", "all")?)?
+        } else {
+            vec![MobilePlatform::Android, MobilePlatform::Ios]
+        };
+    }
+    Ok(())
+}
+
+fn prompt_value(label: &str, default: &str) -> Result<String, String> {
+    print!("{label} [{default}] › ");
+    std::io::stdout()
+        .flush()
+        .map_err(|error| format!("cannot display init prompt: {error}"))?;
+    let mut value = String::new();
+    std::io::stdin()
+        .read_line(&mut value)
+        .map_err(|error| format!("cannot read init value: {error}"))?;
+    let value = value.trim();
+    Ok(if value.is_empty() {
+        default.to_owned()
+    } else {
+        value.to_owned()
+    })
+}
+
+fn valid_application_id(value: &str) -> bool {
+    let parts = value.split('.').collect::<Vec<_>>();
+    parts.len() >= 2
+        && parts.iter().all(|part| {
+            !part.is_empty()
+                && part.as_bytes()[0].is_ascii_lowercase()
+                && part
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+        })
+}
+
+fn write_pam_manifest(
+    directory: &Path,
+    template: InitTemplate,
+    options: &InitOptions,
+) -> Result<(), String> {
+    let kind = match template {
+        InitTemplate::Api => 1,
+        InitTemplate::Mobile | InitTemplate::MobileUi => 2,
+        InitTemplate::Laravel => 3,
+        InitTemplate::Desktop => 4,
+        InitTemplate::Raw => 5,
+    };
+    let name = directory
+        .file_name()
+        .and_then(OsStr::to_str)
+        .filter(|name| !name.is_empty())
+        .unwrap_or("pam-project");
+    let mut manifest = serde_json::json!({
+        "$schema": "https://push-in.github.io/pam-docs/schemas/pam.schema.json",
+        "schema": 1,
+        "type": kind,
+        "name": name,
+        "version": "0.1.0",
+    });
+    if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
+        manifest["native"] = serde_json::json!({
+            "applicationId": options.application_id,
+            "starter": options.mobile_starter.unwrap_or(MobileStarter::Blank) as u8,
+            "platforms": options.mobile_platforms.iter().map(|platform| *platform as u8).collect::<Vec<_>>(),
+        });
+    }
+    write_new(
+        &directory.join("pam.json"),
+        &(serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("cannot serialize PAM project manifest: {error}"))?
+            + "\n"),
+    )
 }
 
 #[derive(Serialize)]
@@ -412,7 +609,7 @@ fn copy_project(
         {
             let entry = entry.map_err(|error| error.to_string())?;
             let path = entry.path();
-            if path == output {
+            if path == output || output.starts_with(&path) {
                 continue;
             }
             let name = entry.file_name();
@@ -2786,7 +2983,11 @@ footer kbd {
     Ok(())
 }
 
-fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
+fn init_mobile(
+    directory: &Path,
+    with_official_ui: bool,
+    options: &InitOptions,
+) -> Result<(), String> {
     let native_repository = local_native_repository();
     let native_package = native_repository
         .as_ref()
@@ -2795,9 +2996,9 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
     let mut requirements = serde_json::json!({
         "php": "^8.4"
     });
-    requirements[native_package] = serde_json::json!("^0.1");
+    requirements[native_package] = serde_json::json!("^0.6");
     if with_official_ui {
-        requirements["pushinbr/pam-mobile-ui"] = serde_json::json!("^0.1");
+        requirements["pushinbr/pam-mobile-ui"] = serde_json::json!("^0.6");
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
@@ -2813,6 +3014,9 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
         "type": "project",
         "license": "proprietary",
         "require": requirements,
+        "require-dev": {
+            "phpunit/phpunit": "^12.5"
+        },
         "autoload": {
             "psr-4": {
                 "App\\": "src/"
@@ -2827,7 +3031,8 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
             "mobile:dev": "pam mobile dev .",
             "mobile:build": "pam mobile build . --release",
             "mobile:benchmark": "pam mobile benchmark .",
-            "mobile:profile": "pam mobile profile ."
+            "mobile:profile": "pam mobile profile .",
+            "test": "pam test . --phpunit -c phpunit.xml"
         }
     });
     if with_official_ui && native_package != "pushinbr/pam-native" {
@@ -2855,30 +3060,25 @@ fn init_mobile(directory: &Path, with_official_ui: bool) -> Result<(), String> {
             .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
             + "\n"),
     )?;
+    let native_manifest = serde_json::json!({
+        "$schema": "vendor/pushinbr/pam-native/resources/pam-native.schema.json",
+        "version": 1,
+        "applicationId": options.application_id.as_deref().unwrap_or("app.pam.hello"),
+        "name": options.application_name.as_deref().unwrap_or("PAM App"),
+        "entry": "index.php",
+        "runtime": {"php": "8.5", "channel": "stable"},
+        "versionCode": 1,
+        "versionName": "0.1.0",
+        "android": {"minSdk": 26, "targetSdk": 36, "permissions": [], "deepLinks": []},
+        "ios": {"minimumVersion": "15.0"},
+        "modules": [],
+        "views": []
+    });
     write_new(
         &directory.join("pam-native.json"),
-        r#"{
-    "$schema": "vendor/pushinbr/pam-native/resources/pam-native.schema.json",
-    "version": 1,
-    "applicationId": "app.pam.hello",
-    "name": "Pam Hello",
-    "entry": "index.php",
-    "runtime": {
-        "php": "8.5",
-        "channel": "stable"
-    },
-    "versionCode": 1,
-    "versionName": "0.1.0",
-    "android": {
-        "minSdk": 26,
-        "targetSdk": 36,
-        "permissions": [],
-        "deepLinks": []
-    },
-    "modules": [],
-    "views": []
-}
-"#,
+        &(serde_json::to_string_pretty(&native_manifest)
+            .map_err(|error| format!("cannot serialize PAM Native manifest: {error}"))?
+            + "\n"),
     )?;
     let entry = if with_official_ui {
         r#"<?php
@@ -2914,54 +3114,14 @@ App::run(new Hello());
     write_new(&directory.join("index.php"), entry)?;
     fs::create_dir_all(directory.join("src"))
         .map_err(|error| format!("cannot create mobile source directory: {error}"))?;
+    let starter = options.mobile_starter.unwrap_or(MobileStarter::Blank);
     let (hello_path, hello) = if with_official_ui {
         (
-            directory.join("src/Hello.pam.php"),
-            r#"<?php
-
-declare(strict_types=1);
-
-namespace App;
-
-use Pam\Native\Attributes\State;
-use Pam\Native\Component;
-
-final class Hello extends Component
-{
-    #[State]
-    public int $count = 0;
-
-    public function increment(): void
-    {
-        $this->count++;
-    }
-}
-?>
-
-<template>
-    <PamUIProvider mode="system">
-        <SafeAreaView class="flex-1 ui-surface">
-            <Center class="flex-1 px-6">
-                <Card class="w-full max-w-md gap-6 p-6">
-                    <VStack class="gap-2">
-                        <Badge variant="secondary">
-                            <BadgeText>PAM Mobile UI</BadgeText>
-                        </Badge>
-                        <Heading size="2xl">Build native apps with PHP</Heading>
-                        <Text class="text-muted-foreground">
-                            Accessible official components on the PAM Native renderer.
-                        </Text>
-                    </VStack>
-
-                    <Button size="lg" on:press="increment">
-                        <ButtonText>Native taps: {{ $count }}</ButtonText>
-                    </Button>
-                </Card>
-            </Center>
-        </SafeAreaView>
-    </PamUIProvider>
-</template>
-"#,
+            directory.join("src/Hello.pam"),
+            mobile_ui_starter(
+                starter,
+                options.application_name.as_deref().unwrap_or("PAM App"),
+            ),
         )
     } else {
         (
@@ -3004,10 +3164,183 @@ final class Hello extends Component
         $this->count++;
     }
 }
-"#,
+"#
+            .to_owned(),
         )
     };
-    write_new(&hello_path, hello)?;
+
+    fn mobile_ui_starter(starter: MobileStarter, application_name: &str) -> String {
+        let content = match starter {
+            MobileStarter::Blank => {
+                r#"
+                <Card class="w-full max-w-md gap-6 p-6">
+                    <Heading size="2xl">__APP_NAME__</Heading>
+                    <Text class="text-muted-foreground">Your native PHP application is ready.</Text>
+                    <Button size="lg" on:press="increment">
+                        <ButtonText>Native taps: {{ $count }}</ButtonText>
+                    </Button>
+                </Card>"#
+            }
+            MobileStarter::Tabs => {
+                r#"
+                <VStack class="w-full flex-1 justify-between p-6">
+                    <VStack class="gap-3">
+                        <Heading size="2xl">Home</Heading>
+                        <Text class="text-muted-foreground">A production-ready tabs starter.</Text>
+                    </VStack>
+                    <Row class="w-full justify-between gap-3">
+                        <Button variant="secondary">
+                            <ButtonText>Home</ButtonText>
+                        </Button>
+                        <Button variant="ghost">
+                            <ButtonText>Search</ButtonText>
+                        </Button>
+                        <Button variant="ghost">
+                            <ButtonText>Profile</ButtonText>
+                        </Button>
+                    </Row>
+                </VStack>"#
+            }
+            MobileStarter::Authentication => {
+                r#"
+                <Card class="w-full max-w-md gap-4 p-6">
+                    <Heading size="2xl">Welcome back</Heading>
+                    <Input bind:value="email" placeholder="Email" />
+                    <Input bind:value="password" placeholder="Password" secureTextEntry />
+                    <Button size="lg" on:press="submit">
+                        <ButtonText>Sign in</ButtonText>
+                    </Button>
+                </Card>"#
+            }
+            MobileStarter::Ecommerce => {
+                r#"
+                <VStack class="w-full flex-1 gap-5 p-6">
+                    <Heading size="2xl">__APP_NAME__</Heading>
+                    <Input bind:value="query" placeholder="Search products" />
+                    <Card class="gap-3 p-5">
+                        <Badge variant="secondary">
+                            <BadgeText>Featured</BadgeText>
+                        </Badge>
+                        <Heading>Native commerce starter</Heading>
+                        <Text class="text-muted-foreground">
+                            Catalog, cart, and checkout foundations.
+                        </Text>
+                        <Button on:press="increment">
+                            <ButtonText>Add to cart · {{ $count }}</ButtonText>
+                        </Button>
+                    </Card>
+                </VStack>"#
+            }
+            MobileStarter::Chat => {
+                r#"
+                <VStack class="w-full flex-1 justify-between gap-4 p-6">
+                    <VStack class="gap-2">
+                        <Heading size="xl">Team chat</Heading>
+                        <Text class="text-muted-foreground">Messages stay above the keyboard.</Text>
+                    </VStack>
+                    <Row class="w-full items-center gap-3">
+                        <Input class="flex-1" bind:value="message" placeholder="Message" />
+                        <Button on:press="send">
+                            <ButtonText>Send</ButtonText>
+                        </Button>
+                    </Row>
+                </VStack>"#
+            }
+            MobileStarter::Showcase => {
+                r#"
+                <ScrollView class="w-full flex-1">
+                    <VStack class="gap-5 p-6">
+                        <Heading size="2xl">Component showcase</Heading>
+                        <Badge variant="secondary">
+                            <BadgeText>PAM Mobile UI</BadgeText>
+                        </Badge>
+                        <Card class="gap-3 p-5">
+                            <Text>State, components, accessibility, and native layout.</Text>
+                            <Button on:press="increment">
+                                <ButtonText>Counter {{ $count }}</ButtonText>
+                            </Button>
+                        </Card>
+                    </VStack>
+                </ScrollView>"#
+            }
+        };
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use Pam\Native\Attributes\State;
+use Pam\Native\Component;
+
+final class Hello extends Component
+{
+    #[State]
+    public int $count = 0;
+
+    #[State]
+    public string $email = '';
+
+    #[State]
+    public string $password = '';
+
+    #[State]
+    public string $query = '';
+
+    #[State]
+    public string $message = '';
+
+    public function increment(): void { $this->count++; }
+    public function submit(): void { $this->count++; }
+    public function send(): void { $this->message = ''; }
+}
+?>
+
+<template>
+    <PamUIProvider mode="system">
+        <SafeAreaView class="flex-1 ui-surface">
+            <Center class="flex-1 px-6">__CONTENT__
+            </Center>
+        </SafeAreaView>
+    </PamUIProvider>
+</template>
+"#
+        .replace("__CONTENT__", content)
+        .replace("__APP_NAME__", application_name)
+    }
+    write_new(&hello_path, &hello)?;
+    fs::create_dir_all(directory.join("tests"))
+        .map_err(|error| format!("cannot create mobile test directory: {error}"))?;
+    write_new(
+        &directory.join("phpunit.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php" colors="true" cacheDirectory=".pam/phpunit-cache">
+    <testsuites>
+        <testsuite name="PAM Native application">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
+"#,
+    )?;
+    write_new(
+        &directory.join("tests/ApplicationTest.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+use PHPUnit\Framework\TestCase;
+
+final class ApplicationTest extends TestCase
+{
+    public function testNativeApplicationManifestIsPresent(): void
+    {
+        self::assertFileExists(dirname(__DIR__).'/pam-native.json');
+        self::assertFileExists(dirname(__DIR__).'/index.php');
+    }
+}
+"#,
+    )?;
     write_new(
         &directory.join(".gitignore"),
         "/vendor/\n/.pam/\n/.pam-native/\n",
@@ -3018,7 +3351,12 @@ final class Hello extends Component
         &directory.join(".vscode/settings.json"),
         r#"{
     "files.associations": {
-        "*.pam": "html"
+        "*.pam": "pam",
+        "*.pam.php": "pam"
+    },
+    "[pam]": {
+        "editor.defaultFormatter": "pushin.pam-native",
+        "editor.formatOnSave": true
     },
     "html.customData": [
         "./vendor/pushinbr/pam-native/resources/pam-native.custom-data.json"
@@ -3118,6 +3456,7 @@ Route::get('/ping', static fn (): array => ['message' => 'pong']);
     configure_laravel_routing(directory)?;
     configure_laravel_manifest(directory)?;
 
+    write_pam_manifest(directory, InitTemplate::Laravel, options)?;
     print_init_success(directory, InitTemplate::Laravel, options.socket);
     Ok(0)
 }

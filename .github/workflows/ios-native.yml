@@ -1,0 +1,95 @@
+name: PAM Native iOS certification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - runtime/catalog.json
+      - runtime-builder/ios/**
+      - src/mobile.rs
+      - src/commands.rs
+      - pam-native/**
+      - .github/workflows/ios-native.yml
+  pull_request:
+    paths:
+      - runtime/catalog.json
+      - runtime-builder/ios/**
+      - src/mobile.rs
+      - src/commands.rs
+      - pam-native/**
+      - .github/workflows/ios-native.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  runtime-host:
+    name: PHP runtime, generated host, and simulator build
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check out the pinned PAM Native SDK
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: 9464b4ed77170cb8e097fe44ed4941145d8ee1f5
+          path: pam-native
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: pam-native-ios-runtime
+      - name: Build verified PHP and engine XCFrameworks
+        run: runtime-builder/ios/build.sh --php 8.5 all
+      - name: Build PAM CLI
+        run: cargo build --locked
+      - name: Generate isolated iOS application fixture
+        run: |
+          fixture=${RUNNER_TEMP}/pam-ios-fixture
+          target/debug/pam init "${fixture}" \
+            --template mobile --platform ios --no-install --no-interaction
+          mkdir -p "${fixture}/vendor/composer"
+          cat >"${fixture}/vendor/autoload.php" <<'PHP'
+          <?php
+          return null;
+          PHP
+          cat >"${fixture}/vendor/composer/installed.json" <<'JSON'
+          {
+            "packages": [
+              {"name": "pushinbr/pam-native", "version": "0.6.67", "extra": {}}
+            ]
+          }
+          JSON
+          target/debug/pam mobile ios:doctor "${fixture}"
+          target/debug/pam mobile ios:prepare "${fixture}"
+          test -f "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
+          ! grep -R '__PAM_' "${fixture}/.pam-native/ios/App"
+          printf 'PAM_IOS_FIXTURE=%s\n' "${fixture}" >>"${GITHUB_ENV}"
+      - name: Validate and build generated Xcode project
+        run: |
+          plutil -lint "${PAM_IOS_FIXTURE}/.pam-native/ios/App/App/Info.plist"
+          xcodebuild \
+            -project "${PAM_IOS_FIXTURE}/.pam-native/ios/App/PamNativeApp.xcodeproj" \
+            -scheme PamNativeApp \
+            -configuration Debug \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+          test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pam-native-ios-generated-host
+          path: |
+            ${{ env.PAM_IOS_FIXTURE }}/.pam-native/ios/App/PamNativeApp.xcodeproj
+            ${{ env.PAM_IOS_FIXTURE }}/.pam-native/ios/App/DerivedData/Logs
+          if-no-files-found: warn

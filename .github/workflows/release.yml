@@ -45,10 +45,12 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: e37db4ea3da59f91aeb05e9a0814995f0c0cc5cb
+          ref: 9464b4ed77170cb8e097fe44ed4941145d8ee1f5
           path: pam-native
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: clippy,rustfmt
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'
@@ -74,6 +76,10 @@ jobs:
       - name: Test, analyze, and build
         run: |
           cargo fmt --all -- --check
+          cargo run --locked -- docs:generate docs/cli-reference.md --check
+          python3 -m json.tool docs/schemas/pam.schema.json >/dev/null
+          python3 scripts/check-docs.py
+          cargo clippy --locked --all-targets --all-features -- -D warnings
           cargo test --locked --all-targets --all-features -- --test-threads=1
           compat/composer-smoke/vendor/bin/phpstan analyse -c compat/composer-smoke/phpstan.neon --no-progress
           compat/laravel-smoke/vendor/bin/phpstan analyse -c compat/laravel-smoke/phpstan.neon --no-progress

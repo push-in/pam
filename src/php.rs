@@ -247,6 +247,22 @@ impl PhpRuntime {
         script: &Path,
         arguments: &[OsString],
     ) -> Result<Self, String> {
+        Self::initialize_with_composer(script, arguments, true)
+    }
+
+    pub fn initialize_tool(
+        _executable: &OsStr,
+        script: &Path,
+        arguments: &[OsString],
+    ) -> Result<Self, String> {
+        Self::initialize_with_composer(script, arguments, false)
+    }
+
+    fn initialize_with_composer(
+        script: &Path,
+        arguments: &[OsString],
+        preload_composer: bool,
+    ) -> Result<Self, String> {
         // SAFETY: This pure function returns the constant compiled into the C shim.
         let native_abi = unsafe { pam_native_abi_version() };
         if native_abi != NATIVE_ABI_VERSION {
@@ -290,7 +306,8 @@ impl PhpRuntime {
             return Err(format!("PHP initialization failed with status {status}"));
         }
 
-        if let Some(project) = composer.as_ref()
+        if preload_composer
+            && let Some(project) = composer.as_ref()
             && project.autoload.is_file()
         {
             let status = match execute_file_raw(&project.autoload) {

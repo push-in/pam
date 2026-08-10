@@ -36,7 +36,7 @@ Pam is **not a framework**, **not a Composer replacement**, and **not a new lang
 - [Official documentation](https://push-in.github.io/pam-docs/introduction/) —
   architecture, installation and public contracts for the whole platform.
 
-**Explore:** [Quick start](#quick-start) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
+**Explore:** [Start here](docs/getting-started.md) · [Documentation map](docs/README.md) · [CLI reference](docs/cli-reference.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
 
 ## Why Pam?
 

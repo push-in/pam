@@ -13,6 +13,7 @@
             "sourceSha256": "1ab9f52008414e43bb2427ffa288eff2a4de39e1a830f957e800ba368d887a72",
             "androidApi": 26,
             "ndkVersion": "27.1.12297006",
+            "iosMinimumVersion": "15.0",
             "extensions": [
                 "ctype",
                 "filter",
@@ -28,6 +29,7 @@
             "sourceSha256": "58910198d19e873048fe87cdfe16bc790025417ede3d1651bfa1c4b533d573f2",
             "androidApi": 26,
             "ndkVersion": "27.1.12297006",
+            "iosMinimumVersion": "15.0",
             "extensions": [
                 "ctype",
                 "filter",

@@ -1,0 +1,72 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://push-in.github.io/pam-docs/schemas/pam.schema.json",
+    "title": "PAM project",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["schema", "type", "name"],
+    "properties": {
+        "$schema": {"type": "string"},
+        "schema": {"const": 1},
+        "type": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "description": "1 API, 2 Native, 3 Laravel, 4 Desktop, 5 Raw runtime"
+        },
+        "name": {"type": "string", "minLength": 1, "maxLength": 80},
+        "version": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+        },
+        "native": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["applicationId", "starter", "platforms"],
+            "properties": {
+                "applicationId": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 255,
+                    "pattern": "^[a-z][a-z0-9_]*(?:\\.[a-z][a-z0-9_]*)+$"
+                },
+                "starter": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 6,
+                    "description": "1 Blank, 2 Tabs, 3 Authentication, 4 E-commerce, 5 Chat, 6 Showcase"
+                },
+                "platforms": {
+                    "type": "array",
+                    "minItems": 1,
+                    "uniqueItems": true,
+                    "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 2,
+                        "description": "1 Android, 2 iOS"
+                    }
+                }
+            }
+        },
+        "commands": {
+            "type": "object",
+            "propertyNames": {"pattern": "^[a-z0-9][a-z0-9:_-]{0,95}$"},
+            "additionalProperties": {
+                "oneOf": [
+                    {"type": "string", "minLength": 1},
+                    {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": ["script"],
+                        "properties": {
+                            "script": {"type": "string", "minLength": 1},
+                            "description": {"type": "string", "maxLength": 240}
+                        }
+                    }
+                ]
+            }
+        }
+    }
+}
