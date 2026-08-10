@@ -96,7 +96,7 @@ jobs:
           path: |
             runtime/ios/8.5.8-r1
             runtime/macos/8.5.8-r1
-          key: ${{ steps.runtime-cache.outputs.cache-primary-key }}
+          key: pam-ios-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('runtime/catalog.json', 'runtime-builder/ios/build.sh', 'pam-native/Cargo.lock', 'pam-native/crates/**/Cargo.toml') }}-c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
       - name: Build PAM CLI
         run: |
           php_config=$(find runtime/macos -type f -path '*/bin/php-config' -print -quit)
