@@ -2307,7 +2307,8 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
     let mut target_dependencies = String::new();
     let mut configurations = String::new();
     let mut configuration_lists = String::new();
-    let mut embed_files = Vec::new();
+    let mut foundation_embed_files = Vec::new();
+    let mut extensionkit_embed_files = Vec::new();
     let mut product_references = Vec::new();
     let mut extension_groups = Vec::new();
     let mut extension_targets = Vec::new();
@@ -2346,6 +2347,7 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
                 &format!("plugin {} extension {name} Info.plist", plugin.package),
             )?;
         }
+        normalize_ios_extension_plist(&mut info, extension.kind)?;
         write_apple_plist(&info_path, &info)?;
 
         let entitlements_setting = if let Some(path) = &extension.entitlements {
@@ -2409,12 +2411,33 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
             }
         }
 
+        let is_extensionkit = extension.kind == IosExtensionKind::Intents;
+        let product_name = if is_extensionkit {
+            format!("{name}.app")
+        } else {
+            format!("{name}.appex")
+        };
+        let product_file_type = if is_extensionkit {
+            "wrapper.extensionkit-extension"
+        } else {
+            "wrapper.app-extension"
+        };
+        let product_type = if is_extensionkit {
+            "com.apple.product-type.extensionkit-extension"
+        } else {
+            "com.apple.product-type.app-extension"
+        };
+        let embed_phase_name = if is_extensionkit {
+            "Embed ExtensionKit Extensions"
+        } else {
+            "Embed App Extensions"
+        };
         build_files.push_str(&format!(
-            "\t\t{embed_id} /* {name}.appex in Embed App Extensions */ = {{isa = PBXBuildFile; fileRef = {product_id} /* {name}.appex */; settings = {{ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }}; }};\n"
+            "\t\t{embed_id} /* {product_name} in {embed_phase_name} */ = {{isa = PBXBuildFile; fileRef = {product_id} /* {product_name} */; settings = {{ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }}; }};\n"
         ));
         file_references.push_str(&format!(
-            "\t\t{product_id} /* {name}.appex */ = {{isa = PBXFileReference; explicitFileType = \"wrapper.app-extension\"; path = {}; sourceTree = BUILT_PRODUCTS_DIR; }};\n",
-            swift_string(&format!("{name}.appex"))
+            "\t\t{product_id} /* {product_name} */ = {{isa = PBXFileReference; explicitFileType = \"{product_file_type}\"; path = {}; sourceTree = BUILT_PRODUCTS_DIR; }};\n",
+            swift_string(&product_name)
         ));
         groups.push_str(&format!(
             "\t\t{group_id} /* {name} */ = {{isa = PBXGroup; children = ({}); path = {}; sourceTree = \"<group>\"; }};\n",
@@ -2433,7 +2456,7 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
             resource_build_ids.join(", ")
         ));
         native_targets.push_str(&format!(
-            "\t\t{target_id} /* {name} */ = {{isa = PBXNativeTarget; buildConfigurationList = {config_list_id}; buildPhases = ({sources_phase_id}, {frameworks_phase_id}, {resources_phase_id}); buildRules = (); dependencies = (); name = {name}; productName = {name}; productReference = {product_id} /* {name}.appex */; productType = \"com.apple.product-type.app-extension\"; }};\n"
+            "\t\t{target_id} /* {name} */ = {{isa = PBXNativeTarget; buildConfigurationList = {config_list_id}; buildPhases = ({sources_phase_id}, {frameworks_phase_id}, {resources_phase_id}); buildRules = (); dependencies = (); name = {name}; productName = {name}; productReference = {product_id} /* {product_name} */; productType = \"{product_type}\"; }};\n"
         ));
         target_proxies.push_str(&format!(
             "\t\t{proxy_id} = {{isa = PBXContainerItemProxy; containerPortal = 500000000000000000000002 /* Project object */; proxyType = 1; remoteGlobalIDString = {target_id}; remoteInfo = {name}; }};\n"
@@ -2451,20 +2474,37 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
         configuration_lists.push_str(&format!(
             "\t\t{config_list_id} = {{isa = XCConfigurationList; buildConfigurations = ({debug_config_id}, {release_config_id}); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; }};\n"
         ));
-        embed_files.push(format!(
-            "{embed_id} /* {name}.appex in Embed App Extensions */"
-        ));
-        product_references.push(format!("{product_id} /* {name}.appex */"));
+        let embed_reference = format!("{embed_id} /* {product_name} in {embed_phase_name} */");
+        if is_extensionkit {
+            extensionkit_embed_files.push(embed_reference);
+        } else {
+            foundation_embed_files.push(embed_reference);
+        }
+        product_references.push(format!("{product_id} /* {product_name} */"));
         extension_groups.push(format!("{group_id} /* {name} */"));
         extension_targets.push(format!("{target_id} /* {name} */"));
         app_dependencies.push(dependency_id);
     }
 
-    let copy_phase_id = pbx_id("extensions:embed-phase");
-    let copy_phase = format!(
-        "/* Begin PBXCopyFilesBuildPhase section */\n\t\t{copy_phase_id} /* Embed App Extensions */ = {{isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = \"\"; dstSubfolderSpec = 13; files = ({}); name = \"Embed App Extensions\"; runOnlyForDeploymentPostprocessing = 0; }};\n/* End PBXCopyFilesBuildPhase section */\n\n",
-        embed_files.join(", ")
-    );
+    let foundation_copy_phase_id = pbx_id("extensions:foundation-embed-phase");
+    let extensionkit_copy_phase_id = pbx_id("extensions:extensionkit-embed-phase");
+    let mut copy_phases = String::from("/* Begin PBXCopyFilesBuildPhase section */\n");
+    let mut app_copy_phases = Vec::new();
+    if !foundation_embed_files.is_empty() {
+        copy_phases.push_str(&format!(
+            "\t\t{foundation_copy_phase_id} /* Embed App Extensions */ = {{isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = \"\"; dstSubfolderSpec = 13; files = ({}); name = \"Embed App Extensions\"; runOnlyForDeploymentPostprocessing = 0; }};\n",
+            foundation_embed_files.join(", ")
+        ));
+        app_copy_phases.push(foundation_copy_phase_id.clone());
+    }
+    if !extensionkit_embed_files.is_empty() {
+        copy_phases.push_str(&format!(
+            "\t\t{extensionkit_copy_phase_id} /* Embed ExtensionKit Extensions */ = {{isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = \"$(EXTENSIONS_FOLDER_PATH)\"; dstSubfolderSpec = 16; files = ({}); name = \"Embed ExtensionKit Extensions\"; runOnlyForDeploymentPostprocessing = 0; }};\n",
+            extensionkit_embed_files.join(", ")
+        ));
+        app_copy_phases.push(extensionkit_copy_phase_id.clone());
+    }
+    copy_phases.push_str("/* End PBXCopyFilesBuildPhase section */\n\n");
     let project_path = workspace.join("PamNativeApp.xcodeproj/project.pbxproj");
     let mut pbx = fs::read_to_string(&project_path)
         .map_err(|error| format!("cannot read {}: {error}", project_path.display()))?;
@@ -2472,7 +2512,7 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
     insert_pbx_section(
         &mut pbx,
         "/* Begin PBXFileReference section */",
-        &copy_phase,
+        &copy_phases,
     )?;
     insert_pbx_section(
         &mut pbx,
@@ -2528,7 +2568,8 @@ fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), S
         &mut pbx,
         "buildPhases = (300000000000000000000003, 300000000000000000000001, 300000000000000000000002);",
         &format!(
-            "buildPhases = (300000000000000000000003, 300000000000000000000001, 300000000000000000000002, {copy_phase_id});"
+            "buildPhases = (300000000000000000000003, 300000000000000000000001, 300000000000000000000002, {});",
+            app_copy_phases.join(", ")
         ),
     )?;
     replace_pbx_once(
@@ -2576,9 +2617,9 @@ fn ios_extension_base_plist(
             "com.apple.widgetkit-extension"
         }
         IosExtensionKind::NotificationService => "com.apple.usernotifications.service",
-        IosExtensionKind::Intents => "com.apple.intents-service",
+        IosExtensionKind::Intents => "com.apple.appintents-extension",
     };
-    serde_json::json!({
+    let mut plist = serde_json::json!({
         "CFBundleDevelopmentRegion": "$(DEVELOPMENT_LANGUAGE)",
         "CFBundleDisplayName": extension.name,
         "CFBundleExecutable": "$(EXECUTABLE_NAME)",
@@ -2587,9 +2628,39 @@ fn ios_extension_base_plist(
         "CFBundleName": "$(PRODUCT_NAME)",
         "CFBundlePackageType": "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
         "CFBundleShortVersionString": project.manifest.version_name,
-        "CFBundleVersion": project.manifest.version_code.to_string(),
-        "NSExtension": {"NSExtensionPointIdentifier": point}
-    })
+        "CFBundleVersion": project.manifest.version_code.to_string()
+    });
+    let extension_key = if extension.kind == IosExtensionKind::Intents {
+        "EXAppExtensionAttributes"
+    } else {
+        "NSExtension"
+    };
+    let point_key = if extension.kind == IosExtensionKind::Intents {
+        "EXExtensionPointIdentifier"
+    } else {
+        "NSExtensionPointIdentifier"
+    };
+    plist[extension_key] = serde_json::json!({point_key: point});
+    plist
+}
+
+fn normalize_ios_extension_plist(
+    plist: &mut serde_json::Value,
+    kind: IosExtensionKind,
+) -> Result<(), String> {
+    let object = plist
+        .as_object_mut()
+        .ok_or_else(|| "iOS extension Info.plist must be a dictionary".to_owned())?;
+    if kind == IosExtensionKind::Intents {
+        object.remove("NSExtension");
+        object.insert(
+            "EXAppExtensionAttributes".to_owned(),
+            serde_json::json!({
+                "EXExtensionPointIdentifier": "com.apple.appintents-extension"
+            }),
+        );
+    }
+    Ok(())
 }
 
 fn collect_tree_files(root: &Path) -> Result<Vec<PathBuf>, String> {
@@ -5288,6 +5359,22 @@ mod tests {
             "app.pam.demo",
         );
         assert_eq!(replaced["groups"][0], "group.app.pam.demo.pam-native");
+    }
+
+    #[test]
+    fn app_intents_use_extensionkit_metadata() {
+        let mut plist = serde_json::json!({
+            "NSExtension": {
+                "NSExtensionPointIdentifier": "com.apple.intents-service"
+            }
+        });
+        normalize_ios_extension_plist(&mut plist, IosExtensionKind::Intents)
+            .expect("App Intents plist");
+        assert!(plist.get("NSExtension").is_none());
+        assert_eq!(
+            plist["EXAppExtensionAttributes"]["EXExtensionPointIdentifier"],
+            "com.apple.appintents-extension"
+        );
     }
 
     #[test]
