@@ -2047,7 +2047,15 @@ fn doctor_ios(project_path: PathBuf) -> Result<u8, String> {
         cfg!(target_os = "macos"),
         std::env::consts::OS.to_owned(),
     );
-    let xcode = command_exists("xcodebuild");
+    // `xcodebuild` uses the historical single-dash spelling for this flag.
+    // The generic command probe calls `--version`, which makes a healthy
+    // Xcode installation look unavailable on macOS runners and developer Macs.
+    let xcode = Command::new("xcodebuild")
+        .arg("-version")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
     healthy &= xcode;
     check("Xcode", xcode, tool_version("xcodebuild", &["-version"]));
     let simctl = Command::new("xcrun")
