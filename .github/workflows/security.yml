@@ -52,4 +52,5 @@ jobs:
             valgrind --error-exitcode=1 \
               --errors-for-leak-kinds=definite,indirect \
               --leak-check=full \
+              --suppressions=.github/valgrind/php-embed.supp \
               ./target/debug/pam tests/fixtures/hello.php

@@ -1,0 +1,8 @@
+# Ubuntu's PHP 8.4 embed build reads Zend hash-key padding while comparing
+# interned strings. Keep this suppression at the exact Zend function so every
+# PAM frame, invalid access, and definite/indirect leak remains reportable.
+{
+   php-embed-zend-string-equality-padding
+   Memcheck:Cond
+   fun:zend_string_equal_val
+}
