@@ -141,6 +141,50 @@ build_engine_slice() {
         -p pam-native-engine --target "${target}"
 }
 
+build_macos_embed_sdk() {
+    local host_arch
+    local build=${build_root}/build-macos-host
+    local install=${pam_root}/runtime/macos/${runtime_id}
+    host_arch=$(uname -m)
+    rm -rf -- "${install}"
+    mkdir -p "${build}" "${install}"
+    (
+        cd "${build}"
+        CC="$(xcrun --sdk macosx --find clang)" \
+        CXX="$(xcrun --sdk macosx --find clang++)" \
+        AR="$(xcrun --sdk macosx --find ar)" \
+        RANLIB="$(xcrun --sdk macosx --find ranlib)" \
+        "${source_root}/configure" \
+            --prefix="${install}" \
+            --enable-embed=shared \
+            --disable-cli --disable-cgi --disable-phpdbg --disable-fpm --disable-all \
+            --enable-ctype --enable-filter --enable-session --enable-tokenizer --enable-phar \
+            --without-pear --without-iconv --without-libxml --without-openssl \
+            --without-zlib --without-curl --without-sqlite3 --without-pdo-sqlite \
+            "${opcache_options[@]}" --with-pcre-jit=no
+        make -j"${PAM_BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}"
+        make install
+    )
+    test -x "${install}/bin/php-config"
+    test -f "${install}/lib/libphp.dylib"
+    xcrun install_name_tool -id @rpath/libphp.dylib "${install}/lib/libphp.dylib"
+    python3 - "${install}/runtime.json" <<PY
+import json
+manifest = {
+    "schemaVersion": 1,
+    "runtimeId": "${runtime_id}",
+    "phpVersion": "${php_version}",
+    "runtimeRevision": ${runtime_revision},
+    "sourceSha256": "${php_sha256}",
+    "platform": "macos",
+    "architecture": "${host_arch}",
+}
+with open("${install}/runtime.json", "w", encoding="utf-8") as stream:
+    json.dump(manifest, stream, indent=4)
+    stream.write("\n")
+PY
+}
+
 if [[ ${slice_selector} == all || ${slice_selector} == device ]]; then
     build_php_slice device-arm64 iphoneos arm64 aarch64-apple-darwin -miphoneos-version-min
     build_engine_slice aarch64-apple-ios
@@ -153,6 +197,7 @@ if [[ ${slice_selector} == all || ${slice_selector} == simulator ]]; then
 fi
 
 if [[ ${slice_selector} == all ]]; then
+    build_macos_embed_sdk
     simulator=${build_root}/simulator
     mkdir -p "${simulator}/php" "${simulator}/engine"
     lipo -create \

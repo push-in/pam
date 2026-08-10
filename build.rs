@@ -29,10 +29,14 @@ fn main() {
     println!("cargo:rustc-link-search=native={}", php_lib_dir.display());
     println!("cargo:rustc-link-lib=dylib={php_lib_name}");
 
-    // Release archives place the exact PHP Embed ABI beside the runtime in
-    // ../lib. `$ORIGIN` is resolved by the ELF loader, so the package remains
-    // relocatable and does not need to modify the host linker configuration.
-    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
+    // Release archives place the exact PHP Embed ABI beside the runtime. Keep
+    // both ELF and Mach-O builds relocatable without modifying global loader
+    // configuration on the user's machine.
+    if cfg!(target_os = "macos") {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,@loader_path/../lib");
+    } else {
+        println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../lib");
+    }
 
     if php_lib_dir.ends_with(".pam-sdk/usr/lib") {
         println!("cargo:rustc-link-arg=-Wl,-rpath,{}", php_lib_dir.display());
@@ -85,6 +89,9 @@ fn find_php_embed_library() -> (PathBuf, String) {
         PathBuf::from("/usr/lib"),
         PathBuf::from("/usr/local/lib"),
         PathBuf::from("/usr/lib/x86_64-linux-gnu"),
+        PathBuf::from("/opt/homebrew/lib"),
+        PathBuf::from("/opt/homebrew/opt/php/lib"),
+        PathBuf::from("/usr/local/opt/php/lib"),
         manifest_dir.join(".pam-sdk/usr/lib"),
     ]);
 
@@ -94,23 +101,30 @@ fn find_php_embed_library() -> (PathBuf, String) {
                 .file_name()
                 .and_then(OsStr::to_str)
                 .expect("PHP Embed library name is not valid UTF-8");
-            let link_name = file_name
+            let library_name = file_name
                 .strip_prefix("lib")
-                .and_then(|name| name.strip_suffix(".so"))
-                .expect("PHP Embed library must be named libphp*.so");
+                .expect("PHP Embed library must start with lib");
+            let link_name = library_name
+                .strip_suffix(".so")
+                .or_else(|| library_name.strip_suffix(".dylib"))
+                .expect("PHP Embed library must be a .so or .dylib");
 
             return (directory, link_name.to_owned());
         }
     }
 
     panic!(
-        "PHP Embed library not found. Install libphp-embed (for example, \
-         `sudo apt-get install libphp8.4-embed`) or set PAM_PHP_LIB_DIR."
+        "PHP Embed library not found. Install libphp-embed or set \
+         PAM_PHP_LIB_DIR to a directory containing libphp.so or libphp.dylib."
     );
 }
 
 fn embed_library_in(directory: &Path) -> Option<PathBuf> {
     let exact = directory.join("libphp.so");
+    if exact.is_file() {
+        return Some(exact);
+    }
+    let exact = directory.join("libphp.dylib");
     if exact.is_file() {
         return Some(exact);
     }
@@ -122,7 +136,10 @@ fn embed_library_in(directory: &Path) -> Option<PathBuf> {
         .filter(|path| {
             path.file_name()
                 .and_then(OsStr::to_str)
-                .is_some_and(|name| name.starts_with("libphp") && name.ends_with(".so"))
+                .is_some_and(|name| {
+                    name.starts_with("libphp")
+                        && (name.ends_with(".so") || name.ends_with(".dylib"))
+                })
         })
         .collect::<Vec<_>>();
 

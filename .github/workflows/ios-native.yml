@@ -50,7 +50,14 @@ jobs:
       - name: Build verified PHP and engine XCFrameworks
         run: runtime-builder/ios/build.sh --php 8.5 all
       - name: Build PAM CLI
-        run: cargo build --locked
+        run: |
+          php_config=$(find runtime/macos -type f -path '*/bin/php-config' -print -quit)
+          test -n "${php_config}"
+          php_sdk=$(dirname "$(dirname "${php_config}")")
+          PHP_CONFIG="${php_config}" \
+          PAM_PHP_LIB_DIR="${php_sdk}/lib" \
+            cargo build --locked
+          printf 'DYLD_LIBRARY_PATH=%s\n' "${php_sdk}/lib" >>"${GITHUB_ENV}"
       - name: Generate isolated iOS application fixture
         run: |
           fixture=${RUNNER_TEMP}/pam-ios-fixture
