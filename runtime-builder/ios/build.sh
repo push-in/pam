@@ -14,12 +14,12 @@ while (($# > 0)); do
             runtime_selector=${2:?--php requires 8.4, 8.5, or an exact runtime id}
             shift 2
             ;;
-        all|device|simulator)
+        all|device|simulator|macos)
             slice_selector=$1
             shift
             ;;
         *)
-            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|device|simulator]" >&2
+            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|device|simulator|macos]" >&2
             exit 64
             ;;
     esac
@@ -193,7 +193,7 @@ with open("${install}/runtime.json", "w", encoding="utf-8") as stream:
 PY
 }
 
-if [[ ${slice_selector} == all ]]; then
+if [[ ${slice_selector} == all || ${slice_selector} == macos ]]; then
     build_macos_embed_sdk
 fi
 if [[ ${slice_selector} == all || ${slice_selector} == device ]]; then
@@ -249,6 +249,8 @@ with open("${destination}/runtime.json", "w", encoding="utf-8") as stream:
     stream.write("\n")
 PY
     echo "Built verified PAM iOS runtime ${runtime_id} at ${destination}."
-else
+elif [[ ${slice_selector} != macos ]]; then
     echo "Built ${slice_selector} slices. Run with 'all' to create XCFrameworks."
+else
+    echo "Built verified PAM macOS runtime ${runtime_id} at ${pam_root}/runtime/macos/${runtime_id}."
 fi

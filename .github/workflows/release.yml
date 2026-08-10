@@ -150,9 +150,11 @@ jobs:
         with:
           key: pam-release-${{ matrix.target }}
       - name: Build verified iOS and macOS PHP runtimes
+        env:
+          PAM_RUNTIME_SLICE: ${{ matrix.target == 'macos-arm64' && 'all' || 'macos' }}
         run: |
-          runtime-builder/ios/build.sh --php 8.4 all
-          runtime-builder/ios/build.sh --php 8.5 all
+          runtime-builder/ios/build.sh --php 8.4 "${PAM_RUNTIME_SLICE}"
+          runtime-builder/ios/build.sh --php 8.5 "${PAM_RUNTIME_SLICE}"
       - name: Build PAM for macOS
         run: |
           php_config=$(find runtime/macos/8.5.* -type f -path '*/bin/php-config' -print -quit)
