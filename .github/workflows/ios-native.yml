@@ -41,6 +41,25 @@ jobs:
           ref: c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
           path: pam-native
           persist-credentials: false
+      - name: Check out the iOS capability certification plugins
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-share-extension
+          ref: 662fa09b57dfd5aff0f9ed11f10026e09e291801
+          path: certification-plugins/share-extension
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-health
+          ref: 0d2efe329022b73b46a40878449bf90e9712de3f
+          path: certification-plugins/health
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-media
+          ref: 8e08f77e90f9b6f91c04697546bf233011c1bf85
+          path: certification-plugins/media
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
@@ -70,6 +89,14 @@ jobs:
           test -f runtime/ios/8.5.8-r1/PamPhp.xcframework/Info.plist
           test -f runtime/ios/8.5.8-r1/PamNativeEngine.xcframework/Info.plist
           test -f runtime/ios/8.5.8-r1/runtime.json
+      - name: Save verified PHP/XCFramework runtime immediately
+        if: steps.runtime-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            runtime/ios/8.5.8-r1
+            runtime/macos/8.5.8-r1
+          key: ${{ steps.runtime-cache.outputs.cache-primary-key }}
       - name: Build PAM CLI
         run: |
           php_config=$(find runtime/macos -type f -path '*/bin/php-config' -print -quit)
@@ -86,10 +113,31 @@ jobs:
             --template mobile --platform ios --no-install --no-interaction
           composer install \
             --working-dir="${fixture}" --no-dev --no-interaction --prefer-dist
+          for plugin in share-extension health media; do
+            composer config --working-dir="${fixture}" \
+              "repositories.certification-${plugin}" \
+              "{\"type\":\"path\",\"url\":\"${GITHUB_WORKSPACE}/certification-plugins/${plugin}\",\"options\":{\"symlink\":false}}"
+          done
+          composer require --working-dir="${fixture}" \
+            pushinbr/pam-native-share-extension:@dev \
+            pushinbr/pam-native-health:@dev \
+            pushinbr/pam-native-media:@dev \
+            --no-dev --no-interaction --prefer-dist --dry-run
+          composer require --working-dir="${fixture}" \
+            pushinbr/pam-native-share-extension:@dev \
+            pushinbr/pam-native-health:@dev \
+            pushinbr/pam-native-media:@dev \
+            --no-dev --no-interaction --prefer-dist
           target/debug/pam mobile ios:doctor "${fixture}"
           target/debug/pam mobile ios:prepare "${fixture}"
           test -f "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
           ! grep -R '__PAM_' "${fixture}/.pam-native/ios/App"
+          grep -q 'NSCameraUsageDescription' "${fixture}/.pam-native/ios/App/App/Info.plist"
+          grep -q 'NSMicrophoneUsageDescription' "${fixture}/.pam-native/ios/App/App/Info.plist"
+          grep -q 'com.apple.developer.healthkit' \
+            "${fixture}/.pam-native/ios/App/App/PamNativeApp.entitlements"
+          grep -q 'PamShareExtension' \
+            "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
           printf 'PAM_IOS_FIXTURE=%s\n' "${fixture}" >>"${GITHUB_ENV}"
       - name: Validate and build generated Xcode project
         run: |
@@ -103,6 +151,8 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
           test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app"
+          test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PamShareExtension.appex"
+          test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app/PlugIns/PamShareExtension.appex"
       - name: Install, launch, and certify the generated app
         run: |
           simulator=$(xcrun simctl list devices available --json | python3 -c '

@@ -1281,6 +1281,16 @@ fn validate_plugin_manifest(
             manifest.ios.minimum_version
         ));
     }
+    let plugin_ios =
+        parse_ios_version(&manifest.ios.minimum_version).expect("validated plugin iOS version");
+    let app_ios =
+        parse_ios_version(&app.ios.minimum_version).expect("validated application iOS version");
+    if plugin_ios > app_ios {
+        return Err(format!(
+            "plugin {package} requires iOS {}, but the app minimum is {}; raise ios.minimumVersion in {MANIFEST_NAME}",
+            manifest.ios.minimum_version, app.ios.minimum_version
+        ));
+    }
     for path in ios_plugin_paths(&manifest.ios) {
         validate_plugin_path(package, root, path)?;
         let expects_directory = manifest.ios.source_dirs.contains(path)
@@ -2167,6 +2177,7 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
     stage_project_at(project, &runtime_destination.join("PamBundle"))?;
 
     let has_app_entitlements = merge_ios_app_metadata(project, &workspace)?;
+    integrate_ios_extensions(project, &workspace)?;
 
     let team = std::env::var("PAM_IOS_DEVELOPMENT_TEAM").unwrap_or_default();
     let code_sign_entitlements = if has_app_entitlements {
@@ -2266,6 +2277,383 @@ fn merge_ios_app_metadata(project: &Project, workspace: &Path) -> Result<bool, S
         )?;
     }
     Ok(has_entitlements)
+}
+
+fn integrate_ios_extensions(project: &Project, workspace: &Path) -> Result<(), String> {
+    let extensions = project
+        .plugins
+        .iter()
+        .flat_map(|plugin| {
+            plugin
+                .manifest
+                .ios
+                .extensions
+                .iter()
+                .map(move |extension| (plugin, extension))
+        })
+        .collect::<Vec<_>>();
+    if extensions.is_empty() {
+        return Ok(());
+    }
+
+    let mut build_files = String::new();
+    let mut file_references = String::new();
+    let mut framework_phases = String::new();
+    let mut groups = String::new();
+    let mut native_targets = String::new();
+    let mut resource_phases = String::new();
+    let mut source_phases = String::new();
+    let mut target_proxies = String::new();
+    let mut target_dependencies = String::new();
+    let mut configurations = String::new();
+    let mut configuration_lists = String::new();
+    let mut embed_files = Vec::new();
+    let mut product_references = Vec::new();
+    let mut extension_groups = Vec::new();
+    let mut extension_targets = Vec::new();
+    let mut app_dependencies = Vec::new();
+
+    for (plugin, extension) in extensions {
+        let name = &extension.name;
+        let extension_root = workspace.join("Extensions").join(name);
+        let sources_root = extension_root.join("Sources");
+        let resources_root = extension_root.join("Resources");
+        fs::create_dir_all(&sources_root)
+            .map_err(|error| format!("cannot create iOS extension {name}: {error}"))?;
+        for source in &extension.source_dirs {
+            copy_tree(&canonical_plugin_path(plugin, source)?, &sources_root, &[])?;
+        }
+        for resources in &extension.resource_dirs {
+            fs::create_dir_all(&resources_root)
+                .map_err(|error| format!("cannot create iOS extension resources: {error}"))?;
+            copy_tree(
+                &canonical_plugin_path(plugin, resources)?,
+                &resources_root,
+                &[],
+            )?;
+        }
+
+        let info_path = extension_root.join("Info.plist");
+        let mut info = ios_extension_base_plist(project, extension);
+        if let Some(path) = &extension.info_plist {
+            let value = replace_plist_application_id(
+                read_apple_plist(&canonical_plugin_path(plugin, path)?)?,
+                &project.manifest.application_id,
+            );
+            merge_plist_value(
+                &mut info,
+                value,
+                &format!("plugin {} extension {name} Info.plist", plugin.package),
+            )?;
+        }
+        write_apple_plist(&info_path, &info)?;
+
+        let entitlements_setting = if let Some(path) = &extension.entitlements {
+            let value = replace_plist_application_id(
+                read_apple_plist(&canonical_plugin_path(plugin, path)?)?,
+                &project.manifest.application_id,
+            );
+            write_apple_plist(&extension_root.join("Extension.entitlements"), &value)?;
+            "CODE_SIGN_ENTITLEMENTS = Extensions/".to_owned() + name + "/Extension.entitlements; "
+        } else {
+            String::new()
+        };
+
+        let target_id = pbx_id(&format!("extension:{name}:target"));
+        let product_id = pbx_id(&format!("extension:{name}:product"));
+        let group_id = pbx_id(&format!("extension:{name}:group"));
+        let sources_phase_id = pbx_id(&format!("extension:{name}:sources"));
+        let resources_phase_id = pbx_id(&format!("extension:{name}:resources"));
+        let frameworks_phase_id = pbx_id(&format!("extension:{name}:frameworks"));
+        let debug_config_id = pbx_id(&format!("extension:{name}:debug"));
+        let release_config_id = pbx_id(&format!("extension:{name}:release"));
+        let config_list_id = pbx_id(&format!("extension:{name}:config-list"));
+        let proxy_id = pbx_id(&format!("extension:{name}:proxy"));
+        let dependency_id = pbx_id(&format!("extension:{name}:dependency"));
+        let embed_id = pbx_id(&format!("extension:{name}:embed"));
+
+        let mut group_children = Vec::new();
+        let mut source_build_ids = Vec::new();
+        let mut resource_build_ids = Vec::new();
+        for path in collect_tree_files(&extension_root)? {
+            let relative = path
+                .strip_prefix(&extension_root)
+                .map_err(|error| format!("cannot stage iOS extension file: {error}"))?;
+            if matches!(
+                relative.to_string_lossy().as_ref(),
+                "Info.plist" | "Extension.entitlements"
+            ) {
+                continue;
+            }
+            let relative_text = relative.to_string_lossy().replace('\\', "/");
+            let reference_id = pbx_id(&format!("extension:{name}:file:{relative_text}"));
+            let build_id = pbx_id(&format!("extension:{name}:build:{relative_text}"));
+            let file_type = xcode_file_type(relative);
+            file_references.push_str(&format!(
+                "\t\t{reference_id} /* {relative_text} */ = {{isa = PBXFileReference; lastKnownFileType = {file_type}; path = {}; sourceTree = \"<group>\"; }};\n",
+                swift_string(&relative_text)
+            ));
+            group_children.push(format!("{reference_id} /* {relative_text} */"));
+            let is_source = matches!(
+                relative.extension().and_then(OsStr::to_str),
+                Some("swift" | "m" | "mm" | "c" | "cc" | "cpp")
+            );
+            build_files.push_str(&format!(
+                "\t\t{build_id} /* {relative_text} in {} */ = {{isa = PBXBuildFile; fileRef = {reference_id} /* {relative_text} */; }};\n",
+                if is_source { "Sources" } else { "Resources" }
+            ));
+            if is_source {
+                source_build_ids.push(format!("{build_id} /* {relative_text} in Sources */"));
+            } else {
+                resource_build_ids.push(format!("{build_id} /* {relative_text} in Resources */"));
+            }
+        }
+
+        build_files.push_str(&format!(
+            "\t\t{embed_id} /* {name}.appex in Embed App Extensions */ = {{isa = PBXBuildFile; fileRef = {product_id} /* {name}.appex */; settings = {{ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }}; }};\n"
+        ));
+        file_references.push_str(&format!(
+            "\t\t{product_id} /* {name}.appex */ = {{isa = PBXFileReference; explicitFileType = \"wrapper.app-extension\"; path = {}; sourceTree = BUILT_PRODUCTS_DIR; }};\n",
+            swift_string(&format!("{name}.appex"))
+        ));
+        groups.push_str(&format!(
+            "\t\t{group_id} /* {name} */ = {{isa = PBXGroup; children = ({}); path = {}; sourceTree = \"<group>\"; }};\n",
+            group_children.join(", "),
+            swift_string(&format!("Extensions/{name}"))
+        ));
+        framework_phases.push_str(&format!(
+            "\t\t{frameworks_phase_id} = {{isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; }};\n"
+        ));
+        source_phases.push_str(&format!(
+            "\t\t{sources_phase_id} = {{isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = ({}); runOnlyForDeploymentPostprocessing = 0; }};\n",
+            source_build_ids.join(", ")
+        ));
+        resource_phases.push_str(&format!(
+            "\t\t{resources_phase_id} = {{isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = ({}); runOnlyForDeploymentPostprocessing = 0; }};\n",
+            resource_build_ids.join(", ")
+        ));
+        native_targets.push_str(&format!(
+            "\t\t{target_id} /* {name} */ = {{isa = PBXNativeTarget; buildConfigurationList = {config_list_id}; buildPhases = ({sources_phase_id}, {frameworks_phase_id}, {resources_phase_id}); buildRules = (); dependencies = (); name = {name}; productName = {name}; productReference = {product_id} /* {name}.appex */; productType = \"com.apple.product-type.app-extension\"; }};\n"
+        ));
+        target_proxies.push_str(&format!(
+            "\t\t{proxy_id} = {{isa = PBXContainerItemProxy; containerPortal = 500000000000000000000002 /* Project object */; proxyType = 1; remoteGlobalIDString = {target_id}; remoteInfo = {name}; }};\n"
+        ));
+        target_dependencies.push_str(&format!(
+            "\t\t{dependency_id} = {{isa = PBXTargetDependency; target = {target_id} /* {name} */; targetProxy = {proxy_id}; }};\n"
+        ));
+        let settings = format!(
+            "APPLICATION_EXTENSION_API_ONLY = YES; {entitlements_setting}CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = __PAM_VERSION_CODE__; DEVELOPMENT_TEAM = \"__PAM_DEVELOPMENT_TEAM__\"; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = Extensions/{name}/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = {}; MARKETING_VERSION = __PAM_VERSION_NAME__; PRODUCT_BUNDLE_IDENTIFIER = __PAM_APPLICATION_ID__.{}; PRODUCT_NAME = \"{name}\"; SDKROOT = iphoneos; SKIP_INSTALL = YES; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = \"1,2\"; ",
+            plugin.manifest.ios.minimum_version, extension.bundle_suffix
+        );
+        configurations.push_str(&format!(
+            "\t\t{debug_config_id} = {{isa = XCBuildConfiguration; buildSettings = {{{settings}}}; name = Debug; }};\n\t\t{release_config_id} = {{isa = XCBuildConfiguration; buildSettings = {{{settings}SWIFT_COMPILATION_MODE = wholemodule; VALIDATE_PRODUCT = YES; }}; name = Release; }};\n"
+        ));
+        configuration_lists.push_str(&format!(
+            "\t\t{config_list_id} = {{isa = XCConfigurationList; buildConfigurations = ({debug_config_id}, {release_config_id}); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; }};\n"
+        ));
+        embed_files.push(format!(
+            "{embed_id} /* {name}.appex in Embed App Extensions */"
+        ));
+        product_references.push(format!("{product_id} /* {name}.appex */"));
+        extension_groups.push(format!("{group_id} /* {name} */"));
+        extension_targets.push(format!("{target_id} /* {name} */"));
+        app_dependencies.push(dependency_id);
+    }
+
+    let copy_phase_id = pbx_id("extensions:embed-phase");
+    let copy_phase = format!(
+        "/* Begin PBXCopyFilesBuildPhase section */\n\t\t{copy_phase_id} /* Embed App Extensions */ = {{isa = PBXCopyFilesBuildPhase; buildActionMask = 2147483647; dstPath = \"\"; dstSubfolderSpec = 13; files = ({}); name = \"Embed App Extensions\"; runOnlyForDeploymentPostprocessing = 0; }};\n/* End PBXCopyFilesBuildPhase section */\n\n",
+        embed_files.join(", ")
+    );
+    let project_path = workspace.join("PamNativeApp.xcodeproj/project.pbxproj");
+    let mut pbx = fs::read_to_string(&project_path)
+        .map_err(|error| format!("cannot read {}: {error}", project_path.display()))?;
+    insert_pbx_section(&mut pbx, "/* End PBXBuildFile section */", &build_files)?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* Begin PBXFileReference section */",
+        &copy_phase,
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* End PBXFileReference section */",
+        &file_references,
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* End PBXFrameworksBuildPhase section */",
+        &framework_phases,
+    )?;
+    insert_pbx_section(&mut pbx, "/* End PBXGroup section */", &groups)?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* End PBXNativeTarget section */",
+        &native_targets,
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* End PBXResourcesBuildPhase section */",
+        &resource_phases,
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* End PBXSourcesBuildPhase section */",
+        &source_phases,
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* Begin PBXBuildFile section */",
+        &format!(
+            "/* Begin PBXContainerItemProxy section */\n{target_proxies}/* End PBXContainerItemProxy section */\n\n"
+        ),
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* Begin XCBuildConfiguration section */",
+        &format!(
+            "/* Begin PBXTargetDependency section */\n{target_dependencies}/* End PBXTargetDependency section */\n\n"
+        ),
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* End XCBuildConfiguration section */",
+        &configurations,
+    )?;
+    insert_pbx_section(
+        &mut pbx,
+        "/* End XCConfigurationList section */",
+        &configuration_lists,
+    )?;
+    replace_pbx_once(
+        &mut pbx,
+        "buildPhases = (300000000000000000000003, 300000000000000000000001, 300000000000000000000002);",
+        &format!(
+            "buildPhases = (300000000000000000000003, 300000000000000000000001, 300000000000000000000002, {copy_phase_id});"
+        ),
+    )?;
+    replace_pbx_once(
+        &mut pbx,
+        "dependencies = (); name = PamNativeApp;",
+        &format!(
+            "dependencies = ({}); name = PamNativeApp;",
+            app_dependencies.join(", ")
+        ),
+    )?;
+    replace_pbx_once(
+        &mut pbx,
+        "children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, 400000000000000000000005);",
+        &format!(
+            "children = (400000000000000000000002, 400000000000000000000003, 400000000000000000000004, {}, 400000000000000000000005);",
+            extension_groups.join(", ")
+        ),
+    )?;
+    replace_pbx_once(
+        &mut pbx,
+        "children = (200000000000000000000006); name = Products;",
+        &format!(
+            "children = (200000000000000000000006, {}); name = Products;",
+            product_references.join(", ")
+        ),
+    )?;
+    replace_pbx_once(
+        &mut pbx,
+        "targets = (500000000000000000000001);",
+        &format!(
+            "targets = (500000000000000000000001, {});",
+            extension_targets.join(", ")
+        ),
+    )?;
+    write_atomic(&project_path, pbx.as_bytes())
+}
+
+fn ios_extension_base_plist(
+    project: &Project,
+    extension: &PluginIosExtension,
+) -> serde_json::Value {
+    let point = match extension.kind {
+        IosExtensionKind::Share => "com.apple.share-services",
+        IosExtensionKind::Widget | IosExtensionKind::LiveActivity => {
+            "com.apple.widgetkit-extension"
+        }
+        IosExtensionKind::NotificationService => "com.apple.usernotifications.service",
+        IosExtensionKind::Intents => "com.apple.intents-service",
+    };
+    serde_json::json!({
+        "CFBundleDevelopmentRegion": "$(DEVELOPMENT_LANGUAGE)",
+        "CFBundleDisplayName": extension.name,
+        "CFBundleExecutable": "$(EXECUTABLE_NAME)",
+        "CFBundleIdentifier": "$(PRODUCT_BUNDLE_IDENTIFIER)",
+        "CFBundleInfoDictionaryVersion": "6.0",
+        "CFBundleName": "$(PRODUCT_NAME)",
+        "CFBundlePackageType": "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
+        "CFBundleShortVersionString": project.manifest.version_name,
+        "CFBundleVersion": project.manifest.version_code.to_string(),
+        "NSExtension": {"NSExtensionPointIdentifier": point}
+    })
+}
+
+fn collect_tree_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+    fn visit(root: &Path, files: &mut Vec<PathBuf>) -> Result<(), String> {
+        for entry in fs::read_dir(root)
+            .map_err(|error| format!("cannot read {}: {error}", root.display()))?
+        {
+            let entry = entry.map_err(|error| error.to_string())?;
+            if entry
+                .file_type()
+                .map_err(|error| error.to_string())?
+                .is_dir()
+            {
+                visit(&entry.path(), files)?;
+            } else {
+                files.push(entry.path());
+            }
+        }
+        Ok(())
+    }
+    let mut files = Vec::new();
+    visit(root, &mut files)?;
+    files.sort();
+    Ok(files)
+}
+
+fn xcode_file_type(path: &Path) -> &'static str {
+    match path.extension().and_then(OsStr::to_str) {
+        Some("swift") => "sourcecode.swift",
+        Some("m") => "sourcecode.c.objc",
+        Some("mm") => "sourcecode.cpp.objcpp",
+        Some("c") => "sourcecode.c.c",
+        Some("cc" | "cpp") => "sourcecode.cpp.cpp",
+        Some("plist") => "text.plist.xml",
+        Some("xcassets") => "folder.assetcatalog",
+        Some("strings") => "text.plist.strings",
+        Some("json") => "text.json",
+        _ => "file",
+    }
+}
+
+fn pbx_id(label: &str) -> String {
+    Sha256::digest(label.as_bytes())[..12]
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect()
+}
+
+fn insert_pbx_section(project: &mut String, marker: &str, contents: &str) -> Result<(), String> {
+    let position = project
+        .find(marker)
+        .ok_or_else(|| format!("generated Xcode template is missing {marker}"))?;
+    project.insert_str(position, contents);
+    Ok(())
+}
+
+fn replace_pbx_once(project: &mut String, expected: &str, replacement: &str) -> Result<(), String> {
+    if project.matches(expected).count() != 1 {
+        return Err(format!(
+            "generated Xcode template must contain exactly one {expected:?}"
+        ));
+    }
+    *project = project.replacen(expected, replacement, 1);
+    Ok(())
 }
 
 fn read_apple_plist(path: &Path) -> Result<serde_json::Value, String> {
@@ -3596,11 +3984,18 @@ fn write_ios_plugin_package(project: &Project, native_home: &Path) -> Result<(),
     } else {
         format!(".product(name: \"PamNative\", package: \"ios\"), {aggregate_target_dependencies}")
     };
+    let swift_dictionary = |entries: &[String]| {
+        if entries.is_empty() {
+            "[:]".to_owned()
+        } else {
+            format!("[\n{}\n        ]", entries.join("\n"))
+        }
+    };
     let registry = format!(
-        "{}\npublic enum PamNativePluginRegistry {{\n    public static func modules() -> [String: NativeModule] {{\n        [\n{}\n        ]\n    }}\n\n    public static func views() -> [String: NativeViewFactory] {{\n        [\n{}\n        ]\n    }}\n}}\n",
+        "{}\npublic enum PamNativePluginRegistry {{\n    public static func modules() -> [String: NativeModule] {{\n        {}\n    }}\n\n    public static func views() -> [String: NativeViewFactory] {{\n        {}\n    }}\n}}\n",
         registry_imports,
-        module_entries.join("\n"),
-        view_entries.join("\n"),
+        swift_dictionary(&module_entries),
+        swift_dictionary(&view_entries),
     );
     write_atomic(
         &package_root.join("Sources/PamNativePlugins/PamNativePlugins.swift"),
