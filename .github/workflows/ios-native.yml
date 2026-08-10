@@ -57,7 +57,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-media
-          ref: 8e08f77e90f9b6f91c04697546bf233011c1bf85
+          ref: 7fbb48c7eeff8a0303f4b90b91f82bce7c4db691
           path: certification-plugins/media
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
