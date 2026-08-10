@@ -122,12 +122,12 @@ jobs:
             pushinbr/pam-native-share-extension:@dev \
             pushinbr/pam-native-health:@dev \
             pushinbr/pam-native-media:@dev \
-            --no-dev --no-interaction --prefer-dist --dry-run
+            --update-no-dev --no-interaction --prefer-dist --dry-run
           composer require --working-dir="${fixture}" \
             pushinbr/pam-native-share-extension:@dev \
             pushinbr/pam-native-health:@dev \
             pushinbr/pam-native-media:@dev \
-            --no-dev --no-interaction --prefer-dist
+            --update-no-dev --no-interaction --prefer-dist
           target/debug/pam mobile ios:doctor "${fixture}"
           target/debug/pam mobile ios:prepare "${fixture}"
           test -f "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
