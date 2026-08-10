@@ -41,6 +41,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+      - name: Validate tag matches the runtime version
+        env:
+          PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: scripts/package-release.sh validate-tag "${PAM_RELEASE_TAG}"
       - name: Check out the pinned PAM Native SDK
         uses: actions/checkout@v5
         with:
@@ -71,6 +75,8 @@ jobs:
           composer validate --strict --working-dir=compat/laravel-smoke
       - name: Install locked Composer test dependencies
         run: |
+          composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist --dry-run
+          composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist --dry-run
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
       - name: Test, analyze, and build
@@ -126,6 +132,10 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+      - name: Validate tag matches the runtime version
+        env:
+          PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: scripts/package-release.sh validate-tag "${PAM_RELEASE_TAG}"
       - name: Check out the pinned PAM Native SDK
         uses: actions/checkout@v5
         with:
