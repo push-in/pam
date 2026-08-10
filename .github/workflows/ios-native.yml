@@ -85,11 +85,11 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
           test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: always()
         with:
           name: pam-native-ios-generated-host
           path: |
-            ${{ env.PAM_IOS_FIXTURE }}/.pam-native/ios/App/PamNativeApp.xcodeproj
-            ${{ env.PAM_IOS_FIXTURE }}/.pam-native/ios/App/DerivedData/Logs
+            ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/PamNativeApp.xcodeproj
+            ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/DerivedData/Logs
           if-no-files-found: warn

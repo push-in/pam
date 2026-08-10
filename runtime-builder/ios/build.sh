@@ -74,9 +74,9 @@ source_root=${build_root}/php-${php_version}
 destination=${pam_root}/runtime/ios/${runtime_id}
 mkdir -p "${destination}"
 
-opcache_options=()
+opcache_options=(--enable-opcache)
 if [[ ${php_version} == 8.4.* ]]; then
-    opcache_options+=(--disable-opcache)
+    opcache_options=(--disable-opcache)
 fi
 
 build_php_slice() {
