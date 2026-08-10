@@ -46,5 +46,10 @@ jobs:
       - name: Native shutdown smoke under Valgrind
         run: |
           cargo build --locked
-          valgrind --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \
-            --leak-check=full ./target/debug/pam tests/fixtures/hello.php
+          clean_ini_dir="${RUNNER_TEMP}/pam-valgrind-ini"
+          mkdir -p "${clean_ini_dir}"
+          PHPRC=/dev/null PHP_INI_SCAN_DIR="${clean_ini_dir}" \
+            valgrind --error-exitcode=1 \
+              --errors-for-leak-kinds=definite,indirect \
+              --leak-check=full \
+              ./target/debug/pam tests/fixtures/hello.php

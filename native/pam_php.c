@@ -16,6 +16,7 @@ enum pam_exit_code {
 };
 
 static bool pam_initialized = false;
+static bool pam_native_functions_registered = false;
 static char *pam_ini_entries = NULL;
 static zend_class_entry *pam_runtime_class = NULL;
 static zend_function *pam_server_config_function = NULL;
@@ -103,6 +104,20 @@ static const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_native_stream_fd, arginfo_pam_native_stream_fd)
     PHP_FE_END
 };
+
+static void pam_unregister_native_functions(void)
+{
+    if (!pam_native_functions_registered) {
+        return;
+    }
+    zend_unregister_functions(
+        pam_native_functions,
+        (int) ((sizeof(pam_native_functions) /
+            sizeof(pam_native_functions[0])) - 1),
+        NULL
+    );
+    pam_native_functions_registered = false;
+}
 
 uint32_t pam_native_abi_version(void)
 {
@@ -371,7 +386,9 @@ int pam_php_init(int argc, char **argv)
         pam_initialized = false;
         return PAM_INITIALIZATION_FAILURE;
     }
+    pam_native_functions_registered = true;
     if (pam_register_file_handles() == FAILURE) {
+        pam_unregister_native_functions();
         php_embed_shutdown();
         pam_initialized = false;
         pam_reset_runtime_cache();
@@ -760,6 +777,7 @@ void pam_php_shutdown(void)
         return;
     }
 
+    pam_unregister_native_functions();
     php_embed_shutdown();
     php_embed_module.ini_entries = NULL;
     free(pam_ini_entries);
