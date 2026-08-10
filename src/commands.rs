@@ -3517,7 +3517,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                 "type": "path",
                 "url": packages.to_string_lossy(),
                 "options": {
-                    "symlink": true,
+                    "symlink": false,
                     "versions": {
                         "pam/core-api": "0.1.0",
                         "pam/api": "0.1.0",
@@ -3548,7 +3548,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "type": "path",
                 "url": path.to_string_lossy(),
                 "options": {
-                    "symlink": true,
+                    "symlink": false,
                     "versions": {
                         "pam/desktop": "0.5.0"
                     }
@@ -3585,13 +3585,17 @@ fn local_native_repository() -> Option<LocalComposerRepository> {
             let composer = fs::read(path.join("composer.json")).ok()?;
             let manifest = serde_json::from_slice::<serde_json::Value>(&composer).ok()?;
             let package = manifest.get("name")?.as_str()?.to_owned();
+            let version = path
+                .parent()?
+                .parent()
+                .and_then(|root| cargo_manifest_version(&root.join("Cargo.toml")))?;
             let definition = serde_json::json!({
                 "type": "path",
                 "url": path.to_string_lossy(),
                 "options": {
-                    "symlink": true,
+                    "symlink": false,
                     "versions": {
-                        package.clone(): env!("CARGO_PKG_VERSION")
+                        package.clone(): version
                     }
                 }
             });
@@ -3600,6 +3604,19 @@ fn local_native_repository() -> Option<LocalComposerRepository> {
                 definition,
             })
         })
+}
+
+fn cargo_manifest_version(path: &Path) -> Option<String> {
+    let contents = fs::read_to_string(path).ok()?;
+    contents.lines().find_map(|line| {
+        let value = line.trim().strip_prefix("version = ")?;
+        let version = value.strip_prefix('"')?.strip_suffix('"')?;
+        let parts = version.split('.').collect::<Vec<_>>();
+        if parts.len() != 3 || parts.iter().any(|part| part.parse::<u32>().is_err()) {
+            return None;
+        }
+        Some(version.to_owned())
+    })
 }
 
 fn local_mobile_ui_repository() -> Option<serde_json::Value> {
@@ -3626,7 +3643,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "type": "path",
                 "url": path.to_string_lossy(),
                 "options": {
-                    "symlink": true,
+                    "symlink": false,
                     "versions": {
                         "pushinbr/pam-mobile-ui": "0.1.0"
                     }

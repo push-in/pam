@@ -47,6 +47,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: pam-native-ios-runtime
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
       - name: Build verified PHP and engine XCFrameworks
         run: runtime-builder/ios/build.sh --php 8.5 all
       - name: Build PAM CLI
@@ -63,18 +68,8 @@ jobs:
           fixture=${RUNNER_TEMP}/pam-ios-fixture
           target/debug/pam init "${fixture}" \
             --template mobile --platform ios --no-install --no-interaction
-          mkdir -p "${fixture}/vendor/composer"
-          cat >"${fixture}/vendor/autoload.php" <<'PHP'
-          <?php
-          return null;
-          PHP
-          cat >"${fixture}/vendor/composer/installed.json" <<'JSON'
-          {
-            "packages": [
-              {"name": "pushinbr/pam-native", "version": "0.6.67", "extra": {}}
-            ]
-          }
-          JSON
+          composer install \
+            --working-dir="${fixture}" --no-dev --no-interaction --prefer-dist
           target/debug/pam mobile ios:doctor "${fixture}"
           target/debug/pam mobile ios:prepare "${fixture}"
           test -f "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
@@ -92,6 +87,45 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
           test -d "${PAM_IOS_FIXTURE}/.pam-native/ios/App/DerivedData/Build/Products/Debug-iphonesimulator/PAM App.app"
+      - name: Install, launch, and certify the generated app
+        run: |
+          simulator=$(xcrun simctl list devices available --json | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime in sorted(devices, reverse=True):
+              for device in devices[runtime]:
+                  if device.get("isAvailable") and device["name"].startswith("iPhone"):
+                      print(device["udid"])
+                      raise SystemExit(0)
+          raise SystemExit("No available iPhone simulator")
+          ')
+          state=$(xcrun simctl list devices --json | python3 -c '
+          import json, sys
+          wanted = sys.argv[1]
+          for devices in json.load(sys.stdin)["devices"].values():
+              for device in devices:
+                  if device.get("udid") == wanted:
+                      print(device.get("state", ""))
+                      raise SystemExit(0)
+          ' "${simulator}")
+          if test "${state}" != Booted; then
+            xcrun simctl boot "${simulator}"
+          fi
+          xcrun simctl bootstatus "${simulator}" -b
+          target/debug/pam mobile ios:run "${PAM_IOS_FIXTURE}"
+          app_container=$(xcrun simctl get_app_container "${simulator}" app.pam.hello app)
+          test -d "${app_container}"
+          launch=$(xcrun simctl launch --terminate-running-process "${simulator}" app.pam.hello)
+          pid=${launch##*: }
+          sleep 5
+          ps -p "${pid}" >/dev/null
+          xcrun simctl io "${simulator}" screenshot "${RUNNER_TEMP}/pam-ios-fixture/simulator.png"
+          xcrun simctl spawn "${simulator}" log show \
+            --style compact --last 2m \
+            --predicate 'process == "PAM App"' \
+            >"${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
+          ! grep -E 'Pam Native failed to start|PHP (fatal|parse) error' \
+            "${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
       - uses: actions/upload-artifact@v5
         if: always()
         with:
@@ -99,4 +133,6 @@ jobs:
           path: |
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/PamNativeApp.xcodeproj
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/DerivedData/Logs
+            ${{ runner.temp }}/pam-ios-fixture/simulator.png
+            ${{ runner.temp }}/pam-ios-fixture/simulator.log
           if-no-files-found: warn
