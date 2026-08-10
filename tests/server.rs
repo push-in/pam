@@ -3,7 +3,7 @@ use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
-use std::sync::Arc;
+use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -28,6 +28,17 @@ impl ServerProcess {
     }
 
     fn start_with_response_limits(response_limits: Option<(usize, usize)>) -> Self {
+        Self::start_with_options(response_limits, None)
+    }
+
+    fn start_with_rate_limit(rate_limit_per_second: u32) -> Self {
+        Self::start_with_options(None, Some(rate_limit_per_second))
+    }
+
+    fn start_with_options(
+        response_limits: Option<(usize, usize)>,
+        rate_limit_per_second: Option<u32>,
+    ) -> Self {
         let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
         let port = probe.local_addr().unwrap().port();
         drop(probe);
@@ -49,6 +60,9 @@ impl ServerProcess {
                     "PAM_TEST_MAX_RESPONSE_CHUNK_BYTES",
                     max_response_chunk_bytes.to_string(),
                 );
+        }
+        if let Some(rate_limit_per_second) = rate_limit_per_second {
+            command.env("PAM_TEST_RATE_LIMIT", rate_limit_per_second.to_string());
         }
         let child = command.spawn().expect("Pam server should start");
         let mut server = Self {
@@ -757,11 +771,25 @@ fn serves_rest_and_websocket_events_on_the_same_port() {
         Ok(Message::Close(_)) | Err(_)
     ));
 
-    let mut saw_rate_limit = false;
-    for _ in 0..110 {
-        let response = server
-            .http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
-        saw_rate_limit |= response.starts_with("HTTP/1.1 429 Too Many Requests");
-    }
+    let rate_limited_server = Arc::new(ServerProcess::start_with_rate_limit(1));
+    let barrier = Arc::new(Barrier::new(8));
+    let requests = (0..8)
+        .map(|_| {
+            let server = Arc::clone(&rate_limited_server);
+            let barrier = Arc::clone(&barrier);
+            thread::spawn(move || {
+                barrier.wait();
+                server.http_request(
+                    "GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let saw_rate_limit = requests.into_iter().any(|request| {
+        request
+            .join()
+            .unwrap()
+            .starts_with("HTTP/1.1 429 Too Many Requests")
+    });
     assert!(saw_rate_limit, "rate limiter did not reject a request");
 }
