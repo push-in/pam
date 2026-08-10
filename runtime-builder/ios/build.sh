@@ -75,10 +75,14 @@ destination=${pam_root}/runtime/ios/${runtime_id}
 mkdir -p "${destination}"
 
 # iOS forbids the writable/executable memory transitions used by PHP's JIT.
-# Configure can see the macOS pthread JIT APIs through the SDK while those APIs
-# are explicitly unavailable to iOS applications, so keep OPcache/JIT outside
-# the mobile runtime for every supported PHP series.
-opcache_options=(--disable-opcache)
+# PHP 8.5 made OPcache part of the core build, so disable JIT on every series
+# and disable the optional extension itself only where that switch still exists.
+opcache_options=(--disable-opcache-jit)
+opcache_enabled=yes
+if [[ ${php_version} == 8.4.* ]]; then
+    opcache_options=(--disable-opcache --disable-opcache-jit)
+    opcache_enabled=no
+fi
 
 build_php_slice() {
     local name=$1
@@ -182,7 +186,7 @@ manifest = {
     "extensions": [
         extension
         for extension in "${php_extensions}".split(",")
-        if extension != "opcache"
+        if extension != "opcache" or "${opcache_enabled}" == "yes"
     ],
 }
 with open("${destination}/runtime.json", "w", encoding="utf-8") as stream:
