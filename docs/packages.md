@@ -8,20 +8,20 @@ lifecycle and diagnostics. Composer owns every optional application feature.
 
 | Package | Responsibility |
 | --- | --- |
-| `pam/core-api` | Stable contracts and runtime capability checks for package authors |
-| `pam/api` | HTTP router, middleware pipeline, error boundary and provider discovery |
-| `pam/socket` | Event-oriented WebSocket API, rooms, broadcasts and distributed adapters |
-| `pam/psr-bridge` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
-| `pam/testing` | In-memory HTTP client and fluent response assertions |
-| `pam/skeleton` | Minimal production-oriented project template |
+| `pushinbr/pam-core-api` | Stable contracts and runtime capability checks for package authors |
+| `pushinbr/pam-api` | HTTP router, middleware pipeline, error boundary and provider discovery |
+| `pushinbr/pam-socket` | Event-oriented WebSocket API, rooms, broadcasts and distributed adapters |
+| `pushinbr/pam-psr-bridge` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
+| `pushinbr/pam-testing` | In-memory HTTP client and fluent response assertions |
+| `pushinbr/pam-skeleton` | Minimal production-oriented project template |
 
 Applications should depend on packages directly. There is no hidden Pam lockfile,
 global package store or alternative registry.
 
 ```bash
-pam composer require pam/api
-pam composer require pam/socket
-pam composer require --dev pam/testing
+pam composer require pushinbr/pam-api
+pam composer require pushinbr/pam-socket
+pam composer require --dev pushinbr/pam-testing
 ```
 
 ## Package discovery
@@ -32,7 +32,7 @@ A Composer package can register one or more providers:
 {
     "name": "acme/pam-health",
     "require": {
-        "pam/core-api": "^1.0"
+        "pushinbr/pam-core-api": "^1.0"
     },
     "extra": {
         "pam": {
@@ -87,12 +87,12 @@ distribution mirrors place each package's `composer.json` at the repository root
 
 | Package | Distribution mirror |
 | --- | --- |
-| `pam/core-api` | `push-in/pam-core-api` |
-| `pam/api` | `push-in/pam-api` |
-| `pam/socket` | `push-in/pam-socket` |
-| `pam/psr-bridge` | `push-in/pam-psr-bridge` |
-| `pam/testing` | `push-in/pam-testing` |
-| `pam/skeleton` | `push-in/pam-skeleton` |
+| `pushinbr/pam-core-api` | `push-in/pam-core-api` |
+| `pushinbr/pam-api` | `push-in/pam-api` |
+| `pushinbr/pam-socket` | `push-in/pam-socket` |
+| `pushinbr/pam-psr-bridge` | `push-in/pam-psr-bridge` |
+| `pushinbr/pam-testing` | `push-in/pam-testing` |
+| `pushinbr/pam-skeleton` | `push-in/pam-skeleton` |
 
 Do not commit directly to a mirror. Package changes, issues and pull requests
 belong in `push-in/pam`.
@@ -115,7 +115,7 @@ inside the Pam Embed SAPI. Run the package-specific validation locally with:
 
 ```bash
 scripts/package-release.sh validate
-scripts/package-release.sh validate-tag v1.0.0
+scripts/package-release.sh validate-tag v1.0.1
 ```
 
 The workflow uses one write-enabled deploy key per mirror. Each private key is an

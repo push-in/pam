@@ -37,7 +37,7 @@ validate_map() {
         and ([.packages[].deploySecret] | length == (unique | length))
         and all(
             .packages[];
-            (.name | test("^pam/[a-z0-9-]+$"))
+            (.name | test("^pushinbr/pam-[a-z0-9-]+$"))
             and (.path | test("^packages/[a-z0-9-]+$"))
             and (.repository | test("^pam-[a-z0-9-]+$"))
             and (.deploySecret | test("^PAM_[A-Z0-9_]+_DEPLOY_KEY$"))
@@ -194,11 +194,11 @@ case "${command_name}" in
         ;;
     split)
         test "$#" -ge 2 && test "$#" -le 3 ||
-            fail "usage: $0 split <pam/package> [git-ref]"
+            fail "usage: $0 split <composer-package> [git-ref]"
         split_package "$2" "${3:-HEAD}"
         ;;
     verify-split)
-        test "$#" -eq 3 || fail "usage: $0 verify-split <pam/package> <git-ref>"
+        test "$#" -eq 3 || fail "usage: $0 verify-split <composer-package> <git-ref>"
         verify_split "$2" "$3"
         ;;
     *)

@@ -1,9 +1,9 @@
-# pam/testing
+# pushinbr/pam-testing
 
-Fast in-memory tests for applications built with `pam/api`.
+Fast in-memory tests for applications built with `pushinbr/pam-api`.
 
 ```bash
-pam composer require --dev pam/testing
+pam composer require --dev pushinbr/pam-testing
 ```
 
 ```php

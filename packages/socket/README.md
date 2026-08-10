@@ -1,11 +1,11 @@
-# pam/socket
+# pushinbr/pam-socket
 
 Event-oriented socket APIs for Pam's native WebSocket transport, including
 authentication, rooms, broadcasts, acknowledgements and Redis Streams/NATS
 adapters.
 
 ```bash
-pam composer require pam/socket
+pam composer require pushinbr/pam-socket
 ```
 
 ```php

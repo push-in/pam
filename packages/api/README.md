@@ -1,11 +1,11 @@
-# pam/api
+# pushinbr/pam-api
 
 The optional Express-like HTTP layer for Pam: route parameters, 404/405 handling,
 a precompiled middleware pipeline, error boundaries and Composer provider
 discovery.
 
 ```bash
-pam composer require pam/api
+pam composer require pushinbr/pam-api
 ```
 
 ```php

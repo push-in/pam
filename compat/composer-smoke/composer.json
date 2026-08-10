@@ -10,11 +10,11 @@
             "options": {
                 "symlink": true,
                 "versions": {
-                    "pam/core-api": "1.0.0",
-                    "pam/api": "1.0.0",
-                    "pam/psr-bridge": "1.0.0",
-                    "pam/socket": "1.0.0",
-                    "pam/testing": "1.0.0"
+                    "pushinbr/pam-core-api": "1.0.1",
+                    "pushinbr/pam-api": "1.0.1",
+                    "pushinbr/pam-psr-bridge": "1.0.1",
+                    "pushinbr/pam-socket": "1.0.1",
+                    "pushinbr/pam-testing": "1.0.1"
                 }
             }
         }
@@ -30,9 +30,9 @@
         "open-telemetry/api": "^1.4",
         "open-telemetry/exporter-otlp": "^1.4",
         "open-telemetry/sdk": "^1.15",
-        "pam/api": "^1.0",
-        "pam/psr-bridge": "^1.0",
-        "pam/socket": "^1.0",
+        "pushinbr/pam-api": "^1.0",
+        "pushinbr/pam-psr-bridge": "^1.0",
+        "pushinbr/pam-socket": "^1.0",
         "psr/http-factory": "^1.1",
         "psr/http-message": "^2.0",
         "psr/http-server-handler": "^1.0",
@@ -44,7 +44,7 @@
         "symfony/http-kernel": "^8.0"
     },
     "require-dev": {
-        "pam/testing": "^1.0",
+        "pushinbr/pam-testing": "^1.0",
         "pestphp/pest": "^4.7",
         "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "12.5.30"

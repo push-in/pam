@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "84b25b4524e890e4f23c71837ffd0dc9",
+    "content-hash": "ead50d3f13ac8f1e5b893e9b500551db",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2044,169 +2044,6 @@
             "time": "2026-01-21T04:14:03+00:00"
         },
         {
-            "name": "pam/api",
-            "version": "1.0.0",
-            "dist": {
-                "type": "path",
-                "url": "../../packages/api",
-                "reference": "217f65a63e6cee11c270dadaa60e4db814a4aeb7"
-            },
-            "require": {
-                "pam/core-api": "^1.0",
-                "php": "^8.4"
-            },
-            "suggest": {
-                "pam/psr-bridge": "PSR-7, PSR-15 and PSR-17 interoperability.",
-                "pam/socket": "High-level event and room APIs for Pam WebSockets."
-            },
-            "type": "library",
-            "autoload": {
-                "classmap": [
-                    "src/App.php"
-                ],
-                "psr-4": {
-                    "Pam\\Api\\": "src/"
-                }
-            },
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "Elegant HTTP routing and middleware for the Pam runtime.",
-            "homepage": "https://github.com/push-in/pam",
-            "keywords": [
-                "http",
-                "middleware",
-                "pam",
-                "php",
-                "router"
-            ],
-            "support": {
-                "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-api"
-            },
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
-        },
-        {
-            "name": "pam/core-api",
-            "version": "1.0.0",
-            "dist": {
-                "type": "path",
-                "url": "../../packages/core-api",
-                "reference": "5a5d17ccff74b063b76c68011e2d70892cac8102"
-            },
-            "require": {
-                "php": "^8.4"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Pam\\Contracts\\": "src/"
-                }
-            },
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "Stable PHP contracts for the Pam persistent runtime.",
-            "homepage": "https://github.com/push-in/pam",
-            "keywords": [
-                "contracts",
-                "pam",
-                "php",
-                "runtime"
-            ],
-            "support": {
-                "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-core-api"
-            },
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
-        },
-        {
-            "name": "pam/psr-bridge",
-            "version": "1.0.0",
-            "dist": {
-                "type": "path",
-                "url": "../../packages/psr-bridge",
-                "reference": "b9f7cfd3bc2288c3f22b880d302d7b86c8a9ae7b"
-            },
-            "require": {
-                "php": "^8.4",
-                "psr/http-factory": "^1.1",
-                "psr/http-message": "^2.0",
-                "psr/http-server-handler": "^1.0",
-                "psr/http-server-middleware": "^1.0"
-            },
-            "type": "library",
-            "autoload": {
-                "files": [
-                    "src/psr.php"
-                ]
-            },
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "PSR-7, PSR-15 and PSR-17 implementations for Pam.",
-            "homepage": "https://github.com/push-in/pam",
-            "keywords": [
-                "pam",
-                "php",
-                "psr-15",
-                "psr-17",
-                "psr-7"
-            ],
-            "support": {
-                "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-psr-bridge"
-            },
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
-        },
-        {
-            "name": "pam/socket",
-            "version": "1.0.0",
-            "dist": {
-                "type": "path",
-                "url": "../../packages/socket",
-                "reference": "ce1f6a0d47991e344320cfa4d0ca039ac294fd08"
-            },
-            "require": {
-                "pam/core-api": "^1.0",
-                "php": "^8.4"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Pam\\Socket\\": "src/"
-                }
-            },
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "Expressive socket API for Pam WebSockets.",
-            "homepage": "https://github.com/push-in/pam",
-            "keywords": [
-                "pam",
-                "php",
-                "realtime",
-                "websocket"
-            ],
-            "support": {
-                "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-socket"
-            },
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
-        },
-        {
             "name": "php-http/discovery",
             "version": "1.20.0",
             "source": {
@@ -2809,6 +2646,169 @@
                 "source": "https://github.com/php-fig/simple-cache/tree/3.0.0"
             },
             "time": "2021-10-29T13:26:27+00:00"
+        },
+        {
+            "name": "pushinbr/pam-api",
+            "version": "1.0.1",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/api",
+                "reference": "c19483bfeb8600d189ee2a84625fa5015cb3c721"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-core-api": "^1.0"
+            },
+            "suggest": {
+                "pushinbr/pam-psr-bridge": "PSR-7, PSR-15 and PSR-17 interoperability.",
+                "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
+            },
+            "type": "library",
+            "autoload": {
+                "classmap": [
+                    "src/App.php"
+                ],
+                "psr-4": {
+                    "Pam\\Api\\": "src/"
+                }
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Elegant HTTP routing and middleware for the Pam runtime.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "http",
+                "middleware",
+                "pam",
+                "php",
+                "router"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-api"
+            },
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-core-api",
+            "version": "1.0.1",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/core-api",
+                "reference": "88088c7636ffdc86532f90cf354bf2725d2d6ca1"
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Contracts\\": "src/"
+                }
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Stable PHP contracts for the Pam persistent runtime.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "contracts",
+                "pam",
+                "php",
+                "runtime"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-core-api"
+            },
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-psr-bridge",
+            "version": "1.0.1",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/psr-bridge",
+                "reference": "03628a570fcb85a14b0b569fd682c5e9093681b5"
+            },
+            "require": {
+                "php": "^8.4",
+                "psr/http-factory": "^1.1",
+                "psr/http-message": "^2.0",
+                "psr/http-server-handler": "^1.0",
+                "psr/http-server-middleware": "^1.0"
+            },
+            "type": "library",
+            "autoload": {
+                "files": [
+                    "src/psr.php"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "PSR-7, PSR-15 and PSR-17 implementations for Pam.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "pam",
+                "php",
+                "psr-15",
+                "psr-17",
+                "psr-7"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-psr-bridge"
+            },
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-socket",
+            "version": "1.0.1",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/socket",
+                "reference": "c1a228d5745fc03f97ccb3628519752911180750"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-core-api": "^1.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Socket\\": "src/"
+                }
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Expressive socket API for Pam WebSockets.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "pam",
+                "php",
+                "realtime",
+                "websocket"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-socket"
+            },
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
         },
         {
             "name": "ramsey/collection",
@@ -5547,44 +5547,6 @@
             "time": "2026-02-16T23:10:27+00:00"
         },
         {
-            "name": "pam/testing",
-            "version": "1.0.0",
-            "dist": {
-                "type": "path",
-                "url": "../../packages/testing",
-                "reference": "feb9249dc942f4fa6c34070f409175fc7845ff7d"
-            },
-            "require": {
-                "pam/core-api": "^1.0",
-                "php": "^8.4"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Pam\\Testing\\": "src/"
-                }
-            },
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "In-memory HTTP testing utilities for Pam applications.",
-            "homepage": "https://github.com/push-in/pam",
-            "keywords": [
-                "http",
-                "pam",
-                "php",
-                "testing"
-            ],
-            "support": {
-                "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-testing"
-            },
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
-        },
-        {
             "name": "pestphp/pest",
             "version": "v4.7.5",
             "source": {
@@ -6814,6 +6776,44 @@
                 }
             ],
             "time": "2026-06-15T13:12:30+00:00"
+        },
+        {
+            "name": "pushinbr/pam-testing",
+            "version": "1.0.1",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/testing",
+                "reference": "73d34959e26b2808a9eaed20d6d5fe2b5f320552"
+            },
+            "require": {
+                "php": "^8.4",
+                "pushinbr/pam-core-api": "^1.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Testing\\": "src/"
+                }
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "In-memory HTTP testing utilities for Pam applications.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "http",
+                "pam",
+                "php",
+                "testing"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-testing"
+            },
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
         },
         {
             "name": "sebastian/cli-parser",

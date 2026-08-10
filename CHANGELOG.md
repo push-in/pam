@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1
+
+- Publish the official Composer packages under the organization-owned
+  `pushinbr/*` namespace so fresh public installs work from Packagist.
+- Isolate Intel macOS runtime packaging from iOS simulator cross-builds.
+
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
@@ -87,9 +93,9 @@ after the first stable release.
   idle snapshot after traffic stops.
 - Added Laravel-aware `pam dev` hot reload and a reproducible, no-benchmark-theater
   comparison protocol for Pam, FrankenPHP, and Swoole.
-- Split application features into optional Composer packages: `pam/api`,
-  `pam/socket`, `pam/psr-bridge`, `pam/testing`, `pam/core-api`, and the
-  `pam/skeleton` project.
+- Split application features into optional Composer packages, now published as
+  `pushinbr/pam-api`, `pushinbr/pam-socket`, `pushinbr/pam-psr-bridge`,
+  `pushinbr/pam-testing`, `pushinbr/pam-core-api`, and `pushinbr/pam-skeleton`.
 - Added parameter routing, a precompiled middleware pipeline, bounded rate-limit
   state, safe Composer provider discovery, and in-memory application tests.
 - Added a typed Zend-to-Tokio suspend/resume protocol with concurrent request

@@ -67,11 +67,11 @@ The result is a runtime designed for APIs, real-time systems, streaming, backgro
 | Area | Where it lives |
 | --- | --- |
 | Runtime core | Persistent Zend Engine, Tokio scheduler, Fibers, HTTP transport, streams, async I/O, process and diagnostics |
-| `pam/api` | Expressive routing, route parameters, middleware, error handling and package discovery |
-| `pam/socket` | RFC 6455 events, rooms, broadcasts, acknowledgements, adapters and resume support |
-| `pam/psr-bridge` | PSR-7, PSR-15 and PSR-17 interoperability using the official interfaces |
-| `pam/testing` | Fast in-memory HTTP client and fluent response assertions |
-| `pam/core-api` | Small, versioned contracts for packages that extend Pam |
+| `pushinbr/pam-api` | Expressive routing, route parameters, middleware, error handling and package discovery |
+| `pushinbr/pam-socket` | RFC 6455 events, rooms, broadcasts, acknowledgements, adapters and resume support |
+| `pushinbr/pam-psr-bridge` | PSR-7, PSR-15 and PSR-17 interoperability using the official interfaces |
+| `pushinbr/pam-testing` | Fast in-memory HTTP client and fluent response assertions |
+| `pushinbr/pam-core-api` | Small, versioned contracts for packages that extend Pam |
 | Pam Desktop | Separate Servo host plus a typed Composer package for building desktop applications with PHP |
 | Composer | Normal `composer.json`, `composer.lock`, PSR-4, custom vendor directories, and `vendor/autoload.php` |
 | Production | Master/worker mode, crash recovery, watchdog, graceful drain, worker recycling, generational reload |
@@ -289,10 +289,10 @@ pam binary
 └── lifecycle, workers, health, metrics and diagnostics
 
 Composer
-├── pam/api          routing + middleware (the Express-like layer)
-├── pam/socket       realtime events (the Socket.IO-like layer)
-├── pam/psr-bridge   standards interoperability
-├── pam/testing      in-memory application tests
+├── pushinbr/pam-api          routing + middleware (the Express-like layer)
+├── pushinbr/pam-socket       realtime events (the Socket.IO-like layer)
+├── pushinbr/pam-psr-bridge   standards interoperability
+├── pushinbr/pam-testing      in-memory application tests
 ├── pam/desktop      desktop application model (separate repository)
 └── every existing compatible PHP package
 ```
@@ -312,17 +312,17 @@ Server::create(static fn (Request $request, Response $response): Response =>
 Install only the higher-level pieces your application needs:
 
 ```bash
-pam composer require pam/api
-pam composer require pam/socket          # optional
-pam composer require pam/psr-bridge      # optional
-pam composer require --dev pam/testing   # optional
+pam composer require pushinbr/pam-api
+pam composer require pushinbr/pam-socket          # optional
+pam composer require pushinbr/pam-psr-bridge      # optional
+pam composer require --dev pushinbr/pam-testing   # optional
 ```
 
 See [Packages and extension model](docs/packages.md) for stability, discovery and publishing rules.
 
 ## The API programming model
 
-`pam/api` is the optional, Express-like API:
+`pushinbr/pam-api` is the optional, Express-like API:
 
 ```php
 <?php
@@ -383,7 +383,7 @@ pam test .
 
 Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and loads the normal Composer autoloader. Your lockfile remains the source of truth.
 
-Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pam/api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
+Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pushinbr/pam-api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
 
 The executable compatibility project currently covers real behavior from:
 
@@ -513,7 +513,7 @@ $app->get('/events', static function ($request, $response) {
 
 ## WebSockets on the same port
 
-Install `pam/socket`; HTTP and RFC 6455 WebSockets then share the same runtime listener:
+Install `pushinbr/pam-socket`; HTTP and RFC 6455 WebSockets then share the same runtime listener:
 
 ```php
 use Pam\Socket\Server as SocketServer;

@@ -821,17 +821,17 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let version = "^1.0";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.4")),
-        ("pam/api".to_owned(), serde_json::json!(version)),
+        ("pushinbr/pam-api".to_owned(), serde_json::json!(version)),
     ]);
     if socket {
-        require.insert("pam/socket".to_owned(), serde_json::json!(version));
+        require.insert("pushinbr/pam-socket".to_owned(), serde_json::json!(version));
     }
     let mut manifest = serde_json::json!({
         "name": "app/pam-project",
         "type": "project",
         "require": require,
         "require-dev": {
-            "pam/testing": version,
+            "pushinbr/pam-testing": version,
             "phpunit/phpunit": "^12.5"
         },
         "autoload": {"psr-4": {"App\\": "src/"}},
@@ -3519,11 +3519,11 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pam/core-api": "0.1.0",
-                        "pam/api": "0.1.0",
-                        "pam/psr-bridge": "0.1.0",
-                        "pam/socket": "0.1.0",
-                        "pam/testing": "0.1.0"
+                        "pushinbr/pam-core-api": "0.1.0",
+                        "pushinbr/pam-api": "0.1.0",
+                        "pushinbr/pam-psr-bridge": "0.1.0",
+                        "pushinbr/pam-socket": "0.1.0",
+                        "pushinbr/pam-testing": "0.1.0"
                     }
                 }
             })

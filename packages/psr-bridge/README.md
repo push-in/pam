@@ -1,10 +1,10 @@
-# pam/psr-bridge
+# pushinbr/pam-psr-bridge
 
 PSR-7, PSR-15 and PSR-17 interoperability for Pam using the official PHP-FIG
 interfaces.
 
 ```bash
-pam composer require pam/psr-bridge
+pam composer require pushinbr/pam-psr-bridge
 ```
 
 Pass a PSR-15 handler and middleware to `Pam\App::handler()` and

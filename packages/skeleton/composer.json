@@ -1,5 +1,5 @@
 {
-    "name": "pam/skeleton",
+    "name": "pushinbr/pam-skeleton",
     "description": "Production-ready starter application for the Pam runtime.",
     "type": "project",
     "license": "Apache-2.0",
@@ -16,12 +16,12 @@
     },
     "require": {
         "php": "^8.4",
-        "pam/api": "^1.0",
-        "pam/psr-bridge": "^1.0",
-        "pam/socket": "^1.0"
+        "pushinbr/pam-api": "^1.0",
+        "pushinbr/pam-psr-bridge": "^1.0",
+        "pushinbr/pam-socket": "^1.0"
     },
     "require-dev": {
-        "pam/testing": "^1.0",
+        "pushinbr/pam-testing": "^1.0",
         "phpunit/phpunit": "^12.5"
     },
     "autoload": {

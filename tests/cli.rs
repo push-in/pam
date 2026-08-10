@@ -661,10 +661,10 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join("phpunit.xml").is_file());
     assert!(directory.join("tests/ApplicationTest.php").is_file());
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
-    assert!(manifest.contains("\"pam/api\""));
+    assert!(manifest.contains("\"pushinbr/pam-api\""));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-    assert_eq!(manifest_json["require"]["pam/api"], "^1.0");
-    assert_eq!(manifest_json["require-dev"]["pam/testing"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^1.0");
+    assert_eq!(manifest_json["require-dev"]["pushinbr/pam-testing"], "^1.0");
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());
@@ -710,10 +710,10 @@ fn initializes_raw_and_socket_presets_without_composer() {
         String::from_utf8_lossy(&output.stderr)
     );
     let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
-    assert!(manifest.contains("pam/socket"));
+    assert!(manifest.contains("pushinbr/pam-socket"));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-    assert_eq!(manifest_json["require"]["pam/api"], "^1.0");
-    assert_eq!(manifest_json["require"]["pam/socket"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-socket"], "^1.0");
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();
