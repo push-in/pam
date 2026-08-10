@@ -116,6 +116,14 @@ build_php_slice() {
             --without-pear --without-iconv --without-libxml --without-openssl \
             --without-zlib --without-curl --without-sqlite3 --without-pdo-sqlite \
             "${opcache_options[@]}" --with-pcre-jit=no
+        # Darwin headers expose desktop-only spawn helpers while marking them
+        # unavailable for iOS. Configure cannot distinguish that availability
+        # annotation during a cross build, so remove only those unsupported
+        # feature probes before compilation.
+        sed -i '' \
+            -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCHDIR_NP 1$/d' \
+            -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR_NP 1$/d' \
+            main/php_config.h
         make -j"${PAM_BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}"
         make install
     )
