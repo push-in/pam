@@ -16,12 +16,12 @@
     },
     "require": {
         "php": "^8.4",
-        "pam/api": "^0.1",
-        "pam/psr-bridge": "^0.1",
-        "pam/socket": "^0.1"
+        "pam/api": "^1.0",
+        "pam/psr-bridge": "^1.0",
+        "pam/socket": "^1.0"
     },
     "require-dev": {
-        "pam/testing": "^0.1",
+        "pam/testing": "^1.0",
         "phpunit/phpunit": "^12.5"
     },
     "autoload": {

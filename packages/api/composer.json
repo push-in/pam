@@ -17,7 +17,7 @@
     },
     "require": {
         "php": "^8.4",
-        "pam/core-api": "^0.1"
+        "pam/core-api": "^1.0"
     },
     "suggest": {
         "pam/psr-bridge": "PSR-7, PSR-15 and PSR-17 interoperability.",

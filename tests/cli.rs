@@ -662,6 +662,9 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join("tests/ApplicationTest.php").is_file());
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     assert!(manifest.contains("\"pam/api\""));
+    let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(manifest_json["require"]["pam/api"], "^1.0");
+    assert_eq!(manifest_json["require-dev"]["pam/testing"], "^1.0");
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());
@@ -708,6 +711,9 @@ fn initializes_raw_and_socket_presets_without_composer() {
     );
     let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
     assert!(manifest.contains("pam/socket"));
+    let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(manifest_json["require"]["pam/api"], "^1.0");
+    assert_eq!(manifest_json["require"]["pam/socket"], "^1.0");
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();

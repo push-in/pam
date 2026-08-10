@@ -32,7 +32,7 @@ A Composer package can register one or more providers:
 {
     "name": "acme/pam-health",
     "require": {
-        "pam/core-api": "^0.1"
+        "pam/core-api": "^1.0"
     },
     "extra": {
         "pam": {
@@ -115,7 +115,7 @@ inside the Pam Embed SAPI. Run the package-specific validation locally with:
 
 ```bash
 scripts/package-release.sh validate
-scripts/package-release.sh validate-tag v0.1.0
+scripts/package-release.sh validate-tag v1.0.0
 ```
 
 The workflow uses one write-enabled deploy key per mirror. Each private key is an

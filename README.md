@@ -8,7 +8,7 @@
 
 Write elegant PHP. Keep Composer. Serve HTTP, WebSockets, and asynchronous I/O from memory—without rebuilding your application for every request.
 
-![Status](https://img.shields.io/badge/status-experimental-f59e0b?style=flat-square)
+![Status](https://img.shields.io/badge/status-1.0%20stable-16a34a?style=flat-square)
 ![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
 ![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?style=flat-square&logo=rust&logoColor=white)
 ![HTTP](https://img.shields.io/badge/HTTP-1.1%20%7C%202%20%7C%203-2563eb?style=flat-square)
@@ -25,7 +25,10 @@ It embeds PHP through the official Embed SAPI, loads your application and Compos
 Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
 
 > [!IMPORTANT]
-> Pam is currently experimental (`0.1.1`). Its integration suite exercises the contracts documented here, but read [Known limitations](#known-limitations) before evaluating it for production.
+> PAM 1.0 stabilizes the documented CLI, runtime, Composer-package, editor, and
+> native-host contracts. Read [Known limitations](#known-limitations) and test
+> your actual packages, extensions, devices, credentials, and workload before
+> production deployment.
 
 ## PAM ecosystem
 
@@ -232,7 +235,7 @@ notifications and drag-and-drop grants are opt-in. Application identity,
 category, icon and signed-update policy also live in a typed PHP manifest:
 
 ```php
-Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
+Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
     ->publisher('Pushin')
     ->category(ApplicationCategory::Development);
 ```

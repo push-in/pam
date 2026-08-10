@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "a1b2482a6c82728f426d0cafcc7b598c",
+    "content-hash": "84b25b4524e890e4f23c71837ffd0dc9",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2045,14 +2045,14 @@
         },
         {
             "name": "pam/api",
-            "version": "0.1.0",
+            "version": "1.0.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/api",
-                "reference": "6dce242ea54610f95108a9a78dc9786d4148941c"
+                "reference": "217f65a63e6cee11c270dadaa60e4db814a4aeb7"
             },
             "require": {
-                "pam/core-api": "^0.1",
+                "pam/core-api": "^1.0",
                 "php": "^8.4"
             },
             "suggest": {
@@ -2091,11 +2091,11 @@
         },
         {
             "name": "pam/core-api",
-            "version": "0.1.0",
+            "version": "1.0.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/core-api",
-                "reference": "89c8240825a813bd8c92d896450c6f34074a1312"
+                "reference": "5a5d17ccff74b063b76c68011e2d70892cac8102"
             },
             "require": {
                 "php": "^8.4"
@@ -2128,11 +2128,11 @@
         },
         {
             "name": "pam/psr-bridge",
-            "version": "0.1.0",
+            "version": "1.0.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/psr-bridge",
-                "reference": "150dcc39162c4c49e3afbb117ea9ab4fc8ceac9f"
+                "reference": "b9f7cfd3bc2288c3f22b880d302d7b86c8a9ae7b"
             },
             "require": {
                 "php": "^8.4",
@@ -2170,14 +2170,14 @@
         },
         {
             "name": "pam/socket",
-            "version": "0.1.0",
+            "version": "1.0.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/socket",
-                "reference": "3aff1936f42052419372c3b691612159a26b634d"
+                "reference": "ce1f6a0d47991e344320cfa4d0ca039ac294fd08"
             },
             "require": {
-                "pam/core-api": "^0.1",
+                "pam/core-api": "^1.0",
                 "php": "^8.4"
             },
             "type": "library",
@@ -5548,14 +5548,14 @@
         },
         {
             "name": "pam/testing",
-            "version": "0.1.0",
+            "version": "1.0.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/testing",
-                "reference": "17363cec1099c267d23559be1fdb21e2c1901df8"
+                "reference": "feb9249dc942f4fa6c34070f409175fc7845ff7d"
             },
             "require": {
-                "pam/core-api": "^0.1",
+                "pam/core-api": "^1.0",
                 "php": "^8.4"
             },
             "type": "library",

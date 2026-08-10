@@ -167,7 +167,7 @@ deploy, antes de iniciar ou recarregar o serviço.
 A imagem multi-stage pode receber a aplicação por uma imagem derivada:
 
 ```dockerfile
-FROM pam-runtime:0.1.0
+FROM pam-runtime:1.0.0
 COPY --chown=10001:10001 . /app
 CMD ["start", "index.php", "--workers", "4", "--admin-address", "0.0.0.0:3010"]
 ```

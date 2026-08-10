@@ -3,7 +3,7 @@
 All notable changes are documented here. The project follows Semantic Versioning
 after the first stable release.
 
-## Unreleased
+## 1.0.0 - 2026-08-10
 
 - Adopted the Apache License 2.0 across the PAM runtime, native SDK,
   Composer packages, examples, and publication metadata. PAM may now be used,
@@ -13,6 +13,22 @@ after the first stable release.
   `pam/desktop` 0.5, including a polished signed-update status surface.
 - Documented cross-platform DMG/MSIX packaging, feed signing, automatic updates
   and rollback while keeping the public workflow under `pam desktop`.
+- Added the interactive PAM launcher and contextual project lifecycle: init,
+  doctor/fix, development, generators, packages, quality, build, signing,
+  packaging, and release gates.
+- Added application and Composer-package CLI extension, stable JSON discovery,
+  embedded Composer/Artisan execution, and generated command documentation.
+- Added the `.pam` formatter and LSP with managed VS Code, Neovim, and Helix
+  integration.
+- Certified PAM Native Android end to end on APIs 26 and 36, including the PHP
+  Embed runtime, emulator execution, and signed APK/AAB production artifacts.
+- Added the generated UIKit/Xcode host, iOS PHP 8.4 and 8.5 XCFrameworks,
+  simulator execution, IPA export tooling, and extension targets for Share,
+  Health, Media, Widgets, App Intents, and Live Activities.
+- Published the six first-party server Composer packages under coherent `^1.0`
+  constraints and added release gates that reject version/tag drift.
+- Reorganized the public documentation around installing PAM first and using
+  one contextual command surface across the ecosystem.
 
 ## 0.1.1 - 2026-07-23
 

@@ -16,7 +16,7 @@
     },
     "require": {
         "php": "^8.4",
-        "pam/core-api": "^0.1"
+        "pam/core-api": "^1.0"
     },
     "autoload": {
         "psr-4": {

@@ -818,7 +818,7 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let version = "^0.1";
+    let version = "^1.0";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.4")),
         ("pam/api".to_owned(), serde_json::json!(version)),
@@ -1441,7 +1441,7 @@ $app = Application::create(
         ->size(1120, 720)
         ->minimumSize(720, 520)
         ->theme(WindowTheme::Dark),
-    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '0.5.0')
+    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
         ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
         ->publisher('Pushin')
         ->category(ApplicationCategory::Development)
