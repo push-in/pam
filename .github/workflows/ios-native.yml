@@ -51,7 +51,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-health
-          ref: 0d2efe329022b73b46a40878449bf90e9712de3f
+          ref: 3f3a72ce3ec663efc250ecfa7bae3a18062cc6dc
           path: certification-plugins/health
           persist-credentials: false
       - uses: actions/checkout@v5
