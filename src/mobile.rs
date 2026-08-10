@@ -2050,12 +2050,17 @@ fn doctor_ios(project_path: PathBuf) -> Result<u8, String> {
     let xcode = command_exists("xcodebuild");
     healthy &= xcode;
     check("Xcode", xcode, tool_version("xcodebuild", &["-version"]));
-    let simctl = command_exists("xcrun");
+    let simctl = Command::new("xcrun")
+        .args(["--find", "simctl"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success());
     healthy &= simctl;
     check(
         "Xcode command line tools",
         simctl,
-        tool_version("xcrun", &["--version"]),
+        tool_version("xcrun", &["--find", "simctl"]),
     );
     let runtime_ready = ios_runtime_ready(&runtime);
     healthy &= runtime_ready;
