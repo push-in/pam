@@ -35,6 +35,8 @@ jobs:
           composer audit --working-dir=compat/laravel-smoke --locked
       - name: Install locked Composer test dependencies
         run: |
+          composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist --dry-run
+          composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist --dry-run
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
       - name: Memory soak contracts
