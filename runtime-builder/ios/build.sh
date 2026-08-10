@@ -74,10 +74,11 @@ source_root=${build_root}/php-${php_version}
 destination=${pam_root}/runtime/ios/${runtime_id}
 mkdir -p "${destination}"
 
-opcache_options=(--enable-opcache)
-if [[ ${php_version} == 8.4.* ]]; then
-    opcache_options=(--disable-opcache)
-fi
+# iOS forbids the writable/executable memory transitions used by PHP's JIT.
+# Configure can see the macOS pthread JIT APIs through the SDK while those APIs
+# are explicitly unavailable to iOS applications, so keep OPcache/JIT outside
+# the mobile runtime for every supported PHP series.
+opcache_options=(--disable-opcache)
 
 build_php_slice() {
     local name=$1
@@ -178,7 +179,11 @@ manifest = {
     "sourceSha256": "${php_sha256}",
     "iosMinimumVersion": "${ios_minimum}",
     "architectures": ["ios-arm64", "ios-arm64_x86_64-simulator"],
-    "extensions": "${php_extensions}".split(","),
+    "extensions": [
+        extension
+        for extension in "${php_extensions}".split(",")
+        if extension != "opcache"
+    ],
 }
 with open("${destination}/runtime.json", "w", encoding="utf-8") as stream:
     json.dump(manifest, stream, indent=4)
