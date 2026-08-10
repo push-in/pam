@@ -10,13 +10,15 @@ use crate::terminal::Terminal;
 struct Package {
     alias: &'static str,
     composer: &'static str,
+    requirement: &'static str,
     description: &'static str,
 }
 
 const PACKAGES: &[Package] = &[
-    package(
+    versioned_package(
         "native",
         "pam-native",
+        "^0.6",
         "PAM Native application SDK and renderer contracts",
     ),
     package(
@@ -66,14 +68,25 @@ const PACKAGES: &[Package] = &[
         "iOS Live Activities",
     ),
     package("maps", "pam-native-maps", "Native maps and markers"),
-    package(
+    versioned_package(
         "media",
         "pam-native-media",
+        "^0.2",
         "Native media metadata and thumbnails",
     ),
-    package("mobile-ui", "pam-mobile-ui", "Official PAM design system"),
+    versioned_package(
+        "mobile-ui",
+        "pam-mobile-ui",
+        "^0.4",
+        "Official PAM design system",
+    ),
     package("nfc", "pam-native-nfc", "NFC and NDEF sessions"),
-    package("nitro", "pam-native-nitro", "Offline-first typed data"),
+    versioned_package(
+        "nitro",
+        "pam-native-nitro",
+        "^0.3",
+        "Offline-first typed data",
+    ),
     package(
         "observability",
         "pam-native-observability",
@@ -112,9 +125,19 @@ const PACKAGES: &[Package] = &[
 ];
 
 const fn package(alias: &'static str, name: &'static str, description: &'static str) -> Package {
+    versioned_package(alias, name, "^0.1", description)
+}
+
+const fn versioned_package(
+    alias: &'static str,
+    name: &'static str,
+    requirement: &'static str,
+    description: &'static str,
+) -> Package {
     Package {
         alias,
         composer: name,
+        requirement,
         description,
     }
 }
@@ -132,6 +155,7 @@ pub fn list(project: Option<&Path>, json: bool) -> Result<u8, String> {
                 serde_json::json!({
                     "alias": package.alias,
                     "composer": composer,
+                    "requirement": package.requirement,
                     "description": package.description,
                     "installed": installed.contains(&composer),
                 })
@@ -159,9 +183,10 @@ pub fn list(project: Option<&Path>, json: bool) -> Result<u8, String> {
             "available"
         };
         println!(
-            "  {}  {:<22} {}",
+            "  {}  {:<22} {:<7} {}",
             ui.status(if status == "installed" { "ok" } else { "info" }, status),
             ui.heading(package.alias),
+            ui.muted(package.requirement),
             ui.muted(package.description),
         );
     }
@@ -175,7 +200,7 @@ pub fn list(project: Option<&Path>, json: bool) -> Result<u8, String> {
 
 pub fn add(executable: &OsStr, project: &Path, alias: &str) -> Result<u8, String> {
     let package = resolve(alias)?;
-    let requirement = format!("pushinbr/{}:^0.6", package.composer);
+    let requirement = format!("pushinbr/{}:{}", package.composer, package.requirement);
     in_project(project, || {
         println!("Checking metadata for {requirement}...");
         composer_success(
@@ -332,4 +357,18 @@ fn in_project<T>(
     std::env::set_current_dir(&original)
         .map_err(|error| format!("cannot restore {}: {error}", original.display()))?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn official_capabilities_keep_their_independent_release_lines() {
+        assert_eq!(resolve("native").unwrap().requirement, "^0.6");
+        assert_eq!(resolve("media").unwrap().requirement, "^0.2");
+        assert_eq!(resolve("mobile-ui").unwrap().requirement, "^0.4");
+        assert_eq!(resolve("nitro").unwrap().requirement, "^0.3");
+        assert_eq!(resolve("maps").unwrap().requirement, "^0.1");
+    }
 }

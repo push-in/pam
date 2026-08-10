@@ -2998,7 +2998,7 @@ fn init_mobile(
     });
     requirements[native_package] = serde_json::json!("^0.6");
     if with_official_ui {
-        requirements["pushinbr/pam-mobile-ui"] = serde_json::json!("^0.6");
+        requirements["pushinbr/pam-mobile-ui"] = serde_json::json!("^0.4");
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
