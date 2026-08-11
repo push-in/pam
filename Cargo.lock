@@ -613,12 +613,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96547c2556ec9d12fb1578c4eaf448b04993e7fb79cbaad930a656880a6bdfa0"
 dependencies = [
  "bytes",
+ "futures-channel",
+ "futures-util",
  "http",
  "http-body",
  "hyper",
+ "libc",
  "pin-project-lite",
+ "socket2",
  "tokio",
  "tower-service",
+ "tracing",
 ]
 
 [[package]]
@@ -841,7 +846,7 @@ checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
 name = "pam"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "axum",
  "axum-server",
@@ -852,6 +857,8 @@ dependencies = [
  "h3-quinn",
  "hmac",
  "http",
+ "http-body-util",
+ "hyper",
  "hyper-util",
  "quinn",
  "rustls-pki-types",

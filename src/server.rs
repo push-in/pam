@@ -1,10 +1,13 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::Infallible;
 use std::fmt;
+use std::fs::OpenOptions;
 use std::future::Future;
+use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::os::fd::{AsRawFd, RawFd};
+use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
@@ -24,10 +27,11 @@ use quinn::crypto::rustls::QuicServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use tokio::io::Interest;
 use tokio::io::unix::AsyncFd;
-use tokio::sync::{Mutex, OwnedSemaphorePermit, RwLock, Semaphore, mpsc, watch};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, RwLock, Semaphore, mpsc, oneshot, watch};
+use tokio::task::LocalSet;
 use yawc::close::CloseCode;
 use yawc::frame::{Frame, OpCode};
 use yawc::{CompressionLevel, IncomingUpgrade, Options, WebSocket};
@@ -37,6 +41,9 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use socket2::{Domain, Protocol, Socket, Type};
 
 use crate::php::{self, ServerConfig};
+use crate::protocol::{
+    PhpDispatchState, PhpHttpResponse, PhpOperation, PhpOperationKind, parse_dispatch_envelope,
+};
 use crate::terminal::Terminal;
 use crate::worker_state::{
     WorkerLifecycle, WorkerMetricsSnapshot, WorkerStateReporter,
@@ -48,9 +55,32 @@ type ResumeHmac = Hmac<Sha256>;
 static NEXT_ATOMIC_FILE_ID: AtomicU64 = AtomicU64::new(1);
 const SIGTERM: i32 = 15;
 const SIGKILL: i32 = 9;
+const REQUEST_DURATION_UPPER_BOUNDS_MICROS: [u64; 10] = [
+    100, 500, 1_000, 5_000, 10_000, 50_000, 100_000, 500_000, 1_000_000, 5_000_000,
+];
 
 unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
+}
+
+#[derive(Clone)]
+struct CachedResponse {
+    status: StatusCode,
+    headers: HeaderMap,
+    body: Bytes,
+    expires_at: Instant,
+    stale_until: Instant,
+    last_access: Arc<AtomicU64>,
+    tags: Arc<HashSet<String>>,
+}
+
+impl CachedResponse {
+    fn response(&self) -> Response {
+        let mut response = Response::new(Body::from(self.body.clone()));
+        *response.status_mut() = self.status;
+        *response.headers_mut() = self.headers.clone();
+        response
+    }
 }
 
 #[derive(Clone)]
@@ -75,12 +105,23 @@ struct ServerState {
     last_reported_active_requests: Arc<AtomicU64>,
     worker_metrics_refresh_scheduled: Arc<AtomicBool>,
     active_php_executions: Arc<StdMutex<HashMap<String, u64>>>,
+    response_cache: Arc<RwLock<HashMap<String, CachedResponse>>>,
+    response_cache_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
+    response_cache_clock: Arc<AtomicU64>,
+    php_metrics: Arc<StdMutex<php::RuntimeMetrics>>,
+    next_php_metrics_at: Arc<AtomicU64>,
+    cache_invalidation_log: Option<Arc<PathBuf>>,
+    cache_invalidation_offset: Arc<AtomicU64>,
+    next_cache_invalidation_at: Arc<AtomicU64>,
+    php: PhpExecutor,
 }
 
 impl ServerState {
-    fn new(config: ServerConfig) -> Self {
+    fn new(config: ServerConfig, php: PhpExecutor) -> Self {
         let (shutdown, _) = watch::channel(false);
         let worker = std::env::var("PAM_WORKER_ID").unwrap_or_else(|_| "standalone".to_owned());
+        let route_metrics = config.route_metrics;
+        let route_metrics_max_entries = config.route_metrics_max_entries;
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             next_socket_id: Arc::new(AtomicU64::new(1)),
@@ -98,13 +139,24 @@ impl ServerState {
             websocket_slots: Arc::new(Semaphore::new(config.websocket_max_connections)),
             request_slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
             config: Arc::new(config),
-            metrics: Arc::new(Metrics::default()),
+            metrics: Arc::new(Metrics::new(route_metrics, route_metrics_max_entries)),
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
             worker_state: WorkerStateReporter::from_environment(),
             next_worker_metrics_at: Arc::new(AtomicU64::new(0)),
             last_reported_active_requests: Arc::new(AtomicU64::new(0)),
             worker_metrics_refresh_scheduled: Arc::new(AtomicBool::new(false)),
             active_php_executions: Arc::new(StdMutex::new(HashMap::new())),
+            response_cache: Arc::new(RwLock::new(HashMap::new())),
+            response_cache_locks: Arc::new(Mutex::new(HashMap::new())),
+            response_cache_clock: Arc::new(AtomicU64::new(1)),
+            php_metrics: Arc::new(StdMutex::new(php::RuntimeMetrics::default())),
+            next_php_metrics_at: Arc::new(AtomicU64::new(0)),
+            cache_invalidation_log: std::env::var_os("PAM_CACHE_INVALIDATION_LOG")
+                .map(PathBuf::from)
+                .map(Arc::new),
+            cache_invalidation_offset: Arc::new(AtomicU64::new(0)),
+            next_cache_invalidation_at: Arc::new(AtomicU64::new(0)),
+            php,
         }
     }
 
@@ -152,15 +204,240 @@ impl ServerState {
         false
     }
 
+    fn response_cache_key(
+        &self,
+        method: &Method,
+        uri: &Uri,
+        headers: &HeaderMap,
+    ) -> Option<String> {
+        if method != Method::GET
+            || self.config.response_cache_max_entries == 0
+            || self.config.response_cache_max_bytes == 0
+            || self.config.response_cache_ttl_ms == 0
+            || !self
+                .config
+                .response_cache_paths
+                .iter()
+                .any(|path| path == uri.path())
+            || headers.contains_key("authorization")
+            || headers.contains_key("cookie")
+            || headers
+                .get("cache-control")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| {
+                    value
+                        .split(',')
+                        .any(|directive| directive.trim().eq_ignore_ascii_case("no-cache"))
+                })
+        {
+            return None;
+        }
+        let mut material = uri
+            .path_and_query()
+            .map_or_else(|| uri.path().to_owned(), ToString::to_string);
+        for configured in &self.config.response_cache_vary_headers {
+            let name = configured.to_ascii_lowercase();
+            material.push('\n');
+            material.push_str(&name);
+            material.push(':');
+            for value in headers.get_all(name.as_str()) {
+                if let Ok(value) = value.to_str() {
+                    material.push_str(&value.len().to_string());
+                    material.push(':');
+                    material.push_str(value);
+                    material.push(';');
+                }
+            }
+        }
+        Some(format!("{:x}", Sha256::digest(material.as_bytes())))
+    }
+
+    async fn cached_response(&self, key: &str, allow_stale: bool) -> Option<(Response, usize)> {
+        let now = Instant::now();
+        let cached = self.response_cache.read().await.get(key).cloned();
+        match cached {
+            Some(cached)
+                if cached.expires_at > now || (allow_stale && cached.stale_until > now) =>
+            {
+                cached.last_access.store(
+                    self.response_cache_clock.fetch_add(1, Ordering::Relaxed),
+                    Ordering::Relaxed,
+                );
+                let bytes = cached.body.len();
+                Some((cached.response(), bytes))
+            }
+            Some(cached) if cached.stale_until <= now => {
+                self.response_cache.write().await.remove(key);
+                None
+            }
+            Some(_) => None,
+            None => None,
+        }
+    }
+
+    async fn response_cache_lock(&self, key: &str) -> Arc<Mutex<()>> {
+        self.response_cache_locks
+            .lock()
+            .await
+            .entry(key.to_owned())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    async fn store_cached_response(&self, key: String, cached: CachedResponse) {
+        let mut cache = self.response_cache.write().await;
+        let now = Instant::now();
+        cache.retain(|_, entry| entry.stale_until > now);
+        if cached.body.len() > self.config.response_cache_max_bytes {
+            return;
+        }
+        while !cache.contains_key(&key)
+            && (cache.len() >= self.config.response_cache_max_entries
+                || cache.values().map(|entry| entry.body.len()).sum::<usize>() + cached.body.len()
+                    > self.config.response_cache_max_bytes)
+        {
+            let Some(eviction_key) = cache
+                .iter()
+                .min_by_key(|(_, entry)| entry.last_access.load(Ordering::Relaxed))
+                .map(|(key, _)| key.clone())
+            else {
+                break;
+            };
+            cache.remove(&eviction_key);
+        }
+        cache.insert(key, cached);
+    }
+
+    async fn purge_cached_responses(&self, tag: Option<&str>) -> usize {
+        let mut cache = self.response_cache.write().await;
+        let before = cache.len();
+        match tag {
+            Some(tag) => cache.retain(|_, entry| !entry.tags.contains(tag)),
+            None => cache.clear(),
+        }
+        let purged = before.saturating_sub(cache.len());
+        self.metrics
+            .response_cache_purges
+            .fetch_add(1, Ordering::Relaxed);
+        purged
+    }
+
+    async fn synchronize_cache_invalidations(&self, force: bool) {
+        let Some(path) = self.cache_invalidation_log.as_deref() else {
+            return;
+        };
+        let now = worker_epoch_millis();
+        let next = self.next_cache_invalidation_at.load(Ordering::Relaxed);
+        if !force
+            && (now < next
+                || self
+                    .next_cache_invalidation_at
+                    .compare_exchange(
+                        next,
+                        now.saturating_add(100),
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    )
+                    .is_err())
+        {
+            return;
+        }
+        self.next_cache_invalidation_at
+            .store(now.saturating_add(100), Ordering::Relaxed);
+
+        let Ok(mut file) = OpenOptions::new().read(true).open(path) else {
+            return;
+        };
+        let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+        let mut offset = self.cache_invalidation_offset.load(Ordering::Relaxed);
+        let mut purge_all = length < offset;
+        if purge_all {
+            offset = 0;
+        }
+        if file.seek(SeekFrom::Start(offset)).is_err() {
+            return;
+        }
+        let mut reader = BufReader::new(file);
+        let mut tags = HashSet::new();
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match reader.read_line(&mut line) {
+                Ok(0) => break,
+                Ok(_) => {
+                    let invalidation = line.trim();
+                    if invalidation == "*" {
+                        purge_all = true;
+                    } else if valid_cache_tag(invalidation) {
+                        tags.insert(invalidation.to_owned());
+                    }
+                }
+                Err(_) => return,
+            }
+        }
+        if let Ok(position) = reader.stream_position() {
+            self.cache_invalidation_offset
+                .store(position, Ordering::Relaxed);
+        }
+        if purge_all || !tags.is_empty() {
+            let mut cache = self.response_cache.write().await;
+            if purge_all {
+                cache.clear();
+            } else {
+                cache.retain(|_, entry| tags.is_disjoint(&entry.tags));
+            }
+        }
+    }
+
+    async fn publish_cache_invalidation(&self, tag: Option<&str>) -> Result<(), String> {
+        let Some(path) = self.cache_invalidation_log.as_deref() else {
+            return Ok(());
+        };
+        self.synchronize_cache_invalidations(true).await;
+        #[cfg(unix)]
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut options = OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options
+            .open(path)
+            .map_err(|error| format!("cannot open cache invalidation log: {error}"))?;
+        let record = format!("{}\n", tag.unwrap_or("*"));
+        file.write_all(record.as_bytes())
+            .and_then(|()| file.sync_data())
+            .map_err(|error| format!("cannot publish cache invalidation: {error}"))?;
+        if let Ok(length) = file.metadata().map(|metadata| metadata.len()) {
+            self.cache_invalidation_offset
+                .store(length, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
     fn metrics_snapshot(&self) -> WorkerMetricsSnapshot {
-        let runtime = php::runtime_metrics().unwrap_or_default();
+        let runtime = self
+            .php_metrics
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
         WorkerMetricsSnapshot {
             requests: self.metrics.requests.load(Ordering::Relaxed),
             errors: self.metrics.errors.load(Ordering::Relaxed),
             active_requests: self.metrics.active_requests.load(Ordering::Relaxed),
             request_duration_micros: self.metrics.request_duration_micros.load(Ordering::Relaxed),
+            request_duration_buckets: std::array::from_fn(|index| {
+                self.metrics.request_duration_buckets[index].load(Ordering::Relaxed)
+            }),
             request_bytes: self.metrics.request_bytes.load(Ordering::Relaxed),
             response_bytes: self.metrics.response_bytes.load(Ordering::Relaxed),
+            response_cache_hits: self.metrics.response_cache_hits.load(Ordering::Relaxed),
+            response_cache_misses: self.metrics.response_cache_misses.load(Ordering::Relaxed),
+            response_cache_collapsed: self
+                .metrics
+                .response_cache_collapsed
+                .load(Ordering::Relaxed),
+            response_cache_stale: self.metrics.response_cache_stale.load(Ordering::Relaxed),
+            response_cache_purges: self.metrics.response_cache_purges.load(Ordering::Relaxed),
             websocket_connections: self.metrics.websocket_connections.load(Ordering::Relaxed),
             websocket_messages: self.metrics.websocket_messages.load(Ordering::Relaxed),
             websocket_backpressure: self.metrics.websocket_backpressure.load(Ordering::Relaxed),
@@ -169,6 +446,35 @@ impl ServerState {
             php_memory_bytes: runtime.memory_bytes,
             php_peak_memory_bytes: runtime.peak_memory_bytes,
             php_fibers: runtime.fibers,
+        }
+    }
+
+    fn refresh_php_metrics_on_owner_thread(&self, force: bool) -> php::RuntimeMetrics {
+        let now = worker_epoch_millis();
+        let next = self.next_php_metrics_at.load(Ordering::Relaxed);
+        if force
+            || (now >= next
+                && self
+                    .next_php_metrics_at
+                    .compare_exchange(
+                        next,
+                        now.saturating_add(1_000),
+                        Ordering::Relaxed,
+                        Ordering::Relaxed,
+                    )
+                    .is_ok())
+        {
+            let runtime = php::runtime_metrics().unwrap_or_default();
+            *self
+                .php_metrics
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = runtime.clone();
+            runtime
+        } else {
+            self.php_metrics
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
         }
     }
 
@@ -289,6 +595,92 @@ impl ServerState {
     }
 }
 
+#[derive(Clone)]
+struct PhpExecutor {
+    sender: mpsc::Sender<PhpJob>,
+}
+
+struct OwnedHttpRequest {
+    remote: SocketAddr,
+    client: String,
+    method: Method,
+    target: String,
+    version: Version,
+    headers: HeaderMap,
+    body: Bytes,
+    request_id: String,
+    traceparent: String,
+}
+
+enum PhpJob {
+    Http {
+        request: Box<OwnedHttpRequest>,
+        response: oneshot::Sender<(Response, usize)>,
+    },
+    WebSocket {
+        event_kind: i32,
+        socket_id: String,
+        payload: String,
+        response: oneshot::Sender<Result<String, String>>,
+    },
+    Metrics {
+        response: oneshot::Sender<php::RuntimeMetrics>,
+    },
+}
+
+impl PhpExecutor {
+    async fn http(&self, request: OwnedHttpRequest) -> (Response, usize) {
+        let (response, receiver) = oneshot::channel();
+        if let Err(error) = self.sender.try_send(PhpJob::Http {
+            request: Box::new(request),
+            response,
+        }) {
+            return match error {
+                mpsc::error::TrySendError::Full(_) => {
+                    (service_unavailable("PHP executor queue is full"), 0)
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    (internal_error("PHP executor is unavailable"), 0)
+                }
+            };
+        }
+        receiver
+            .await
+            .unwrap_or_else(|_| (internal_error("PHP executor stopped"), 0))
+    }
+
+    async fn websocket(
+        &self,
+        event_kind: i32,
+        socket_id: &str,
+        payload: &str,
+    ) -> Result<String, String> {
+        let (response, receiver) = oneshot::channel();
+        self.sender
+            .try_send(PhpJob::WebSocket {
+                event_kind,
+                socket_id: socket_id.to_owned(),
+                payload: payload.to_owned(),
+                response,
+            })
+            .map_err(|error| match error {
+                mpsc::error::TrySendError::Full(_) => "PHP executor queue is full".to_owned(),
+                mpsc::error::TrySendError::Closed(_) => "PHP executor is unavailable".to_owned(),
+            })?;
+        receiver
+            .await
+            .map_err(|_| "PHP executor stopped".to_owned())?
+    }
+
+    async fn metrics(&self) -> php::RuntimeMetrics {
+        let (response, receiver) = oneshot::channel();
+        if self.sender.try_send(PhpJob::Metrics { response }).is_err() {
+            return php::RuntimeMetrics::default();
+        }
+        receiver.await.unwrap_or_default()
+    }
+}
+
 struct PhpExecutionGuard {
     state: Option<ServerState>,
     request_id: String,
@@ -378,18 +770,41 @@ impl Drop for PhpHttpDispatchGuard {
     }
 }
 
-#[derive(Default)]
 struct Metrics {
     requests: AtomicU64,
     errors: AtomicU64,
     active_requests: AtomicU64,
     request_duration_micros: AtomicU64,
+    request_duration_buckets: [AtomicU64; 11],
     request_bytes: AtomicU64,
     response_bytes: AtomicU64,
+    response_cache_hits: AtomicU64,
+    response_cache_misses: AtomicU64,
+    response_cache_collapsed: AtomicU64,
+    response_cache_stale: AtomicU64,
+    response_cache_purges: AtomicU64,
     websocket_connections: AtomicU64,
     websocket_messages: AtomicU64,
     websocket_backpressure: AtomicU64,
     event_loop_lag_micros: AtomicU64,
+    route_metrics_enabled: bool,
+    route_metrics_max_entries: usize,
+    route_metrics: StdMutex<HashMap<RouteMetricKey, RouteMetric>>,
+    route_metrics_overflow: AtomicU64,
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+struct RouteMetricKey {
+    method: String,
+    route: String,
+    status: u16,
+}
+
+#[derive(Default)]
+struct RouteMetric {
+    requests: u64,
+    duration_micros: u64,
+    duration_buckets: [u64; 11],
 }
 
 struct RateBucket {
@@ -398,8 +813,33 @@ struct RateBucket {
 }
 
 impl Metrics {
+    fn new(route_metrics_enabled: bool, route_metrics_max_entries: usize) -> Self {
+        Self {
+            requests: AtomicU64::new(0),
+            errors: AtomicU64::new(0),
+            active_requests: AtomicU64::new(0),
+            request_duration_micros: AtomicU64::new(0),
+            request_duration_buckets: Default::default(),
+            request_bytes: AtomicU64::new(0),
+            response_bytes: AtomicU64::new(0),
+            response_cache_hits: AtomicU64::new(0),
+            response_cache_misses: AtomicU64::new(0),
+            response_cache_collapsed: AtomicU64::new(0),
+            response_cache_stale: AtomicU64::new(0),
+            response_cache_purges: AtomicU64::new(0),
+            websocket_connections: AtomicU64::new(0),
+            websocket_messages: AtomicU64::new(0),
+            websocket_backpressure: AtomicU64::new(0),
+            event_loop_lag_micros: AtomicU64::new(0),
+            route_metrics_enabled,
+            route_metrics_max_entries,
+            route_metrics: StdMutex::new(HashMap::new()),
+            route_metrics_overflow: AtomicU64::new(0),
+        }
+    }
+
     fn render(&self, websocket_connections: usize, runtime: &php::RuntimeMetrics) -> String {
-        format!(
+        let mut output = format!(
             concat!(
                 "# TYPE pam_http_requests_total counter\n",
                 "pam_http_requests_total {}\n",
@@ -407,12 +847,20 @@ impl Metrics {
                 "pam_http_errors_total {}\n",
                 "# TYPE pam_http_active_requests gauge\n",
                 "pam_http_active_requests {}\n",
-                "# TYPE pam_http_request_duration_seconds counter\n",
-                "pam_http_request_duration_seconds {:.6}\n",
                 "# TYPE pam_http_request_bytes_total counter\n",
                 "pam_http_request_bytes_total {}\n",
                 "# TYPE pam_http_response_bytes_total counter\n",
                 "pam_http_response_bytes_total {}\n",
+                "# TYPE pam_http_response_cache_hits_total counter\n",
+                "pam_http_response_cache_hits_total {}\n",
+                "# TYPE pam_http_response_cache_misses_total counter\n",
+                "pam_http_response_cache_misses_total {}\n",
+                "# TYPE pam_http_response_cache_collapsed_total counter\n",
+                "pam_http_response_cache_collapsed_total {}\n",
+                "# TYPE pam_http_response_cache_stale_total counter\n",
+                "pam_http_response_cache_stale_total {}\n",
+                "# TYPE pam_http_response_cache_purges_total counter\n",
+                "pam_http_response_cache_purges_total {}\n",
                 "# TYPE pam_websocket_connections gauge\n",
                 "pam_websocket_connections {}\n",
                 "# TYPE pam_websocket_messages_total counter\n",
@@ -435,9 +883,13 @@ impl Metrics {
             self.requests.load(Ordering::Relaxed),
             self.errors.load(Ordering::Relaxed),
             self.active_requests.load(Ordering::Relaxed),
-            self.request_duration_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
             self.request_bytes.load(Ordering::Relaxed),
             self.response_bytes.load(Ordering::Relaxed),
+            self.response_cache_hits.load(Ordering::Relaxed),
+            self.response_cache_misses.load(Ordering::Relaxed),
+            self.response_cache_collapsed.load(Ordering::Relaxed),
+            self.response_cache_stale.load(Ordering::Relaxed),
+            self.response_cache_purges.load(Ordering::Relaxed),
             websocket_connections,
             self.websocket_messages.load(Ordering::Relaxed),
             self.websocket_backpressure.load(Ordering::Relaxed),
@@ -449,7 +901,104 @@ impl Metrics {
             std::env::var("PAM_WORKER_ID").unwrap_or_else(|_| "standalone".to_owned()),
             std::env::var("PAM_WORKER_GENERATION").unwrap_or_else(|_| "1".to_owned()),
             std::process::id(),
-        )
+        );
+        output.push_str("# TYPE pam_http_request_duration_seconds histogram\n");
+        let labels = [
+            "0.0001", "0.0005", "0.001", "0.005", "0.01", "0.05", "0.1", "0.5", "1", "5", "+Inf",
+        ];
+        let mut cumulative = 0_u64;
+        for (label, bucket) in labels.iter().zip(&self.request_duration_buckets) {
+            cumulative = cumulative.saturating_add(bucket.load(Ordering::Relaxed));
+            output.push_str(&format!(
+                "pam_http_request_duration_seconds_bucket{{le=\"{label}\"}} {cumulative}\n"
+            ));
+        }
+        output.push_str(&format!(
+            "pam_http_request_duration_seconds_sum {:.6}\npam_http_request_duration_seconds_count {}\n",
+            self.request_duration_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+            self.requests.load(Ordering::Relaxed),
+        ));
+        output.push_str("# TYPE pam_http_route_metrics_overflow_total counter\n");
+        output.push_str(&format!(
+            "pam_http_route_metrics_overflow_total {}\n",
+            self.route_metrics_overflow.load(Ordering::Relaxed),
+        ));
+        if self.route_metrics_enabled {
+            output.push_str("# TYPE pam_http_route_requests_total counter\n");
+            output.push_str("# TYPE pam_http_route_request_duration_seconds histogram\n");
+            let routes = self
+                .route_metrics
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            for (key, metric) in routes.iter() {
+                let method = prometheus_label(&key.method);
+                let route = prometheus_label(&key.route);
+                let labels = format!(
+                    "method=\"{method}\",route=\"{route}\",status=\"{}\"",
+                    key.status,
+                );
+                output.push_str(&format!(
+                    "pam_http_route_requests_total{{{labels}}} {}\n",
+                    metric.requests,
+                ));
+                let mut cumulative = 0_u64;
+                for (label, bucket) in [
+                    "0.0001", "0.0005", "0.001", "0.005", "0.01", "0.05", "0.1", "0.5", "1", "5",
+                    "+Inf",
+                ]
+                .iter()
+                .zip(metric.duration_buckets)
+                {
+                    cumulative = cumulative.saturating_add(bucket);
+                    output.push_str(&format!(
+                        "pam_http_route_request_duration_seconds_bucket{{{labels},le=\"{label}\"}} {cumulative}\n"
+                    ));
+                }
+                output.push_str(&format!(
+                    "pam_http_route_request_duration_seconds_sum{{{labels}}} {:.6}\npam_http_route_request_duration_seconds_count{{{labels}}} {}\n",
+                    metric.duration_micros as f64 / 1_000_000.0,
+                    metric.requests,
+                ));
+            }
+        }
+        output
+    }
+
+    fn observe_request_duration(&self, duration: Duration) {
+        let micros = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
+        let bucket = REQUEST_DURATION_UPPER_BOUNDS_MICROS
+            .iter()
+            .position(|upper| micros <= *upper)
+            .unwrap_or(REQUEST_DURATION_UPPER_BOUNDS_MICROS.len());
+        self.request_duration_buckets[bucket].fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn observe_route(&self, method: &Method, route: &str, status: StatusCode, duration: Duration) {
+        if !self.route_metrics_enabled || self.route_metrics_max_entries == 0 {
+            return;
+        }
+        let key = RouteMetricKey {
+            method: method.as_str().to_owned(),
+            route: route.to_owned(),
+            status: status.as_u16(),
+        };
+        let mut routes = self
+            .route_metrics
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if !routes.contains_key(&key) && routes.len() >= self.route_metrics_max_entries {
+            self.route_metrics_overflow.fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let metric = routes.entry(key).or_default();
+        metric.requests = metric.requests.saturating_add(1);
+        let micros = u64::try_from(duration.as_micros()).unwrap_or(u64::MAX);
+        metric.duration_micros = metric.duration_micros.saturating_add(micros);
+        let bucket = REQUEST_DURATION_UPPER_BOUNDS_MICROS
+            .iter()
+            .position(|upper| micros <= *upper)
+            .unwrap_or(REQUEST_DURATION_UPPER_BOUNDS_MICROS.len());
+        metric.duration_buckets[bucket] = metric.duration_buckets[bucket].saturating_add(1);
     }
 }
 
@@ -499,9 +1048,19 @@ impl RequestTelemetry {
         cors_origin: Option<&str>,
     ) -> Response {
         let duration = self.started.elapsed();
+        let route_template = response
+            .headers_mut()
+            .remove("x-pam-route-template")
+            .and_then(|value| value.to_str().ok().map(ToOwned::to_owned))
+            .filter(|route| valid_route_template(route));
         self.metrics
             .request_duration_micros
             .fetch_add(duration.as_micros() as u64, Ordering::Relaxed);
+        self.metrics.observe_request_duration(duration);
+        if let Some(route) = route_template.as_deref() {
+            self.metrics
+                .observe_route(method, route, response.status(), duration);
+        }
         self.metrics
             .response_bytes
             .fetch_add(response_bytes as u64, Ordering::Relaxed);
@@ -601,15 +1160,111 @@ impl fmt::Display for ServerError {
 }
 
 pub fn run(config: ServerConfig) -> Result<(), ServerError> {
-    let runtime = tokio::runtime::Builder::new_current_thread()
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("pam-io")
         .enable_all()
         .build()
         .map_err(ServerError::Runtime)?;
-
-    runtime.block_on(run_async(config))
+    let local = LocalSet::new();
+    runtime.block_on(local.run_until(run_async(config)))
 }
 
-async fn run_async(config: ServerConfig) -> Result<(), ServerError> {
+fn start_php_executor(state: ServerState, mut receiver: mpsc::Receiver<PhpJob>) {
+    tokio::task::spawn_local(async move {
+        while let Some(job) = receiver.recv().await {
+            match job {
+                PhpJob::Http { request, response } => {
+                    let request_state = state.clone();
+                    tokio::task::spawn_local(async move {
+                        let result = invoke_php_http_local(&request_state, &request).await;
+                        request_state.refresh_php_metrics_on_owner_thread(false);
+                        let _ = response.send(result);
+                    });
+                }
+                PhpJob::WebSocket {
+                    event_kind,
+                    socket_id,
+                    payload,
+                    response,
+                } => {
+                    let _ = response.send(php::dispatch_ws(event_kind, &socket_id, &payload));
+                }
+                PhpJob::Metrics { response } => {
+                    let _ = response.send(state.refresh_php_metrics_on_owner_thread(true));
+                }
+            }
+        }
+    });
+}
+
+async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
+    if let Some(address) = std::env::var_os("PAM_INTERNAL_LISTEN_ADDRESS") {
+        let address = address.to_string_lossy();
+        let (host, port) = address.rsplit_once(':').ok_or_else(|| {
+            ServerError::Configuration("PAM_INTERNAL_LISTEN_ADDRESS must be host:port".to_owned())
+        })?;
+        config.host = host.to_owned();
+        config.port = port.parse().map_err(|_| {
+            ServerError::Configuration("PAM_INTERNAL_LISTEN_ADDRESS has an invalid port".to_owned())
+        })?;
+        // TLS terminates at the public ingress. Internal pool traffic remains on
+        // loopback, avoiding duplicate handshakes and certificate configuration.
+        config.tls_cert = None;
+        config.tls_key = None;
+        config.http3 = false;
+    }
+    for configured in &config.response_cache_vary_headers {
+        let normalized = configured.to_ascii_lowercase();
+        if HeaderName::try_from(normalized.as_str()).is_err() {
+            return Err(ServerError::Configuration(format!(
+                "responseCacheVaryHeaders contains invalid header {configured:?}"
+            )));
+        }
+        if matches!(
+            normalized.as_str(),
+            "authorization" | "cookie" | "set-cookie"
+        ) {
+            return Err(ServerError::Configuration(format!(
+                "responseCacheVaryHeaders cannot contain sensitive header {configured:?}"
+            )));
+        }
+    }
+    match (
+        config.response_cache_purge_path.as_deref(),
+        config.response_cache_purge_secret.as_deref(),
+    ) {
+        (Some(path), Some(secret)) => {
+            if !path.starts_with('/') || path.contains('?') {
+                return Err(ServerError::Configuration(
+                    "responseCachePurgePath must be an absolute path without a query string"
+                        .to_owned(),
+                ));
+            }
+            if path == config.metrics_path {
+                return Err(ServerError::Configuration(
+                    "responseCachePurgePath cannot equal metricsPath".to_owned(),
+                ));
+            }
+            if secret.len() < 32 {
+                return Err(ServerError::Configuration(
+                    "responseCachePurgeSecret must contain at least 32 bytes".to_owned(),
+                ));
+            }
+        }
+        (None, None) => {}
+        _ => {
+            return Err(ServerError::Configuration(
+                "responseCachePurgePath and responseCachePurgeSecret must be configured together"
+                    .to_owned(),
+            ));
+        }
+    }
+    if HeaderName::try_from(config.response_cache_tag_header.as_str()).is_err() {
+        return Err(ServerError::Configuration(
+            "responseCacheTagHeader must be a valid HTTP header name".to_owned(),
+        ));
+    }
     if config
         .websocket_resume_secret
         .as_ref()
@@ -634,7 +1289,12 @@ async fn run_async(config: ServerConfig) -> Result<(), ServerError> {
         address: address.clone(),
         source,
     })?;
-    let state = ServerState::new(config);
+    // Bound work waiting for the single embedded-PHP owner thread. This keeps
+    // overload deterministic and prevents a slow application from turning a
+    // traffic spike into unbounded process memory growth.
+    let (php_sender, php_receiver) = mpsc::channel(config.php_executor_queue_capacity.max(1));
+    let state = ServerState::new(config, PhpExecutor { sender: php_sender });
+    start_php_executor(state.clone(), php_receiver);
     let recycle = state.shutdown.subscribe();
     let shutdown_sender = state.shutdown.clone();
     let http3 = if state.config.http3 {
@@ -920,7 +1580,7 @@ async fn handle_http3_request(
     );
 
     let (response, response_bytes, cors_origin) = if uri.path() == state.config.metrics_path {
-        let runtime_metrics = php::runtime_metrics().unwrap_or_default();
+        let runtime_metrics = state.php.metrics().await;
         let body = state
             .metrics
             .render(state.clients.read().await.len(), &runtime_metrics);
@@ -1129,7 +1789,7 @@ async fn http_dispatch(
         .map_or_else(|| uri.path(), |value| value.as_str());
 
     if uri.path() == state.config.metrics_path {
-        let runtime_metrics = php::runtime_metrics().unwrap_or_default();
+        let runtime_metrics = state.php.metrics().await;
         let body = state
             .metrics
             .render(state.clients.read().await.len(), &runtime_metrics);
@@ -1248,8 +1908,97 @@ async fn http_dispatch(
         .metrics
         .request_bytes
         .fetch_add(body.len() as u64, Ordering::Relaxed);
+    state.synchronize_cache_invalidations(false).await;
 
-    let (response, response_bytes) = invoke_php_http(
+    if state.config.response_cache_purge_path.as_deref() == Some(uri.path()) {
+        let response = handle_cache_purge(&state, &method, &headers, &body).await;
+        let response_bytes = response
+            .body()
+            .size_hint()
+            .exact()
+            .and_then(|bytes| usize::try_from(bytes).ok())
+            .unwrap_or(0);
+        return telemetry.finish(
+            response,
+            response_bytes,
+            &request_id,
+            &traceparent,
+            &method,
+            target,
+            cors_origin.as_deref(),
+        );
+    }
+
+    let cache_key = state.response_cache_key(&method, &uri, &headers);
+    let _cache_guard = if let Some(key) = cache_key.as_deref() {
+        if let Some((response, response_bytes)) = state.cached_response(key, false).await {
+            state
+                .metrics
+                .response_cache_hits
+                .fetch_add(1, Ordering::Relaxed);
+            return telemetry.finish(
+                response,
+                response_bytes,
+                &request_id,
+                &traceparent,
+                &method,
+                target,
+                cors_origin.as_deref(),
+            );
+        }
+        state
+            .metrics
+            .response_cache_misses
+            .fetch_add(1, Ordering::Relaxed);
+        let lock = state.response_cache_lock(key).await;
+        let (guard, collapsed) = match lock.clone().try_lock_owned() {
+            Ok(guard) => (guard, false),
+            Err(_) => {
+                if let Some((response, response_bytes)) = state.cached_response(key, true).await {
+                    state
+                        .metrics
+                        .response_cache_stale
+                        .fetch_add(1, Ordering::Relaxed);
+                    return telemetry.finish(
+                        response,
+                        response_bytes,
+                        &request_id,
+                        &traceparent,
+                        &method,
+                        target,
+                        cors_origin.as_deref(),
+                    );
+                }
+                (lock.lock_owned().await, true)
+            }
+        };
+        if collapsed {
+            state
+                .metrics
+                .response_cache_collapsed
+                .fetch_add(1, Ordering::Relaxed);
+            if let Some((response, response_bytes)) = state.cached_response(key, false).await {
+                state
+                    .metrics
+                    .response_cache_hits
+                    .fetch_add(1, Ordering::Relaxed);
+                return telemetry.finish(
+                    response,
+                    response_bytes,
+                    &request_id,
+                    &traceparent,
+                    &method,
+                    target,
+                    cors_origin.as_deref(),
+                );
+            }
+        }
+        Some(guard)
+    } else {
+        None
+    };
+
+    let (mut response, mut response_bytes) = invoke_php_http(
         &state,
         remote,
         &client,
@@ -1262,6 +2011,43 @@ async fn http_dispatch(
         &traceparent,
     )
     .await;
+    let cache_tags = extract_cache_tags(&mut response, &state.config.response_cache_tag_header);
+    if let Some(cache_key) = cache_key
+        && cacheable_response(&response)
+    {
+        let (parts, response_body) = response.into_parts();
+        match to_bytes(response_body, state.config.max_response_bytes).await {
+            Ok(bytes) => {
+                response_bytes = bytes.len();
+                let cached = CachedResponse {
+                    status: parts.status,
+                    headers: parts.headers,
+                    body: bytes,
+                    expires_at: Instant::now()
+                        + Duration::from_millis(state.config.response_cache_ttl_ms),
+                    stale_until: Instant::now()
+                        + Duration::from_millis(
+                            state.config.response_cache_ttl_ms.saturating_add(
+                                state.config.response_cache_stale_while_revalidate_ms,
+                            ),
+                        ),
+                    last_access: Arc::new(AtomicU64::new(
+                        state.response_cache_clock.fetch_add(1, Ordering::Relaxed),
+                    )),
+                    tags: Arc::new(cache_tags),
+                };
+                response = cached.response();
+                state.store_cached_response(cache_key, cached).await;
+            }
+            Err(error) => {
+                response = error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    &format!("cannot buffer cacheable response: {error}"),
+                );
+                response_bytes = 0;
+            }
+        }
+    }
     telemetry.finish(
         response,
         response_bytes,
@@ -1271,6 +2057,121 @@ async fn http_dispatch(
         target,
         cors_origin.as_deref(),
     )
+}
+
+async fn handle_cache_purge(
+    state: &ServerState,
+    method: &Method,
+    headers: &HeaderMap,
+    body: &[u8],
+) -> Response {
+    if method != Method::POST {
+        return error_response(StatusCode::METHOD_NOT_ALLOWED, "cache purge requires POST");
+    }
+    let Some(secret) = state.config.response_cache_purge_secret.as_deref() else {
+        return error_response(StatusCode::NOT_FOUND, "cache purge is disabled");
+    };
+    let supplied = headers
+        .get("authorization")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "));
+    if !supplied.is_some_and(|token| constant_time_token_eq(secret, token)) {
+        return error_response(StatusCode::UNAUTHORIZED, "invalid cache purge credentials");
+    }
+    let payload: Value = match serde_json::from_slice(body) {
+        Ok(payload) => payload,
+        Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid purge JSON payload"),
+    };
+    let all = payload.get("all").and_then(Value::as_bool) == Some(true);
+    let tag = payload.get("tag").and_then(Value::as_str);
+    if all == tag.is_some() || tag.is_some_and(|tag| !valid_cache_tag(tag)) {
+        return error_response(
+            StatusCode::BAD_REQUEST,
+            "provide either all=true or one valid cache tag",
+        );
+    }
+    if let Err(error) = state.publish_cache_invalidation(tag).await {
+        return internal_error(error);
+    }
+    let purged = state.purge_cached_responses(tag).await;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "application/json; charset=utf-8")
+        .header("cache-control", "no-store")
+        .body(Body::from(
+            serde_json::json!({"purged": purged}).to_string(),
+        ))
+        .expect("cache purge response must be valid")
+}
+
+fn constant_time_token_eq(expected: &str, supplied: &str) -> bool {
+    let expected = Sha256::digest(expected.as_bytes());
+    let supplied = Sha256::digest(supplied.as_bytes());
+    expected
+        .iter()
+        .zip(supplied.iter())
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+fn valid_cache_tag(tag: &str) -> bool {
+    !tag.is_empty()
+        && tag.len() <= 64
+        && tag.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/')
+        })
+}
+
+fn valid_route_template(route: &str) -> bool {
+    route.starts_with('/')
+        && route.len() <= 256
+        && route
+            .bytes()
+            .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'\\' | b'"'))
+}
+
+fn prometheus_label(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', "\\n")
+}
+
+fn extract_cache_tags(response: &mut Response, configured_header: &str) -> HashSet<String> {
+    let Ok(header) = HeaderName::try_from(configured_header) else {
+        return HashSet::new();
+    };
+    let tags = response
+        .headers()
+        .get_all(&header)
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .flat_map(|value| value.split([',', ' ', '\t']))
+        .filter(|tag| valid_cache_tag(tag))
+        .take(32)
+        .map(ToOwned::to_owned)
+        .collect();
+    response.headers_mut().remove(header);
+    tags
+}
+
+fn cacheable_response(response: &Response) -> bool {
+    response.status() == StatusCode::OK
+        && !response.headers().contains_key("set-cookie")
+        && !response
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| {
+                value.split(',').any(|directive| {
+                    matches!(
+                        directive.trim().to_ascii_lowercase().as_str(),
+                        "private" | "no-store"
+                    )
+                })
+            })
 }
 
 fn advertised_http3(config: &ServerConfig) -> Option<HeaderValue> {
@@ -1294,6 +2195,35 @@ async fn invoke_php_http(
     request_id: &str,
     traceparent: &str,
 ) -> (Response, usize) {
+    state
+        .php
+        .http(OwnedHttpRequest {
+            remote,
+            client: client.to_owned(),
+            method: method.clone(),
+            target: target.to_owned(),
+            version,
+            headers: headers.clone(),
+            body: Bytes::copy_from_slice(body),
+            request_id: request_id.to_owned(),
+            traceparent: traceparent.to_owned(),
+        })
+        .await
+}
+
+async fn invoke_php_http_local(
+    state: &ServerState,
+    request: &OwnedHttpRequest,
+) -> (Response, usize) {
+    let remote = request.remote;
+    let client = request.client.as_str();
+    let method = &request.method;
+    let target = request.target.as_str();
+    let version = request.version;
+    let headers = &request.headers;
+    let body = request.body.as_ref();
+    let request_id = request.request_id.as_str();
+    let traceparent = request.traceparent.as_str();
     let _request_slot = match state.request_slots.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -1375,20 +2305,17 @@ async fn invoke_php_http(
         match envelope.state {
             PhpDispatchState::Complete => {
                 cancellation.complete();
-                let Some(json) = envelope.response.take() else {
+                let Some(response) = envelope.response.take() else {
                     return (
                         internal_error("PHP dispatch completed without a response"),
                         0,
                     );
                 };
-                return match serde_json::from_str::<PhpHttpResponse>(&json) {
-                    Ok(response) => match response.total_bytes() {
-                        Some(bytes) if bytes <= state.config.max_response_bytes => {
-                            (response.into_http_response(), bytes)
-                        }
-                        _ => (response_limit_error(state.config.max_response_bytes), 0),
-                    },
-                    Err(error) => (internal_error(format!("invalid PHP response: {error}")), 0),
+                return match response.total_bytes() {
+                    Some(bytes) if bytes <= state.config.max_response_bytes => {
+                        (response.into_http_response(), bytes)
+                    }
+                    _ => (response_limit_error(state.config.max_response_bytes), 0),
                 };
             }
             PhpDispatchState::Suspended => {
@@ -1452,6 +2379,7 @@ async fn invoke_php_http(
                         let Some(head) = operation.response.take() else {
                             return (internal_error("streaming response has no HTTP metadata"), 0);
                         };
+                        let head = head.into_php();
                         let Some(encoded_chunk) = operation.chunk.take() else {
                             return (internal_error("streaming response has no chunk"), 0);
                         };
@@ -1497,13 +2425,12 @@ async fn invoke_php_http(
                         }
                         let (sender, receiver) =
                             mpsc::channel(state.config.response_stream_queue_capacity.max(1));
-                        if !head.body.is_empty()
-                            && sender.try_send(Ok(Bytes::from(head.body.clone()))).is_err()
+                        if !head.body.is_empty() && sender.try_send(Ok(head.body.clone())).is_err()
                         {
                             return (internal_error("streaming response queue is unavailable"), 0);
                         }
                         for buffered in &head.chunks {
-                            if sender.try_send(Ok(Bytes::from(buffered.clone()))).is_err() {
+                            if sender.try_send(Ok(buffered.clone())).is_err() {
                                 return (internal_error("streaming response queue is full"), 0);
                             }
                         }
@@ -1512,7 +2439,7 @@ async fn invoke_php_http(
                         }
                         let request_id = request_id.to_owned();
                         let request_body = body.to_vec();
-                        tokio::spawn(
+                        tokio::task::spawn_local(
                             PhpResponseStream {
                                 sender,
                                 request_id,
@@ -1605,13 +2532,11 @@ impl PhpResponseStream {
             match envelope.state {
                 PhpDispatchState::Complete => {
                     cancellation.complete();
-                    if let Some(response) = envelope.response.take()
-                        && let Ok(response) = serde_json::from_str::<PhpHttpResponse>(&response)
-                    {
+                    if let Some(response) = envelope.response.take() {
                         if !response.body.is_empty()
                             && !send_response_chunk(
                                 &sender,
-                                Bytes::from(response.body),
+                                response.body,
                                 timeout.saturating_sub(started.elapsed()),
                                 &metrics,
                                 &mut sent_bytes,
@@ -1625,7 +2550,7 @@ impl PhpResponseStream {
                         for chunk in response.chunks {
                             if !send_response_chunk(
                                 &sender,
-                                Bytes::from(chunk),
+                                chunk,
                                 timeout.saturating_sub(started.elapsed()),
                                 &metrics,
                                 &mut sent_bytes,
@@ -1991,7 +2916,11 @@ async fn dispatch_websocket_event(
     };
     let execution_id = format!("ws:{}:{}", socket_id, event_kind as i32);
     let _execution = PhpExecutionGuard::begin(state, &execution_id);
-    let json = match php::dispatch_ws(event_kind as i32, socket_id, payload) {
+    let json = match state
+        .php
+        .websocket(event_kind as i32, socket_id, payload)
+        .await
+    {
         Ok(json) => json,
         Err(error) => {
             eprintln!("pam: WebSocket PHP dispatch failed: {error}");
@@ -2093,6 +3022,23 @@ fn internal_error(message: impl Into<String>) -> Response {
         .expect("static HTTP error response must be valid")
 }
 
+fn service_unavailable(message: impl Into<String>) -> Response {
+    let message = message.into();
+    eprintln!(
+        "{}",
+        serde_json::json!({
+            "level": "warning",
+            "event": "runtime_overloaded",
+            "message": message,
+        })
+    );
+    Response::builder()
+        .status(StatusCode::SERVICE_UNAVAILABLE)
+        .header("retry-after", "1")
+        .body(Body::from("Service Unavailable"))
+        .expect("static overload response must be valid")
+}
+
 fn response_limit_error(limit: usize) -> Response {
     internal_error(format!(
         "PHP response exceeded the configured maxResponseBytes limit of {limit} bytes"
@@ -2103,106 +3049,6 @@ fn response_chunk_limit_error(limit: usize) -> Response {
     internal_error(format!(
         "PHP response chunk exceeded the configured maxResponseChunkBytes limit of {limit} bytes"
     ))
-}
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(try_from = "u8")]
-enum PhpDispatchState {
-    Complete = 1,
-    Suspended = 2,
-}
-
-impl TryFrom<u8> for PhpDispatchState {
-    type Error = String;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::Complete),
-            2 => Ok(Self::Suspended),
-            _ => Err(format!("unknown PHP dispatch state {value}")),
-        }
-    }
-}
-
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, Deserialize)]
-#[serde(try_from = "u8")]
-enum PhpOperationKind {
-    Timer = 1,
-    Stream = 2,
-    Dns = 3,
-    FileRead = 4,
-    FileWrite = 5,
-    Process = 6,
-    Signal = 7,
-    ResponseChunk = 8,
-}
-
-impl TryFrom<u8> for PhpOperationKind {
-    type Error = String;
-
-    fn try_from(value: u8) -> Result<Self, Self::Error> {
-        match value {
-            1 => Ok(Self::Timer),
-            2 => Ok(Self::Stream),
-            3 => Ok(Self::Dns),
-            4 => Ok(Self::FileRead),
-            5 => Ok(Self::FileWrite),
-            6 => Ok(Self::Process),
-            7 => Ok(Self::Signal),
-            8 => Ok(Self::ResponseChunk),
-            _ => Err(format!("unknown PHP async operation kind {value}")),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PhpOperation {
-    kind: PhpOperationKind,
-    delay_micros: u64,
-    #[serde(default)]
-    read_file_descriptors: Vec<RawFd>,
-    #[serde(default)]
-    write_file_descriptors: Vec<RawFd>,
-    #[serde(default)]
-    host: Option<String>,
-    #[serde(default)]
-    path: Option<String>,
-    #[serde(default)]
-    data: Option<String>,
-    #[serde(default)]
-    atomic: bool,
-    #[serde(default)]
-    arguments: Vec<String>,
-    #[serde(default)]
-    stdin: Option<String>,
-    #[serde(default = "default_native_output_limit")]
-    max_output_bytes: usize,
-    #[serde(default)]
-    signal: Option<i32>,
-    #[serde(default)]
-    response: Option<PhpHttpResponse>,
-    #[serde(default)]
-    chunk: Option<String>,
-}
-
-fn default_native_output_limit() -> usize {
-    8 * 1024 * 1024
-}
-
-#[derive(Debug, Deserialize)]
-struct PhpDispatchEnvelope {
-    state: PhpDispatchState,
-    #[serde(default)]
-    response: Option<String>,
-    #[serde(default)]
-    operation: Option<PhpOperation>,
-}
-
-fn parse_dispatch_envelope(json: &str) -> Result<PhpDispatchEnvelope, String> {
-    serde_json::from_str(json).map_err(|error| format!("invalid PHP dispatch envelope: {error}"))
 }
 
 #[derive(Clone, Copy)]
@@ -2569,15 +3415,6 @@ fn signal_process_group(process_group: u32, signal: i32) {
     }
 }
 
-#[derive(Debug, Deserialize)]
-struct PhpHttpResponse {
-    status: u16,
-    headers: HashMap<String, Vec<String>>,
-    body: String,
-    #[serde(default)]
-    chunks: Vec<String>,
-}
-
 impl PhpHttpResponse {
     fn total_bytes(&self) -> Option<usize> {
         self.chunks
@@ -2628,7 +3465,7 @@ impl PhpHttpResponse {
         } else {
             let chunks = std::iter::once(self.body)
                 .chain(self.chunks)
-                .map(|chunk| Ok::<Bytes, Infallible>(Bytes::from(chunk)));
+                .map(Ok::<Bytes, Infallible>);
             response
                 .body(Body::from_stream(futures_util::stream::iter(chunks)))
                 .unwrap_or_else(|error| {

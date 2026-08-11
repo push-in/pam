@@ -14,9 +14,12 @@ mod dev;
 mod doctor;
 mod ecosystem;
 mod editor;
+mod ingress;
 mod mobile;
+mod octane;
 mod php;
 mod project;
+mod protocol;
 mod quality;
 mod self_update;
 mod server;
@@ -369,12 +372,25 @@ fn run() -> Result<u8, CliError> {
     if script_arg == "start" {
         let mut options = cluster::StartOptions::parse(raw_args).map_err(CliError::Cluster)?;
         options.script = resolve_script(options.script.as_os_str())?;
+        enable_server_opcache();
+        if options.script.file_name() == Some(OsStr::new("artisan")) {
+            // SAFETY: the master has not initialized PHP or started worker
+            // threads. Children inherit the console identity before booting
+            // Laravel, just like `pam artisan`.
+            unsafe {
+                env::set_var("PAM_CLI_MODE", "1");
+                env::set_var("APP_RUNNING_IN_CONSOLE", "true");
+            }
+        }
         return cluster::run(&executable, options).map_err(CliError::Cluster);
     }
 
     if script_arg == "artisan" {
         let script = resolve_script(OsStr::new("artisan"))?;
         let arguments = raw_args.collect::<Vec<_>>();
+        if arguments.first() == Some(&OsString::from("pam:octane")) {
+            enable_server_opcache();
+        }
         // SAFETY: Artisan owns this single-threaded PHP lifecycle and the runtime
         // has not started Tokio or any worker threads yet.
         unsafe {
@@ -382,6 +398,38 @@ fn run() -> Result<u8, CliError> {
             env::set_var("APP_RUNNING_IN_CONSOLE", "true");
         }
         return run_script(&executable, &script, arguments);
+    }
+
+    if matches!(
+        script_arg.to_string_lossy().as_ref(),
+        "octane:start" | "octane:status" | "octane:reload" | "octane:stop"
+    ) {
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("PAM Octane commands must run inside a Laravel project".to_owned())
+        })?;
+        if context.kind != project::ProjectKind::Laravel {
+            return Err(CliError::Commands(format!(
+                "PAM Octane requires a Laravel project; found {}",
+                context.kind.label()
+            )));
+        }
+        return match script_arg.to_string_lossy().as_ref() {
+            "octane:start" => {
+                let script = resolve_script(context.root.join("artisan").as_os_str())?;
+                enable_server_opcache();
+                // SAFETY: workers inherit this identity before PHP starts.
+                unsafe {
+                    env::set_var("PAM_CLI_MODE", "1");
+                    env::set_var("APP_RUNNING_IN_CONSOLE", "true");
+                }
+                octane::start(&executable, script, &context.root, raw_args)
+                    .map_err(CliError::Cluster)
+            }
+            "octane:status" => octane::status(&context.root).map_err(CliError::Cluster),
+            "octane:reload" => octane::reload(&context.root).map_err(CliError::Cluster),
+            "octane:stop" => octane::stop(&context.root).map_err(CliError::Cluster),
+            _ => unreachable!(),
+        };
     }
 
     if script_arg == "exec" {
@@ -1039,6 +1087,29 @@ fn run() -> Result<u8, CliError> {
 fn current_project() -> Option<project::ProjectContext> {
     let directory = env::current_dir().ok()?;
     project::discover(&directory)
+}
+
+fn enable_server_opcache() {
+    let mut entries = env::var("PAM_INI_ENTRIES").unwrap_or_default();
+    for (name, value) in [
+        ("opcache.enable_cli", "1"),
+        ("opcache.validate_timestamps", "0"),
+        ("opcache.jit", "tracing"),
+        ("opcache.jit_buffer_size", "128M"),
+    ] {
+        let prefix = format!("{name}=");
+        if !entries
+            .lines()
+            .any(|entry| entry.trim_start().starts_with(&prefix))
+        {
+            entries.push_str(name);
+            entries.push('=');
+            entries.push_str(value);
+            entries.push('\n');
+        }
+    }
+    // SAFETY: server command dispatch occurs before PHP or Tokio initializes.
+    unsafe { env::set_var("PAM_INI_ENTRIES", entries) };
 }
 
 fn run_script(

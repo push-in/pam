@@ -1,0 +1,25 @@
+{
+    auto_https off
+    admin off
+
+    frankenphp {
+        # FrankenPHP reserves one regular thread in addition to its configured
+        # Laravel workers. The runner passes workers + 1 explicitly.
+        num_threads {$PAM_BENCH_FRANKEN_THREADS:2}
+        max_threads {$PAM_BENCH_FRANKEN_THREADS:2}
+        php_ini opcache.validate_timestamps 0
+        php_ini opcache.jit tracing
+        php_ini opcache.jit_buffer_size 128M
+        worker /workspace/packages/octane/tests/Fixtures/laravel/public/frankenphp-worker.php {$PAM_BENCH_WORKERS:1}
+    }
+}
+
+:{$PAM_BENCH_PORT:38080} {
+    route {
+        root * /workspace/packages/octane/tests/Fixtures/laravel/public
+        php_server {
+            index frankenphp-worker.php
+            try_files {path} frankenphp-worker.php
+        }
+    }
+}

@@ -154,9 +154,17 @@ namespace Pam\Async {
         }
     }
 
+    final class FiberContextBag
+    {
+        /** @param array<string, mixed> $values */
+        public function __construct(public array $values = [])
+        {
+        }
+    }
+
     final class FiberContext
     {
-        /** @var \WeakMap<object, array<string, mixed>>|null */
+        /** @var \WeakMap<object, FiberContextBag>|null */
         private static ?\WeakMap $fiberValues = null;
 
         /** @var array<string, mixed> */
@@ -173,15 +181,16 @@ namespace Pam\Async {
                 return;
             }
             self::$fiberValues ??= new \WeakMap();
-            $values = self::$fiberValues[$fiber] ?? [];
-            $values[$key] = $value;
-            self::$fiberValues[$fiber] = $values;
+            $bag = self::$fiberValues[$fiber] ??= new FiberContextBag();
+            $bag->values[$key] = $value;
         }
 
         public static function get(string $key, mixed $default = null): mixed
         {
             $fiber = \Fiber::getCurrent();
-            $values = $fiber === null ? self::$rootValues : (self::$fiberValues[$fiber] ?? []);
+            $values = $fiber === null
+                ? self::$rootValues
+                : (self::$fiberValues[$fiber]->values ?? []);
             return $values[$key] ?? $default;
         }
 
@@ -189,7 +198,9 @@ namespace Pam\Async {
         public static function snapshot(): array
         {
             $fiber = \Fiber::getCurrent();
-            return $fiber === null ? self::$rootValues : (self::$fiberValues[$fiber] ?? []);
+            return $fiber === null
+                ? self::$rootValues
+                : (self::$fiberValues[$fiber]->values ?? []);
         }
 
         /** @param array<string, mixed> $values */
@@ -201,7 +212,7 @@ namespace Pam\Async {
                 return;
             }
             self::$fiberValues ??= new \WeakMap();
-            self::$fiberValues[$fiber] = $values;
+            self::$fiberValues[$fiber] = new FiberContextBag($values);
         }
 
         public static function clear(): void
@@ -226,9 +237,32 @@ namespace Pam\Async {
             if (self::$fiberValues === null) {
                 return;
             }
-            $values = self::$fiberValues[$fiber] ?? [];
-            unset($values[$key]);
-            self::$fiberValues[$fiber] = $values;
+            $bag = self::$fiberValues[$fiber] ?? null;
+            if ($bag !== null) {
+                unset($bag->values[$key]);
+            }
+        }
+
+        /** @param list<string> $keys */
+        public static function removeMany(array $keys): void
+        {
+            $fiber = \Fiber::getCurrent();
+            if ($fiber === null) {
+                foreach ($keys as $key) {
+                    unset(self::$rootValues[$key]);
+                }
+                return;
+            }
+            if (self::$fiberValues === null) {
+                return;
+            }
+            $bag = self::$fiberValues[$fiber] ?? null;
+            if ($bag === null) {
+                return;
+            }
+            foreach ($keys as $key) {
+                unset($bag->values[$key]);
+            }
         }
     }
 

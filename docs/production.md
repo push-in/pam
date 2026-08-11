@@ -99,6 +99,7 @@ aplicação pode complementar, mas não substituir, `/ready`. Métricas importan
 - `pam_http_requests_total`, `pam_http_errors_total`;
 - `pam_http_active_requests` e duração acumulada;
 - bytes de request/response;
+- hits, misses e requisições colapsadas do cache de resposta;
 - conexões e mensagens WebSocket, backpressure;
 - `pam_event_loop_lag_seconds`;
 - RSS, memória/peak PHP e Fibers;
@@ -113,6 +114,105 @@ deve coletar os logs e reiniciar o master caso ele próprio falhe.
 `telemetryHeaders` habilita `x-request-id`, `traceparent` e `Server-Timing` nas
 respostas. Ele é desligado por padrão para evitar formatação e bytes extras em
 cada resposta; habilite quando a correlação distribuída for necessária.
+
+## Cache nativo de respostas
+
+`responseCachePaths` aceita uma lista explícita de caminhos públicos. O cache
+fica antes do slot PHP e usa uma trava assíncrona por chave para que uma rajada
+fria execute Laravel apenas uma vez. Configure também `responseCacheTtlMs` e
+`responseCacheMaxEntries` e `responseCacheMaxBytes`. O limite em bytes impede que
+respostas grandes consumam memória sem controle; ao atingir qualquer limite, o
+PAM remove a entrada menos recentemente usada.
+
+`responseCacheStaleWhileRevalidateMs` mantém uma janela opcional de resposta
+stale. Uma requisição renova a entrada executando Laravel e as demais recebem a
+última resposta durante essa renovação, evitando uma avalanche no worker. O
+cache continua desabilitado para requisições com cookies, autorização ou
+`Cache-Control: no-cache` e nunca armazena respostas privadas ou com `Set-Cookie`.
+Use `responseCacheVaryHeaders` para separar variantes públicas, como idioma. Os
+valores entram em uma chave SHA-256 de tamanho constante; `Authorization`,
+`Cookie` e `Set-Cookie` são recusados nessa lista para evitar exposição de
+credenciais e fragmentação perigosa do cache.
+
+Para invalidação por domínio, a aplicação pode devolver tags no header interno
+configurado por `responseCacheTagHeader` (padrão `X-Pam-Cache-Tags`). O PAM
+remove esse header antes de responder. Habilite a API com
+`responseCachePurgePath` e um `responseCachePurgeSecret` aleatório de pelo menos
+32 bytes. Uma invalidação autenticada usa `POST`, `Authorization: Bearer ...` e
+um corpo `{"tag":"catalog"}`; `{"all":true}` limpa tudo. Em modo cluster, o
+supervisor fornece um log privado e todos os workers aplicam a invalidação em
+até 100 ms, inclusive os que não receberam o POST.
+
+PAM ignora o cache para métodos diferentes de GET, `Authorization`, `Cookie` e
+`Cache-Control: no-cache`. Respostas com status diferente de 200, `Set-Cookie`,
+`private` ou `no-store` nunca são armazenadas. Não adicione endpoints privados,
+personalizados ou cuja resposta varie por headers não representados na URL.
+
+Os contadores Prometheus são
+`pam_http_response_cache_hits_total`,
+`pam_http_response_cache_misses_total` e
+`pam_http_response_cache_collapsed_total`.
+Respostas servidas durante a renovação aparecem em
+`pam_http_response_cache_stale_total`.
+Operações de purge aparecem em `pam_http_response_cache_purges_total`.
+
+As latências HTTP são expostas como histograma Prometheus em
+`pam_http_request_duration_seconds`, incluindo contagem, soma e buckets de
+100 µs até 5 s. Memória PHP, pico de memória, Fibers, RSS e atraso do event loop
+também são publicados sem acessar o runtime PHP fora de sua thread proprietária.
+
+### Métricas por rota Laravel
+
+Ative `routeMetrics` (ou `PAM_ROUTE_METRICS=true` no pacote Octane) para receber
+contadores e histogramas com `method`, template da rota e status. O pacote usa o
+template do router, como `/users/{user}`, nunca a URL concreta, e o runtime
+remove o header de transporte antes de responder. `routeMetricsMaxEntries`
+(padrão 256) limita a cardinalidade; observações excedentes são contabilizadas
+em `pam_http_route_metrics_overflow_total`. A funcionalidade é opt-in para que
+aplicações que não coletam métricas não paguem locks nem resolução de rota no
+hot path.
+
+### I/O cooperativo e isolamento
+
+`Pam\Http\Client` e `Pam\Redis\Client` usam as primitivas de socket do PAM:
+DNS, connect, read e write suspendem somente a Fiber atual enquanto Tokio atende
+outras requisições. O cliente Redis implementa RESP2, pipeline, autenticação,
+seleção de database, limites de resposta, timeout e cancelamento; respostas
+malformadas ou excessivas encerram a conexão.
+
+Drivers PDO tradicionais são bloqueantes. Para consultas legadas ou
+deliberadamente pesadas, `Pam\Database\IsolatedPdoPool` oferece workers de
+processo limitados, fila limitada, timeout e limite de resultado. DSN,
+credenciais, SQL e parâmetros seguem pelo stdin, não pela linha de comando, e a
+Fiber aguarda cooperativamente. Esse pool privilegia isolamento e responsividade;
+para consultas pequenas e de altíssimo volume, continue usando o pool persistente
+do driver Laravel até existir um protocolo de banco totalmente nativo no Tokio.
+
+`Pam\Task\ProcessPool` permanece disponível para CPU, ferramentas externas e
+outros trabalhos bloqueantes, também com concorrência e output limitados.
+
+### Pools especializados de Laravel
+
+Endpoints caros ou com perfis de memória diferentes podem usar processos Laravel
+persistentes independentes. O ingress público faz streaming e reutiliza conexões
+internas; uma instância do PHP embutido nunca executa duas requisições ao mesmo tempo.
+
+```bash
+pam octane:start \
+  --ingress-address=0.0.0.0:8000 \
+  --pool=api=8@/api,/graphql \
+  --pool=web=4@*
+```
+
+O prefixo respeita segmentos (`/api` não captura `/apix`), a correspondência mais
+específica vence e deve existir exatamente um fallback `*`. Cada grupo tem heap,
+OPcache, container Laravel, listener loopback e ciclo de restart próprios. Dentro
+do PHP, `PAM_WORKER_POOL` contém o nome selecionado. No modo atual, TLS e HTTP/3
+devem terminar no edge/reverse proxy; o tráfego entre ingress e pools permanece
+HTTP no loopback. Upgrades
+WebSocket são tunelados de ponta a ponta. O control plane inclui o pool em
+`pam_cluster_worker_info` e publica workers, requests, errors, requests ativos,
+RSS e memória PHP agregados por `pool`.
 
 ## Capacidade e segurança
 
@@ -167,10 +267,40 @@ deploy, antes de iniciar ou recarregar o serviço.
 A imagem multi-stage pode receber a aplicação por uma imagem derivada:
 
 ```dockerfile
-FROM pam-runtime:1.0.0
+FROM pam-runtime:1.0.3
 COPY --chown=10001:10001 . /app
 CMD ["start", "index.php", "--workers", "4", "--admin-address", "0.0.0.0:3010"]
 ```
+
+Para PAM Octane, use o Artisan como entrypoint do worker e mantenha tanto a
+porta HTTP quanto o control plane explícitos:
+
+```dockerfile
+FROM pam-runtime:1.0.3
+COPY --chown=10001:10001 . /app
+CMD ["start", "artisan", "--workers", "4", "--max-requests", "100000", \
+     "--admin-address", "0.0.0.0:3010", "--", \
+     "pam:octane", "--host=0.0.0.0", "--port=8000"]
+```
+
+A unit pronta em `packaging/pam-octane.service` aplica o mesmo contrato com
+`DynamicUser`, filesystem somente leitura e storage Laravel gravável. Filas,
+Horizon e scheduler continuam em units separadas.
+
+Um proxy Caddy mínimo termina TLS e mantém o control plane inacessível ao
+público:
+
+```caddyfile
+example.com {
+    reverse_proxy 127.0.0.1:8000 {
+        health_uri /api/ping
+        health_interval 10s
+    }
+}
+```
+
+Use `127.0.0.1:3010/ready` diretamente no supervisor/orquestrador. Não encaminhe
+`/live`, `/ready`, `/startup` ou `/metrics` pelo virtual host público.
 
 Para um diretório autocontido, execute
 `pam build --entry index.php --output dist`. O launcher do bundle carrega a

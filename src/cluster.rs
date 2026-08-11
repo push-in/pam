@@ -7,7 +7,10 @@ use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
+use serde::{Deserialize, Serialize};
+
 use crate::control_plane::{ClusterSnapshot, ControlPlane, SharedClusterSnapshot};
+use crate::ingress::{Ingress, Route as IngressRoute};
 use crate::worker_state::{
     WORKER_STATE_PATH_ENV, WorkerLifecycle, WorkerRuntimeRecord, epoch_millis, read,
 };
@@ -32,6 +35,16 @@ pub struct StartOptions {
     pub restart_backoff: Duration,
     pub watchdog_grace: Duration,
     pub admin_address: Option<SocketAddr>,
+    pub state_file: Option<PathBuf>,
+    pub ingress_address: Option<SocketAddr>,
+    pub pools: Vec<PoolSpec>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PoolSpec {
+    pub name: String,
+    pub workers: usize,
+    pub prefixes: Vec<String>,
 }
 
 impl StartOptions {
@@ -50,6 +63,9 @@ impl StartOptions {
         let mut restart_backoff = Duration::from_millis(100);
         let mut watchdog_grace = Duration::from_millis(250);
         let mut admin_address = None;
+        let mut state_file = None;
+        let mut ingress_address = None;
+        let mut pools = Vec::new();
         let mut script_args = Vec::new();
 
         while let Some(argument) = arguments.next() {
@@ -80,6 +96,19 @@ impl StartOptions {
                 "--admin-address" => {
                     admin_address = Some(parse_address(arguments.next(), "--admin-address")?);
                 }
+                "--state-file" => {
+                    state_file = Some(PathBuf::from(
+                        arguments
+                            .next()
+                            .ok_or_else(|| "--state-file requires a path".to_owned())?,
+                    ));
+                }
+                "--ingress-address" => {
+                    ingress_address = Some(parse_address(arguments.next(), "--ingress-address")?);
+                }
+                "--pool" => {
+                    pools.push(parse_pool(arguments.next())?);
+                }
                 "--" => {
                     script_args.extend(arguments);
                     break;
@@ -94,6 +123,24 @@ impl StartOptions {
         if workers > 256 {
             return Err("--workers cannot exceed 256".to_owned());
         }
+        if !pools.is_empty() {
+            if ingress_address.is_none() {
+                return Err("--pool requires --ingress-address".to_owned());
+            }
+            if pools
+                .iter()
+                .filter(|pool| pool.prefixes.iter().any(|prefix| prefix == "*"))
+                .count()
+                != 1
+            {
+                return Err("pool configuration requires exactly one '*' fallback".to_owned());
+            }
+            let total: usize = pools.iter().map(|pool| pool.workers).sum();
+            if total > 256 {
+                return Err("total pool workers cannot exceed 256".to_owned());
+            }
+            workers = total;
+        }
 
         Ok(Self {
             script,
@@ -105,9 +152,67 @@ impl StartOptions {
             restart_backoff,
             watchdog_grace,
             admin_address,
+            state_file,
+            ingress_address,
+            pools,
         })
     }
 }
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MasterState {
+    pub version: u8,
+    pub pid: u32,
+    pub process_start: Option<u64>,
+    pub workers: usize,
+    pub admin_address: Option<String>,
+    pub started_at_millis: u64,
+}
+
+pub fn read_master_state(path: &Path) -> Result<MasterState, String> {
+    let bytes = fs::read(path)
+        .map_err(|error| format!("cannot read PAM state {}: {error}", path.display()))?;
+    let state: MasterState = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid PAM state {}: {error}", path.display()))?;
+    if state.version != 1 {
+        return Err(format!("unsupported PAM state version {}", state.version));
+    }
+    Ok(state)
+}
+
+pub fn master_is_running(state: &MasterState) -> bool {
+    let pid = match i32::try_from(state.pid) {
+        Ok(pid) => pid,
+        Err(_) => return false,
+    };
+    // SAFETY: signal 0 performs a read-only process existence check.
+    if unsafe { kill(pid, 0) } != 0 {
+        return false;
+    }
+    state
+        .process_start
+        .is_none_or(|expected| linux_process_start(state.pid) == Some(expected))
+}
+
+pub fn signal_master(state: &MasterState, signal: i32) -> Result<(), String> {
+    if !master_is_running(state) {
+        return Err(format!("PAM master {} is not running", state.pid));
+    }
+    let pid = i32::try_from(state.pid).map_err(|_| "PAM master PID is invalid".to_owned())?;
+    // SAFETY: the PID and its process-start fingerprint were verified above.
+    if unsafe { kill(pid, signal) } != 0 {
+        return Err(format!(
+            "cannot signal PAM master {}: {}",
+            state.pid,
+            std::io::Error::last_os_error()
+        ));
+    }
+    Ok(())
+}
+
+pub const RELOAD_SIGNAL: i32 = 1;
+pub const STOP_SIGNAL: i32 = SIGTERM;
 
 struct Worker {
     id: usize,
@@ -116,6 +221,15 @@ struct Worker {
     state_path: PathBuf,
     started: Instant,
     consecutive_failures: u32,
+    pool: Option<RuntimePool>,
+}
+
+#[derive(Clone, Debug)]
+struct RuntimePool {
+    name: String,
+    workers: usize,
+    prefixes: Vec<String>,
+    address: SocketAddr,
 }
 
 struct RuntimeDirectory(PathBuf);
@@ -170,6 +284,25 @@ pub fn run(executable: &OsStr, options: StartOptions) -> Result<u8, String> {
 
 async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, String> {
     let runtime_directory = RuntimeDirectory::create()?;
+    let pools = prepare_pools(&options)?;
+    let ingress = if let Some(address) = options.ingress_address {
+        Some(
+            Ingress::start(
+                address,
+                pools
+                    .iter()
+                    .map(|pool| IngressRoute {
+                        name: pool.name.clone(),
+                        address: pool.address,
+                        prefixes: pool.prefixes.clone(),
+                    })
+                    .collect(),
+            )
+            .await?,
+        )
+    } else {
+        None
+    };
     let mut generation = 1;
     let snapshot: SharedClusterSnapshot = Arc::new(RwLock::new(ClusterSnapshot {
         live: true,
@@ -189,13 +322,24 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
         );
     }
 
-    let mut workers = spawn_generation(executable, &options, generation, runtime_directory.path())?;
+    let mut workers = spawn_generation(
+        executable,
+        &options,
+        &pools,
+        generation,
+        runtime_directory.path(),
+    )?;
     if let Err(error) = wait_generation_ready(&mut workers, options.startup_timeout).await {
         terminate_workers(&mut workers, options.graceful_timeout).await;
         set_cluster_health(&snapshot, false, false, generation, &workers);
         return Err(error);
     }
     set_cluster_health(&snapshot, true, true, generation, &workers);
+    let _state_file = options
+        .state_file
+        .as_deref()
+        .map(|path| MasterStateFile::create(path, &options, control_plane.as_ref()))
+        .transpose()?;
     let mut checks = tokio::time::interval(Duration::from_millis(200));
     checks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
@@ -224,6 +368,7 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                 let mut replacements = spawn_generation(
                     executable,
                     &options,
+                    &pools,
                     next_generation,
                     runtime_directory.path(),
                 )?;
@@ -284,6 +429,7 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             generation,
                             runtime_directory.path(),
                             failures,
+                            failed.pool.clone(),
                         )?);
                     }
                 }
@@ -294,19 +440,120 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
 
     set_cluster_health(&snapshot, true, false, generation, &workers);
     terminate_workers(&mut workers, options.graceful_timeout).await;
+    if let Some(ingress) = ingress {
+        ingress.stop().await;
+    }
     set_cluster_health(&snapshot, false, false, generation, &workers);
     Ok(0)
+}
+
+struct MasterStateFile(PathBuf);
+
+impl MasterStateFile {
+    fn create(
+        path: &Path,
+        options: &StartOptions,
+        control_plane: Option<&ControlPlane>,
+    ) -> Result<Self, String> {
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|error| {
+                format!(
+                    "cannot create PAM state directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700)).map_err(|error| {
+                format!(
+                    "cannot secure PAM state directory {}: {error}",
+                    parent.display()
+                )
+            })?;
+        }
+        if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+            return Err(format!(
+                "refusing symlink PAM state file {}",
+                path.display()
+            ));
+        }
+        let state = MasterState {
+            version: 1,
+            pid: std::process::id(),
+            process_start: linux_process_start(std::process::id()),
+            workers: options.workers,
+            admin_address: control_plane.map(|control| control.address().to_string()),
+            started_at_millis: epoch_millis(),
+        };
+        let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+        let bytes = serde_json::to_vec_pretty(&state)
+            .map_err(|error| format!("cannot serialize PAM state: {error}"))?;
+        fs::write(&temporary, bytes)
+            .map_err(|error| format!("cannot write PAM state {}: {error}", temporary.display()))?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("cannot secure PAM state {}: {error}", temporary.display()))?;
+        fs::rename(&temporary, path)
+            .map_err(|error| format!("cannot publish PAM state {}: {error}", path.display()))?;
+        Ok(Self(path.to_owned()))
+    }
+}
+
+impl Drop for MasterStateFile {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_file(&self.0)
+            && error.kind() != std::io::ErrorKind::NotFound
+        {
+            eprintln!(
+                "pam: cannot remove state file {}: {error}",
+                self.0.display()
+            );
+        }
+    }
+}
+
+fn linux_process_start(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_command = stat.rsplit_once(") ")?.1;
+    after_command.split_whitespace().nth(19)?.parse().ok()
 }
 
 fn spawn_generation(
     executable: &OsStr,
     options: &StartOptions,
+    pools: &[RuntimePool],
     generation: u64,
     runtime_directory: &Path,
 ) -> Result<Vec<Worker>, String> {
-    (1..=options.workers)
-        .map(|id| spawn_worker(executable, options, id, generation, runtime_directory, 0))
-        .collect()
+    if pools.is_empty() {
+        return (1..=options.workers)
+            .map(|id| {
+                spawn_worker(
+                    executable,
+                    options,
+                    id,
+                    generation,
+                    runtime_directory,
+                    0,
+                    None,
+                )
+            })
+            .collect();
+    }
+    let mut id = 0;
+    let mut workers = Vec::with_capacity(options.workers);
+    for pool in pools {
+        for _ in 0..pool.workers {
+            id += 1;
+            workers.push(spawn_worker(
+                executable,
+                options,
+                id,
+                generation,
+                runtime_directory,
+                0,
+                Some(pool.clone()),
+            )?);
+        }
+    }
+    Ok(workers)
 }
 
 fn spawn_worker(
@@ -316,6 +563,7 @@ fn spawn_worker(
     generation: u64,
     runtime_directory: &Path,
     consecutive_failures: u32,
+    pool: Option<RuntimePool>,
 ) -> Result<Worker, String> {
     let state_path = runtime_directory.join(format!("worker-{id}-generation-{generation}.json"));
     if let Err(error) = fs::remove_file(&state_path)
@@ -327,17 +575,28 @@ fn spawn_worker(
         ));
     }
     let max_requests = staggered_max_requests(options, id);
-    let child = Command::new(executable)
+    let mut command = Command::new(executable);
+    command
         .arg("__worker")
         .arg(&options.script)
         .args(&options.script_args)
         .env("PAM_WORKER_ID", id.to_string())
         .env("PAM_WORKER_GENERATION", generation.to_string())
         .env("PAM_MAX_REQUESTS", max_requests.to_string())
+        .env(
+            "PAM_CACHE_INVALIDATION_LOG",
+            runtime_directory.join("cache-invalidations.log"),
+        )
         .env(WORKER_STATE_PATH_ENV, &state_path)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    if let Some(pool) = &pool {
+        command
+            .env("PAM_WORKER_POOL", &pool.name)
+            .env("PAM_INTERNAL_LISTEN_ADDRESS", pool.address.to_string());
+    }
+    let child = command
         .spawn()
         .map_err(|error| format!("cannot start worker {id}: {error}"))?;
     Ok(Worker {
@@ -347,7 +606,28 @@ fn spawn_worker(
         state_path,
         started: Instant::now(),
         consecutive_failures,
+        pool,
     })
+}
+
+fn prepare_pools(options: &StartOptions) -> Result<Vec<RuntimePool>, String> {
+    options
+        .pools
+        .iter()
+        .map(|pool| {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").map_err(|error| {
+                format!("cannot reserve address for pool {}: {error}", pool.name)
+            })?;
+            let address = listener.local_addr().map_err(|error| error.to_string())?;
+            drop(listener);
+            Ok(RuntimePool {
+                name: pool.name.clone(),
+                workers: pool.workers,
+                prefixes: pool.prefixes.clone(),
+                address,
+            })
+        })
+        .collect()
 }
 
 fn staggered_max_requests(options: &StartOptions, worker_id: usize) -> u64 {
@@ -499,6 +779,43 @@ fn parse_address(value: Option<OsString>, option: &str) -> Result<SocketAddr, St
         .map_err(|_| format!("{option} requires a valid IP:port value"))
 }
 
+fn parse_pool(value: Option<OsString>) -> Result<PoolSpec, String> {
+    let value = value.ok_or_else(|| "--pool requires name=workers@prefix[,prefix]".to_owned())?;
+    let value = value.to_string_lossy();
+    let (name, rest) = value
+        .split_once('=')
+        .ok_or_else(|| "--pool requires name=workers@prefix[,prefix]".to_owned())?;
+    let (workers, prefixes) = rest
+        .split_once('@')
+        .ok_or_else(|| "--pool requires name=workers@prefix[,prefix]".to_owned())?;
+    if name.is_empty()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return Err("pool name may only contain letters, numbers, '-' and '_'".to_owned());
+    }
+    let workers = workers
+        .parse::<usize>()
+        .map_err(|_| "pool workers must be a positive integer".to_owned())?;
+    if workers == 0 {
+        return Err("pool workers must be a positive integer".to_owned());
+    }
+    let prefixes: Vec<String> = prefixes.split(',').map(str::to_owned).collect();
+    if prefixes.is_empty()
+        || prefixes
+            .iter()
+            .any(|prefix| prefix != "*" && !prefix.starts_with('/'))
+    {
+        return Err("pool prefixes must be '*' or absolute paths".to_owned());
+    }
+    Ok(PoolSpec {
+        name: name.to_owned(),
+        workers,
+        prefixes,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,5 +834,47 @@ mod tests {
 
         assert_eq!(staggered_max_requests(&options, 1), 10_000_000);
         assert_eq!(staggered_max_requests(&options, 4), 12_500_000);
+    }
+
+    #[test]
+    fn parses_specialized_worker_pools() {
+        let options = StartOptions::parse(
+            [
+                "--ingress-address",
+                "127.0.0.1:8080",
+                "--pool",
+                "api=4@/api,/graphql",
+                "--pool",
+                "web=2@*",
+            ]
+            .into_iter()
+            .map(OsString::from),
+        )
+        .unwrap();
+        assert_eq!(options.workers, 6);
+        assert_eq!(
+            options.pools[0],
+            PoolSpec {
+                name: "api".to_owned(),
+                workers: 4,
+                prefixes: vec!["/api".to_owned(), "/graphql".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn pool_configuration_requires_one_fallback() {
+        let error = StartOptions::parse(
+            [
+                "--ingress-address",
+                "127.0.0.1:8080",
+                "--pool",
+                "api=2@/api",
+            ]
+            .into_iter()
+            .map(OsString::from),
+        )
+        .unwrap_err();
+        assert!(error.contains("exactly one '*' fallback"));
     }
 }

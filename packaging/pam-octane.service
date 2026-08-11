@@ -1,0 +1,44 @@
+[Unit]
+Description=PAM Octane Laravel application runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/srv/pam/current
+Environment=APP_ENV=production
+Environment=APP_DEBUG=false
+Environment=PAM_LARAVEL_STORAGE_PATH=/var/lib/pam-octane
+Environment=PAM_WORKERS=4
+Environment=PAM_MAX_REQUESTS=100000
+Environment=PAM_OCTANE_HOST=127.0.0.1
+Environment=PAM_OCTANE_PORT=8000
+EnvironmentFile=-/etc/pam/pam-octane.env
+ExecStart=/usr/local/bin/pam start artisan --workers ${PAM_WORKERS} --max-requests ${PAM_MAX_REQUESTS} --admin-address 127.0.0.1:3010 -- pam:octane --host=${PAM_OCTANE_HOST} --port=${PAM_OCTANE_PORT}
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGTERM
+KillMode=mixed
+TimeoutStopSec=45s
+Restart=always
+RestartSec=2s
+LimitNOFILE=1048576
+StateDirectory=pam-octane
+StateDirectoryMode=0750
+UMask=0027
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

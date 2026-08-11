@@ -1,0 +1,17 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use Symfony\Component\Console\Input\ArgvInput;
+
+require __DIR__.'/../../../vendor/autoload.php';
+
+$_ENV['APP_ENV'] = $_SERVER['APP_ENV'] = 'testing';
+$_ENV['APP_KEY'] = $_SERVER['APP_KEY'] = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+
+$application = require_once __DIR__.'/bootstrap/app.php';
+
+$status = $application->handleCommand(new ArgvInput());
+
+exit($status);

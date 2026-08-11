@@ -131,12 +131,15 @@ jobs:
         run: |
           composer validate --strict --working-dir=compat/composer-smoke
           composer validate --strict --working-dir=compat/laravel-smoke
+          composer validate --strict --no-check-lock --working-dir=packages/octane
       - name: Install locked Composer test dependencies
         run: |
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist --dry-run
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist --dry-run
+          composer install --working-dir=packages/octane --no-interaction --prefer-dist --dry-run
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
+          composer install --working-dir=packages/octane --no-interaction --prefer-dist
       - name: Test, analyze, and build
         run: |
           cargo fmt --all -- --check
@@ -147,9 +150,15 @@ jobs:
           cargo test --locked --all-targets --all-features -- --test-threads=1
           compat/composer-smoke/vendor/bin/phpstan analyse -c compat/composer-smoke/phpstan.neon --no-progress
           compat/laravel-smoke/vendor/bin/phpstan analyse -c compat/laravel-smoke/phpstan.neon --no-progress
+          composer --working-dir=packages/octane verify
+          scripts/package-release.sh validate
           ./target/debug/pam test compat/composer-smoke --phpunit --colors=never
           ./target/debug/pam test compat/composer-smoke --pest --colors=never
           cargo build --locked --release
+      - name: Verify release binary identity
+        env:
+          PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: test "$(target/release/pam --version)" = "pam ${PAM_RELEASE_TAG#v}"
       - name: Package self-contained runtime
         env:
           PAM_TARGET: ${{ matrix.target }}
@@ -222,7 +231,9 @@ jobs:
           PAM_PHP_LIB_DIR="${php_sdk}/lib" \
             cargo build --locked --release
           printf 'PAM_MACOS_PHP_SDK=%s\n' "${php_sdk}" >>"${GITHUB_ENV}"
-          DYLD_LIBRARY_PATH="${php_sdk}/lib" target/release/pam --version
+          actual_version=$(DYLD_LIBRARY_PATH="${php_sdk}/lib" target/release/pam --version)
+          expected_tag='${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}'
+          test "${actual_version}" = "pam ${expected_tag#v}"
       - name: Package relocatable macOS runtime
         env:
           PAM_TARGET: ${{ matrix.target }}

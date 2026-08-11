@@ -33,6 +33,14 @@ jobs:
         run: |
           composer audit --working-dir=compat/composer-smoke --locked
           composer audit --working-dir=compat/laravel-smoke --locked
+          composer install --working-dir=packages/octane --no-interaction --prefer-dist --dry-run
+          composer install --working-dir=packages/octane --no-interaction --prefer-dist
+          composer audit --working-dir=packages/octane
+      - name: Coverage-guided dispatch protocol fuzzing
+        run: |
+          cargo install cargo-fuzz --version 0.13.2 --locked
+          cargo fuzz run dispatch_envelope -- \
+            -max_total_time=120 -timeout=5 -rss_limit_mb=2048
       - name: Install locked Composer test dependencies
         run: |
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist --dry-run
@@ -41,6 +49,7 @@ jobs:
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
       - name: Memory soak contracts
         run: |
+          cargo test --locked protocol_tests -- --nocapture
           cargo test --locked --test memory -- --nocapture --test-threads=1
           cargo test --locked --test laravel -- --nocapture --test-threads=1
       - name: Native shutdown smoke under Valgrind

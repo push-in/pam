@@ -35,6 +35,90 @@ impl ServerProcess {
         Self::start_with_options(None, Some(rate_limit_per_second))
     }
 
+    fn start_with_response_cache() -> Self {
+        let mut server = Self::start_with_options(None, None);
+        server.child.kill().unwrap();
+        server.child.wait().unwrap();
+
+        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
+        server.port = probe.local_addr().unwrap().port();
+        drop(probe);
+        server.child = Command::new(env!("CARGO_BIN_EXE_pam"))
+            .arg("tests/fixtures/server.php")
+            .env("PAM_TEST_PORT", server.port.to_string())
+            .env("PAM_TEST_RESPONSE_CACHE", "1")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Pam cache server should start");
+        server.wait_until_ready();
+        server
+    }
+
+    fn start_with_redis(redis_port: u16) -> Self {
+        let mut server = Self::start_with_options(None, None);
+        server.child.kill().unwrap();
+        server.child.wait().unwrap();
+
+        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
+        server.port = probe.local_addr().unwrap().port();
+        drop(probe);
+        server.child = Command::new(env!("CARGO_BIN_EXE_pam"))
+            .arg("tests/fixtures/server.php")
+            .env("PAM_TEST_PORT", server.port.to_string())
+            .env("PAM_TEST_REDIS_PORT", redis_port.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Pam Redis test server should start");
+        server.wait_until_ready();
+        server
+    }
+
+    fn start_with_http_upstream(upstream_port: u16) -> Self {
+        let mut server = Self::start_with_options(None, None);
+        server.child.kill().unwrap();
+        server.child.wait().unwrap();
+
+        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
+        server.port = probe.local_addr().unwrap().port();
+        drop(probe);
+        server.child = Command::new(env!("CARGO_BIN_EXE_pam"))
+            .arg("tests/fixtures/server.php")
+            .env("PAM_TEST_PORT", server.port.to_string())
+            .env("PAM_TEST_HTTP_UPSTREAM_PORT", upstream_port.to_string())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("Pam HTTP client test server should start");
+        server.wait_until_ready();
+        server
+    }
+
+    fn start_with_isolated_database(database: &std::path::Path) -> Self {
+        let mut server = Self::start_with_options(None, None);
+        server.child.kill().unwrap();
+        server.child.wait().unwrap();
+
+        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
+        server.port = probe.local_addr().unwrap().port();
+        drop(probe);
+        server.child = Command::new(env!("CARGO_BIN_EXE_pam"))
+            .arg("tests/fixtures/server.php")
+            .env("PAM_TEST_PORT", server.port.to_string())
+            .env("PAM_TEST_ISOLATED_DATABASE", database)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()
+            .expect("Pam isolated database test server should start");
+        server.wait_until_ready();
+        server
+    }
+
     fn start_with_options(
         response_limits: Option<(usize, usize)>,
         rate_limit_per_second: Option<u32>,
@@ -151,6 +235,300 @@ impl ServerProcess {
         stream.read_to_string(&mut response).unwrap();
         response
     }
+}
+
+#[test]
+fn caches_only_explicit_public_anonymous_responses() {
+    let server = ServerProcess::start_with_response_cache();
+    let first = response_json(
+        &server
+            .http_request("GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"),
+    );
+    let second = response_json(
+        &server
+            .http_request("GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"),
+    );
+    let authenticated = response_json(&server.http_request(
+        "GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer test\r\nConnection: close\r\n\r\n",
+    ));
+
+    assert_eq!(first["calls"], 1);
+    assert_eq!(second["calls"], 1, "the public response should be cached");
+    assert_eq!(
+        authenticated["calls"], 2,
+        "authenticated requests must bypass cache"
+    );
+
+    let metrics = server
+        .http_request("GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        metrics.contains("pam_http_response_cache_hits_total 1"),
+        "{metrics}"
+    );
+    assert!(
+        metrics.contains("pam_http_response_cache_misses_total 1"),
+        "{metrics}"
+    );
+    assert!(
+        metrics.contains("# TYPE pam_http_request_duration_seconds histogram"),
+        "{metrics}"
+    );
+    assert!(
+        metrics.contains("pam_http_request_duration_seconds_bucket{le=\"+Inf\"}"),
+        "{metrics}"
+    );
+}
+
+#[test]
+fn serves_stale_cache_entries_while_one_request_revalidates() {
+    let server = ServerProcess::start_with_response_cache();
+    let warm =
+        response_json(&server.http_request(
+            "GET /cached-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        ));
+    assert_eq!(warm["calls"], 1);
+    thread::sleep(Duration::from_millis(150));
+
+    let port = server.port;
+    let refresh = thread::spawn(move || {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .write_all(b"GET /cached-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response_json(&response)
+    });
+    thread::sleep(Duration::from_millis(40));
+
+    let stale =
+        response_json(&server.http_request(
+            "GET /cached-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        ));
+    assert_eq!(stale["calls"], 1, "stale response should not wait for PHP");
+    assert_eq!(refresh.join().unwrap()["calls"], 2);
+
+    let metrics = server
+        .http_request("GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        metrics.contains("pam_http_response_cache_stale_total 1"),
+        "{metrics}"
+    );
+}
+
+#[test]
+fn partitions_cache_entries_by_configured_vary_headers() {
+    let server = ServerProcess::start_with_response_cache();
+    let english = response_json(&server.http_request(
+        "GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Language: en\r\nConnection: close\r\n\r\n",
+    ));
+    let portuguese = response_json(&server.http_request(
+        "GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Language: pt-BR\r\nConnection: close\r\n\r\n",
+    ));
+    let english_again = response_json(&server.http_request(
+        "GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept-Language: en\r\nConnection: close\r\n\r\n",
+    ));
+
+    assert_eq!(english["calls"], 1);
+    assert_eq!(portuguese["calls"], 2);
+    assert_eq!(english_again["calls"], 1);
+}
+
+#[test]
+fn redis_client_yields_the_php_owner_while_waiting_for_responses() {
+    let redis = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let redis_port = redis.local_addr().unwrap().port();
+    let fake_redis = thread::spawn(move || {
+        let (mut stream, _) = redis.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = Vec::new();
+        while !request
+            .windows(b"fixture-key".len())
+            .any(|part| part == b"fixture-key")
+        {
+            let mut chunk = [0_u8; 256];
+            let length = stream.read(&mut chunk).unwrap();
+            assert!(
+                length > 0,
+                "Redis client closed before sending its pipeline"
+            );
+            request.extend_from_slice(&chunk[..length]);
+        }
+        let request = String::from_utf8_lossy(&request);
+        assert!(request.contains("PING"), "{request}");
+        assert!(request.contains("fixture-key"), "{request}");
+        thread::sleep(Duration::from_millis(120));
+        stream.write_all(b"+PONG\r\n$5\r\n").unwrap();
+        thread::sleep(Duration::from_millis(10));
+        stream.write_all(b"value\r\n").unwrap();
+    });
+    let server = ServerProcess::start_with_redis(redis_port);
+    let port = server.port;
+    let redis_request = thread::spawn(move || {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .write_all(b"GET /redis HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    });
+    thread::sleep(Duration::from_millis(30));
+
+    let started = Instant::now();
+    let ping =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(ping.starts_with("HTTP/1.1 200"), "{ping}");
+    assert!(
+        started.elapsed() < Duration::from_millis(80),
+        "Redis I/O blocked the PHP owner for {:?}",
+        started.elapsed(),
+    );
+
+    let response = redis_request.join().unwrap();
+    assert_eq!(
+        response_json(&response)["responses"],
+        serde_json::json!(["PONG", "value"]),
+    );
+    fake_redis.join().unwrap();
+}
+
+#[test]
+fn http_client_yields_the_php_owner_while_waiting_for_an_upstream() {
+    let upstream = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let upstream_port = upstream.local_addr().unwrap().port();
+    let fake_upstream = thread::spawn(move || {
+        let (mut stream, _) = upstream.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut request = Vec::new();
+        while !request.windows(4).any(|part| part == b"\r\n\r\n") {
+            let mut chunk = [0_u8; 256];
+            let length = stream.read(&mut chunk).unwrap();
+            assert!(length > 0, "HTTP client closed before sending headers");
+            request.extend_from_slice(&chunk[..length]);
+        }
+        assert!(
+            String::from_utf8_lossy(&request).starts_with("GET /upstream HTTP/1.1"),
+            "{}",
+            String::from_utf8_lossy(&request),
+        );
+        thread::sleep(Duration::from_millis(120));
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello")
+            .unwrap();
+    });
+    let server = ServerProcess::start_with_http_upstream(upstream_port);
+    let port = server.port;
+    let upstream_request = thread::spawn(move || {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .write_all(
+                b"GET /http-client-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    });
+    thread::sleep(Duration::from_millis(30));
+
+    let started = Instant::now();
+    let ping =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(ping.starts_with("HTTP/1.1 200"), "{ping}");
+    assert!(
+        started.elapsed() < Duration::from_millis(80),
+        "upstream HTTP I/O blocked the PHP owner for {:?}",
+        started.elapsed(),
+    );
+    assert_eq!(
+        response_json(&upstream_request.join().unwrap())["body"],
+        "hello",
+    );
+    fake_upstream.join().unwrap();
+}
+
+#[test]
+fn isolated_database_pool_yields_and_keeps_blocking_pdo_outside_the_worker() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let database = std::env::temp_dir().join(format!(
+        "pam-isolated-pdo-{}-{unique}.sqlite",
+        std::process::id(),
+    ));
+    let server = ServerProcess::start_with_isolated_database(&database);
+    let port = server.port;
+    let database_request = thread::spawn(move || {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .write_all(
+                b"GET /isolated-database HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            )
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    });
+    thread::sleep(Duration::from_millis(30));
+
+    let started = Instant::now();
+    let ping =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(ping.starts_with("HTTP/1.1 200"), "{ping}");
+    assert!(
+        started.elapsed() < Duration::from_millis(80),
+        "isolated PDO blocked the PHP owner for {:?}",
+        started.elapsed(),
+    );
+    let response = database_request.join().unwrap();
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert_eq!(response_json(&response)["total"], 45_000_150_000_u64);
+    let _ = fs::remove_file(database);
+}
+
+#[test]
+fn purges_tagged_cache_entries_only_with_valid_credentials() {
+    let server = ServerProcess::start_with_response_cache();
+    let first_raw =
+        server.http_request("GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        !first_raw.to_ascii_lowercase().contains("x-pam-cache-tags"),
+        "internal cache tags must not leak: {first_raw}"
+    );
+    assert_eq!(response_json(&first_raw)["calls"], 1);
+    assert_eq!(
+        response_json(
+            &server.http_request(
+                "GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            )
+        )["calls"],
+        1,
+    );
+
+    let unauthorized = server.http_request(
+        "POST /__pam/cache/purge HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 17\r\nConnection: close\r\n\r\n{\"tag\":\"catalog\"}",
+    );
+    assert!(unauthorized.starts_with("HTTP/1.1 401"), "{unauthorized}");
+
+    let authorized = server.http_request(
+        "POST /__pam/cache/purge HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer pam-test-cache-purge-secret-32-bytes\r\nContent-Type: application/json\r\nContent-Length: 17\r\nConnection: close\r\n\r\n{\"tag\":\"catalog\"}",
+    );
+    assert!(authorized.starts_with("HTTP/1.1 200"), "{authorized}");
+    assert_eq!(response_json(&authorized)["purged"], 1);
+    assert_eq!(
+        response_json(
+            &server.http_request(
+                "GET /cached HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+            )
+        )["calls"],
+        2,
+    );
 }
 
 #[test]

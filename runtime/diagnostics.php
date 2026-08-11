@@ -69,6 +69,11 @@ namespace Pam\Diagnostics {
             unset(self::$subscribers[$subscriberId]);
         }
 
+        public static function enabled(): bool
+        {
+            return self::$environmentEnabled || self::$subscribers !== [];
+        }
+
         /** @param array<string, mixed> $context */
         public static function publish(EventKind $kind, array $context = []): void
         {
@@ -110,15 +115,21 @@ namespace Pam\Diagnostics {
 
     final class Profiler
     {
+        private static bool $enabled = false;
         /** @var array<string, array{started: int, memory: int}> */
         private static array $active = [];
 
         /** @var array<string, array{count: int, durationNanoseconds: int, memoryDeltaBytes: int, peakMemoryBytes: int}> */
         private static array $profiles = [];
 
+        public static function initialize(): void
+        {
+            self::$enabled = getenv('PAM_PROFILE') === '1';
+        }
+
         public static function begin(string $requestId): void
         {
-            if (getenv('PAM_PROFILE') !== '1') {
+            if (!self::$enabled) {
                 return;
             }
             self::$active[$requestId] = [
@@ -185,4 +196,5 @@ namespace Pam\Diagnostics {
     }
 
     Channel::initialize();
+    Profiler::initialize();
 }

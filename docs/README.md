@@ -20,6 +20,7 @@ machine output. Package authors can use the [CLI extension contract](extending-c
 | --- | --- | --- |
 | PAM API | Persistent HTTP and realtime services | `pam init app --template api` |
 | PAM Laravel | Laravel hosted by the persistent runtime | [`laravel.md`](laravel.md) |
+| PAM Octane | Laravel Octane on the PAM transport | [`../packages/octane/README.md`](../packages/octane/README.md) |
 | PAM Native | Android and iOS applications in PHP | [`../pam-native/README.md`](../pam-native/README.md) |
 | PAM Desktop | Servo-hosted desktop applications | `pam init app --template desktop` |
 
@@ -37,6 +38,7 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 - [CLI workflow and automation](cli.md)
 - [Application and package commands](extending-cli.md)
 - [Laravel lifecycle and production behavior](laravel.md)
+- [PAM Octane security boundaries](octane-security.md)
 - [Async runtime](async-runtime.md)
 - [Production operations](production.md)
 - [Compatibility](compatibility.md)

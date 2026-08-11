@@ -22,6 +22,68 @@ $app->get('/ping', static fn (Request $request, Response $response) => $response
     'message' => 'pong',
     'query' => $request->getQuery('query'),
 ]));
+$app->get('/api/pool', static fn (Request $request, Response $response) => $response->json([
+    'pool' => getenv('PAM_WORKER_POOL') ?: null,
+]));
+$app->get('/api/admin/pool', static fn (Request $request, Response $response) => $response->json([
+    'pool' => getenv('PAM_WORKER_POOL') ?: null,
+]));
+$app->get('/pool', static fn (Request $request, Response $response) => $response->json([
+    'pool' => getenv('PAM_WORKER_POOL') ?: null,
+]));
+$app->get('/cached', static function (Request $request, Response $response): Response {
+    $GLOBALS['pam_cache_fixture_calls'] = (int) ($GLOBALS['pam_cache_fixture_calls'] ?? 0) + 1;
+    return $response
+        ->header('Cache-Control', 'public, max-age=30')
+        ->header('X-Pam-Cache-Tags', 'catalog public')
+        ->json(['calls' => $GLOBALS['pam_cache_fixture_calls']]);
+});
+$app->get('/cached-slow', static function (Request $request, Response $response): Response {
+    $GLOBALS['pam_slow_cache_fixture_calls'] = (int) ($GLOBALS['pam_slow_cache_fixture_calls'] ?? 0) + 1;
+    if ($GLOBALS['pam_slow_cache_fixture_calls'] > 1) {
+        \Pam\Async\delay(0.1);
+    }
+    return $response
+        ->header('Cache-Control', 'public, max-age=30')
+        ->json(['calls' => $GLOBALS['pam_slow_cache_fixture_calls']]);
+});
+$redisPort = getenv('PAM_TEST_REDIS_PORT');
+if (is_string($redisPort) && ctype_digit($redisPort)) {
+    $app->get('/redis', static function (Request $request, Response $response) use ($redisPort): Response {
+        $redis = new \Pam\Redis\Client(port: (int) $redisPort, timeout: 2.0);
+        return $response->json([
+            'responses' => $redis->pipeline([
+                ['PING'],
+                ['GET', 'fixture-key'],
+            ]),
+        ]);
+    });
+}
+$httpUpstreamPort = getenv('PAM_TEST_HTTP_UPSTREAM_PORT');
+if (is_string($httpUpstreamPort) && ctype_digit($httpUpstreamPort)) {
+    $app->get('/http-client-slow', static function (Request $request, Response $response) use ($httpUpstreamPort): Response {
+        $upstream = (new \Pam\Http\Client(timeout: 2.0))->get(
+            "http://127.0.0.1:{$httpUpstreamPort}/upstream",
+        );
+        return $response->json(['body' => $upstream->body]);
+    });
+}
+$databasePath = getenv('PAM_TEST_ISOLATED_DATABASE');
+if (is_string($databasePath) && $databasePath !== '') {
+    $app->get('/isolated-database', static function (Request $request, Response $response) use ($databasePath): Response {
+        $database = new \Pam\Database\IsolatedPdoPool(
+            'sqlite:' . $databasePath,
+            maxWorkers: 2,
+            timeout: 3.0,
+        );
+        $result = $database->query(
+            'WITH RECURSIVE values_table(value) AS ('
+            . ' SELECT 1 UNION ALL SELECT value + 1 FROM values_table WHERE value < 300000'
+            . ') SELECT sum(value) AS total FROM values_table',
+        );
+        return $response->json(['total' => $result->rows[0]['total'] ?? null]);
+    });
+}
 $app->post('/echo', static fn (Request $request, Response $response) => $response->json([
     'body' => $request->json(),
     'testHeader' => $request->getHeader('x-pam-test'),
@@ -253,6 +315,16 @@ $options = [
     'maxResponseChunkBytes' => (int) (getenv('PAM_TEST_MAX_RESPONSE_CHUNK_BYTES') ?: 1024 * 1024),
     'leakDetectionSampleRate' => 1,
 ];
+if (getenv('PAM_TEST_RESPONSE_CACHE') === '1') {
+    $options['responseCachePaths'] = ['/cached', '/cached-slow'];
+    $options['responseCacheVaryHeaders'] = ['accept-language'];
+    $options['responseCacheTtlMs'] = (int) (getenv('PAM_TEST_CACHE_TTL') ?: 100);
+    $options['responseCacheStaleWhileRevalidateMs'] = 2_000;
+    $options['responseCacheMaxEntries'] = 16;
+    $options['responseCacheMaxBytes'] = 1048576;
+    $options['responseCachePurgePath'] = '/__pam/cache/purge';
+    $options['responseCachePurgeSecret'] = 'pam-test-cache-purge-secret-32-bytes';
+}
 $tlsCertificate = getenv('PAM_TLS_CERT');
 $tlsKey = getenv('PAM_TLS_KEY');
 if (is_string($tlsCertificate) && $tlsCertificate !== '' && is_string($tlsKey) && $tlsKey !== '') {

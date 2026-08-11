@@ -42,6 +42,7 @@ impl ClusterSnapshot {
                 "id": worker.worker_id,
                 "generation": worker.generation,
                 "pid": worker.pid,
+                "pool": worker.pool,
                 "state": worker.state,
             })).collect::<Vec<_>>(),
         })
@@ -56,9 +57,14 @@ impl ClusterSnapshot {
             "# TYPE pam_http_requests_total counter\n",
             "# TYPE pam_http_errors_total counter\n",
             "# TYPE pam_http_active_requests gauge\n",
-            "# TYPE pam_http_request_duration_seconds counter\n",
+            "# TYPE pam_http_request_duration_seconds histogram\n",
             "# TYPE pam_http_request_bytes_total counter\n",
             "# TYPE pam_http_response_bytes_total counter\n",
+            "# TYPE pam_http_response_cache_hits_total counter\n",
+            "# TYPE pam_http_response_cache_misses_total counter\n",
+            "# TYPE pam_http_response_cache_collapsed_total counter\n",
+            "# TYPE pam_http_response_cache_stale_total counter\n",
+            "# TYPE pam_http_response_cache_purges_total counter\n",
             "# TYPE pam_websocket_connections gauge\n",
             "# TYPE pam_websocket_messages_total counter\n",
             "# TYPE pam_websocket_backpressure_total counter\n",
@@ -66,6 +72,12 @@ impl ClusterSnapshot {
             "# TYPE pam_php_memory_bytes gauge\n",
             "# TYPE pam_php_peak_memory_bytes gauge\n",
             "# TYPE pam_php_fibers gauge\n",
+            "# TYPE pam_pool_workers gauge\n",
+            "# TYPE pam_pool_http_requests_total counter\n",
+            "# TYPE pam_pool_http_errors_total counter\n",
+            "# TYPE pam_pool_http_active_requests gauge\n",
+            "# TYPE pam_pool_process_resident_memory_bytes gauge\n",
+            "# TYPE pam_pool_php_memory_bytes gauge\n",
         ));
         let sum =
             |value: fn(&WorkerRuntimeRecord) -> u64| self.workers.iter().map(value).sum::<u64>();
@@ -76,9 +88,13 @@ impl ClusterSnapshot {
                 "pam_http_requests_total {}\n",
                 "pam_http_errors_total {}\n",
                 "pam_http_active_requests {}\n",
-                "pam_http_request_duration_seconds {:.6}\n",
                 "pam_http_request_bytes_total {}\n",
                 "pam_http_response_bytes_total {}\n",
+                "pam_http_response_cache_hits_total {}\n",
+                "pam_http_response_cache_misses_total {}\n",
+                "pam_http_response_cache_collapsed_total {}\n",
+                "pam_http_response_cache_stale_total {}\n",
+                "pam_http_response_cache_purges_total {}\n",
                 "pam_websocket_connections {}\n",
                 "pam_websocket_messages_total {}\n",
                 "pam_websocket_backpressure_total {}\n",
@@ -92,9 +108,13 @@ impl ClusterSnapshot {
             sum(|worker| worker.metrics.requests),
             sum(|worker| worker.metrics.errors),
             sum(|worker| worker.metrics.active_requests),
-            sum(|worker| worker.metrics.request_duration_micros) as f64 / 1_000_000.0,
             sum(|worker| worker.metrics.request_bytes),
             sum(|worker| worker.metrics.response_bytes),
+            sum(|worker| worker.metrics.response_cache_hits),
+            sum(|worker| worker.metrics.response_cache_misses),
+            sum(|worker| worker.metrics.response_cache_collapsed),
+            sum(|worker| worker.metrics.response_cache_stale),
+            sum(|worker| worker.metrics.response_cache_purges),
             sum(|worker| worker.metrics.websocket_connections),
             sum(|worker| worker.metrics.websocket_messages),
             sum(|worker| worker.metrics.websocket_backpressure),
@@ -103,10 +123,70 @@ impl ClusterSnapshot {
             sum(|worker| worker.metrics.php_peak_memory_bytes),
             sum(|worker| worker.metrics.php_fibers),
         ));
+        let labels = [
+            "0.0001", "0.0005", "0.001", "0.005", "0.01", "0.05", "0.1", "0.5", "1", "5", "+Inf",
+        ];
+        let mut cumulative = 0_u64;
+        for (index, label) in labels.iter().enumerate() {
+            cumulative = cumulative.saturating_add(
+                self.workers
+                    .iter()
+                    .map(|worker| worker.metrics.request_duration_buckets[index])
+                    .sum::<u64>(),
+            );
+            output.push_str(&format!(
+                "pam_http_request_duration_seconds_bucket{{le=\"{label}\"}} {cumulative}\n"
+            ));
+        }
+        output.push_str(&format!(
+            "pam_http_request_duration_seconds_sum {:.6}\npam_http_request_duration_seconds_count {}\n",
+            sum(|worker| worker.metrics.request_duration_micros) as f64 / 1_000_000.0,
+            sum(|worker| worker.metrics.requests),
+        ));
         for worker in &self.workers {
             output.push_str(&format!(
-                "pam_cluster_worker_info{{worker=\"{}\",generation=\"{}\",pid=\"{}\",state=\"{}\"}} 1\n",
+                "pam_cluster_worker_info{{worker=\"{}\",generation=\"{}\",pid=\"{}\",state=\"{}\",pool=\"{}\"}} 1\n",
                 worker.worker_id, worker.generation, worker.pid, worker.state,
+                worker.pool.as_deref().unwrap_or("default"),
+            ));
+        }
+        let mut pools = self
+            .workers
+            .iter()
+            .map(|worker| worker.pool.as_deref().unwrap_or("default"))
+            .collect::<Vec<_>>();
+        pools.sort_unstable();
+        pools.dedup();
+        for pool in pools {
+            let workers = self
+                .workers
+                .iter()
+                .filter(|worker| worker.pool.as_deref().unwrap_or("default") == pool)
+                .collect::<Vec<_>>();
+            let sum = |value: fn(&WorkerRuntimeRecord) -> u64| {
+                workers.iter().map(|worker| value(worker)).sum::<u64>()
+            };
+            output.push_str(&format!(
+                concat!(
+                    "pam_pool_workers{{pool=\"{}\"}} {}\n",
+                    "pam_pool_http_requests_total{{pool=\"{}\"}} {}\n",
+                    "pam_pool_http_errors_total{{pool=\"{}\"}} {}\n",
+                    "pam_pool_http_active_requests{{pool=\"{}\"}} {}\n",
+                    "pam_pool_process_resident_memory_bytes{{pool=\"{}\"}} {}\n",
+                    "pam_pool_php_memory_bytes{{pool=\"{}\"}} {}\n",
+                ),
+                pool,
+                workers.len(),
+                pool,
+                sum(|worker| worker.metrics.requests),
+                pool,
+                sum(|worker| worker.metrics.errors),
+                pool,
+                sum(|worker| worker.metrics.active_requests),
+                pool,
+                sum(|worker| worker.metrics.resident_memory_bytes),
+                pool,
+                sum(|worker| worker.metrics.php_memory_bytes),
             ));
         }
         output

@@ -1,0 +1,32 @@
+version: 2
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      rust-runtime:
+        patterns:
+          - "*"
+
+  - package-ecosystem: composer
+    directory: /packages/octane
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      octane-production:
+        dependency-type: production
+      octane-development:
+        dependency-type: development
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "*"

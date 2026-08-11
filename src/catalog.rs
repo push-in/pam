@@ -83,6 +83,18 @@ pub const COMMANDS: &[CommandSpec] = &[
         "Ship",
     ),
     command("start", "Run a supervised server cluster", "Runtime"),
+    command(
+        "octane:start",
+        "Start Laravel Octane on the PAM runtime",
+        "Runtime",
+    ),
+    command("octane:status", "Inspect the PAM Octane master", "Runtime"),
+    command(
+        "octane:reload",
+        "Reload PAM Octane without downtime",
+        "Runtime",
+    ),
+    command("octane:stop", "Gracefully stop PAM Octane", "Runtime"),
     command("exec", "Execute a PHP script explicitly", "Runtime"),
     command("inspect", "Inspect runtime capabilities", "Observe"),
     command("routes", "List application routes", "Observe"),

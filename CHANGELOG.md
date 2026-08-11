@@ -1,7 +1,20 @@
 # Changelog
 
-## Unreleased
+## 1.0.3 - 2026-08-11
 
+- Add the optional `pushinbr/pam-octane` bridge for Laravel Octane 2.19+ on
+  Laravel 12 and 13, preserving Octane's worker lifecycle over PAM's native
+  Rust/Tokio HTTP transport.
+- Add supervised `pam octane:start`, `octane:status`, `octane:reload` and
+  `octane:stop` commands with independent route-aware worker pools.
+- Add bounded public response caching, authenticated tag invalidation,
+  stale-while-revalidate and bounded route metrics for Octane workloads.
+- Add cooperative HTTP/Redis I/O, isolated bounded PDO execution and protocol
+  fuzzing contracts used by persistent Laravel workers.
+- Add a PHP 8.4 × Laravel 12/13 package matrix, native end-to-end smoke,
+  public-release installation smoke and reproducible benchmark/soak gates.
+- Add PAM Octane publication metadata, community templates, security guidance,
+  release checklist and private vulnerability reporting instructions.
 - Updated `pam init --template desktop` to the PAM Desktop 1.2
   convention-first API with `#[Desktop]`, typed method commands, listeners,
   dependency injection, explicit permissions, and typed named windows.

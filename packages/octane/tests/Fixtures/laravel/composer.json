@@ -1,0 +1,10 @@
+{
+    "name": "pam/octane-fixture",
+    "type": "project",
+    "require": {
+        "php": "^8.4",
+        "laravel/framework": "^13.0",
+        "laravel/octane": "^2.19",
+        "pushinbr/pam-octane": "@dev"
+    }
+}

@@ -4,6 +4,10 @@
 /.idea/
 /.vscode/
 /dist/
+/benchmarks/octane/results/
+/fuzz/artifacts/
+/fuzz/coverage/
+/fuzz/target/
 **/.env
 **/*.log
 **/.DS_Store

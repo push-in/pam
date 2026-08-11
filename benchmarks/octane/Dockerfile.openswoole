@@ -1,0 +1,20 @@
+FROM php:8.4.24-cli-bookworm@sha256:5380a7dd17b978cd14fb2c84cd67ddc47adaf079b240f8138224bbadefae46f7
+
+ARG OPENSWOOLE_VERSION=25.2.0
+ARG OPENSWOOLE_SHA256=bcc1fed4877b6646cb8f79b092ba03d5e495800465a3fff83c065c58d4312d40
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    && curl -fsSL "https://pecl.php.net/get/openswoole-${OPENSWOOLE_VERSION}.tgz" \
+        -o /tmp/openswoole.tgz \
+    && echo "${OPENSWOOLE_SHA256}  /tmp/openswoole.tgz" | sha256sum -c - \
+    && mkdir /tmp/openswoole \
+    && tar -xzf /tmp/openswoole.tgz --strip-components=1 -C /tmp/openswoole \
+    && cd /tmp/openswoole \
+    && phpize \
+    && ./configure --enable-openswoole \
+    && make -j"$(nproc)" \
+    && make install \
+    && docker-php-ext-enable openswoole \
+    && docker-php-ext-install -j"$(nproc)" opcache pcntl \
+    && rm -rf /tmp/openswoole /tmp/openswoole.tgz /var/lib/apt/lists/*

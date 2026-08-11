@@ -8,6 +8,8 @@ fn main() {
     println!("cargo:rerun-if-changed=native/pam_php.c");
     println!("cargo:rerun-if-changed=native/pam.h");
     println!("cargo:rerun-if-changed=runtime/bootstrap.php");
+    println!("cargo:rerun-if-changed=runtime/redis.php");
+    println!("cargo:rerun-if-changed=runtime/database.php");
     println!("cargo:rerun-if-changed=runtime/laravel.php");
     println!("cargo:rerun-if-changed=runtime/composer_bootstrap.php");
     println!("cargo:rerun-if-env-changed=CC");

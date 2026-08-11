@@ -42,6 +42,13 @@
             "repository": "pam-skeleton",
             "deploySecret": "PAM_SKELETON_DEPLOY_KEY",
             "description": "Production-ready starter application for the PAM runtime."
+        },
+        {
+            "name": "pushinbr/pam-octane",
+            "path": "packages/octane",
+            "repository": "pam-octane",
+            "deploySecret": "PAM_OCTANE_DEPLOY_KEY",
+            "description": "Laravel Octane bridge for the PAM runtime."
         }
     ]
 }

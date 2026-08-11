@@ -17,7 +17,9 @@ const ASYNC_BOOTSTRAP: &str = include_str!("../runtime/async.php");
 const IO_BOOTSTRAP: &str = include_str!("../runtime/io.php");
 const STREAMS_BOOTSTRAP: &str = include_str!("../runtime/streams.php");
 const HTTP_CLIENT_BOOTSTRAP: &str = include_str!("../runtime/http_client.php");
+const REDIS_BOOTSTRAP: &str = include_str!("../runtime/redis.php");
 const TASKS_BOOTSTRAP: &str = include_str!("../runtime/tasks.php");
+const DATABASE_BOOTSTRAP: &str = include_str!("../runtime/database.php");
 const WS_BOOTSTRAP: &str = include_str!("../runtime/ws.php");
 const OBSERVABILITY_BOOTSTRAP: &str = include_str!("../runtime/observability.php");
 const SCOPE_BOOTSTRAP: &str = include_str!("../runtime/scope.php");
@@ -99,6 +101,8 @@ pub struct ServerConfig {
     pub request_timeout_ms: u64,
     #[serde(default = "default_max_concurrent_requests")]
     pub max_concurrent_requests: usize,
+    #[serde(default = "default_php_executor_queue_capacity")]
+    pub php_executor_queue_capacity: usize,
     #[serde(default = "default_response_stream_queue_capacity")]
     pub response_stream_queue_capacity: usize,
     #[serde(default = "default_max_response_bytes")]
@@ -142,6 +146,28 @@ pub struct ServerConfig {
     #[serde(default = "default_access_log_sample_rate")]
     pub access_log_sample_rate: u64,
     #[serde(default)]
+    pub route_metrics: bool,
+    #[serde(default = "default_route_metrics_max_entries")]
+    pub route_metrics_max_entries: usize,
+    #[serde(default)]
+    pub response_cache_paths: Vec<String>,
+    #[serde(default)]
+    pub response_cache_vary_headers: Vec<String>,
+    #[serde(default = "default_response_cache_ttl_ms")]
+    pub response_cache_ttl_ms: u64,
+    #[serde(default)]
+    pub response_cache_stale_while_revalidate_ms: u64,
+    #[serde(default = "default_response_cache_max_entries")]
+    pub response_cache_max_entries: usize,
+    #[serde(default = "default_response_cache_max_bytes")]
+    pub response_cache_max_bytes: usize,
+    #[serde(default)]
+    pub response_cache_purge_path: Option<String>,
+    #[serde(default)]
+    pub response_cache_purge_secret: Option<String>,
+    #[serde(default = "default_response_cache_tag_header")]
+    pub response_cache_tag_header: String,
+    #[serde(default)]
     pub websocket_resume_secret: Option<String>,
     #[serde(default = "default_websocket_resume_ttl_seconds")]
     pub websocket_resume_ttl_seconds: u64,
@@ -162,6 +188,9 @@ fn default_request_timeout_ms() -> u64 {
 fn default_max_concurrent_requests() -> usize {
     4096
 }
+fn default_php_executor_queue_capacity() -> usize {
+    1_024
+}
 fn default_response_stream_queue_capacity() -> usize {
     16
 }
@@ -170,6 +199,18 @@ fn default_max_response_bytes() -> usize {
 }
 fn default_max_response_chunk_bytes() -> usize {
     1024 * 1024
+}
+fn default_response_cache_ttl_ms() -> u64 {
+    30_000
+}
+fn default_response_cache_max_entries() -> usize {
+    1_024
+}
+fn default_response_cache_max_bytes() -> usize {
+    64 * 1024 * 1024
+}
+fn default_response_cache_tag_header() -> String {
+    "x-pam-cache-tags".to_owned()
 }
 fn default_header_read_timeout_ms() -> u64 {
     10_000
@@ -203,6 +244,9 @@ fn default_websocket_compression() -> bool {
 }
 fn default_access_log_sample_rate() -> u64 {
     1
+}
+fn default_route_metrics_max_entries() -> usize {
+    256
 }
 fn default_websocket_resume_ttl_seconds() -> u64 {
     86_400
@@ -334,7 +378,9 @@ impl PhpRuntime {
             .and_then(|()| {
                 evaluate_runtime_source(HTTP_CLIENT_BOOTSTRAP, b"Pam HTTP client bootstrap\0")
             })
+            .and_then(|()| evaluate_runtime_source(REDIS_BOOTSTRAP, b"Pam Redis bootstrap\0"))
             .and_then(|()| evaluate_runtime_source(TASKS_BOOTSTRAP, b"Pam tasks bootstrap\0"))
+            .and_then(|()| evaluate_runtime_source(DATABASE_BOOTSTRAP, b"Pam database bootstrap\0"))
             .and_then(|()| evaluate_runtime_source(WS_BOOTSTRAP, b"Pam WebSocket bootstrap\0"))
             .and_then(|()| {
                 evaluate_runtime_source(OBSERVABILITY_BOOTSTRAP, b"Pam observability bootstrap\0")
@@ -458,9 +504,9 @@ pub fn dispatch_http(
     body: &[u8],
     context_json: &str,
     request_id: &str,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     ensure_owner()?;
-    call_for_string(|output, length| {
+    call_for_bytes(|output, length| {
         // SAFETY: All slices remain valid for the synchronous call; PHP runs only on
         // the owner thread and allocates the returned buffer for call_for_string.
         unsafe {
@@ -488,9 +534,9 @@ pub fn resume_http(
     request_id: &str,
     body: &[u8],
     operation_result: &str,
-) -> Result<String, String> {
+) -> Result<Vec<u8>, String> {
     ensure_owner()?;
-    call_for_string(|output, length| {
+    call_for_bytes(|output, length| {
         // SAFETY: Buffers remain valid for this synchronous owner-thread call.
         unsafe {
             pam_php_resume_http(
@@ -565,6 +611,22 @@ fn call_for_string(
     // SAFETY: The buffer came from the matching C allocation function.
     unsafe { pam_php_string_free(output) };
     result
+}
+
+fn call_for_bytes(
+    call: impl FnOnce(*mut *mut c_char, *mut usize) -> c_int,
+) -> Result<Vec<u8>, String> {
+    let mut output = ptr::null_mut();
+    let mut output_length = 0;
+    let status = call(&mut output, &mut output_length);
+    if status != 0 || output.is_null() {
+        return Err(format!("PHP dispatch failed with status {status}"));
+    }
+    // SAFETY: A successful C call returns an allocation of output_length bytes.
+    let result = unsafe { std::slice::from_raw_parts(output.cast::<u8>(), output_length) }.to_vec();
+    // SAFETY: The buffer came from the matching C allocation function.
+    unsafe { pam_php_string_free(output) };
+    Ok(result)
 }
 
 fn ensure_owner() -> Result<(), String> {

@@ -42,9 +42,11 @@ namespace Pam\Observability {
             if (is_object($scope) && method_exists($scope, 'detach')) {
                 $scope->detach();
             }
-            \Pam\Async\FiberContext::remove(self::REQUEST_SCOPE);
-            \Pam\Async\FiberContext::remove(self::REQUEST_ID);
-            \Pam\Async\FiberContext::remove(self::TRACEPARENT);
+            \Pam\Async\FiberContext::removeMany([
+                self::REQUEST_SCOPE,
+                self::REQUEST_ID,
+                self::TRACEPARENT,
+            ]);
         }
 
         /** @param array<string, mixed> $context */

@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
+use tungstenite::{Message, connect};
 
 const SIGHUP: i32 = 1;
 const SIGKILL: i32 = 9;
@@ -13,6 +14,133 @@ const SIGTERM: i32 = 15;
 
 unsafe extern "C" {
     fn kill(process_id: i32, signal: i32) -> i32;
+}
+
+#[test]
+fn routes_requests_to_isolated_specialized_pools() {
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let admin_probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let admin_port = admin_probe.local_addr().unwrap().port();
+    drop(admin_probe);
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/server.php");
+    let child = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args([
+            "start",
+            script.to_str().unwrap(),
+            "--ingress-address",
+            &format!("127.0.0.1:{port}"),
+            "--pool",
+            "api=1@/api,/a/very-long-prefix",
+            "--pool",
+            "admin=1@/api/admin",
+            "--pool",
+            "web=1@*",
+            "--startup-timeout",
+            "3000",
+            "--admin-address",
+            &format!("127.0.0.1:{admin_port}"),
+        ])
+        .env("PAM_TEST_PORT", "3000")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut cluster = ClusterProcess {
+        child,
+        port,
+        admin_port,
+    };
+    cluster.wait_for_workers(3);
+    let api = cluster.request_path("/api/pool").unwrap();
+    let web = cluster.request_path("/pool").unwrap();
+    assert!(api.contains(r#""pool":"api""#), "{api}");
+    assert!(web.contains(r#""pool":"web""#), "{web}");
+    let admin = cluster.request_path("/api/admin/pool").unwrap();
+    assert!(admin.contains(r#""pool":"admin""#), "{admin}");
+
+    let ready = cluster.admin_request("/ready");
+    let ready_body = ready.split_once("\r\n\r\n").unwrap().1;
+    let snapshot: serde_json::Value = serde_json::from_str(ready_body).unwrap();
+    let api_pid = snapshot["workers"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|worker| worker["pool"] == "api")
+        .unwrap()["pid"]
+        .as_u64()
+        .unwrap() as i32;
+    // A crash in the API heap must not interrupt the independent web pool.
+    assert_eq!(unsafe { kill(api_pid, SIGKILL) }, 0);
+    assert!(
+        cluster
+            .request_path("/pool")
+            .unwrap()
+            .contains(r#""pool":"web""#)
+    );
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if cluster.request_path("/api/pool").is_ok() {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        cluster
+            .request_path("/api/pool")
+            .unwrap()
+            .contains(r#""pool":"api""#)
+    );
+
+    let metrics_deadline = Instant::now() + Duration::from_secs(2);
+    let metrics = loop {
+        let metrics = cluster.admin_request("/metrics");
+        if metrics.contains("pam_pool_http_requests_total{pool=\"api\"}") {
+            break metrics;
+        }
+        assert!(
+            Instant::now() < metrics_deadline,
+            "pool metrics were not published: {metrics}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        metrics.contains("pam_pool_workers{pool=\"api\"} 1"),
+        "{metrics}"
+    );
+    assert!(
+        metrics.contains("pam_pool_workers{pool=\"web\"} 1"),
+        "{metrics}"
+    );
+
+    cluster.signal(SIGHUP);
+    let reload_deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < reload_deadline {
+        let response = cluster.admin_request("/ready");
+        if response.contains(r#""generation":2"#) && response.starts_with("HTTP/1.1 200") {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        cluster
+            .request_path("/api/pool")
+            .unwrap()
+            .contains(r#""pool":"api""#)
+    );
+    assert!(
+        cluster
+            .request_path("/pool")
+            .unwrap()
+            .contains(r#""pool":"web""#)
+    );
+    let (mut socket, upgrade) = connect(format!("ws://127.0.0.1:{port}/ws")).unwrap();
+    assert_eq!(upgrade.status().as_u16(), 101);
+    let welcome = socket.read().unwrap().into_text().unwrap();
+    assert!(welcome.contains("welcome"), "{welcome}");
+    socket.send(Message::Close(None)).unwrap();
 }
 
 struct ClusterProcess {
@@ -24,6 +152,47 @@ struct ClusterProcess {
 impl ClusterProcess {
     fn start(max_requests: u64) -> Self {
         Self::start_with(max_requests, 2, None, None)
+    }
+
+    fn start_with_cache() -> Self {
+        let mut cluster = Self::start_with(1_000, 2, None, None);
+        cluster.stop();
+
+        let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let admin_probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let admin_port = admin_probe.local_addr().unwrap().port();
+        drop(admin_probe);
+        let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/server.php");
+        let child = Command::new(env!("CARGO_BIN_EXE_pam"))
+            .args([
+                "start",
+                script.to_str().unwrap(),
+                "--workers",
+                "2",
+                "--max-requests",
+                "1000",
+                "--startup-timeout",
+                "2000",
+                "--admin-address",
+                &format!("127.0.0.1:{admin_port}"),
+            ])
+            .env("PAM_TEST_PORT", port.to_string())
+            .env("PAM_TEST_RESPONSE_CACHE", "1")
+            .env("PAM_TEST_CACHE_TTL", "30000")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        cluster = Self {
+            child,
+            port,
+            admin_port,
+        };
+        cluster.wait_for_workers(2);
+        cluster
     }
 
     fn start_with(
@@ -122,6 +291,14 @@ impl ClusterProcess {
         Ok(response)
     }
 
+    fn raw_request(&self, request: &str) -> String {
+        let mut stream = TcpStream::connect(("127.0.0.1", self.port)).unwrap();
+        stream.write_all(request.as_bytes()).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    }
+
     fn admin_request(&self, path: &str) -> String {
         let mut stream = TcpStream::connect(("127.0.0.1", self.admin_port)).unwrap();
         stream
@@ -209,6 +386,46 @@ fn request_identity(response: &str) -> (String, String) {
     (worker, process)
 }
 
+fn response_calls(response: &str) -> u64 {
+    let body = response.split_once("\r\n\r\n").unwrap().1;
+    serde_json::from_str::<serde_json::Value>(body).unwrap()["calls"]
+        .as_u64()
+        .unwrap()
+}
+
+#[test]
+fn propagates_tagged_cache_purges_to_every_worker() {
+    let mut cluster = ClusterProcess::start_with_cache();
+    let mut warmed = HashSet::new();
+    for _ in 0..40 {
+        let response = cluster.request_path("/cached").unwrap();
+        warmed.insert(request_identity(&response).0);
+        assert_eq!(response_calls(&response), 1, "{response}");
+        if warmed.len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(warmed.len(), 2, "both worker caches must be warmed");
+
+    let purge = cluster.raw_request(
+        "POST /__pam/cache/purge HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer pam-test-cache-purge-secret-32-bytes\r\nContent-Type: application/json\r\nContent-Length: 17\r\nConnection: close\r\n\r\n{\"tag\":\"catalog\"}",
+    );
+    assert!(purge.starts_with("HTTP/1.1 200"), "{purge}");
+    thread::sleep(Duration::from_millis(150));
+
+    let mut refreshed = HashSet::new();
+    for _ in 0..40 {
+        let response = cluster.request_path("/cached").unwrap();
+        refreshed.insert(request_identity(&response).0);
+        assert_eq!(response_calls(&response), 2, "{response}");
+        if refreshed.len() == 2 {
+            break;
+        }
+    }
+    assert_eq!(refreshed.len(), 2, "purge must reach both workers");
+    cluster.stop();
+}
+
 #[test]
 fn recycles_workers_after_the_request_limit() {
     let mut cluster = ClusterProcess::start(3);
@@ -290,6 +507,14 @@ fn exposes_independent_health_and_aggregate_metrics() {
     assert!(metrics.contains("pam_cluster_workers 2"), "{metrics}");
     assert!(metrics.contains("pam_http_requests_total"), "{metrics}");
     assert!(metrics.contains("pam_http_errors_total 0"), "{metrics}");
+    assert!(
+        metrics.contains("# TYPE pam_http_request_duration_seconds histogram"),
+        "{metrics}"
+    );
+    assert!(
+        metrics.contains("pam_http_request_duration_seconds_bucket{le=\"+Inf\"}"),
+        "{metrics}"
+    );
     let baseline_requests = metric_value(&metrics, "pam_http_requests_total");
     for _ in 0..10 {
         cluster.request_with_retry();

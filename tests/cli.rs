@@ -522,6 +522,12 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     assert!(start_help.contains("--admin-address IP:PORT"));
     assert!(start_help.contains("$ pam start index.php --workers 4"));
 
+    let octane_help = run_pam(&["help", "octane:start"]);
+    assert!(octane_help.status.success());
+    let octane_help = String::from_utf8_lossy(&octane_help.stderr);
+    assert!(octane_help.contains("PAM / OCTANE:START"));
+    assert!(octane_help.contains("--host ADDRESS"));
+
     let init_help = run_pam(&["init", "--help"]);
     assert!(init_help.status.success());
     let init_help = String::from_utf8_lossy(&init_help.stderr);

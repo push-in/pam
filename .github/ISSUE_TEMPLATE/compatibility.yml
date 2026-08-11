@@ -1,0 +1,30 @@
+name: Compatibility report
+description: Report a Composer package, extension or Laravel integration gap.
+title: "compat: "
+labels: [compatibility]
+body:
+  - type: input
+    id: component
+    attributes:
+      label: Package or extension
+      description: Exact package/extension name and version.
+    validations:
+      required: true
+  - type: input
+    id: matrix
+    attributes:
+      label: Runtime matrix
+      description: PAM, PHP, Laravel and Octane versions.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction and observed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: persistent_state
+    attributes:
+      label: Persistent-state assessment
+      description: Note globals, singletons, handlers, blocking I/O or SAPI assumptions involved.

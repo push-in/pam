@@ -54,6 +54,10 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Runtime
 
 - `pam start` — Run a supervised server cluster.
+- `pam octane:start` — Start Laravel Octane on the PAM runtime.
+- `pam octane:status` — Inspect the PAM Octane master.
+- `pam octane:reload` — Reload PAM Octane without downtime.
+- `pam octane:stop` — Gracefully stop PAM Octane.
 - `pam exec` — Execute a PHP script explicitly.
 ## Observe
 

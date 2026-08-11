@@ -265,14 +265,25 @@ namespace Pam\Http {
     {
         private readonly \Closure $handler;
 
-        public function __construct(callable $handler)
+        public function __construct(callable $handler, private readonly bool $native = false)
         {
             $this->handler = \Closure::fromCallable($handler);
         }
 
         public static function create(callable $handler): self
         {
-            return new self($handler);
+            return new self($handler, false);
+        }
+
+        /**
+         * Register a runtime-aware handler that reads the request from the SAPI
+         * environment and receives only the PAM response transport.
+         *
+         * @param callable(Response):mixed $handler
+         */
+        public static function createNative(callable $handler): self
+        {
+            return new self($handler, true);
         }
 
         /** @param array<string, mixed> $options */
@@ -281,7 +292,11 @@ namespace Pam\Http {
             string $host = '127.0.0.1',
             array $options = [],
         ): void {
-            \Pam\Internal\Runtime::registerHttpHandler($this->handler);
+            if ($this->native) {
+                \Pam\Internal\Runtime::registerNativeHttpHandler($this->handler);
+            } else {
+                \Pam\Internal\Runtime::registerHttpHandler($this->handler);
+            }
             \Pam\Internal\Runtime::listen($port, $host, $options);
         }
     }
@@ -513,6 +528,8 @@ namespace Pam\Internal {
 
         private static ?\Closure $httpHandler = null;
 
+        private static ?\Closure $nativeHttpHandler = null;
+
         /** @var list<array{method: string, path: string, kind: int}> */
         private static array $routeMetadata = [];
 
@@ -549,10 +566,18 @@ namespace Pam\Internal {
 
         public static function registerHttpHandler(callable $handler): void
         {
-            if (self::$httpHandler !== null) {
+            if (self::$httpHandler !== null || self::$nativeHttpHandler !== null) {
                 throw new \LogicException('An HTTP application handler is already registered.');
             }
             self::$httpHandler = \Closure::fromCallable($handler);
+        }
+
+        public static function registerNativeHttpHandler(callable $handler): void
+        {
+            if (self::$httpHandler !== null || self::$nativeHttpHandler !== null) {
+                throw new \LogicException('An HTTP application handler is already registered.');
+            }
+            self::$nativeHttpHandler = \Closure::fromCallable($handler);
         }
 
         public static function describeRoute(string $method, string $path): void
@@ -620,6 +645,7 @@ namespace Pam\Internal {
                 'maxHeaders' => self::integerOption($options, 'maxHeaders', 100),
                 'requestTimeoutMs' => self::integerOption($options, 'requestTimeoutMs', 30_000),
                 'maxConcurrentRequests' => self::integerOption($options, 'maxConcurrentRequests', 4096),
+                'phpExecutorQueueCapacity' => self::integerOption($options, 'phpExecutorQueueCapacity', 1_024),
                 'responseStreamQueueCapacity' => $responseStreamQueueCapacity,
                 'maxResponseBytes' => $maxResponseBytes,
                 'maxResponseChunkBytes' => $maxResponseChunkBytes,
@@ -642,6 +668,17 @@ namespace Pam\Internal {
                 'telemetryHeaders' => self::booleanOption($options, 'telemetryHeaders', false),
                 'accessLog' => self::booleanOption($options, 'accessLog', false),
                 'accessLogSampleRate' => self::integerOption($options, 'accessLogSampleRate', 1),
+                'routeMetrics' => self::booleanOption($options, 'routeMetrics', false),
+                'routeMetricsMaxEntries' => self::integerOption($options, 'routeMetricsMaxEntries', 256),
+                'responseCachePaths' => self::absolutePathListOption($options, 'responseCachePaths'),
+                'responseCacheVaryHeaders' => self::stringListOption($options, 'responseCacheVaryHeaders'),
+                'responseCacheTtlMs' => self::integerOption($options, 'responseCacheTtlMs', 30_000),
+                'responseCacheStaleWhileRevalidateMs' => self::integerOption($options, 'responseCacheStaleWhileRevalidateMs', 0, true),
+                'responseCacheMaxEntries' => self::integerOption($options, 'responseCacheMaxEntries', 1_024),
+                'responseCacheMaxBytes' => self::integerOption($options, 'responseCacheMaxBytes', 64 * 1024 * 1024),
+                'responseCachePurgePath' => self::nullableStringOption($options, 'responseCachePurgePath'),
+                'responseCachePurgeSecret' => self::nullableStringOption($options, 'responseCachePurgeSecret'),
+                'responseCacheTagHeader' => self::stringOption($options, 'responseCacheTagHeader', 'x-pam-cache-tags'),
                 'gcCollectCyclesEvery' => self::integerOption($options, 'gcCollectCyclesEvery', 256, true),
                 'gcMemCachesEvery' => self::integerOption($options, 'gcMemCachesEvery', 1024, true),
                 'leakDetectionSampleRate' => self::integerOption(
@@ -668,6 +705,19 @@ namespace Pam\Internal {
                 throw new \InvalidArgumentException("{$key} must be a boolean.");
             }
             return $value;
+        }
+
+        /** @param array<string, mixed> $options @return list<string> */
+        private static function absolutePathListOption(array $options, string $key): array
+        {
+            $values = self::stringListOption($options, $key);
+            foreach ($values as $value) {
+                if ($value === '' || $value[0] !== '/') {
+                    throw new \InvalidArgumentException("{$key} entries must be absolute HTTP paths.");
+                }
+            }
+
+            return array_values(array_unique($values));
         }
 
         /** @param array<string, mixed> $options */
@@ -807,7 +857,8 @@ namespace Pam\Internal {
                     'path' => '*',
                     'kind' => RouteKind::Psr->value,
                 ];
-            } elseif (self::$httpHandler !== null && self::$routeMetadata === []) {
+            } elseif ((self::$httpHandler !== null || self::$nativeHttpHandler !== null)
+                && self::$routeMetadata === []) {
                 $routes[] = [
                     'method' => '*',
                     'path' => '*',
@@ -944,6 +995,9 @@ namespace Pam\Internal {
             }
 
             $response = $envelope['response'] ?? null;
+            if (is_array($response)) {
+                $response = json_encode($response, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            }
             if (!is_string($response)) {
                 throw new \RuntimeException('The HTTP dispatch completed without a response.');
             }
@@ -1005,15 +1059,19 @@ namespace Pam\Internal {
                     $fiberRequestId,
                 );
                 \Pam\Diagnostics\Profiler::begin($profileRequestId);
-                \Pam\Diagnostics\Channel::publish(
-                    \Pam\Diagnostics\EventKind::RequestStart,
-                    ['method' => strtoupper($method), 'target' => $target],
-                );
+                if (\Pam\Diagnostics\Channel::enabled()) {
+                    \Pam\Diagnostics\Channel::publish(
+                        \Pam\Diagnostics\EventKind::RequestStart,
+                        ['method' => strtoupper($method), 'target' => $target],
+                    );
+                }
                 $incomingSessionId = $cookies[session_name()] ?? null;
                 if (session_status() === PHP_SESSION_NONE && is_string($incomingSessionId)) {
                     session_id($incomingSessionId);
                 }
-                $request = new Request(strtoupper($method), $path, $query, $headers, $body);
+                $request = self::$nativeHttpHandler === null
+                    ? new Request(strtoupper($method), $path, $query, $headers, $body)
+                    : null;
                 $handler = self::$routes[strtoupper($method)][$path] ?? null;
 
                 if (self::$psrHandler !== null) {
@@ -1027,10 +1085,16 @@ namespace Pam\Internal {
                         $parsedBody,
                         $psrUploads,
                     );
-                    $serialized = json_encode(
+                    $serialized = self::encodeHttpResponse(
                         self::mergeNativePsrHeaders(self::exportPsrResponse($psrResponse)),
-                        JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE,
                     );
+                } elseif (self::$nativeHttpHandler !== null) {
+                    $result = (self::$nativeHttpHandler)($response);
+                    if ($result instanceof Response) {
+                        $response = $result;
+                    } elseif ($result !== null && $response->isEmpty()) {
+                        $response->send($result);
+                    }
                 } elseif (self::$httpHandler !== null) {
                     $result = (self::$httpHandler)($request, $response);
                     if ($result instanceof Response) {
@@ -1051,13 +1115,10 @@ namespace Pam\Internal {
 
                 if (!isset($serialized)) {
                     self::mergeNativeHeaders($response);
-                    $serialized = json_encode(
-                        $response->export(),
-                        JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE,
-                    );
+                    $serialized = self::encodeHttpResponse($response->export());
                 }
             } catch (HttpRequestCancelled $error) {
-                $serialized = json_encode([
+                $serialized = self::encodeHttpResponse([
                     'status' => 499,
                     'headers' => ['content-type' => ['application/json; charset=utf-8']],
                     'body' => json_encode(
@@ -1065,7 +1126,7 @@ namespace Pam\Internal {
                         JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE,
                     ),
                     'chunks' => [],
-                ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+                ]);
             } catch (\Throwable $error) {
                 \Pam\Observability\Telemetry::log('error', 'Unhandled request exception', [
                     'exception' => $error::class,
@@ -1074,7 +1135,7 @@ namespace Pam\Internal {
                     'line' => $error->getLine(),
                 ]);
                 $exposeErrors = (bool) (self::$server['exposeErrors'] ?? false);
-                $serialized = json_encode([
+                $serialized = self::encodeHttpResponse([
                     'status' => 500,
                     'headers' => ['content-type' => ['application/json; charset=utf-8']],
                     'body' => json_encode(
@@ -1087,12 +1148,14 @@ namespace Pam\Internal {
                         JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE,
                     ),
                     'chunks' => [],
-                ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+                ]);
             } finally {
-                \Pam\Diagnostics\Channel::publish(
-                    \Pam\Diagnostics\EventKind::Cleanup,
-                    ['requestId' => $profileRequestId ?? null],
-                );
+                if (\Pam\Diagnostics\Channel::enabled()) {
+                    \Pam\Diagnostics\Channel::publish(
+                        \Pam\Diagnostics\EventKind::Cleanup,
+                        ['requestId' => $profileRequestId ?? null],
+                    );
+                }
                 \Pam\Runtime\RequestScope::finish(
                     self::serverInteger('leakThresholdBytes', 8 * 1024 * 1024),
                 );
@@ -1111,10 +1174,12 @@ namespace Pam\Internal {
                 if (isset($profileRequestId)) {
                     \Pam\Diagnostics\Profiler::finish($profileRequestId);
                 }
-                \Pam\Diagnostics\Channel::publish(
-                    \Pam\Diagnostics\EventKind::RequestEnd,
-                    ['requestId' => $profileRequestId ?? null],
-                );
+                if (\Pam\Diagnostics\Channel::enabled()) {
+                    \Pam\Diagnostics\Channel::publish(
+                        \Pam\Diagnostics\EventKind::RequestEnd,
+                        ['requestId' => $profileRequestId ?? null],
+                    );
+                }
                 \Pam\Async\Scheduler::reset();
                 \Pam\Async\FiberContext::clear();
                 foreach ($temporaryUploads as $temporaryUpload) {
@@ -1209,10 +1274,7 @@ namespace Pam\Internal {
             self::clearHttpEnvironment();
             self::collectRequestMemory();
 
-            return json_encode([
-                'state' => HttpDispatchState::Complete->value,
-                'response' => $serialized,
-            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            return "\x89PAM\x01".$serialized;
         }
 
         private static function captureHttpEnvironment(PendingHttpDispatch $dispatch): void
@@ -1230,7 +1292,7 @@ namespace Pam\Internal {
                 '_FILES' => $_FILES,
                 '_REQUEST' => $_REQUEST,
                 '_SERVER' => $_SERVER,
-                '_SESSION' => $_SESSION,
+                '_SESSION' => is_array($GLOBALS['_SESSION'] ?? null) ? $GLOBALS['_SESSION'] : [],
             ];
             $dispatch->nativeHeaders = headers_list();
             $statusCode = http_response_code();
@@ -1281,7 +1343,7 @@ namespace Pam\Internal {
             if ($output === '') {
                 return $serialized;
             }
-            $response = self::decodeObject($serialized, 64);
+            $response = self::decodeHttpResponse($serialized);
             if (($response['body'] ?? '') !== '' || ($response['chunks'] ?? []) !== []) {
                 return $serialized;
             }
@@ -1289,7 +1351,73 @@ namespace Pam\Internal {
             $headers = is_array($response['headers'] ?? null) ? $response['headers'] : [];
             $headers['content-type'] ??= ['text/plain; charset=utf-8'];
             $response['headers'] = $headers;
-            return json_encode($response, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+            return self::encodeHttpResponse($response);
+        }
+
+        /** @param array{status:int,headers:array<string,list<string>>,body:string,chunks?:list<string>} $response */
+        private static function encodeHttpResponse(array $response): string
+        {
+            $status = (int) ($response['status'] ?? 500);
+            $headers = is_array($response['headers'] ?? null) ? $response['headers'] : [];
+            $body = is_string($response['body'] ?? null) ? $response['body'] : '';
+            $chunks = is_array($response['chunks'] ?? null) ? $response['chunks'] : [];
+            if ($status < 100 || $status > 999 || count($headers) > 65535) {
+                throw new \UnexpectedValueException('HTTP response metadata exceeds the native protocol limits.');
+            }
+            $encoded = pack('nn', $status, count($headers));
+            foreach ($headers as $name => $values) {
+                $name = (string) $name;
+                $values = is_array($values) ? $values : [(string) $values];
+                if (strlen($name) > 65535 || count($values) > 65535) {
+                    throw new \UnexpectedValueException('HTTP header exceeds the native protocol limits.');
+                }
+                $encoded .= pack('n', strlen($name)).$name.pack('n', count($values));
+                foreach ($values as $value) {
+                    $value = (string) $value;
+                    $encoded .= pack('N', strlen($value)).$value;
+                }
+            }
+            $encoded .= pack('N', strlen($body)).$body.pack('N', count($chunks));
+            foreach ($chunks as $chunk) {
+                $chunk = (string) $chunk;
+                $encoded .= pack('N', strlen($chunk)).$chunk;
+            }
+            return $encoded;
+        }
+
+        /** @return array{status:int,headers:array<string,list<string>>,body:string,chunks:list<string>} */
+        private static function decodeHttpResponse(string $encoded): array
+        {
+            $offset = 0;
+            $take = static function (int $length) use ($encoded, &$offset): string {
+                if ($length < 0 || $offset + $length > strlen($encoded)) {
+                    throw new \UnexpectedValueException('Truncated native HTTP response.');
+                }
+                $value = substr($encoded, $offset, $length);
+                $offset += $length;
+                return $value;
+            };
+            $u16 = static fn (): int => (int) unpack('nvalue', $take(2))['value'];
+            $u32 = static fn (): int => (int) unpack('Nvalue', $take(4))['value'];
+            $status = $u16();
+            $headers = [];
+            $headerCount = $u16();
+            for ($headerIndex = 0; $headerIndex < $headerCount; ++$headerIndex) {
+                $name = $take($u16());
+                $values = [];
+                $valueCount = $u16();
+                for ($valueIndex = 0; $valueIndex < $valueCount; ++$valueIndex) {
+                    $values[] = $take($u32());
+                }
+                $headers[$name] = $values;
+            }
+            $body = $take($u32());
+            $chunks = [];
+            $chunkCount = $u32();
+            for ($chunkIndex = 0; $chunkIndex < $chunkCount; ++$chunkIndex) {
+                $chunks[] = $take($u32());
+            }
+            return compact('status', 'headers', 'body', 'chunks');
         }
 
         private static function internalDispatchError(\Throwable $error): string
@@ -1298,7 +1426,7 @@ namespace Pam\Internal {
                 'exception' => $error::class,
                 'message' => $error->getMessage(),
             ]);
-            return json_encode([
+            return self::encodeHttpResponse([
                 'status' => 500,
                 'headers' => ['content-type' => ['application/json; charset=utf-8']],
                 'body' => json_encode(
@@ -1306,7 +1434,7 @@ namespace Pam\Internal {
                     JSON_THROW_ON_ERROR,
                 ),
                 'chunks' => [],
-            ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+            ]);
         }
 
         /**

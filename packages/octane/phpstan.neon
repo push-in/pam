@@ -1,0 +1,12 @@
+parameters:
+    level: 9
+    paths:
+        - src
+        - tests
+    excludePaths:
+        analyse:
+            - tests/Fixtures/laravel/storage/framework/views/*.php
+    bootstrapFiles:
+        - tests/bootstrap.php
+    tmpDir: .phpstan-cache
+    treatPhpDocTypesAsCertain: false

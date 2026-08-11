@@ -30,7 +30,7 @@ package_field() {
 validate_map() {
     jq -e '
         .owner == "push-in"
-        and (.packages | length == 6)
+        and (.packages | length == 7)
         and ([.packages[].name] | length == (unique | length))
         and ([.packages[].path] | length == (unique | length))
         and ([.packages[].repository] | length == (unique | length))
@@ -48,6 +48,7 @@ validate_map() {
 
 validate_packages() {
     require_command composer
+    require_command git
     require_command jq
     validate_map
 
@@ -98,10 +99,9 @@ validate_packages() {
             --no-interaction \
             "${manifest}" >/dev/null
 
-        if find "${directory}" \
-            \( -name vendor -o -name node_modules -o -name .git -o -name .env \) \
-            -print -quit | grep -q .; then
-            fail "${package_path} contains a generated or private path"
+        if git -C "${repository_root}" ls-files "${package_path}" |
+            grep -Eq '(^|/)(vendor|node_modules|\.git)(/|$)|(^|/)\.env$'; then
+            fail "${package_path} tracks a generated or private path"
         fi
     done < <(
         jq -r '.packages[] | [.name, .path, .repository] | @tsv' "${package_map}"
@@ -119,6 +119,30 @@ validate_release_tag() {
     test -n "${runtime_version}" || fail "unable to read the runtime version from Cargo.toml"
     test "v${runtime_version}" = "${release_tag}" ||
         fail "tag ${release_tag} does not match Cargo.toml version ${runtime_version}"
+
+    local lock_version
+    lock_version=$(
+        awk '
+            $0 == "name = \"pam\"" {
+                getline
+                value = $0
+                sub(/^version = \"/, "", value)
+                sub(/\"$/, "", value)
+                print value
+                exit
+            }
+        ' "${repository_root}/Cargo.lock"
+    )
+    test "${lock_version}" = "${runtime_version}" ||
+        fail "Cargo.lock PAM version ${lock_version} does not match ${runtime_version}"
+
+    local release_heading="## ${runtime_version} - "
+    grep -Eq "^${release_heading}[0-9]{4}-[0-9]{2}-[0-9]{2}$" \
+        "${repository_root}/CHANGELOG.md" ||
+        fail "CHANGELOG.md does not contain a dated ${runtime_version} release"
+    grep -Eq "^${release_heading}[0-9]{4}-[0-9]{2}-[0-9]{2}$" \
+        "${repository_root}/packages/octane/CHANGELOG.md" ||
+        fail "packages/octane/CHANGELOG.md does not contain a dated ${runtime_version} release"
 }
 
 split_package() {
@@ -145,7 +169,7 @@ verify_split() (
     local package_name=$1
     local split_ref=$2
     local expected_files
-    expected_files='^(LICENSE|README\.md|PROTOCOL\.md|composer\.json|src/|tests/|benchmarks/|resources/|phpstan\.neon|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
+    expected_files='^(LICENSE|README\.md|CHANGELOG\.md|CONTRIBUTING\.md|SECURITY\.md|PROTOCOL\.md|composer\.json|config/|src/|tests/|benchmarks/|resources/|phpstan\.neon|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
 
     local temporary_directory
     temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/pam-package.XXXXXX")

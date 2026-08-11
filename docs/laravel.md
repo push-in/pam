@@ -131,6 +131,37 @@ metadata. Generated directories including `vendor`, `storage` and
 `bootstrap/cache` are ignored. An invalid save may stop the child, but the watcher
 stays alive and starts a fresh worker after the next valid change.
 
+## Laravel Octane bridge
+
+Applications that depend on Laravel Octane can use the optional PAM bridge while
+keeping Octane's application factory, worker lifecycle events and request cleanup:
+
+```bash
+pam composer require laravel/octane pushinbr/pam-octane
+pam octane:start
+```
+
+PAM owns the native HTTP transport, Tokio I/O, streaming and process supervision;
+Octane owns Laravel's worker lifecycle. The maintained package matrix is PHP 8.4,
+Laravel 12 or 13, and Laravel Octane 2.19 or newer. Use `pam octane:status`,
+`pam octane:reload` and `pam octane:stop` for the supervised lifecycle.
+
+For production, run behind a reverse proxy, keep the admin listener private and
+start with multiple process workers:
+
+```bash
+pam start artisan \
+  --workers 8 \
+  --max-requests 100000 \
+  --admin-address 127.0.0.1:3010 \
+  -- pam:octane --host=127.0.0.1 --port=8000
+```
+
+Queue workers, Horizon and the scheduler remain separate processes. See the
+[package guide](../packages/octane/README.md), the
+[production guide](production.md) and the
+[Octane threat model](octane-security.md) before deploying.
+
 ## Production
 
 ```bash

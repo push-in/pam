@@ -1,0 +1,25 @@
+name: Performance report
+description: Report a reproducible latency, throughput or memory regression.
+title: "perf: "
+labels: [performance]
+body:
+  - type: textarea
+    id: result
+    attributes:
+      label: Result and expected baseline
+    validations:
+      required: true
+  - type: textarea
+    id: protocol
+    attributes:
+      label: Reproduction protocol
+      description: Include commit, dirty state, hardware, runtime versions, workers, connections, duration and payload size.
+    validations:
+      required: true
+  - type: textarea
+    id: artifacts
+    attributes:
+      label: Raw artifacts
+      description: Link complete raw output and metadata rather than screenshots alone.
+    validations:
+      required: true
