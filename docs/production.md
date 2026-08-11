@@ -14,7 +14,7 @@ curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
 sudo env PAM_INSTALL_DIR=/opt/pam PAM_BIN_DIR=/usr/local/bin \
   sh pam-install.sh
 rm pam-install.sh
-pam doctor .
+pam doctor
 ```
 
 O instalador detecta Linux/macOS e x86_64/ARM64, valida SHA-256, rejeita caminhos
@@ -29,7 +29,7 @@ partir do código-fonte precisa do SDK PHP Embed.
 
 ```bash
 pam composer install --no-dev --classmap-authoritative
-pam doctor .
+pam doctor
 pam start index.php \
   --workers 8 \
   --max-requests 10000000 \
@@ -173,10 +173,10 @@ CMD ["start", "index.php", "--workers", "4", "--admin-address", "0.0.0.0:3010"]
 ```
 
 Para um diretório autocontido, execute
-`pam build . --entry index.php --output dist`. O launcher do bundle carrega a
+`pam build --entry index.php --output dist`. O launcher do bundle carrega a
 `libphp` empacotada e o manifesto registra SHA-256 de todos os arquivos. O host
 ainda precisa ter ABI Linux compatível e as dependências nativas da PHP/extensões;
-para eliminar também essa variação, prefira a imagem. Execute `pam doctor .`
+para eliminar também essa variação, prefira a imagem. Execute `pam doctor`
 dentro do artefato final.
 
 ## Diagnóstico operacional
@@ -210,7 +210,7 @@ compat/composer-smoke/vendor/bin/phpunit -c compat/composer-smoke/phpunit.xml
 ./target/debug/pam composer audit --working-dir=compat/composer-smoke --locked
 ./target/debug/pam composer audit --working-dir=compat/laravel-smoke --locked
 cargo audit
-pam doctor .
+pam doctor
 ```
 
 O workflow semanal repete auditoria, soak de RSS e smoke de shutdown sob Valgrind.

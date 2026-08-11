@@ -213,9 +213,9 @@ random per-process token, matching-origin checks, and a restrictive CSP.
 ```console
 $ pam init studio --template desktop
 $ cd studio
-$ pam desktop doctor .
-$ pam desktop dev .
-$ pam desktop build .
+$ pam desktop doctor
+$ pam desktop dev
+$ pam desktop build
 ✓ Application bundle created
 ✓ SHA-256 integrity manifest written
 ```
@@ -411,8 +411,8 @@ Pam does not ship a package registry or a competing dependency format.
 ```bash
 pam composer require guzzlehttp/guzzle
 pam composer install
-pam doctor .
-pam test .
+pam doctor
+pam test
 ```
 
 Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and loads the normal Composer autoloader. Your lockfile remains the source of truth.
@@ -799,7 +799,7 @@ count, hardware and response contract have been measured under that protocol.
 
 ```bash
 pam composer install --no-dev --classmap-authoritative
-pam build . --entry index.php --output dist
+pam build --entry index.php --output dist
 ./dist/bin/pam-run
 ```
 

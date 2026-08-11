@@ -30,8 +30,8 @@ manter estado de request em singletons. Execute sempre:
 
 ```bash
 pam composer install
-pam doctor .
-pam test .
+pam doctor
+pam test
 ```
 
 `doctor` valida o Embed, seus INIs, o autoloader e o platform check gerado pelo
