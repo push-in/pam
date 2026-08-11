@@ -548,6 +548,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "runtime:use | runtime:update",
                     "Select and lock PHP 8.4 or 8.5",
                 ),
+                (
+                    "runtime:install",
+                    "Install verified Android runtimes and native engines",
+                ),
                 ("make:*", "Generate screens, components, or native views"),
             ],
             &[
@@ -555,6 +559,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "mobile dev .",
                 "mobile devtools .",
                 "mobile runtime:use 8.5 .",
+                "mobile runtime:install .",
                 "mobile make:screen Dashboard .",
                 "mobile ios:doctor .",
                 "mobile ios:run .",

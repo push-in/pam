@@ -656,6 +656,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "runtime:list" => list_runtimes(parse_project_only(arguments)?),
         "runtime:info" => runtime_info(parse_project_only(arguments)?),
         "runtime:use" => runtime_use(parse_runtime_use(arguments)?),
+        "runtime:install" => install_android_runtime(parse_project_only(arguments)?),
         "runtime:update" => runtime_update(parse_project_only(arguments)?),
         "make:screen" => generate_screen(parse_generator(arguments)?),
         "make:component" => generate_component(parse_generator(arguments)?),
@@ -1931,6 +1932,211 @@ fn runtime_update(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
+pub fn repair_android(project_path: &Path) -> Result<(), String> {
+    let project = load_project(project_path)?;
+    let pam_home = pam_home()?;
+    let native_home = native_home()?;
+    let runtime = resolve_runtime(&project, &pam_home)?;
+
+    if default_abis()
+        .into_iter()
+        .any(|abi| !runtime_ready_at(&runtime.root, abi) || !engine_ready_at(&native_home, abi))
+    {
+        install_android_runtime_bundle(&project, &pam_home, &native_home)?;
+    }
+
+    write_runtime_lock(&project, &runtime)?;
+    Ok(())
+}
+
+fn install_android_runtime(project_path: PathBuf) -> Result<u8, String> {
+    repair_android(&project_path)?;
+    let project = load_project(&project_path)?;
+    let runtime = resolve_runtime(&project, &pam_home()?)?;
+    println!(
+        "Installed verified PHP {} Android runtime and PAM Native engines.",
+        runtime.release.php_version
+    );
+    Ok(0)
+}
+
+fn install_android_runtime_bundle(
+    project: &Project,
+    pam_home: &Path,
+    native_home: &Path,
+) -> Result<(), String> {
+    let asset = "pam-android-runtime.tar.gz";
+    let release_tag = format!("v{}", env!("CARGO_PKG_VERSION"));
+    let base = std::env::var("PAM_RELEASE_BASE_URL").unwrap_or_else(|_| {
+        format!("https://github.com/push-in/pam/releases/download/{release_tag}")
+    });
+    if !base.starts_with("https://") && std::env::var_os("PAM_RELEASE_BASE_URL").is_none() {
+        return Err("refusing a non-HTTPS Android runtime release URL".to_owned());
+    }
+    let temporary = std::env::temp_dir().join(format!(
+        "pam-android-runtime-{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_nanos()
+    ));
+    fs::create_dir(&temporary)
+        .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
+    let result = (|| {
+        let archive = temporary.join(asset);
+        let checksum = temporary.join(format!("{asset}.sha256"));
+        download_release_asset(&format!("{base}/{asset}"), &archive)?;
+        download_release_asset(&format!("{base}/{asset}.sha256"), &checksum)?;
+        verify_release_checksum(&archive, &checksum, asset)?;
+
+        let listing = Command::new("tar")
+            .args(["-tzf"])
+            .arg(&archive)
+            .output()
+            .map_err(|error| format!("cannot inspect Android runtime archive: {error}"))?;
+        if !listing.status.success() {
+            return Err(format!(
+                "cannot inspect Android runtime archive: {}",
+                listing.status
+            ));
+        }
+        for line in String::from_utf8_lossy(&listing.stdout).lines() {
+            if !safe_android_runtime_archive_path(Path::new(line)) {
+                return Err(format!("unsafe Android runtime archive path: {line}"));
+            }
+        }
+        let extracted = temporary.join("extracted");
+        fs::create_dir(&extracted)
+            .map_err(|error| format!("cannot create {}: {error}", extracted.display()))?;
+        let status = Command::new("tar")
+            .args(["-xzf"])
+            .arg(&archive)
+            .arg("-C")
+            .arg(&extracted)
+            .status()
+            .map_err(|error| format!("cannot extract Android runtime archive: {error}"))?;
+        if !status.success() {
+            return Err(format!("Android runtime extraction failed with {status}"));
+        }
+
+        let runtime = resolve_runtime(project, &extracted)?;
+        for abi in default_abis() {
+            if !runtime_ready_at(&runtime.root, abi) {
+                return Err(format!(
+                    "Android runtime archive is missing PHP {} for {}",
+                    runtime.release.php_version,
+                    abi.android()
+                ));
+            }
+            if !engine_ready_at(&extracted.join("native"), abi) {
+                return Err(format!(
+                    "Android runtime archive is missing the PAM Native engine for {}",
+                    abi.android()
+                ));
+            }
+        }
+        copy_tree(
+            &extracted.join("runtime/android"),
+            &pam_home.join("runtime/android"),
+            &[],
+        )?;
+        copy_tree(
+            &extracted.join("native/target"),
+            &native_home.join("target"),
+            &[],
+        )?;
+        Ok(())
+    })();
+    let cleanup = fs::remove_dir_all(&temporary);
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(format!(
+            "Android runtime installed, but temporary files could not be removed: {error}"
+        )),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+fn download_release_asset(url: &str, destination: &Path) -> Result<(), String> {
+    let mut command = Command::new("curl");
+    if url.starts_with("https://") {
+        command.args([
+            "--proto",
+            "=https",
+            "--tlsv1.2",
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+        ]);
+    } else if std::env::var_os("PAM_RELEASE_BASE_URL").is_some() {
+        command.args(["--fail", "--silent", "--show-error", "--location"]);
+    } else {
+        return Err("refusing a non-HTTPS Android runtime asset".to_owned());
+    }
+    let status = command
+        .arg("--output")
+        .arg(destination)
+        .arg(url)
+        .status()
+        .map_err(|error| format!("cannot download {url}: {error}"))?;
+    status
+        .success()
+        .then_some(())
+        .ok_or_else(|| format!("Android runtime download failed with {status}"))
+}
+
+fn verify_release_checksum(archive: &Path, checksum: &Path, asset: &str) -> Result<(), String> {
+    let expected_line = fs::read_to_string(checksum)
+        .map_err(|error| format!("cannot read {}: {error}", checksum.display()))?;
+    let mut fields = expected_line.split_whitespace();
+    let expected = fields.next().unwrap_or_default();
+    let expected_name = fields.next().unwrap_or_default().trim_start_matches('*');
+    if expected.len() != 64
+        || !expected.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || expected_name != asset
+        || fields.next().is_some()
+    {
+        return Err("invalid Android runtime checksum manifest".to_owned());
+    }
+    let mut input = fs::File::open(archive)
+        .map_err(|error| format!("cannot read {}: {error}", archive.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .map_err(|error| format!("cannot read {}: {error}", archive.display()))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    let actual = format!("{:x}", digest.finalize());
+    if actual.eq_ignore_ascii_case(expected) {
+        Ok(())
+    } else {
+        Err(format!(
+            "Android runtime checksum mismatch: expected {expected}, got {actual}"
+        ))
+    }
+}
+
+fn safe_android_runtime_archive_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, Component::Normal(_)))
+        && (path == Path::new("runtime")
+            || path == Path::new("runtime/catalog.json")
+            || path.starts_with("runtime/android")
+            || path == Path::new("native")
+            || path == Path::new("native/target")
+            || path.starts_with("native/target"))
+}
+
 fn doctor(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
     let native_home = native_home()?;
@@ -1951,12 +2157,17 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
         command_exists("java") && java_major_version(&java_version).is_some_and(|v| v >= 17);
     healthy &= java_ready;
     check("Java 17+", java_ready, java_version);
-    healthy &= command_exists("cargo");
-    check(
-        "Rust",
-        command_exists("cargo"),
-        tool_version("rustc", &["--version"]),
-    );
+    let engines_ready = default_abis()
+        .into_iter()
+        .all(|abi| engine_ready_at(&native_home, abi));
+    if !engines_ready {
+        healthy &= command_exists("cargo");
+        check(
+            "Rust",
+            command_exists("cargo"),
+            tool_version("rustc", &["--version"]),
+        );
+    }
     let sdk = android_sdk();
     healthy &= sdk.is_ok();
     check(
@@ -2013,15 +2224,23 @@ fn doctor(project_path: PathBuf) -> Result<u8, String> {
             runtime.root.join(abi.android()).display().to_string(),
         );
     }
-    let installed = installed_rust_targets().unwrap_or_default();
     for abi in default_abis() {
-        let available = installed.contains(abi.rust_target());
+        let engine = engine_ready_at(&native_home, abi);
+        let available = if engine {
+            true
+        } else {
+            installed_rust_targets()
+                .unwrap_or_default()
+                .contains(abi.rust_target())
+        };
         healthy &= available;
         check(
-            &format!("Rust target ({})", abi.rust_target()),
+            &format!("Native engine ({})", abi.android()),
             available,
-            if available {
-                "installed".to_owned()
+            if engine {
+                native_engine_path(&native_home, abi).display().to_string()
+            } else if available {
+                format!("Rust target {} installed", abi.rust_target())
             } else {
                 format!("run: rustup target add {}", abi.rust_target())
             },
@@ -4930,6 +5149,9 @@ fn write_new_file(path: &Path, contents: &[u8]) -> Result<(), String> {
 }
 
 fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
+    if engine_ready_at(native_home, abi) {
+        return Ok(());
+    }
     let installed = installed_rust_targets()?;
     if !installed.contains(abi.rust_target()) {
         return Err(format!(
@@ -4977,6 +5199,17 @@ fn build_engine(native_home: &Path, abi: AndroidAbi) -> Result<(), String> {
             abi.android()
         ))
     }
+}
+
+fn native_engine_path(native_home: &Path, abi: AndroidAbi) -> PathBuf {
+    native_home
+        .join("target")
+        .join(abi.rust_target())
+        .join("release/libpam_native_engine.a")
+}
+
+fn engine_ready_at(native_home: &Path, abi: AndroidAbi) -> bool {
+    native_engine_path(native_home, abi).is_file()
 }
 
 fn installed_rust_targets() -> Result<HashSet<String>, String> {
@@ -5720,5 +5953,27 @@ mod tests {
         assert!(!valid_swift_class_name("PamFirebase/FirebaseModule"));
         assert!(!valid_swift_class_name("PamFirebase..FirebaseModule"));
         assert!(!valid_swift_class_name("1FirebaseModule"));
+    }
+
+    #[test]
+    fn android_runtime_archives_are_confined_to_verified_install_roots() {
+        assert!(safe_android_runtime_archive_path(Path::new(
+            "runtime/catalog.json"
+        )));
+        assert!(safe_android_runtime_archive_path(Path::new(
+            "runtime/android/8.5.8-r1/x86_64/lib/libphp.a"
+        )));
+        assert!(safe_android_runtime_archive_path(Path::new(
+            "native/target/x86_64-linux-android/release/libpam_native_engine.a"
+        )));
+        assert!(!safe_android_runtime_archive_path(Path::new(
+            "../runtime/android/libphp.a"
+        )));
+        assert!(!safe_android_runtime_archive_path(Path::new(
+            "/runtime/android/libphp.a"
+        )));
+        assert!(!safe_android_runtime_archive_path(Path::new(
+            "native/Cargo.toml"
+        )));
     }
 }

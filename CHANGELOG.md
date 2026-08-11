@@ -6,6 +6,8 @@
   and `pam test` by installing Pint and emitting formatter-clean PHP.
 - Add complete Composer publication metadata to generated applications and an
   explicit escape hatch for public-install tests run from source checkouts.
+- Publish checksum-verified PHP 8.4/8.5 Android runtimes and prebuilt native
+  engines; `pam doctor --fix` installs them without requiring Rust locally.
 
 ## 1.0.1
 

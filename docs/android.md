@@ -11,8 +11,9 @@ avançada.
 
 ## Preparar o ambiente
 
-Instale Java 17 ou superior, Rust, Android SDK 36, NDK `27.1.12297006`, CMake
-`3.22.1` e platform-tools. Depois execute:
+Instale Java 17 ou superior e o Android SDK. O PAM instala seus runtimes PHP e
+engines nativos verificados; o Android SDK fornece NDK `27.1.12297006`, CMake
+`3.22.1`, platform-tools e API 36. Depois execute:
 
 ```bash
 pam doctor --fix
@@ -20,8 +21,10 @@ pam doctor
 pam build
 ```
 
-O doctor valida também os targets Rust e os runtimes PHP verificados para
-`arm64-v8a` e `x86_64`. Ele falha se uma exigência de build estiver ausente.
+`pam doctor --fix` baixa o bundle atestado da release, verifica SHA-256 e
+instala os runtimes PHP 8.4/8.5 e engines para `arm64-v8a` e `x86_64`. Rust só é
+necessário para contribuir com o engine; uma aplicação comum usa os binários
+pré-compilados. O doctor falha se qualquer exigência restante estiver ausente.
 
 ## Desenvolver
 

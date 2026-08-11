@@ -316,6 +316,9 @@ fn run() -> Result<u8, CliError> {
                 println!("Installed the project's locked Composer dependencies.");
             }
             if context.kind == project::ProjectKind::Native {
+                if project::native_platforms(context).map_err(CliError::Commands)? != [2] {
+                    mobile::repair_android(&context.root).map_err(CliError::Commands)?;
+                }
                 ecosystem::refresh_native(&executable, &context.root)
                     .map_err(CliError::Commands)?;
                 println!("Regenerated PAM Native bindings and plugin integration.");

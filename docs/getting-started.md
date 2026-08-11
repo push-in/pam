@@ -23,6 +23,10 @@ PHAR when required. A separately installed PHP CLI, Composer, Rust, Gradle, or
 Xcode is not needed merely to explore PAM. Platform build tools are diagnosed
 when a project actually targets that platform.
 
+For Android projects, `pam doctor --fix` installs PAM's checksum-verified PHP
+runtimes and native engines. Application developers do not need a Rust
+toolchain unless they intend to rebuild the engine itself.
+
 ## Create a project interactively
 
 ```bash
