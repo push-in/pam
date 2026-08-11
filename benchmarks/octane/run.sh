@@ -167,11 +167,11 @@ benchmark_pam() {
     echo "Benchmarking PAM"
     (
         cd "$ROOT/packages/octane/tests/Fixtures/laravel"
+        # The opt-in cache can exceed ten million requests during the
+        # release matrix. Recycling here would benchmark supervisor churn
+        # instead of the HTTP/cache implementation, so keep the release
+        # evidence below a deliberately unreachable per-run ceiling.
         exec taskset -c "$SERVER_CPUSET" env PAM_RESPONSE_CACHE_PATHS=/api/cached \
-            # The opt-in cache can exceed ten million requests during the
-            # release matrix. Recycling here would benchmark supervisor churn
-            # instead of the HTTP/cache implementation, so keep the release
-            # evidence below a deliberately unreachable per-run ceiling.
             "$PAM_BINARY" start artisan --workers "$WORKERS" --max-requests 1000000000 \
                 -- pam:octane --host=127.0.0.1 --port="$PORT"
     ) >"$RESULTS/pam.server.log" 2>&1 &
