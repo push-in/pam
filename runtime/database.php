@@ -71,11 +71,6 @@ PHP;
             if ($sql === '' || str_contains($sql, "\0")) {
                 throw new \InvalidArgumentException('PDO query must be non-empty and contain no NUL bytes.');
             }
-            foreach ($parameters as $value) {
-                if (!is_scalar($value) && $value !== null) {
-                    throw new \InvalidArgumentException('PDO parameters must be scalar or null.');
-                }
-            }
             $deadline = microtime(true) + $this->timeout;
             if ($this->active >= $this->maxWorkers) {
                 if ($this->waiting >= $this->maxQueue) {
@@ -116,7 +111,16 @@ PHP;
                         : ($result->stderr !== '' ? $result->stderr : 'isolated PDO worker failed');
                     throw new \RuntimeException($message);
                 }
-                $rows = is_array($decoded['rows'] ?? null) ? array_values($decoded['rows']) : [];
+                $rows = [];
+                if (is_array($decoded['rows'] ?? null)) {
+                    foreach ($decoded['rows'] as $row) {
+                        if (!is_array($row)) {
+                            throw new \RuntimeException('Isolated PDO worker returned an invalid row.');
+                        }
+                        /** @var array<string, mixed> $row */
+                        $rows[] = $row;
+                    }
+                }
                 $affectedRows = is_int($decoded['affectedRows'] ?? null) ? $decoded['affectedRows'] : 0;
                 return new PdoResult($rows, $affectedRows);
             } finally {

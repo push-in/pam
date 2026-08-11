@@ -64,7 +64,7 @@ namespace Pam\Redis {
             if ($keys === []) {
                 return 0;
             }
-            $deleted = $this->command(['DEL', ...$keys]);
+            $deleted = $this->command(array_values(['DEL', ...$keys]));
             if (!is_int($deleted)) {
                 throw new RedisException('Redis DEL returned an unexpected value.');
             }

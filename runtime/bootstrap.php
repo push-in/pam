@@ -707,7 +707,10 @@ namespace Pam\Internal {
             return $value;
         }
 
-        /** @param array<string, mixed> $options @return list<string> */
+        /**
+         * @param array<string, mixed> $options
+         * @return list<string>
+         */
         private static function absolutePathListOption(array $options, string $key): array
         {
             $values = self::stringListOption($options, $key);
@@ -1344,11 +1347,11 @@ namespace Pam\Internal {
                 return $serialized;
             }
             $response = self::decodeHttpResponse($serialized);
-            if (($response['body'] ?? '') !== '' || ($response['chunks'] ?? []) !== []) {
+            if ($response['body'] !== '' || $response['chunks'] !== []) {
                 return $serialized;
             }
             $response['body'] = $output;
-            $headers = is_array($response['headers'] ?? null) ? $response['headers'] : [];
+            $headers = $response['headers'];
             $headers['content-type'] ??= ['text/plain; charset=utf-8'];
             $response['headers'] = $headers;
             return self::encodeHttpResponse($response);
@@ -1357,17 +1360,16 @@ namespace Pam\Internal {
         /** @param array{status:int,headers:array<string,list<string>>,body:string,chunks?:list<string>} $response */
         private static function encodeHttpResponse(array $response): string
         {
-            $status = (int) ($response['status'] ?? 500);
-            $headers = is_array($response['headers'] ?? null) ? $response['headers'] : [];
-            $body = is_string($response['body'] ?? null) ? $response['body'] : '';
-            $chunks = is_array($response['chunks'] ?? null) ? $response['chunks'] : [];
+            $status = $response['status'];
+            $headers = $response['headers'];
+            $body = $response['body'];
+            $chunks = $response['chunks'] ?? [];
             if ($status < 100 || $status > 999 || count($headers) > 65535) {
                 throw new \UnexpectedValueException('HTTP response metadata exceeds the native protocol limits.');
             }
             $encoded = pack('nn', $status, count($headers));
             foreach ($headers as $name => $values) {
                 $name = (string) $name;
-                $values = is_array($values) ? $values : [(string) $values];
                 if (strlen($name) > 65535 || count($values) > 65535) {
                     throw new \UnexpectedValueException('HTTP header exceeds the native protocol limits.');
                 }
@@ -1397,8 +1399,16 @@ namespace Pam\Internal {
                 $offset += $length;
                 return $value;
             };
-            $u16 = static fn (): int => (int) unpack('nvalue', $take(2))['value'];
-            $u32 = static fn (): int => (int) unpack('Nvalue', $take(4))['value'];
+            $unpackInteger = static function (string $format, string $value): int {
+                $unpacked = unpack($format, $value);
+                if ($unpacked === false) {
+                    throw new \UnexpectedValueException('Invalid native HTTP response integer.');
+                }
+
+                return (int) $unpacked['value'];
+            };
+            $u16 = static fn (): int => $unpackInteger('nvalue', $take(2));
+            $u32 = static fn (): int => $unpackInteger('Nvalue', $take(4));
             $status = $u16();
             $headers = [];
             $headerCount = $u16();

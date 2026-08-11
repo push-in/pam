@@ -106,6 +106,12 @@ jobs:
       - name: Install package dependencies
         working-directory: packages/octane
         run: composer install --no-interaction --prefer-dist
+      - name: Preflight native fixture dependencies
+        working-directory: compat/composer-smoke
+        run: composer install --dry-run --no-interaction --prefer-dist
+      - name: Install native fixture dependencies
+        working-directory: compat/composer-smoke
+        run: composer install --no-interaction --prefer-dist
       - name: Build PAM and run native runtime contracts
         run: |
           cargo build --locked
