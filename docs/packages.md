@@ -115,7 +115,7 @@ inside the Pam Embed SAPI. Run the package-specific validation locally with:
 
 ```bash
 scripts/package-release.sh validate
-scripts/package-release.sh validate-tag v1.0.1
+scripts/package-release.sh validate-tag v1.0.2
 ```
 
 The workflow uses one write-enabled deploy key per mirror. Each private key is an

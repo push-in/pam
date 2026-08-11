@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 - 2026-08-10
+
+- Make fresh API projects immediately pass `pam format --check`, `pam lint`,
+  and `pam test` by installing Pint and emitting formatter-clean PHP.
+- Add complete Composer publication metadata to generated applications and an
+  explicit escape hatch for public-install tests run from source checkouts.
+
 ## 1.0.1
 
 - Publish the official Composer packages under the organization-owned

@@ -663,7 +663,13 @@ fn initializes_a_project_without_overwriting_files() {
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     assert!(manifest.contains("\"pushinbr/pam-api\""));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
+    assert_eq!(
+        manifest_json["description"],
+        "A PHP application powered by the PAM runtime."
+    );
+    assert_eq!(manifest_json["license"], "proprietary");
     assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^1.0");
+    assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
     assert_eq!(manifest_json["require-dev"]["pushinbr/pam-testing"], "^1.0");
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);

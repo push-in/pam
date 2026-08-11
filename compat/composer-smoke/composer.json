@@ -10,11 +10,11 @@
             "options": {
                 "symlink": true,
                 "versions": {
-                    "pushinbr/pam-core-api": "1.0.1",
-                    "pushinbr/pam-api": "1.0.1",
-                    "pushinbr/pam-psr-bridge": "1.0.1",
-                    "pushinbr/pam-socket": "1.0.1",
-                    "pushinbr/pam-testing": "1.0.1"
+                    "pushinbr/pam-core-api": "1.0.2",
+                    "pushinbr/pam-api": "1.0.2",
+                    "pushinbr/pam-psr-bridge": "1.0.2",
+                    "pushinbr/pam-socket": "1.0.2",
+                    "pushinbr/pam-testing": "1.0.2"
                 }
             }
         }

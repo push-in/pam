@@ -828,9 +828,12 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     }
     let mut manifest = serde_json::json!({
         "name": "app/pam-project",
+        "description": "A PHP application powered by the PAM runtime.",
         "type": "project",
+        "license": "proprietary",
         "require": require,
         "require-dev": {
+            "laravel/pint": "^1.30",
             "pushinbr/pam-testing": version,
             "phpunit/phpunit": "^12.5"
         },
@@ -873,7 +876,7 @@ use Pam\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
-$app = new App();
+$app = new App;
 {socket_setup}
 $app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json([
     'message' => 'pong',
@@ -912,11 +915,10 @@ use PHPUnit\Framework\TestCase;
 
 final class ApplicationTest extends TestCase
 {
-    public function testPingEndpoint(): void
+    public function test_ping_endpoint(): void
     {
         $app = new App(discoverPackages: false);
-        $app->get('/api/ping', static fn (Request $request, Response $response): Response =>
-            $response->json(['message' => 'pong']));
+        $app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json(['message' => 'pong']));
 
         (new TestClient($app))
             ->get('/api/ping')
@@ -3508,6 +3510,9 @@ fn configure_laravel_manifest(directory: &Path) -> Result<(), String> {
 }
 
 fn local_packages_repository() -> Option<serde_json::Value> {
+    if std::env::var_os("PAM_NO_LOCAL_PACKAGES").is_some() {
+        return None;
+    }
     let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/*");
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("packages/api/composer.json")
