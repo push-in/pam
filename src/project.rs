@@ -435,7 +435,10 @@ fn composer_kind(directory: &Path) -> Option<ProjectKind> {
         Some(ProjectKind::Native)
     } else if require.contains_key("laravel/framework") {
         Some(ProjectKind::Laravel)
-    } else if require.keys().any(|name| name.contains("pam/desktop")) {
+    } else if require
+        .keys()
+        .any(|name| name == "pushinbr/pam-desktop" || name.contains("pam/desktop"))
+    {
         Some(ProjectKind::Desktop)
     } else if require.keys().any(|name| name.starts_with("pam/")) {
         Some(ProjectKind::Api)

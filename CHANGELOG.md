@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Updated `pam init --template desktop` to the PAM Desktop 1.2
+  convention-first API with `#[Desktop]`, typed method commands, listeners,
+  dependency injection, explicit permissions, and typed named windows.
+- Updated new desktop projects to `pushinbr/pam-desktop:^1.2` and protocol 6.
+
 ## 1.0.2 - 2026-08-10
 
 - Make fresh API projects immediately pass `pam format --check`, `pam lint`,

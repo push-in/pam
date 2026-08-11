@@ -1391,7 +1391,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
         "license": "proprietary",
         "require": {
             "php": "^8.4",
-            "pam/desktop": "^0.5"
+            "pushinbr/pam-desktop": "^1.2"
         },
         "autoload": {
             "psr-4": {
@@ -1423,90 +1423,109 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
 
 declare(strict_types=1);
 
-use Pam\Desktop\Application;
+use Pam\Desktop\App;
 use Pam\Desktop\ApplicationCategory;
-use Pam\Desktop\Capabilities;
-use Pam\Desktop\ClientEvent;
-use Pam\Desktop\CommandContext;
-use Pam\Desktop\CommandResult;
-use Pam\Desktop\EventContext;
-use Pam\Desktop\FileSystemRoot;
-use Pam\Desktop\Manifest;
-use Pam\Desktop\Window;
-use Pam\Desktop\WindowEffect;
+use Pam\Desktop\Attributes\Command;
+use Pam\Desktop\Attributes\Desktop as DesktopApplication;
+use Pam\Desktop\Attributes\Listen;
+use Pam\Desktop\Attributes\Window as DesktopWindowDefinition;
+use Pam\Desktop\Desktop;
+use Pam\Desktop\DesktopWindow;
+use Pam\Desktop\Events;
+use Pam\Desktop\Permissions;
+use Pam\Desktop\WindowHandle;
 use Pam\Desktop\WindowTheme;
 
 require __DIR__.'/vendor/autoload.php';
 
-$app = Application::create(
-    window: Window::create('Pam Desktop · Hello')
-        ->size(1120, 720)
-        ->minimumSize(720, 520)
-        ->theme(WindowTheme::Dark),
-    manifest: Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
-        ->description('Uma aplicação desktop elegante, gerenciada em PHP.')
-        ->publisher('Pushin')
-        ->category(ApplicationCategory::Development)
-        ->excludeFromBundle('storage/hello.txt'),
-)
-    ->window(
-        'inspector',
-        Window::create('Pam Desktop · Runtime Inspector')
-            ->entry('resources/inspector.html')
-            ->minimumSize(480, 360)
-            ->size(680, 520)
-            ->visible(false)
-            ->theme(WindowTheme::Dark),
-    )
-    ->capabilities(
-        Capabilities::none()
-            ->filesystem(FileSystemRoot::readWrite('data', __DIR__.'/storage'))
-            ->dialogs()
-            ->clipboard()
-            ->notifications()
-            ->dragAndDrop(),
-    )
-    ->commandTimeout(10_000);
+#[DesktopWindowDefinition(
+    name: 'inspector',
+    title: 'Pam Desktop · Runtime Inspector',
+    page: 'resources/inspector.html',
+    width: 680,
+    height: 520,
+    minimumWidth: 480,
+    minimumHeight: 360,
+    theme: WindowTheme::Dark,
+)]
+final readonly class InspectorWindow extends DesktopWindow
+{
+}
 
-$app->command('greet', static function (CommandContext $command): CommandResult {
-    $name = trim((string) $command->string('name', 'mundo'));
-    $name = $name !== '' ? mb_substr($name, 0, 40) : 'mundo';
+#[DesktopApplication(
+    id: 'com.pushin.pam-hello',
+    name: 'Pam Hello',
+    version: '1.0.0',
+    description: 'Uma aplicação desktop elegante, gerenciada em PHP.',
+    publisher: 'Pushin',
+    category: ApplicationCategory::Development,
+    theme: WindowTheme::Dark,
+)]
+final class HelloApp extends App
+{
+    protected function configure(Desktop $desktop): void
+    {
+        $desktop
+            ->permissions(static fn (Permissions $permissions) => $permissions
+                ->filesystem('data', __DIR__.'/storage', read: true, write: true)
+                ->dialogs()
+                ->clipboard()
+                ->notifications()
+                ->dragAndDrop())
+            ->timeout(10_000);
+    }
 
-    return CommandResult::success([
-        'message' => "Olá, {$name}.",
-        'detail' => 'Esta resposta saiu do PHP, atravessou o host Rust e chegou ao Servo.',
-    ])
-        ->effect(WindowEffect::title("Pam Desktop · {$name}", $command->windowId))
-        ->event(new ClientEvent(
-            name: 'hello.completed',
-            payload: ['name' => $name],
-            windowId: $command->windowId,
-        ));
-});
+    protected function windows(): array
+    {
+        return [InspectorWindow::class];
+    }
 
-$app->command('inspector.open', static fn (CommandContext $command): CommandResult =>
-    CommandResult::success(['windowId' => 'inspector'])
-        ->effect(WindowEffect::visible(true, 'inspector'))
-        ->effect(WindowEffect::focus('inspector'))
-        ->event(new ClientEvent(
-            name: 'inspector.opened',
-            payload: ['sourceWindowId' => $command->windowId],
-            windowId: $command->windowId,
-        )));
+    #[Command]
+    public function greet(
+        WindowHandle $window,
+        Events $events,
+        string $name = 'mundo',
+    ): array {
+        $name = trim($name);
+        $name = $name !== '' ? mb_substr($name, 0, 40) : 'mundo';
+        $window->title("Pam Desktop · {$name}");
+        $events->emit('hello.completed', compact('name'));
 
-$app->command('inspector.hide', static fn (): CommandResult =>
-    CommandResult::success()
-        ->effect(WindowEffect::visible(false, 'inspector')));
+        return [
+            'message' => "Olá, {$name}.",
+            'detail' => 'Esta resposta saiu do PHP, atravessou o host Rust e chegou ao Servo.',
+        ];
+    }
 
-$app->on('client.ready', static fn (EventContext $event): CommandResult =>
-    CommandResult::success()
-        ->event(new ClientEvent(
-            name: 'runtime.ready',
-            payload: ['windowId' => $event->windowId, 'protocol' => 5],
-            windowId: $event->windowId,
-        )));
+    #[Command('inspector.open')]
+    public function openInspector(
+        InspectorWindow $inspector,
+        WindowHandle $window,
+        Events $events,
+    ): array {
+        $inspector->show()->focus();
+        $events->emit('inspector.opened', ['sourceWindowId' => $window->id]);
 
-$app->run();
+        return ['windowId' => $inspector->id()];
+    }
+
+    #[Command('inspector.hide')]
+    public function hideInspector(InspectorWindow $inspector): void
+    {
+        $inspector->hide();
+    }
+
+    #[Listen('client.ready')]
+    public function clientReady(WindowHandle $window, Events $events): void
+    {
+        $events->emit('runtime.ready', [
+            'windowId' => $window->id,
+            'protocol' => 6,
+        ]);
+    }
+}
+
+HelloApp::run();
 "#,
     )?;
     write_new(
@@ -1747,7 +1766,7 @@ $app->run();
                 </article>
                 <article>
                     <span>contract</span>
-                    <strong>IPC v5</strong>
+                    <strong>IPC v6</strong>
                     <small>tipado e versionado</small>
                 </article>
             </section>
@@ -3555,7 +3574,7 @@ fn local_desktop_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pam/desktop": "0.5.0"
+                        "pushinbr/pam-desktop": "1.2.0"
                     }
                 }
             })

@@ -827,22 +827,24 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     let inspector_javascript =
         fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
 
-    assert!(manifest.contains("\"pam/desktop\""));
-    assert!(manifest.contains("\"pam/desktop\": \"^0.5\""));
+    assert!(manifest.contains("\"pushinbr/pam-desktop\""));
+    assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.2\""));
     assert!(manifest.contains("pam desktop build ."));
     assert!(manifest.contains("pam desktop dev ."));
-    assert!(application.contains("Application::create"));
-    assert!(application.contains("Manifest::create"));
+    assert!(application.contains("final class HelloApp extends App"));
+    assert!(application.contains("#[DesktopApplication("));
+    assert!(application.contains("#[Command]"));
+    assert!(application.contains("#[Listen('client.ready')]"));
     assert!(application.contains("ApplicationCategory::Development"));
-    assert!(application.contains("->window("));
-    assert!(application.contains("ClientEvent"));
-    assert!(application.contains("commandTimeout(10_000)"));
-    assert!(application.contains("Capabilities::none()"));
-    assert!(application.contains("FileSystemRoot::readWrite"));
-    assert!(application.contains("WindowEffect::title"));
+    assert!(application.contains("extends DesktopWindow"));
+    assert!(application.contains("Events $events"));
+    assert!(application.contains("->timeout(10_000)"));
+    assert!(application.contains("Permissions $permissions"));
+    assert!(application.contains("->filesystem('data'"));
+    assert!(application.contains("$window->title"));
     assert!(html.contains("/_pam/bridge.js"));
     assert!(html.contains("aria-live=\"polite\""));
-    assert!(html.contains("IPC v5"));
+    assert!(html.contains("IPC v6"));
     assert!(html.contains("Native Lab"));
     assert!(html.contains("Atualizações com rollback"));
     assert!(styles.contains("prefers-reduced-motion"));
