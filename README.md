@@ -1,54 +1,273 @@
 <div align="center">
 
-# ⚡ Pam
+# ⚡ PAM
 
-### PHP, Always in Memory.
+### PHP was never the ceiling. The runtime was.
 
-**A persistent, event-driven PHP application runtime powered by Rust, Tokio, Fibers, and the Zend Engine.**
+**One persistent PHP platform for servers, Laravel, real native mobile apps, and secure desktop software.**
 
-Write elegant PHP. Keep Composer. Serve HTTP, WebSockets, and asynchronous I/O from memory—without rebuilding your application for every request.
+Rust owns the runtime. Tokio owns concurrency. PHP owns your product.
 
-![Status](https://img.shields.io/badge/status-1.0%20stable-16a34a?style=flat-square)
-![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=flat-square&logo=php&logoColor=white)
-![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?style=flat-square&logo=rust&logoColor=white)
-![HTTP](https://img.shields.io/badge/HTTP-1.1%20%7C%202%20%7C%203-2563eb?style=flat-square)
-![License](https://img.shields.io/badge/license-Apache%202.0-22c55e?style=flat-square)
+[![Status](https://img.shields.io/badge/PAM-1.0%20stable-16a34a?style=for-the-badge)](https://push-in.github.io/pam-docs/project/status/)
+[![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net/)
+[![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-2563eb?style=for-the-badge)](LICENSE)
+
+**[Read the docs](https://push-in.github.io/pam-docs/introduction/) · [Install PAM](https://push-in.github.io/pam-docs/getting-started/installation/) · [Create your first app](https://push-in.github.io/pam-docs/getting-started/first-app/) · [Explore PAM Native](https://push-in.github.io/pam-docs/native/overview/)**
 
 </div>
 
 ---
 
-Pam brings the long-lived, event-driven runtime model to PHP while preserving the ecosystem PHP developers already trust.
+PAM — **PHP, Always in Memory** — is an unapologetically ambitious answer to a
+simple question: **how far can PHP go when we stop rebuilding and discarding it
+on every request?**
 
-It embeds PHP through the official Embed SAPI, loads your application and Composer autoloader once, and keeps them alive inside a Rust runtime. Incoming requests run in isolated PHP Fibers; native I/O is scheduled by Tokio; HTTP and WebSocket connections stay in memory; production workloads scale through supervised workers.
+Much further.
 
-Pam is **not a framework**, **not a Composer replacement**, and **not a new language**. The binary is the runtime layer beneath your application; optional first-party features are ordinary Composer packages.
+PAM keeps the Zend Engine and your Composer application alive inside a
+supervised, event-driven runtime powered by Rust, Tokio, and PHP Fibers. That
+same foundation can serve HTTP and WebSockets, run Laravel with isolated request
+sandboxes, render actual Android Views and UIKit controls, and power desktop
+applications inside capability-secured native windows.
+
+This is not PHP imitating another ecosystem. **This is PHP with a modern systems
+boundary built around its strengths.**
 
 > [!IMPORTANT]
-> PAM 1.0 stabilizes the documented CLI, runtime, Composer-package, editor, and
-> native-host contracts. Read [Known limitations](#known-limitations) and test
-> your actual packages, extensions, devices, credentials, and workload before
-> production deployment.
+> PAM 1.0 stabilizes the documented CLI, server runtime, Composer packages,
+> editor tooling, Android distribution, and generated iOS host contracts. Read
+> the [project status](https://push-in.github.io/pam-docs/project/status/) and
+> [known limitations](#known-limitations), then validate your own extensions,
+> devices, credentials, and workloads before production deployment.
 
-## PAM ecosystem
+## One command. Four product surfaces. No ecosystem reset.
 
-- [PAM Native](https://github.com/push-in/pam-native) — build real Android and
-  iOS applications in PHP without JavaScript or WebViews.
-- [PAM Native Nitro](https://github.com/push-in/pam-native-nitro) —
-  high-performance offline-first data for PAM Native.
-- [Official documentation](https://push-in.github.io/pam-docs/introduction/) —
-  architecture, installation and public contracts for the whole platform.
+| Build | What PAM changes | What you keep |
+| --- | --- | --- |
+| **PAM Server** | Persistent Zend, native HTTP/WebSockets, async I/O, supervised workers | PHP, Composer, PSRs, your application |
+| **Laravel on PAM** | Boot once, isolate every request, add native operations and observability | Laravel, Artisan, packages, conventions |
+| **PAM Native** | Reconcile in Rust and render real Android/iOS controls | Reactive PHP components, state, routes, Composer |
+| **PAM Desktop** | Servo UI, Rust process control, explicit native capabilities | PHP application logic, HTML/CSS/JS views |
 
-**Explore:** [Start here](docs/getting-started.md) · [Documentation map](docs/README.md) · [CLI reference](docs/cli-reference.md) · [Composer](#composer-stays-composer) · [Async I/O](#async-php-backed-by-tokio) · [WebSockets](#websockets-on-the-same-port) · [Production](#built-for-production-operations) · [Performance](#performance) · [Architecture](#how-it-works) · [Limitations](#known-limitations)
+Most platforms ask you to choose between the PHP ecosystem and a modern runtime.
+PAM rejects the trade-off. Composer stays Composer. Laravel stays Laravel. Rust
+handles transport, scheduling, reconciliation, supervision, and the native edge;
+PHP remains the expressive product layer your team already knows.
 
-## Why Pam?
+## Your first persistent application in 60 seconds
 
-Traditional PHP deployment is excellent at isolation, but each request usually rebuilds a meaningful part of the application: bootstrap files, dependency injection containers, configuration, routes, middleware, and framework state.
+No global PHP. No global Composer. No FPM pool. No Rust toolchain for application
+developers. Install one verified runtime and create the product you want:
 
-Pam changes the lifecycle:
+```console
+$ curl --proto '=https' --tlsv1.2 -fsSL \
+    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+$ pam init my-api --template api
+✓ Project created
+✓ Composer dependencies installed
+✓ PAM runtime ready
+
+$ cd my-api && pam dev
+⚡ PAM listening on http://127.0.0.1:3000
+↻ Hot reload enabled
+
+$ curl http://127.0.0.1:3000/api/ping
+{"message":"pong"}
+```
+
+Your application is now warm and persistent. Composer loaded once. The runtime
+stays alive. Requests execute in isolated Fibers.
+
+Choose another target without learning another platform CLI:
+
+```bash
+pam init my-laravel-app --template laravel  # Persistent Laravel
+pam init my-native-app  --template mobile   # Android + iOS
+pam init my-desktop-app --template desktop  # Linux + macOS + Windows
+```
+
+Inside every PAM project, the workflow is the same:
+
+```bash
+pam doctor
+pam dev
+pam test
+pam build
+pam package
+```
+
+## Native means native. Reactive means reactive.
+
+PAM Native does not ship a DOM, a browser pretending to be an app, or a
+JavaScript runtime between your state and the platform. PHP describes the UI;
+Rust validates, diffs, and lays it out; Kotlin and Swift commit bounded mutations
+to real native controls on the UI thread.
+
+Write a reactive component in PHP:
+
+```php
+<?php
+
+use Pam\Native\Attributes\State;
+use Pam\Native\Component;
+
+final class Counter extends Component
+{
+    #[State]
+    public int $count = 0;
+
+    public function increment(): void
+    {
+        $this->count++;
+    }
+}
+?>
+
+<template>
+    <Column class="counter">
+        <Text class="eyebrow">LIVE NATIVE STATE</Text>
+        <Text class="value">{{ $count }}</Text>
+        <Button label="Increment" @press="increment" />
+    </Column>
+</template>
+
+<style scoped>
+    .counter { padding: 24px; gap: 16px; align-items: center; }
+    .eyebrow { font-size: 12px; font-weight: 700; }
+    .value { font-size: 56px; font-weight: 800; }
+</style>
+```
+
+Tap the native button. PAM dispatches the event to the persistent PHP component,
+updates `#[State]`, renders the next typed tree, calculates the minimal diff in
+Rust, and commits only the necessary mutation to Android or iOS.
 
 ```text
-Traditional PHP                         Pam
+native event → PHP action → reactive state → Rust diff → UI-thread commit
+```
+
+The result is a product-grade native foundation:
+
+- real Android Views and UIKit controls;
+- native stacks, tabs, drawers, sheets, headers, gestures, and transitions;
+- recycled lists and grids built for large datasets;
+- navigation, scroll, and focused-input preservation during hot reload where supported;
+- native animations and gestures without per-frame traffic through PHP;
+- camera, media, files, SQLite, secure storage, notifications, location, sensors,
+  background work, sharing, widgets, App Intents, and Live Activities;
+- a plugin SDK for product-specific Kotlin and Swift modules or views;
+- bounded queues, payloads, caches, restoration, diagnostics, profiling, and
+  repeatable performance budgets.
+
+Start it with the same CLI:
+
+```console
+$ pam init orbit --template mobile
+$ cd orbit
+$ pam doctor --fix
+$ pam dev
+✓ PHP component runtime started
+✓ Native host connected
+⚡ Hot reload ready
+```
+
+**Go deeper:** [Native overview](https://push-in.github.io/pam-docs/native/overview/) ·
+[components](https://push-in.github.io/pam-docs/native/components/) ·
+[state and lifecycle](https://push-in.github.io/pam-docs/native/state-and-lifecycle/) ·
+[navigation](https://push-in.github.io/pam-docs/native/navigation/) ·
+[hot reload](https://push-in.github.io/pam-docs/native/hot-reload/) ·
+[plugin SDK](https://push-in.github.io/pam-docs/native/plugins/)
+
+## Desktop without ambient superpowers
+
+PAM Desktop combines typed PHP application logic, Rust process supervision, and
+local HTML/CSS/JavaScript rendered by Servo inside native windows. It supports
+multiple windows, bidirectional commands and events, background jobs, hot reload,
+crash recovery, signed updates, rollback, and native distribution.
+
+Power is explicit. Grant only what the application needs:
+
+```php
+$app->capabilities(
+    Capabilities::none()
+        ->filesystem(FileSystemRoot::readWrite('workspace', __DIR__.'/storage'))
+        ->dialogs()
+        ->clipboard()
+        ->notifications()
+        ->dragAndDrop(),
+);
+
+$app->command('greet', static fn (CommandContext $command): CommandResult =>
+    CommandResult::success([
+        'message' => 'Hello, '.$command->string('name', 'world').'.',
+    ]),
+);
+```
+
+Browser code can invoke only registered commands. Filesystem access is limited
+to named roots. The local bridge uses a random loopback port, a cryptographically
+random per-process token, matching-origin checks, and a restrictive CSP.
+
+```console
+$ pam init studio --template desktop
+$ cd studio
+$ pam desktop doctor .
+$ pam desktop dev .
+$ pam desktop build .
+✓ Application bundle created
+✓ SHA-256 integrity manifest written
+```
+
+Build self-contained packages for Linux, macOS, or Windows; create DEB, DMG, or
+MSIX output on the corresponding native host; and keep feed signing plus updates
+behind explicit PHP policy and a pinned Ed25519 public key.
+
+> [!NOTE]
+> PAM Desktop is alpha software alongside Servo 0.4. It is ready for prototypes
+> and controlled applications, but does not claim Electron feature parity yet.
+
+**Explore Desktop:** [overview](https://push-in.github.io/pam-docs/desktop/overview/) ·
+[windows and commands](https://push-in.github.io/pam-docs/desktop/windows-and-commands/) ·
+[native capabilities](https://push-in.github.io/pam-docs/desktop/capabilities/) ·
+[security](https://push-in.github.io/pam-docs/desktop/security/) ·
+[distribution](https://push-in.github.io/pam-docs/desktop/distribution/)
+
+## Laravel, still unmistakably Laravel
+
+```console
+$ pam init my-laravel-app --template laravel
+$ cd my-laravel-app
+$ pam dev pam.php
+⚡ Laravel booted once and listening on http://127.0.0.1:3000
+```
+
+PAM downloads the official skeleton, installs normal Composer dependencies,
+runs package discovery, generates the application key, and keeps Laravel intact
+in `vendor`. Each request receives an isolated application sandbox while the
+framework remains warm.
+
+Artisan remains Artisan:
+
+```bash
+pam artisan migrate
+pam artisan route:list
+pam artisan test
+pam artisan queue:work
+```
+
+The executable compatibility matrix covers Laravel 12 and 13 with SQLite,
+MySQL, PostgreSQL, Redis, database queues, Artisan, Sanctum, Scout, Livewire,
+Inertia, Reverb, Telescope, and Pulse. See the
+[Laravel documentation](https://push-in.github.io/pam-docs/laravel/overview/)
+for the lifecycle, package matrix, observability, Cloud, Forge, autoscaling, and
+deployment contracts.
+
+## The runtime beneath all of it
+
+```text
+Traditional PHP                         PAM
 
 request                                 process starts
   ├─ bootstrap PHP                        ├─ start Zend + Tokio
@@ -60,222 +279,37 @@ request                                   request N ─┘
   └─ repeat all of the above              process stays alive
 ```
 
-The result is a runtime designed for APIs, real-time systems, streaming, background I/O, and high-throughput services—with PHP syntax and Composer packages intact.
+PAM is **not** a new language, a PHP fork, a framework, or a Composer
+replacement. It is the systems layer beneath your application:
 
-## What you get
+- persistent Zend Engine through the official Embed SAPI;
+- Tokio scheduling, native async I/O, streaming, and backpressure;
+- HTTP/1.1, HTTP/2, HTTP/3, and RFC 6455 WebSockets on the same runtime;
+- supervised master/worker processes, crash recovery, graceful drain, worker
+  recycling, and generational reload;
+- Prometheus metrics, health endpoints, structured logs, tracing, profiling,
+  diagnostics, and live `pam top`;
+- verified TLS, timeouts, request limits, slowloris protection, CORS, rate
+  limiting, and trusted-proxy controls;
+- relocatable bundles containing the application, `vendor`, runtime, exact
+  `libphp`, and a SHA-256 manifest.
 
-| Area | Where it lives |
+## Start exploring
+
+| I want to… | Start here |
 | --- | --- |
-| Runtime core | Persistent Zend Engine, Tokio scheduler, Fibers, HTTP transport, streams, async I/O, process and diagnostics |
-| `pushinbr/pam-api` | Expressive routing, route parameters, middleware, error handling and package discovery |
-| `pushinbr/pam-socket` | RFC 6455 events, rooms, broadcasts, acknowledgements, adapters and resume support |
-| `pushinbr/pam-psr-bridge` | PSR-7, PSR-15 and PSR-17 interoperability using the official interfaces |
-| `pushinbr/pam-testing` | Fast in-memory HTTP client and fluent response assertions |
-| `pushinbr/pam-core-api` | Small, versioned contracts for packages that extend Pam |
-| Pam Desktop | Separate Servo host plus a typed Composer package for building desktop applications with PHP |
-| Composer | Normal `composer.json`, `composer.lock`, PSR-4, custom vendor directories, and `vendor/autoload.php` |
-| Production | Master/worker mode, crash recovery, watchdog, graceful drain, worker recycling, generational reload |
-| Operations | Prometheus metrics, health endpoints, structured logs, tracing, profiling, diagnostics, live `pam top` |
-| Security | Request limits, timeouts, slowloris protection, verified TLS, CORS, rate limiting, trusted proxies |
-| Distribution | Relocatable production bundles with application, `vendor`, runtime, exact `libphp`, and SHA-256 manifest |
-| Developer experience | One binary, expressive PHP API, project generator, hot reload, test runner, doctor, benchmark tooling |
+| Understand the whole platform | **[Introduction](https://push-in.github.io/pam-docs/introduction/)** |
+| Install PAM | [Installation](https://push-in.github.io/pam-docs/getting-started/installation/) |
+| Build my first application | [Create your first app](https://push-in.github.io/pam-docs/getting-started/first-app/) |
+| Choose Server, Laravel, Native, or Desktop | [Choose a target](https://push-in.github.io/pam-docs/getting-started/choose-a-target/) |
+| Learn every command | [CLI and project console](https://push-in.github.io/pam-docs/getting-started/cli/) · [repository CLI reference](docs/cli-reference.md) |
+| Understand the internals | [Architecture](docs/architecture.md) · [How it works](#how-it-works) |
+| Operate PAM in production | [Production](#built-for-production-operations) · [official production guide](https://push-in.github.io/pam-docs/runtime/production/) |
+| Inspect maturity and support | [Project status](https://push-in.github.io/pam-docs/project/status/) · [Known limitations](#known-limitations) |
 
-## Quick start
-
-### 1. Install the runtime
-
-PAM ships prebuilt Linux and macOS releases for x86_64 and ARM64. Linux archives
-target glibc 2.35 or newer; macOS archives also contain the verified iOS PHP and
-engine XCFrameworks used by `pam mobile ios:*`.
-
-```bash
-curl --proto '=https' --tlsv1.2 --fail --silent --show-error --location \
-  --output pam-install.sh \
-  https://github.com/push-in/pam/releases/latest/download/install.sh
-sh pam-install.sh
-rm pam-install.sh
-pam --version
-pam doctor .
-```
-
-The release contains the PAM binary, its exact private PHP Embed library, a
-reviewed set of common PHP extensions, and an isolated INI tree. End users do
-**not** install PHP, Composer, Rust, `php-config`, development headers or an FPM
-service. The installer verifies the release SHA-256, rejects unsafe archive paths
-and installs without root under `~/.local`.
-
-Composer is downloaded and signature-verified inside PAM's Embed SAPI only when a
-project first needs it.
-
-PAM never reads the host PHP configuration for an official release. Extra
-extension configuration can be added explicitly with `PAM_PHP_INI_SCAN_DIR`;
-there is no accidental dependency on `/etc/php`.
-
-<details>
-<summary>Building PAM itself from source</summary>
-
-Runtime contributors need Rust 1.88+, a C toolchain, matching PHP 8.4 development
-headers and the Embed library:
-
-```bash
-sudo apt-get install -y build-essential php8.4-dev libphp8.4-embed
-cargo build --locked --release
-```
-
-Use `PHP_CONFIG` and `PAM_PHP_LIB_DIR` for a custom build toolchain. These are
-build-time requirements and are not required on machines using an official PAM
-release.
-
-</details>
-
-### 2. Create an application
-
-```bash
-pam init my-api --template api
-cd my-api
-pam dev index.php
-```
-
-The generated application exposes `GET /api/ping` on port `3000`.
-
-```bash
-curl http://127.0.0.1:3000/api/ping
-```
-
-```json
-{"message":"pong"}
-```
-
-That is a persistent PHP server with hot reload. No FPM pool, no framework bootstrap per request, and no second package ecosystem.
-
-`pam init` installs dependencies automatically through Composer running inside Pam's
-Embed SAPI. The project and lockfile remain standard Composer artifacts; no external
-PHP CLI or global Composer installation is required.
-
-> [!NOTE]
-When Pam is built from this monorepo, generated API projects use a Composer path
-repository for the local first-party packages. Published binaries use their normal
-Packagist versions.
-
-### Laravel in one command
-
-```bash
-pam init my-laravel-app --template laravel
-cd my-laravel-app
-pam dev pam.php
-```
-
-Pam downloads the official Laravel skeleton, installs its normal Composer
-dependencies, runs package discovery, generates the application key and configures
-a stateless `GET /api/ping` route. The `Pam\Laravel` host is compiled into the
-binary: Laravel itself remains untouched in `vendor`, boots once, and receives an
-isolated application sandbox for every request.
-
-The executable matrix validates Laravel 12 and 13 with SQLite, MySQL,
-PostgreSQL, Redis, database queues, Artisan, Sanctum, Scout, Livewire, Inertia,
-Reverb, Telescope and Pulse. Horizon and Socialite are tested on Laravel 12,
-the version accepted by their current stable Composer constraints. The supported
-contract is maintained Laravel 12 and current Laravel 13.
-
-Artisan runs through Pam with a real CLI SAPI identity, normal arguments, exit
-codes, standard streams, and Laravel's console environment:
-
-```bash
-pam artisan migrate
-pam artisan route:list
-pam artisan test
-pam artisan queue:work
-```
-
-Add the native Socket transport to either preset:
-
-```bash
-pam init realtime-api --template api --socket
-pam init realtime-laravel --template laravel --socket
-```
-
-Run `pam init` without a template in a terminal for the interactive preset picker.
-Use `--no-install` to generate/download source without resolving dependencies.
-See [Laravel on Pam](docs/laravel.md) for lifecycle and production details.
-
-### Mobile preset
-
-The CLI offers two native mobile starting points:
-
-```bash
-pam init native-core --template mobile
-```
-
-`mobile` starts with the explicit PAM Native PHP tree and no component-library
-dependency. It renders through the PAM Native element tree, Rust diff engine
-and platform UI-thread commit path.
-
-### Desktop applications with Servo
-
-Pam Desktop lives in its own repository because its release cadence, native
-toolchain and threat model differ from the server runtime. The Pam CLI still
-knows how to create a polished starter:
-
-```bash
-pam init my-desktop-app --template desktop
-cd my-desktop-app
-pam desktop doctor .
-pam desktop dev .
-pam desktop build .
-```
-
-`pam desktop` is the public command; it delegates to the separately distributed
-`pam-desktop` host and identifies the current Pam executable to its PHP worker.
-The 0.5 starter demonstrates multiple windows, bidirectional events, command
-timeouts, crash recovery, development hot reload and explicit native
-capabilities. Window configuration and application policy remain in PHP, local
-HTML/CSS/JavaScript renders directly with Servo, and the Rust host supervises a
-versioned JSON-lines protocol. Named filesystem roots, dialogs, clipboard,
-notifications and drag-and-drop grants are opt-in. Application identity,
-category, icon and signed-update policy also live in a typed PHP manifest:
-
-```php
-Manifest::create('com.pushin.pam-hello', 'Pam Hello', '1.0.0')
-    ->publisher('Pushin')
-    ->category(ApplicationCategory::Development);
-```
-
-`pam desktop build` creates a self-contained, update-ready package for Linux,
-macOS or Windows. `--format deb` adds a Debian package; `--format native`
-creates a DMG or MSIX on its native host. Bundles include the Pam worker, PHP
-runtime libraries, Servo host, vendored PHP application, platform metadata,
-icon and a SHA-256 integrity manifest. Feed signing and automatic updates remain
-behind explicit PHP policy and a pinned Ed25519 public key.
-
-Native capabilities remain explicit:
-
-```php
-$app->capabilities(
-    Capabilities::none()
-        ->filesystem(FileSystemRoot::readWrite('data', __DIR__.'/storage'))
-        ->dialogs()
-        ->clipboard()
-        ->notifications()
-        ->dragAndDrop(),
-);
-```
-Browser code can call only commands explicitly registered by the application:
-
-```php
-$app->command('greet', static fn (CommandContext $command): CommandResult =>
-    CommandResult::success([
-        'message' => 'Olá, '.$command->string('name', 'mundo').'.',
-    ])
-);
-```
-
-The local bridge binds to a random loopback port, requires a cryptographically
-random per-process token and matching origin, applies a restrictive CSP, and
-prevents static assets from escaping the project. Deadlined or cancelled
-commands terminate the compromised worker and prepare a fresh generation
-without replaying possible side effects. Pam Desktop is alpha software alongside
-Servo 0.4; it is suited to prototypes and controlled applications, not yet a
-claim of Electron feature parity.
+The sections below are the deep technical reference: packages, APIs, Composer,
+PSRs, async I/O, WebSockets, production, performance, architecture, and
+validation.
 
 ## A small core, a Composer ecosystem
 
