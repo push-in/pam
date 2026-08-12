@@ -1,0 +1,88 @@
+name: Required release gates
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: required-release-gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Required CI
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          components: rustfmt
+      - name: Validate locked Rust graph
+        run: cargo metadata --locked --format-version=1 >/dev/null
+      - name: Check Rust formatting
+        run: cargo fmt --all -- --check
+
+  octane:
+    name: Required PAM Octane
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: packages/octane
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Preflight locked dependencies
+        run: composer install --dry-run --no-interaction --prefer-dist
+      - name: Install locked dependencies
+        run: composer install --no-interaction --prefer-dist
+      - name: Verify the Octane package
+        run: composer verify
+
+  composer_packages:
+    name: Required Composer packages
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Validate package publication metadata and splits
+        run: scripts/package-release.sh validate
+
+  security:
+    name: Required security
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Validate dependency graphs before audit
+        run: |
+          cargo metadata --locked --format-version=1 >/dev/null
+          composer install --working-dir=compat/composer-smoke --dry-run --no-interaction --prefer-dist
+          composer install --working-dir=compat/laravel-smoke --dry-run --no-interaction --prefer-dist
+          composer install --working-dir=packages/octane --dry-run --no-interaction --prefer-dist
+      - name: Install Octane dependencies for audit
+        run: composer install --working-dir=packages/octane --no-interaction --prefer-dist
+      - name: Audit locked Composer dependencies
+        run: |
+          composer audit --working-dir=compat/composer-smoke --locked
+          composer audit --working-dir=compat/laravel-smoke --locked
+          composer audit --working-dir=packages/octane
