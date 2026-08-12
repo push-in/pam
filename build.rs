@@ -4,8 +4,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+enum PhpLibrary {
+    Dynamic { directory: PathBuf, name: String },
+    Static { archive: PathBuf },
+}
+
 fn main() {
     println!("cargo:rerun-if-changed=native/pam_php.c");
+    println!("cargo:rerun-if-changed=native/resolver_shim.c");
     println!("cargo:rerun-if-changed=native/pam.h");
     println!("cargo:rerun-if-changed=runtime/bootstrap.php");
     println!("cargo:rerun-if-changed=runtime/redis.php");
@@ -21,13 +27,29 @@ fn main() {
     let php_config = env::var_os("PHP_CONFIG").unwrap_or_else(|| "php-config".into());
     let includes = command_output(&php_config, &["--includes"]);
 
-    compile_shim(&out_dir, &includes);
-    archive_shim(&out_dir);
+    let php_library = find_php_embed_library();
+    let static_linux =
+        matches!(php_library, PhpLibrary::Static { .. }) && cfg!(target_os = "linux");
 
-    let (php_lib_dir, php_lib_name) = find_php_embed_library();
+    compile_shim(&out_dir, &includes, static_linux);
+    archive_shim(&out_dir, static_linux);
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
-    println!("cargo:rustc-link-lib=static=pam_php");
+    if static_linux {
+        // The resolver bridge is intentionally not referenced until libphp.a
+        // is processed later, so retain both shim objects in full.
+        println!("cargo:rustc-link-lib=static:+whole-archive=pam_php");
+    } else {
+        println!("cargo:rustc-link-lib=static=pam_php");
+    }
+
+    match php_library {
+        PhpLibrary::Dynamic { directory, name } => link_dynamic_php(&directory, &name),
+        PhpLibrary::Static { archive } => link_static_php(&archive),
+    }
+}
+
+fn link_dynamic_php(php_lib_dir: &Path, php_lib_name: &str) {
     println!("cargo:rustc-link-search=native={}", php_lib_dir.display());
     println!("cargo:rustc-link-lib=dylib={php_lib_name}");
 
@@ -45,27 +67,80 @@ fn main() {
     }
 }
 
-fn compile_shim(out_dir: &Path, includes: &str) {
-    let compiler = env::var_os("CC").unwrap_or_else(|| "cc".into());
-    let object = out_dir.join("pam_php.o");
-    let mut command = Command::new(&compiler);
+fn link_static_php(php_archive: &Path) {
+    let library_dir = php_archive
+        .parent()
+        .expect("static PHP archive must have a parent directory");
+    let mut archives = fs::read_dir(library_dir)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", library_dir.display()))
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(OsStr::to_str) == Some("a"))
+        .collect::<Vec<_>>();
 
-    command
-        .arg("-std=c11")
-        .arg("-fPIC")
-        .arg("-Wall")
-        .arg("-Wextra")
-        .arg("-Werror")
-        .arg("-c")
-        .arg("native/pam_php.c")
-        .arg("-o")
-        .arg(&object);
+    archives.sort();
 
-    command.args(includes.split_whitespace());
-    run(&mut command, "compile the PHP Embed shim");
+    // PHP module and SAPI registration contains intentionally unreferenced
+    // symbols, so the main archive must be retained in full.
+    println!("cargo:rustc-link-arg=-Wl,--whole-archive");
+    println!("cargo:rustc-link-arg={}", php_archive.display());
+    println!("cargo:rustc-link-arg=-Wl,--no-whole-archive");
+
+    // ePHPm SDKs bundle their static dependencies. Keep them after libphp.a
+    // so the archive linker can resolve PHP's references in order. Some of
+    // those archives reference each other, requiring a linker group.
+    println!("cargo:rustc-link-arg=-Wl,--start-group");
+    for archive in archives {
+        println!("cargo:rustc-link-arg={}", archive.display());
+    }
+    println!("cargo:rustc-link-arg=-Wl,--end-group");
+
+    if cfg!(target_os = "linux") {
+        // Repeat the system runtime libraries after the static archives.
+        // rustc's own copies occur earlier and --as-needed may discard them
+        // before PHP introduces references to resolver, glibc, and libgcc.
+        for library in ["resolv", "dl", "m", "pthread", "rt", "gcc", "gcc_s", "c"] {
+            println!("cargo:rustc-link-arg=-l{library}");
+        }
+    }
 }
 
-fn archive_shim(out_dir: &Path) {
+fn compile_shim(out_dir: &Path, includes: &str, static_linux: bool) {
+    let compiler = env::var_os("CC").unwrap_or_else(|| "cc".into());
+    compile_c_object(
+        &compiler,
+        Path::new("native/pam_php.c"),
+        &out_dir.join("pam_php.o"),
+        includes.split_whitespace(),
+    );
+
+    if static_linux {
+        compile_c_object(
+            &compiler,
+            Path::new("native/resolver_shim.c"),
+            &out_dir.join("resolver_shim.o"),
+            std::iter::empty(),
+        );
+    }
+}
+
+fn compile_c_object<'a>(
+    compiler: &OsStr,
+    source: &Path,
+    object: &Path,
+    includes: impl Iterator<Item = &'a str>,
+) {
+    let mut command = Command::new(compiler);
+    command
+        .args(["-std=c11", "-fPIC", "-Wall", "-Wextra", "-Werror", "-c"])
+        .arg(source)
+        .arg("-o")
+        .arg(object)
+        .args(includes);
+    run(&mut command, &format!("compile {}", source.display()));
+}
+
+fn archive_shim(out_dir: &Path, static_linux: bool) {
     let archiver = env::var_os("AR").unwrap_or_else(|| "ar".into());
     let mut command = Command::new(&archiver);
 
@@ -74,10 +149,14 @@ fn archive_shim(out_dir: &Path) {
         .arg(out_dir.join("libpam_php.a"))
         .arg(out_dir.join("pam_php.o"));
 
+    if static_linux {
+        command.arg(out_dir.join("resolver_shim.o"));
+    }
+
     run(&mut command, "archive the PHP Embed shim");
 }
 
-fn find_php_embed_library() -> (PathBuf, String) {
+fn find_php_embed_library() -> PhpLibrary {
     let manifest_dir = PathBuf::from(
         env::var_os("CARGO_MANIFEST_DIR").expect("Cargo did not set CARGO_MANIFEST_DIR"),
     );
@@ -103,25 +182,36 @@ fn find_php_embed_library() -> (PathBuf, String) {
                 .file_name()
                 .and_then(OsStr::to_str)
                 .expect("PHP Embed library name is not valid UTF-8");
-            let library_name = file_name
-                .strip_prefix("lib")
-                .expect("PHP Embed library must start with lib");
-            let link_name = library_name
-                .strip_suffix(".so")
-                .or_else(|| library_name.strip_suffix(".dylib"))
-                .expect("PHP Embed library must be a .so or .dylib");
+            if file_name == "libphp.a" {
+                return PhpLibrary::Static { archive: library };
+            }
 
-            return (directory, link_name.to_owned());
+            let name = file_name
+                .strip_prefix("lib")
+                .and_then(|name| {
+                    name.strip_suffix(".so")
+                        .or_else(|| name.strip_suffix(".dylib"))
+                })
+                .expect("dynamic PHP Embed library must be a lib*.so or lib*.dylib");
+
+            return PhpLibrary::Dynamic {
+                directory,
+                name: name.to_owned(),
+            };
         }
     }
 
     panic!(
         "PHP Embed library not found. Install libphp-embed or set \
-         PAM_PHP_LIB_DIR to a directory containing libphp.so or libphp.dylib."
+         PAM_PHP_LIB_DIR to a directory containing libphp.a, libphp.so, or libphp.dylib."
     );
 }
 
 fn embed_library_in(directory: &Path) -> Option<PathBuf> {
+    let exact = directory.join("libphp.a");
+    if exact.is_file() {
+        return Some(exact);
+    }
     let exact = directory.join("libphp.so");
     if exact.is_file() {
         return Some(exact);

@@ -501,11 +501,16 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
     let bundled_executable = binary_directory.join("pam");
     fs::copy(&executable, &bundled_executable)
         .map_err(|error| format!("cannot copy {}: {error}", executable.display()))?;
-    let php_library_name = php_library
-        .file_name()
-        .ok_or_else(|| "linked PHP library has no filename".to_owned())?;
-    fs::copy(&php_library, library_directory.join(php_library_name))
-        .map_err(|error| format!("cannot copy {}: {error}", php_library.display()))?;
+    let php_library_manifest = if let Some(php_library) = php_library {
+        let php_library_name = php_library
+            .file_name()
+            .ok_or_else(|| "linked PHP library has no filename".to_owned())?;
+        fs::copy(&php_library, library_directory.join(php_library_name))
+            .map_err(|error| format!("cannot copy {}: {error}", php_library.display()))?;
+        format!("lib/{}", php_library_name.to_string_lossy())
+    } else {
+        "embedded".to_owned()
+    };
 
     let entry = entry.to_string_lossy();
     if entry.contains('\'') {
@@ -530,7 +535,7 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
         pam_version: env!("CARGO_PKG_VERSION"),
         target: std::env::consts::ARCH.to_owned() + "-" + std::env::consts::OS,
         entry: entry.into_owned(),
-        php_library: format!("lib/{}", php_library_name.to_string_lossy()),
+        php_library: php_library_manifest,
         files: build_files(output)?,
     };
     fs::write(
@@ -556,7 +561,7 @@ pub fn build(project: &Path, output: &Path, entry: &Path) -> Result<u8, String> 
     Ok(0)
 }
 
-fn linked_php_library(executable: &Path) -> Result<PathBuf, String> {
+fn linked_php_library(executable: &Path) -> Result<Option<PathBuf>, String> {
     let output = Command::new("ldd")
         .arg(executable)
         .output()
@@ -567,7 +572,7 @@ fn linked_php_library(executable: &Path) -> Result<PathBuf, String> {
             String::from_utf8_lossy(&output.stderr)
         ));
     }
-    String::from_utf8_lossy(&output.stdout)
+    Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
         .find_map(|line| {
             let line = line.trim();
@@ -577,8 +582,7 @@ fn linked_php_library(executable: &Path) -> Result<PathBuf, String> {
             let path = line.split("=>").nth(1)?.split_whitespace().next()?;
             Some(PathBuf::from(path))
         })
-        .filter(|path| path.is_file())
-        .ok_or_else(|| "cannot locate the PHP Embed shared library linked by Pam".to_owned())
+        .filter(|path| path.is_file()))
 }
 
 fn copy_project(

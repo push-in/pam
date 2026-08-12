@@ -251,7 +251,13 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
         String::from_utf8_lossy(&output.stderr),
     );
     assert!(bundle.join("manifest.json").is_file());
-    assert!(bundle.join("lib").read_dir().unwrap().next().is_some());
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(bundle.join("manifest.json")).unwrap()).unwrap();
+    let php_library = manifest["phpLibrary"].as_str().unwrap();
+    assert!(
+        php_library == "embedded" || bundle.join(php_library).is_file(),
+        "invalid bundled PHP library: {php_library}"
+    );
     let bundled = Command::new(bundle.join("bin/pam-run")).output().unwrap();
     assert!(
         bundled.status.success(),
