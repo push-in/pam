@@ -160,3 +160,31 @@ and [iOS ecosystem](https://github.com/push-in/pam-native/actions/runs/321945871
 compilation of the official plugins. This is a source publication, not a new
 Composer version: no tag or package release is claimed until the versioned
 publication gate runs on that exact tag.
+
+## 2026-08-18 fail-closed Native and Desktop tag releases
+
+The bounded-network delivery exposed that PAM Native's aggregate Android and
+iOS workflows did not automatically run for platform-source changes; they had
+to be dispatched manually. Commit `9da8325` made source CI and both aggregate
+plugin workflows reusable, expanded their automatic path coverage, and made
+all three hard dependencies of the GitHub Release publisher alongside the
+central Composer matrix. A checked-in executable contract prevents those
+dependencies or path triggers from disappearing silently. The first push with
+the new policy automatically started [source/device CI](https://github.com/push-in/pam-native/actions/runs/32195961606),
+[Android ecosystem certification](https://github.com/push-in/pam-native/actions/runs/32195961609)
+and [iOS ecosystem certification](https://github.com/push-in/pam-native/actions/runs/32195961623).
+
+The same audit found that PAM Desktop tag publication, especially its API-only
+path, could bypass the complete CI that protects `main`. Desktop commit
+`bd8ec18` made that CI reusable and a dependency of both release paths, with an
+executable workflow regression contract. Its [first policy-enforced source
+run](https://github.com/push-in/pam-desktop/actions/runs/32196230253) covers
+formatting, Clippy, workspace and Composer tests, PHP static analysis,
+reproducible/installed host evidence, footprint limits and signed official
+Collector interoperability.
+
+No version tag was created to test these controls: doing so would itself be a
+real publication. GitHub accepted and executed the reusable workflow syntax on
+the source pushes, while the regression contracts verify the tag dependency
+graph statically. The next legitimate tag will exercise that graph on its exact
+immutable commit before either publisher can run.
