@@ -88,6 +88,17 @@ def verify_checkout(packages: list[dict[str, object]], directory: Path, reposito
         raise ValueError(f"{repository} Composer scripts must be an object")
     if package["testRequired"] and not isinstance(scripts.get("test"), str):
         raise ValueError(f"{repository} must expose composer test")
+    publication_workflow = directory / ".github" / "workflows" / "publication-compatibility.yml"
+    release_workflow = directory / ".github" / "workflows" / "release.yml"
+    workflow_path = publication_workflow if publication_workflow.is_file() else release_workflow
+    if not workflow_path.is_file():
+        raise ValueError(f"{repository} must certify every publication tag")
+    workflow = workflow_path.read_text(encoding="utf-8")
+    reusable_gate = "push-in/pam/.github/workflows/ecosystem-compatibility.yml@main"
+    if "tags:" not in workflow or reusable_gate not in workflow:
+        raise ValueError(f"{repository} publication workflow must call the ecosystem gate")
+    if workflow_path == release_workflow and "needs: ecosystem-compatibility" not in workflow:
+        raise ValueError(f"{repository} publisher must wait for ecosystem compatibility")
 
 
 def main() -> int:

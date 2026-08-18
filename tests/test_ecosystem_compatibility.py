@@ -57,6 +57,18 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertIn("github.event.repository.name == matrix.package.repository", workflow)
         self.assertIn("github.ref_type == 'tag'", workflow)
 
+    def test_checkout_contract_requires_a_publication_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = {
+                "name": "pushinbr/pam-native-auth",
+                "require": {"php": "^8.4", "pushinbr/pam-native": "^0.6.1"},
+                "scripts": {"test": "php tests/run.php"},
+            }
+            Path(directory, "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = self.run_script("verify", directory, "pam-native-auth")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must certify every publication tag", result.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
