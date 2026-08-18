@@ -8,6 +8,8 @@ on:
       - '.github/workflows/observability.yml'
       - 'Cargo.lock'
       - 'Cargo.toml'
+      - 'compat/composer-smoke/composer.json'
+      - 'compat/composer-smoke/composer.lock'
       - 'scripts/certify-otlp.sh'
       - 'scripts/otlp-evidence.py'
       - 'src/otlp.rs'
@@ -35,6 +37,17 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Validate the fixture dependency graph
+        run: composer validate --strict --working-dir=compat/composer-smoke
+      - name: Preflight and install fixture dependencies
+        run: |
+          composer install --working-dir=compat/composer-smoke --dry-run --no-interaction --prefer-dist
+          composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
       - name: Install the integrity-verified Cosign release
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
       - name: Verify the official Collector image signature
