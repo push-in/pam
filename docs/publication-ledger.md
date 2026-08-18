@@ -134,3 +134,29 @@ Android build/lint and instrumented renderer contracts on API 26 and API 36.
 The Composer package split is deliberately not claimed as released until a new
 versioned Native tag passes the newly connected global ecosystem gate and its
 mirror publication workflow.
+
+## 2026-08-18 bounded Native network timeline
+
+PAM CLI commit `58f9d4d` added fail-closed Chrome/Perfetto export for Native
+network events before Native began emitting the new integer kind. It accepts
+only sequential method codes `1` through `5`, valid HTTP status codes and byte
+counts within the Native request/response limits. Unknown snapshot fields,
+including deliberately injected URL, label and header data in the tests, are
+not copied into the trace.
+
+PAM Native commit `bad65bd` added the corresponding Android and iOS diagnostics
+to the existing eight-entry timeline. Each event retains only method/status
+codes, request/response byte counts, duration and failure state. URLs, origins,
+paths, queries, headers and bodies are never serialized. The source publication
+passed [PAM CI](https://github.com/push-in/pam/actions/runs/32194299303),
+[Laravel compatibility](https://github.com/push-in/pam/actions/runs/32194299485),
+[required release gates](https://github.com/push-in/pam/actions/runs/32194299236)
+and the full [26-package Composer matrix](https://github.com/push-in/pam/actions/runs/32194674415).
+
+Native certification includes [Rust/PHP, Swift/UIKit, Android build and API
+26/36 contracts](https://github.com/push-in/pam-native/actions/runs/32194384295),
+plus explicit [Android ecosystem](https://github.com/push-in/pam-native/actions/runs/32194585232)
+and [iOS ecosystem](https://github.com/push-in/pam-native/actions/runs/32194587117)
+compilation of the official plugins. This is a source publication, not a new
+Composer version: no tag or package release is claimed until the versioned
+publication gate runs on that exact tag.

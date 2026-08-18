@@ -90,8 +90,11 @@ unintended downstream service.
 React Native 0.83 also added automatic fetch, XHR and image inspection to its
 [Network panel](https://reactnative.dev/docs/react-native-devtools#network),
 including timings, headers, previews and Performance-panel events. PAM's next
-network-tooling gap is host-native bounded request metadata in the existing
-cross-surface timeline—not response-body capture or an unbounded inspector.
+step is now shipped as host-native bounded request metadata in the existing
+cross-surface timeline. Android and iOS retain only the latest eight events and
+export method/status integer codes, duration, failure state and byte counts.
+URLs, origins, paths, queries, headers and bodies are excluded by construction;
+the CLI rejects invalid codes and counts outside the Native transport bounds.
 
 ## Current product audit
 
@@ -237,7 +240,7 @@ repository-local.
 | Structured error and automation contracts | `7d9fff3`; actionable Doctor target/artifact/remediation report `f5709ce` | Contextual CLI commands inherit the envelope | Desktop retains its typed bridge errors | Shipped |
 | Development lifecycle event protocol | `2b724e4` | Android/iOS hosts emit schema 1 | `392a6eb` | Shipped |
 | Versioned DevTools snapshots | `870e4fd` | `d4dec09` | `ea34d52` | Shipped |
-| Cross-surface observability | Prometheus/control-plane metrics, structured access logs and W3C server-child trace lineage `ab0d0da`; redacted Chrome/Perfetto timeline exporter `4aff197`; bounded OTLP/HTTP JSON server spans `93aec7a`; signed official-Collector certification and evidence `5e51c03` | Certified traces/logs/metrics `ab4805e`; strict Server context import with preserved sampling and Collector-proven parent lineage `622df52`; exact-origin outbound Native HTTP propagation `e041449` | Explicit-opt-in command spans and signed Collector CI `789a1f1`; authenticated bridge continuation `d93c63b`; renderer trace-header spoofing closed `0b01551`; exact-origin outbound injection `e2c7840` | End-to-end lineage and scoped outbound propagation shipped across all three surfaces; bounded host-native network timeline events remain open |
+| Cross-surface observability | Prometheus/control-plane metrics, structured access logs and W3C server-child trace lineage `ab0d0da`; redacted Chrome/Perfetto timeline exporter `4aff197`; bounded OTLP/HTTP JSON server spans `93aec7a`; signed official-Collector certification and evidence `5e51c03`; validated Native network trace export `58f9d4d` | Certified traces/logs/metrics `ab4805e`; strict Server context import with preserved sampling and Collector-proven parent lineage `622df52`; exact-origin outbound Native HTTP propagation `e041449`; bounded/redacted network diagnostics `bad65bd` | Explicit-opt-in command spans and signed Collector CI `789a1f1`; authenticated bridge continuation `d93c63b`; renderer trace-header spoofing closed `0b01551`; exact-origin outbound injection `e2c7840` | End-to-end lineage, scoped outbound propagation and bounded Native network timeline events shipped across all three surfaces |
 | Contextual live snapshot transport | Desktop routing `cf2609f`; Android routing `00b4df5`; iOS routing `9cf68fa` | Privilege-gated Android export `5b4b5f5`; app-scoped iOS Simulator export and generated overlay `8a95f55` | Authenticated development session `47b489b` | Server, Android, iOS Simulator and Desktop shipped; physical-device Native export intentionally excluded pending a pairing protocol |
 | Visual capture foundation | `42a4a07` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
 | Accessible adaptive design tokens | Desktop starter run-green identity and WCAG/forced-color gate `f58a2ba` | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `9099df7` | Generated Desktop starter inherits the runtime-owned design contract | Native system and Desktop first-run surface shipped; reusable cross-surface package remains open |
