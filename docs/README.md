@@ -36,6 +36,7 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 
 - [Composer packages and ecosystem boundaries](packages.md)
 - [Signed plugin registry and trust rotation](plugin-registry.md)
+- [Plugin registry ceremony and publication operations](registry-operations.md)
 - [CLI workflow and automation](cli.md)
 - [Application and package commands](extending-cli.md)
 - [Laravel lifecycle and production behavior](laravel.md)

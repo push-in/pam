@@ -496,6 +496,11 @@ struct AdoptOptions {
     json: bool,
 }
 
+struct PayloadOptions {
+    document: PathBuf,
+    output: Option<PathBuf>,
+}
+
 pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut arguments = arguments.into_iter();
     let Some(command) = arguments.next() else {
@@ -511,10 +516,93 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "rotate" => verify_rotation_command(parse_options(arguments, true)?),
         "adopt" => adopt_rotation_command(parse_adopt_options(arguments)?),
         "resolve" => resolve_command(parse_resolve_options(arguments)?),
+        "payload" => payload_command(parse_payload_options(arguments)?),
+        "key-id" => key_id_command(arguments),
         unknown => Err(format!(
-            "unknown registry command {unknown:?}; expected verify, resolve, rotate, or adopt"
+            "unknown registry command {unknown:?}; expected verify, resolve, rotate, adopt, payload, or key-id"
         )),
     }
+}
+
+fn parse_payload_options(
+    mut arguments: impl Iterator<Item = OsString>,
+) -> Result<PayloadOptions, String> {
+    let mut document = None;
+    let mut output = None;
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--document" => document = Some(required_path(&mut arguments, "--document")?),
+            "--output" => output = Some(required_path(&mut arguments, "--output")?),
+            unknown => return Err(format!("unknown registry payload option {unknown:?}")),
+        }
+    }
+    Ok(PayloadOptions {
+        document: document.ok_or_else(|| "registry payload requires --document".to_owned())?,
+        output,
+    })
+}
+
+fn payload_command(options: PayloadOptions) -> Result<u8, String> {
+    let bytes = read_bounded(&options.document, "registry signing document")?;
+    let shape: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("invalid registry signing document: {error}"))?;
+    let payload = if shape.get("generation").is_some() {
+        let root: RegistryRoot = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("invalid registry root: {error}"))?;
+        validate_root_shape(&root)?;
+        canonical_root_payload(&root)?
+    } else if shape.get("sequence").is_some() {
+        let catalog: PluginCatalog = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("invalid plugin catalog: {error}"))?;
+        validate_catalog_shape_for_signing(&catalog)?;
+        canonical_catalog_payload(&catalog)?
+    } else {
+        return Err("registry signing document must be a root or catalog".to_owned());
+    };
+    if let Some(output) = options.output {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&output)
+            .map_err(|error| {
+                format!(
+                    "cannot create signing payload {}: {error}",
+                    output.display()
+                )
+            })?;
+        file.write_all(&payload)
+            .and_then(|()| file.sync_all())
+            .map_err(|error| {
+                format!("cannot write signing payload {}: {error}", output.display())
+            })?;
+        println!(
+            "Wrote {} canonical signing bytes to {}.",
+            payload.len(),
+            output.display()
+        );
+    } else {
+        std::io::stdout()
+            .write_all(&payload)
+            .map_err(|error| format!("cannot write registry signing payload: {error}"))?;
+    }
+    Ok(0)
+}
+
+fn key_id_command(mut arguments: impl Iterator<Item = OsString>) -> Result<u8, String> {
+    let mut public_key = None;
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--public-key" => public_key = Some(required_utf8(&mut arguments, "--public-key")?),
+            unknown => return Err(format!("unknown registry key-id option {unknown:?}")),
+        }
+    }
+    let public_key =
+        public_key.ok_or_else(|| "registry key-id requires --public-key".to_owned())?;
+    let decoded = decode_hex::<32>(&public_key, "registry public key")?;
+    VerifyingKey::from_bytes(&decoded)
+        .map_err(|_| "registry public key is not valid Ed25519".to_owned())?;
+    println!("{}", encode_hex(&Sha256::digest(decoded)));
+    Ok(0)
 }
 
 fn parse_adopt_options(
@@ -1083,15 +1171,11 @@ fn validate_root_structure(root: &RegistryRoot, now: u64) -> Result<(), String> 
     Ok(())
 }
 
+fn validate_root_shape(root: &RegistryRoot) -> Result<(), String> {
+    validate_root_structure(root, root.issued_at_unix)
+}
+
 fn validate_catalog(catalog: &PluginCatalog, root: &RegistryRoot, now: u64) -> Result<(), String> {
-    if catalog.schema_version != SCHEMA_VERSION
-        || catalog.sequence == 0
-        || catalog.plugins.len() > MAX_PLUGINS
-        || catalog.revocations.len() > MAX_REVOCATIONS
-        || catalog.signatures.len() > MAX_SIGNATURES
-    {
-        return Err("plugin catalog violates schema 1 bounds".to_owned());
-    }
     if catalog.registry != root.registry || catalog.root_generation != root.generation {
         return Err("plugin catalog does not match the trusted registry root".to_owned());
     }
@@ -1104,6 +1188,24 @@ fn validate_catalog(catalog: &PluginCatalog, root: &RegistryRoot, now: u64) -> R
     {
         return Err("plugin catalog timestamps are invalid or expired".to_owned());
     }
+    validate_catalog_shape_for_signing(catalog)?;
+    let payload = canonical_catalog_payload(catalog)?;
+    verify_threshold(&payload, &catalog.signatures, &root.keys, root.threshold)
+}
+
+fn validate_catalog_shape_for_signing(catalog: &PluginCatalog) -> Result<(), String> {
+    if catalog.schema_version != SCHEMA_VERSION
+        || catalog.root_generation == 0
+        || catalog.sequence == 0
+        || catalog.plugins.len() > MAX_PLUGINS
+        || catalog.revocations.len() > MAX_REVOCATIONS
+        || catalog.signatures.len() > MAX_SIGNATURES
+        || catalog.expires_at_unix <= catalog.generated_at_unix
+        || catalog.expires_at_unix - catalog.generated_at_unix > CATALOG_MAX_VALIDITY_SECONDS
+    {
+        return Err("plugin catalog violates schema 1 bounds".to_owned());
+    }
+    validate_https(&catalog.registry, "registry")?;
     ensure_sorted_unique(
         &catalog.plugins,
         |left, right| (&left.package, &left.version) < (&right.package, &right.version),
@@ -1175,8 +1277,7 @@ fn validate_catalog(catalog: &PluginCatalog, root: &RegistryRoot, now: u64) -> R
             return Err("plugin revocation has an invalid reasonCode or timestamp".to_owned());
         }
     }
-    let payload = canonical_catalog_payload(catalog)?;
-    verify_threshold(&payload, &catalog.signatures, &root.keys, root.threshold)
+    Ok(())
 }
 
 fn canonical_root_payload(root: &RegistryRoot) -> Result<Vec<u8>, String> {
@@ -1401,7 +1502,7 @@ fn unix_seconds() -> u64 {
 
 fn print_usage() {
     println!(
-        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]\n       pam registry adopt --project <directory> --next-root <project-relative.json> --next-catalog <project-relative.json> [--at-unix <seconds>] [--json]"
+        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]\n       pam registry adopt --project <directory> --next-root <project-relative.json> --next-catalog <project-relative.json> [--at-unix <seconds>] [--json]\n       pam registry payload --document <root-or-catalog.json> [--output <payload.json>]\n       pam registry key-id --public-key <64-lowercase-hex>"
     );
 }
 
@@ -1880,5 +1981,38 @@ mod tests {
                 .unwrap_err();
         assert!(error.contains("does not match runtime protocol"));
         fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn signing_payload_is_the_verifiers_exact_canonical_input() {
+        let directory =
+            std::env::temp_dir().join(format!("pam-registry-payload-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir(&directory).unwrap();
+        let (_signing, registry_key) = key(31, 1);
+        let root = RegistryRoot {
+            schema_version: 1,
+            registry: "https://plugins.pam.dev/v1".to_owned(),
+            generation: 1,
+            issued_at_unix: 1_000,
+            expires_at_unix: 2_000,
+            threshold: 1,
+            keys: vec![registry_key],
+            signatures: Vec::new(),
+            previous_signatures: Vec::new(),
+        };
+        let document = directory.join("root.json");
+        let output = directory.join("root.payload.json");
+        fs::write(&document, serde_json::to_vec_pretty(&root).unwrap()).unwrap();
+        payload_command(PayloadOptions {
+            document,
+            output: Some(output.clone()),
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read(output).unwrap(),
+            canonical_root_payload(&root).unwrap()
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }

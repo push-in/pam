@@ -18,6 +18,12 @@ pam registry verify \
   --json
 ```
 
+The reproducible custody, detached-signing and publication procedure is defined
+in the [registry operations runbook](registry-operations.md). `pam registry
+payload` emits the verifier's exact canonical bytes, while `pam registry key-id`
+derives a key identity from a validated raw Ed25519 public key. Neither command
+loads or generates private keys.
+
 `--minimum-sequence` is the last sequence accepted by the caller. Persist it in
 CI or the package client and never decrease it; this blocks a validly signed
 catalog rollback within the seven-day metadata lifetime.

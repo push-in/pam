@@ -707,6 +707,8 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     assert!(registry_help.contains("registry verify"));
     assert!(registry_help.contains("registry resolve"));
     assert!(registry_help.contains("registry rotate"));
+    assert!(registry_help.contains("registry payload"));
+    assert!(registry_help.contains("registry key-id"));
 
     let version = run_pam(&["--version"]);
     assert!(version.status.success());
