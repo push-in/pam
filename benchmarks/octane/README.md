@@ -48,3 +48,16 @@ under `benchmarks/octane/results` locally and ignored by Git.
 The runner also samples the complete process tree for RSS, CPU and process
 count. `resources.json` is evidence alongside throughput, not a replacement for
 it. Any socket error, timeout or non-2xx response fails the zero-error gate.
+
+Every comparison, worker matrix, and soak run also creates an
+`evidence-manifest.json`. The manifest records the sequential integer suite ID,
+source metadata, parameters, gate outcome, byte size, and SHA-256 digest of every
+JSON, CSV, log, and raw text artifact. The runner verifies the manifest before a
+run can finish successfully:
+
+```bash
+php benchmarks/octane/evidence-manifest.php \
+  benchmarks/octane/results 1 --verify
+```
+
+Suite IDs are `1` for a comparison, `2` for a worker matrix, and `3` for a soak.

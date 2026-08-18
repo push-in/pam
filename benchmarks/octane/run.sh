@@ -254,3 +254,5 @@ done
 
 php "$ROOT/benchmarks/octane/aggregate.php" "$RESULTS"
 php "$ROOT/benchmarks/octane/resource-report.php" "$RESULTS"
+php "$ROOT/benchmarks/octane/evidence-manifest.php" "$RESULTS" 1
+php "$ROOT/benchmarks/octane/evidence-manifest.php" "$RESULTS" 1 --verify

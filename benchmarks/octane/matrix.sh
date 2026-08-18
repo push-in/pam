@@ -24,3 +24,5 @@ for workers in $WORKER_MATRIX; do
 done
 
 php "$ROOT/benchmarks/octane/matrix-report.php" "$MATRIX_RESULTS"
+php "$ROOT/benchmarks/octane/evidence-manifest.php" "$MATRIX_RESULTS" 2
+php "$ROOT/benchmarks/octane/evidence-manifest.php" "$MATRIX_RESULTS" 2 --verify

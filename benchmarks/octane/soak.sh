@@ -53,3 +53,5 @@ SAMPLER_PID=""
 
 php "$ROOT/benchmarks/octane/parse-wrk.php" pam-soak 1 "$RESULTS/soak.txt"
 php "$ROOT/benchmarks/octane/soak-report.php" "$RESULTS"
+php "$ROOT/benchmarks/octane/evidence-manifest.php" "$RESULTS" 3
+php "$ROOT/benchmarks/octane/evidence-manifest.php" "$RESULTS" 3 --verify

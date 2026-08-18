@@ -39,6 +39,57 @@ fn fixture(name: &str) -> PathBuf {
 }
 
 #[test]
+fn creates_and_verifies_benchmark_evidence_manifests() {
+    let results = temporary_path("benchmark-evidence");
+    fs::create_dir_all(&results).unwrap();
+    fs::write(
+        results.join("metadata.json"),
+        r#"{"source":{"commit":"abc","dirty":false},"parameters":{"workers":1}}"#,
+    )
+    .unwrap();
+    fs::write(
+        results.join("report.json"),
+        r#"{"measurement_gate":{"passed":true},"dynamic_gate":{"passed_frankenphp":true,"p99_passed":true,"zero_errors":true}}"#,
+    )
+    .unwrap();
+    fs::write(results.join("pam.round-1.txt"), "Requests/sec: 100\n").unwrap();
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+
+    let created = run_pam(&[script.to_str().unwrap(), results.to_str().unwrap(), "1"]);
+    assert!(
+        created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&created.stderr)
+    );
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("evidence-manifest.json")).unwrap()).unwrap();
+    assert_eq!(manifest["schema_version"], 1);
+    assert_eq!(manifest["suite_id"], 1);
+    assert_eq!(manifest["gates"]["measurement"], true);
+    assert_eq!(manifest["gates"]["dynamic"], true);
+    assert_eq!(manifest["artifacts"].as_array().unwrap().len(), 3);
+
+    let verified = run_pam(&[
+        script.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "1",
+        "--verify",
+    ]);
+    assert!(verified.status.success());
+    fs::write(results.join("pam.round-1.txt"), "tampered\n").unwrap();
+    let tampered = run_pam(&[
+        script.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "1",
+        "--verify",
+    ]);
+    assert!(!tampered.status.success());
+    assert!(String::from_utf8_lossy(&tampered.stderr).contains("do not match"));
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
 fn executes_a_php_file() {
     let output = run_pam(&[fixture("hello.php").to_str().unwrap()]);
 
