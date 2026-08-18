@@ -1,0 +1,86 @@
+name: Ecosystem compatibility
+
+on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - 'config/ecosystem-packages.json'
+      - 'scripts/ecosystem-compatibility.py'
+      - '.github/workflows/ecosystem-compatibility.yml'
+      - 'Cargo.toml'
+      - 'src/mobile.rs'
+  pull_request:
+    paths:
+      - 'config/ecosystem-packages.json'
+      - 'scripts/ecosystem-compatibility.py'
+      - '.github/workflows/ecosystem-compatibility.yml'
+      - 'Cargo.toml'
+      - 'src/mobile.rs'
+  schedule:
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecosystem-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  inventory:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.catalog.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Match the complete public ecosystem
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --paginate 'orgs/push-in/repos?per_page=100&type=public' --jq '.[].name' |
+            sort | grep '^pam-native-' |
+            scripts/ecosystem-compatibility.py inventory
+      - id: catalog
+        name: Publish the validated matrix
+        run: printf 'matrix=%s\n' "$(scripts/ecosystem-compatibility.py matrix)" >>"${GITHUB_OUTPUT}"
+
+  packages:
+    needs: inventory
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: ${{ fromJSON(needs.inventory.outputs.matrix) }}
+    name: ${{ matrix.package.repository }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: pam
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/${{ matrix.package.repository }}
+          path: package
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Validate package contract and metadata
+        run: |
+          pam/scripts/ecosystem-compatibility.py verify package '${{ matrix.package.repository }}'
+          composer validate --strict --no-check-lock --no-check-publish package/composer.json
+      - name: Preflight the current dependency graph
+        run: composer install --working-dir=package --dry-run --no-interaction --prefer-dist
+      - name: Install the compatible graph
+        run: composer install --working-dir=package --no-interaction --prefer-dist
+      - name: Run package tests
+        if: ${{ matrix.package.testRequired }}
+        run: composer test --working-dir=package
+      - name: Run package static analysis when declared
+        shell: bash
+        run: |
+          if jq -e '.scripts.analyse | type == "string"' package/composer.json >/dev/null; then
+            composer analyse --working-dir=package
+          fi

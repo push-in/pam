@@ -44,3 +44,17 @@ published evidence points to the rewritten source history.
 Local nested repositories and the pre-existing Native macrobenchmark change are
 outside this batch. They are not staged, committed or implicitly published by
 the PAM repository push.
+
+## Universal ecosystem gate
+
+Every future PAM publication must run the `Ecosystem compatibility` workflow.
+Its schema 1 catalog uses integer role codes: `1` core distribution, `2` device
+capability, `3` product integration and `4` tooling. The inventory job compares
+the catalog with every public `push-in/pam-native-*` repository, so adding or
+removing a package without updating the compatibility authority fails closed.
+
+For all 26 current repositories, the matrix checks the Composer identity, PHP
+8.4 contract, PAM Native constraint where applicable, metadata validity,
+dependency dry-run, real installation, declared tests and declared static
+analysis. The workflow also runs weekly to detect ecosystem drift between PAM
+publications. A green core build cannot substitute for this matrix.
