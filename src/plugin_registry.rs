@@ -146,6 +146,19 @@ struct ResolutionReport<'a> {
     sha256: &'a str,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct VerifiedRelease {
+    pub registry: String,
+    pub root_sha256: String,
+    pub root_generation: u32,
+    pub catalog_sequence: u64,
+    pub package: String,
+    pub version: String,
+    pub artifact_kind_code: u8,
+    pub artifact_url: String,
+    pub sha256: String,
+}
+
 #[derive(Default)]
 struct VerifyOptions {
     root: Option<PathBuf>,
@@ -412,39 +425,31 @@ fn verify_rotation_command(options: VerifyOptions) -> Result<u8, String> {
 }
 
 fn resolve_command(options: ResolveOptions) -> Result<u8, String> {
-    let now = options.verify.at_unix.unwrap_or_else(unix_seconds);
-    let (root, _) = load_trusted_root(
+    let release = resolve_verified(
         options.verify.root.as_deref().expect("validated root"),
         options
             .verify
             .root_sha256
             .as_deref()
             .expect("validated root fingerprint"),
-        now,
-    )?;
-    let catalog: PluginCatalog = read_document(
         options
             .verify
             .catalog
             .as_deref()
             .expect("validated catalog"),
-        "plugin catalog",
-    )?;
-    validate_catalog(&catalog, &root, now)?;
-    enforce_minimum_sequence(catalog.sequence, options.verify.minimum_sequence)?;
-    let release = resolve_release(
-        &catalog,
         &options.package,
         options.surface_code,
         &options.pam_version,
         options.native_protocol,
         options.desktop_protocol,
+        options.verify.minimum_sequence,
+        options.verify.at_unix,
     )?;
     let report = ResolutionReport {
         schema_version: SCHEMA_VERSION,
         result_code: 1,
-        registry: &catalog.registry,
-        catalog_sequence: catalog.sequence,
+        registry: &release.registry,
+        catalog_sequence: release.catalog_sequence,
         package: &release.package,
         version: &release.version,
         artifact_kind_code: release.artifact_kind_code,
@@ -464,6 +469,45 @@ fn resolve_command(options: ResolveOptions) -> Result<u8, String> {
         );
     }
     Ok(0)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn resolve_verified(
+    root_path: &Path,
+    root_sha256: &str,
+    catalog_path: &Path,
+    package: &str,
+    surface_code: u8,
+    pam_version: &Version,
+    native_protocol: Option<u32>,
+    desktop_protocol: Option<u32>,
+    minimum_sequence: Option<u64>,
+    at_unix: Option<u64>,
+) -> Result<VerifiedRelease, String> {
+    let now = at_unix.unwrap_or_else(unix_seconds);
+    let (root, _) = load_trusted_root(root_path, root_sha256, now)?;
+    let catalog: PluginCatalog = read_document(catalog_path, "plugin catalog")?;
+    validate_catalog(&catalog, &root, now)?;
+    enforce_minimum_sequence(catalog.sequence, minimum_sequence)?;
+    let release = resolve_release(
+        &catalog,
+        package,
+        surface_code,
+        pam_version,
+        native_protocol,
+        desktop_protocol,
+    )?;
+    Ok(VerifiedRelease {
+        registry: catalog.registry.clone(),
+        root_sha256: root_sha256.to_owned(),
+        root_generation: catalog.root_generation,
+        catalog_sequence: catalog.sequence,
+        package: release.package.clone(),
+        version: release.version.clone(),
+        artifact_kind_code: release.artifact_kind_code,
+        artifact_url: release.artifact_url.clone(),
+        sha256: release.sha256.clone(),
+    })
 }
 
 fn resolve_release<'a>(

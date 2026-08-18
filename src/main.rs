@@ -1065,7 +1065,7 @@ fn run() -> Result<u8, CliError> {
             ))
         })?;
         return if script_arg == "add" {
-            ecosystem::add(&executable, &context.root, &capability)
+            ecosystem::add(&executable, &context, &capability)
         } else {
             ecosystem::remove(&executable, &context.root, &capability)
         }

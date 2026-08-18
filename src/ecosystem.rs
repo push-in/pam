@@ -1,10 +1,45 @@
 use std::ffi::{OsStr, OsString};
-use std::fs;
-use std::path::Path;
+use std::fs::{self, OpenOptions};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use crate::composer;
+use crate::plugin_registry::{self, VerifiedRelease};
+use crate::project::{ProjectContext, ProjectKind};
 use crate::terminal::Terminal;
+use semver::Version;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+
+const REGISTRY_CONFIG: &str = "pam-registry.json";
+const REGISTRY_STATE: &str = ".pam/plugin-registry-state.json";
+const MAX_REGISTRY_CONFIG_BYTES: u64 = 16 * 1024;
+const MAX_COMPOSER_LOCK_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_PLUGIN_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistryConfig {
+    schema_version: u8,
+    root_path: PathBuf,
+    root_sha256: String,
+    catalog_path: PathBuf,
+    #[serde(default)]
+    native_protocol: Option<u32>,
+    #[serde(default)]
+    desktop_protocol: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RegistryState {
+    schema_version: u8,
+    registry: String,
+    root_sha256: String,
+    root_generation: u32,
+    catalog_sequence: u64,
+}
 
 #[derive(Clone, Copy)]
 struct Package {
@@ -198,9 +233,18 @@ pub fn list(project: Option<&Path>, json: bool) -> Result<u8, String> {
     Ok(0)
 }
 
-pub fn add(executable: &OsStr, project: &Path, alias: &str) -> Result<u8, String> {
+pub fn add(executable: &OsStr, context: &ProjectContext, alias: &str) -> Result<u8, String> {
     let package = resolve(alias)?;
-    let requirement = format!("pushinbr/{}:{}", package.composer, package.requirement);
+    let project = &context.root;
+    let name = format!("pushinbr/{}", package.composer);
+    let authenticated = resolve_authenticated(context, &name)?;
+    let selected_requirement = authenticated
+        .as_ref()
+        .map_or(package.requirement, |release| release.version.as_str());
+    let requirement = format!("{name}:{selected_requirement}");
+    if let Some(release) = &authenticated {
+        verify_remote_artifact(release)?;
+    }
     in_project(project, || {
         println!("Checking metadata for {requirement}...");
         composer_success(
@@ -223,7 +267,12 @@ pub fn add(executable: &OsStr, project: &Path, alias: &str) -> Result<u8, String
             executable,
             &["require", &requirement, "--no-interaction"],
             "Composer install",
-        )
+        )?;
+        if let Some(release) = &authenticated {
+            validate_locked_release(project, release)?;
+            persist_registry_state(project, release)?;
+        }
+        Ok(())
     })?;
     refresh_native(executable, project)?;
     println!(
@@ -231,6 +280,253 @@ pub fn add(executable: &OsStr, project: &Path, alias: &str) -> Result<u8, String
         package.alias
     );
     Ok(0)
+}
+
+fn resolve_authenticated(
+    context: &ProjectContext,
+    package: &str,
+) -> Result<Option<VerifiedRelease>, String> {
+    let path = context.root.join(REGISTRY_CONFIG);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let config: RegistryConfig = read_bounded_json(&path, "registry configuration")?;
+    if config.schema_version != 1 {
+        return Err("unsupported pam-registry.json schema; expected integer 1".to_owned());
+    }
+    let (surface_code, native_protocol, desktop_protocol) = match context.kind {
+        ProjectKind::Native => (2, config.native_protocol, None),
+        ProjectKind::Desktop => (3, None, config.desktop_protocol),
+        ProjectKind::Api | ProjectKind::Laravel | ProjectKind::Raw => (1, None, None),
+    };
+    if surface_code == 2 && native_protocol.is_none() {
+        return Err("pam-registry.json requires nativeProtocol for a Native project".to_owned());
+    }
+    if surface_code == 3 && desktop_protocol.is_none() {
+        return Err("pam-registry.json requires desktopProtocol for a Desktop project".to_owned());
+    }
+    let state = read_registry_state(&context.root)?;
+    let root = confined_project_path(&context.root, &config.root_path, "rootPath")?;
+    let catalog = confined_project_path(&context.root, &config.catalog_path, "catalogPath")?;
+    let pam_version = Version::parse(env!("CARGO_PKG_VERSION"))
+        .map_err(|error| format!("invalid PAM package version: {error}"))?;
+    let release = plugin_registry::resolve_verified(
+        &root,
+        &config.root_sha256,
+        &catalog,
+        package,
+        surface_code,
+        &pam_version,
+        native_protocol,
+        desktop_protocol,
+        state.as_ref().map(|value| value.catalog_sequence),
+        None,
+    )?;
+    if let Some(state) = state {
+        if state.registry != release.registry {
+            return Err(
+                "signed registry identity does not match the accepted project state".to_owned(),
+            );
+        }
+        if state.root_sha256 != release.root_sha256 {
+            return Err(
+                "trusted registry root changed without an authenticated rotation".to_owned(),
+            );
+        }
+        if release.root_generation < state.root_generation {
+            return Err("signed registry root generation would roll the project back".to_owned());
+        }
+    }
+    if release.artifact_kind_code != 1 {
+        return Err("pam add requires a signed Composer artifactKindCode of 1".to_owned());
+    }
+    Ok(Some(release))
+}
+
+fn confined_project_path(project: &Path, relative: &Path, field: &str) -> Result<PathBuf, String> {
+    if relative.as_os_str().is_empty()
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return Err(format!(
+            "pam-registry.json {field} must be a normalized project-relative path"
+        ));
+    }
+    Ok(project.join(relative))
+}
+
+fn read_bounded_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T, String> {
+    read_json_with_limit(path, label, MAX_REGISTRY_CONFIG_BYTES)
+}
+
+fn read_json_with_limit<T: for<'de> Deserialize<'de>>(
+    path: &Path,
+    label: &str,
+    maximum_bytes: u64,
+) -> Result<T, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > maximum_bytes {
+        return Err(format!(
+            "{label} must be a regular file no larger than {maximum_bytes} bytes"
+        ));
+    }
+    let bytes =
+        fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
+}
+
+fn read_registry_state(project: &Path) -> Result<Option<RegistryState>, String> {
+    let path = project.join(REGISTRY_STATE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let state: RegistryState = read_bounded_json(&path, "registry state")?;
+    if state.schema_version != 1 || state.registry.is_empty() || state.catalog_sequence == 0 {
+        return Err("invalid project plugin-registry state".to_owned());
+    }
+    Ok(Some(state))
+}
+
+fn persist_registry_state(project: &Path, release: &VerifiedRelease) -> Result<(), String> {
+    let path = project.join(REGISTRY_STATE);
+    let parent = path.parent().expect("state path has parent");
+    if parent.exists() {
+        let metadata = fs::symlink_metadata(parent)
+            .map_err(|error| format!("cannot inspect {}: {error}", parent.display()))?;
+        if !metadata.file_type().is_dir() {
+            return Err(format!(
+                "registry state parent is not a real directory: {}",
+                parent.display()
+            ));
+        }
+    } else {
+        fs::create_dir(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
+    let temporary = parent.join(format!(".plugin-registry-state-{}.tmp", std::process::id()));
+    let bytes = serde_json::to_vec_pretty(&RegistryState {
+        schema_version: 1,
+        registry: release.registry.clone(),
+        root_sha256: release.root_sha256.clone(),
+        root_generation: release.root_generation,
+        catalog_sequence: release.catalog_sequence,
+    })
+    .map_err(|error| format!("cannot encode registry state: {error}"))?;
+    fs::write(&temporary, bytes)
+        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("cannot replace {}: {error}", path.display()))
+}
+
+fn validate_locked_release(project: &Path, release: &VerifiedRelease) -> Result<(), String> {
+    let path = project.join("composer.lock");
+    let lock: serde_json::Value =
+        read_json_with_limit(&path, "Composer lock", MAX_COMPOSER_LOCK_BYTES)?;
+    let locked = ["packages", "packages-dev"]
+        .into_iter()
+        .filter_map(|section| lock.get(section).and_then(serde_json::Value::as_array))
+        .flatten()
+        .find(|item| item.get("name").and_then(serde_json::Value::as_str) == Some(&release.package))
+        .ok_or_else(|| {
+            format!(
+                "composer.lock does not contain signed package {}",
+                release.package
+            )
+        })?;
+    let version = locked.get("version").and_then(serde_json::Value::as_str);
+    let dist = locked.get("dist").and_then(serde_json::Value::as_object);
+    let url = dist
+        .and_then(|value| value.get("url"))
+        .and_then(serde_json::Value::as_str);
+    if version != Some(release.version.as_str()) || url != Some(release.artifact_url.as_str()) {
+        return Err(format!(
+            "composer.lock does not match the signed registry artifact for {} {}; expected exact version and dist URL",
+            release.package, release.version
+        ));
+    }
+    Ok(())
+}
+
+fn verify_remote_artifact(release: &VerifiedRelease) -> Result<(), String> {
+    let temporary = allocate_artifact_path()?;
+    let result = (|| {
+        let status = Command::new("curl")
+            .args([
+                "--proto",
+                "=https",
+                "--tlsv1.2",
+                "--fail",
+                "--silent",
+                "--show-error",
+                "--location",
+                "--max-filesize",
+                &MAX_PLUGIN_ARTIFACT_BYTES.to_string(),
+                "--output",
+            ])
+            .arg(&temporary)
+            .arg(&release.artifact_url)
+            .status()
+            .map_err(|error| format!("cannot download signed plugin artifact: {error}"))?;
+        if !status.success() {
+            return Err(format!(
+                "signed plugin artifact download failed with {status}"
+            ));
+        }
+        verify_artifact_file(&temporary, &release.sha256)
+    })();
+    let cleanup = fs::remove_file(&temporary);
+    match (result, cleanup) {
+        (Err(error), _) => Err(error),
+        (Ok(()), Err(error)) => Err(format!("cannot remove verified plugin artifact: {error}")),
+        (Ok(()), Ok(())) => Ok(()),
+    }
+}
+
+fn allocate_artifact_path() -> Result<PathBuf, String> {
+    for attempt in 0..32_u8 {
+        let path = std::env::temp_dir().join(format!(
+            "pam-plugin-artifact-{}-{attempt}.download",
+            std::process::id()
+        ));
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(_) => return Ok(path),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("cannot allocate plugin artifact: {error}")),
+        }
+    }
+    Err("cannot allocate a unique plugin artifact path".to_owned())
+}
+
+fn verify_artifact_file(path: &Path, expected_sha256: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect plugin artifact: {error}"))?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_PLUGIN_ARTIFACT_BYTES {
+        return Err("plugin artifact is not a bounded regular file".to_owned());
+    }
+    let mut input =
+        fs::File::open(path).map_err(|error| format!("cannot read plugin artifact: {error}"))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .map_err(|error| format!("cannot hash plugin artifact: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    let actual = format!("{:x}", digest.finalize());
+    if actual == expected_sha256 {
+        Ok(())
+    } else {
+        Err(format!(
+            "signed plugin artifact SHA-256 mismatch: expected {expected_sha256}, received {actual}"
+        ))
+    }
 }
 
 pub fn remove(executable: &OsStr, project: &Path, alias: &str) -> Result<u8, String> {
@@ -363,6 +659,28 @@ fn in_project<T>(
 mod tests {
     use super::*;
 
+    fn temporary_project(label: &str) -> PathBuf {
+        let path =
+            std::env::temp_dir().join(format!("pam-ecosystem-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&path);
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    fn signed_release() -> VerifiedRelease {
+        VerifiedRelease {
+            registry: "pam-official".to_owned(),
+            root_sha256: "ab".repeat(32),
+            root_generation: 2,
+            catalog_sequence: 9,
+            package: "pushinbr/pam-native-maps".to_owned(),
+            version: "1.2.3".to_owned(),
+            artifact_kind_code: 1,
+            artifact_url: "https://plugins.pam.dev/maps-1.2.3.zip".to_owned(),
+            sha256: "cd".repeat(32),
+        }
+    }
+
     #[test]
     fn official_capabilities_keep_their_independent_release_lines() {
         assert_eq!(resolve("native").unwrap().requirement, "^0.6");
@@ -370,5 +688,78 @@ mod tests {
         assert_eq!(resolve("mobile-ui").unwrap().requirement, "^0.4");
         assert_eq!(resolve("nitro").unwrap().requirement, "^0.3");
         assert_eq!(resolve("maps").unwrap().requirement, "^0.1");
+    }
+
+    #[test]
+    fn authenticated_lock_requires_exact_version_and_url() {
+        let project = temporary_project("lock");
+        let release = signed_release();
+        fs::write(
+            project.join("composer.lock"),
+            serde_json::to_vec(&serde_json::json!({
+                "packages": [{
+                    "name": release.package,
+                    "version": release.version,
+                    "dist": {"url": release.artifact_url, "shasum": release.sha256}
+                }],
+                "packages-dev": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(validate_locked_release(&project, &release).is_ok());
+        let mut lock: serde_json::Value =
+            serde_json::from_slice(&fs::read(project.join("composer.lock")).unwrap()).unwrap();
+        lock["packages"][0]["dist"]["url"] = serde_json::json!("https://attacker.invalid/map.zip");
+        fs::write(
+            project.join("composer.lock"),
+            serde_json::to_vec(&lock).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            validate_locked_release(&project, &release)
+                .unwrap_err()
+                .contains("does not match the signed registry artifact")
+        );
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn downloaded_artifact_requires_the_signed_sha256() {
+        let project = temporary_project("artifact");
+        let artifact = project.join("plugin.zip");
+        fs::write(&artifact, b"signed artifact").unwrap();
+        let expected = format!("{:x}", Sha256::digest(b"signed artifact"));
+        assert!(verify_artifact_file(&artifact, &expected).is_ok());
+        assert!(
+            verify_artifact_file(&artifact, &"00".repeat(32))
+                .unwrap_err()
+                .contains("SHA-256 mismatch")
+        );
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn registry_state_persists_the_rollback_floor_and_root_identity() {
+        let project = temporary_project("state");
+        let release = signed_release();
+        persist_registry_state(&project, &release).unwrap();
+        let state = read_registry_state(&project).unwrap().unwrap();
+        assert_eq!(state.registry, release.registry);
+        assert_eq!(state.root_sha256, release.root_sha256);
+        assert_eq!(state.root_generation, 2);
+        assert_eq!(state.catalog_sequence, 9);
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn registry_documents_must_stay_beneath_the_project() {
+        let project = temporary_project("paths");
+        assert!(
+            confined_project_path(&project, Path::new("registry/root.json"), "rootPath").is_ok()
+        );
+        assert!(confined_project_path(&project, Path::new("../root.json"), "rootPath").is_err());
+        assert!(confined_project_path(&project, Path::new("/root.json"), "rootPath").is_err());
+        fs::remove_dir_all(project).unwrap();
     }
 }

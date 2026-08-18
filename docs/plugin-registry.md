@@ -90,6 +90,39 @@ publisher compromise, `3` policy violation and `4` withdrawn release. A catalog
 is invalid if it advertises the same package/version as both installable and
 revoked.
 
+## Enforcing signed releases in `pam add`
+
+Place `pam-registry.json` at the project root to opt into authenticated installs:
+
+```json
+{
+  "schemaVersion": 1,
+  "rootPath": "registry/root.json",
+  "rootSha256": "<64 lowercase hexadecimal characters>",
+  "catalogPath": "registry/catalog.json",
+  "nativeProtocol": 1,
+  "desktopProtocol": 1
+}
+```
+
+Paths must be normalized, relative to the project, and resolve to regular files.
+Only the protocol matching the project surface is required. API, Laravel, and raw
+runtime projects require neither protocol field.
+
+With this file present, `pam add` refuses unsigned resolution. It verifies the
+root and catalog quorum, expiration, revocations, PAM compatibility, exact surface
+protocol, and the previously accepted catalog sequence. Composer receives the
+resolved version rather than a floating range. Before Composer mutates the project,
+PAM downloads the bounded HTTPS artifact to a temporary file and verifies its
+SHA-256. After installation, `composer.lock` must contain that exact version and
+distribution URL; otherwise the command fails.
+
+The accepted registry identity, root fingerprint/generation, and catalog sequence
+are stored atomically in `.pam/plugin-registry-state.json`. A later catalog cannot
+move below that sequence. `pam add` refuses a changed root fingerprint; operators
+must validate root rotation separately with `pam registry rotate`. Persisting a
+rotation receipt into project state remains a distinct operational gate.
+
 ## Canonical signed bytes
 
 Signatures cover compact UTF-8 JSON without trailing newline. Object fields use
