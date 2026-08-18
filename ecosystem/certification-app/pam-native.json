@@ -12,6 +12,9 @@
         "minSdk": 26,
         "targetSdk": 36
     },
+    "ios": {
+        "minimumVersion": "16.2"
+    },
     "modules": [],
     "views": []
 }

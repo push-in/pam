@@ -181,6 +181,12 @@ jobs:
           composer require --working-dir="${fixture}" \
             "${packages[@]}" \
             --update-no-dev --no-interaction --prefer-dist
+          target/debug/pam mobile audit "${fixture}" --json \
+            >"${fixture}/native-release-audit.json"
+          test "$(jq -r '.schemaVersion' "${fixture}/native-release-audit.json")" = 1
+          test "$(jq -r '.surfaceCode' "${fixture}/native-release-audit.json")" = 2
+          test "$(jq -r '.resultCode' "${fixture}/native-release-audit.json")" = 1
+          test "$(jq -r '.counts.critical' "${fixture}/native-release-audit.json")" = 0
           target/debug/pam mobile ios:doctor "${fixture}"
           target/debug/pam mobile ios:prepare "${fixture}"
           test -f "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
@@ -300,6 +306,7 @@ jobs:
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/DerivedData/Logs
             ${{ runner.temp }}/pam-ios-fixture/simulator.png
             ${{ runner.temp }}/pam-ios-fixture/simulator.log
+            ${{ runner.temp }}/pam-ios-fixture/native-release-audit.json
             ${{ runner.temp }}/pam-ios-fixture/lldb.log
             ${{ runner.temp }}/pam-ios-fixture/crashes
           if-no-files-found: warn
