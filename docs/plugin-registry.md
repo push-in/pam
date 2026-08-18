@@ -119,3 +119,11 @@ Private signing keys are intentionally outside PAM. Production keys should be
 generated and held by an offline or hardware-backed ceremony with independent
 operators; committing fixture seeds or accepting a locally generated root as
 official would defeat the trust model.
+
+## Footprint evidence
+
+On Linux with the repository release profile (`thin` LTO, symbols stripped),
+the `f5c6328` baseline binary measured 9,376,320 bytes. The verifier and its
+direct Ed25519/SemVer dependencies produce a 9,585,216-byte binary: an increase
+of 208,896 bytes, or 2.23%. Both builds used the same temporary Cargo target and
+were removed after measurement.

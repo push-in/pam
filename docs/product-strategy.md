@@ -198,11 +198,13 @@ repository-local.
 | Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
 | Accessible adaptive design tokens | Desktop starter run-green identity and WCAG/forced-color gate `0634ce7` | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `9099df7` | Generated Desktop starter inherits the runtime-owned design contract | Native system and Desktop first-run surface shipped; reusable cross-surface package remains open |
 | Cross-surface release authority and recovery | iOS audit artifact workflow `9018383` | Native release audit `d4746b9` | Permission policy `46fead6`; interrupted updater recovery `e82efd6` | Native/Desktop policy shipped; platform sandbox certification remains open |
-| Signed typed plugin registry | Existing ABI/range/path checks | Descriptor and IDL integrity locks | Executable protocol/identity/hash checks | Open: requires public registry schema, release signing root, key rotation and revocation policy |
+| Signed typed plugin registry | Offline schema 1 verifier, quorum rotation, rollback floor and SemVer/protocol resolver `6238dfc` | Descriptor and IDL integrity locks | Executable protocol/identity/hash checks | Verifier and trust model shipped; official key ceremony, hosted catalog and installer enforcement remain open |
 | Flagship cross-surface application | — | Native showcase exists | — | Open |
 
-The next registry implementation gate is intentionally strict: choose and
-publish the signing root, canonical payload, key-rotation and revocation model,
-then add offline verification fixtures before trusting registry metadata. A
-locally generated private key or an unsigned JSON catalog does not satisfy the
-product claim.
+The next registry gate is intentionally operational: conduct the independent
+production-key ceremony, publish the root hash through a PAM release and a
+second channel, sign the initial catalog, then make `pam add` and Native/Desktop
+artifact installers persist the accepted sequence and enforce resolver output.
+The canonical payload, quorum rotation, revocation model and deterministic
+offline tamper fixtures now exist in `6238dfc`; a locally generated private key
+or unsigned hosted JSON still does not satisfy the public-registry claim.
