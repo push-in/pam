@@ -19,6 +19,7 @@ mod ingress;
 mod mobile;
 mod octane;
 mod php;
+mod plugin_registry;
 mod project;
 mod protocol;
 mod quality;
@@ -467,6 +468,10 @@ fn run() -> Result<u8, CliError> {
 
     if script_arg == "desktop" {
         return desktop::run(&executable, raw_args).map_err(CliError::Commands);
+    }
+
+    if script_arg == "registry" {
+        return plugin_registry::run(raw_args.collect()).map_err(CliError::Commands);
     }
 
     if script_arg == "start" {

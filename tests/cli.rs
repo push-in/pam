@@ -701,6 +701,13 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     assert!(mobile_help.contains("PAM / MOBILE"));
     assert!(mobile_help.contains("make:screen"));
 
+    let registry_help = run_pam(&["registry", "--help"]);
+    assert!(registry_help.status.success());
+    let registry_help = String::from_utf8_lossy(&registry_help.stdout);
+    assert!(registry_help.contains("registry verify"));
+    assert!(registry_help.contains("registry resolve"));
+    assert!(registry_help.contains("registry rotate"));
+
     let version = run_pam(&["--version"]);
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("pam "));

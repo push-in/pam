@@ -61,6 +61,11 @@ pub const COMMANDS: &[CommandSpec] = &[
     ),
     command("make:job", "Generate a Laravel job", "Generate"),
     command("packages", "List official PAM capabilities", "Ecosystem"),
+    command(
+        "registry",
+        "Verify signed plugin metadata and compatibility",
+        "Ecosystem",
+    ),
     command("add", "Install an official capability", "Ecosystem"),
     command("remove", "Remove an official capability", "Ecosystem"),
     command(

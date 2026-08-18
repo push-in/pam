@@ -34,6 +34,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Ecosystem
 
 - `pam packages` — List official PAM capabilities.
+- `pam registry` — Verify signed plugin metadata and compatibility.
 - `pam add` — Install an official capability.
 - `pam remove` — Remove an official capability.
 - `pam outdated` — Inspect available dependency updates.
