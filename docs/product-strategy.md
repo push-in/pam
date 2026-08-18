@@ -190,7 +190,7 @@ repository-local.
 | Structured error and automation contracts | `fc1a8fa` | Contextual CLI commands inherit the envelope | Desktop retains its typed bridge errors | Shipped |
 | Development lifecycle event protocol | `c273d21` | Android/iOS hosts emit schema 1 | `392a6eb` | Shipped |
 | Versioned DevTools snapshots | `1b3f3f3` | `d4dec09` | `ea34d52` | Shipped |
-| Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Open: Desktop capture/golden harness | Partial |
+| Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
 | Accessible adaptive design tokens | — | `b07d09f` | — | Native shipped; cross-surface system open |
 | Signed typed plugin registry | Existing ABI/range/path checks | Descriptor and IDL integrity locks | Executable protocol/identity/hash checks | Open: requires public registry schema, release signing root, key rotation and revocation policy |
 | Flagship cross-surface application | — | Native showcase exists | — | Open |
