@@ -69,6 +69,8 @@ Native explicit app spans ─adapter─► OTLP trace receiver       ✓
 Native logs/metrics ───────adapter─► matching OTLP endpoint    ✓
 Desktop aggregate snapshot ────────► local diagnostics
 Desktop validated commands ──gate──► OTLP trace receiver        ✓
+Server response traceparent ──valid─► Native child span          ✓
+Server response traceparent ──auth──► Desktop command child      ✓
 ```
 
 - Server remains non-blocking with bounded batch and queue controls.
@@ -82,8 +84,12 @@ Desktop validated commands ──gate──► OTLP trace receiver        ✓
   attributes. Its bounded queue cannot stall command execution, and diagnostic
   counters expose dropped, failed and Collector-rejected spans.
 - Cross-surface trace IDs may be propagated only through authenticated product
-  channels. Snapshots and offline timelines never invent missing trace IDs or
-  timestamps.
+  channels. Native's `TraceContext` strictly imports a Server response context,
+  preserves sampling and refuses invalid/zero IDs (`622df52`). Desktop accepts
+  that context only inside its exact-origin, ephemeral-token bridge invocation,
+  validates it again in Rust and preserves parent lineage (`d93c63b`). Neither
+  surface accepts `tracestate` until a bounded vendor policy exists. Snapshots
+  and offline timelines never invent missing trace IDs or timestamps.
 
 Collector upgrades require a new digest, successful signature verification,
 the full certification suite and a fresh evidence artifact. Compatibility

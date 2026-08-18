@@ -78,8 +78,10 @@ cross-surface performance timeline and direct OTLP/HTTP JSON export. Both are
 now shipped with bounded data paths and reproducible official-Collector
 certification. Native now maps each family to its real OTLP signal endpoint;
 Desktop now adds deliberately opt-in command spans without exposing bridge
-data. The next gap is authenticated cross-surface trace propagation rather
-than another isolated debug screen.
+data. Server response lineage can continue through strict Native context import
+and Desktop's authenticated local bridge. The next gap is outbound context
+injection for capability-scoped Native/Desktop HTTP rather than another
+isolated debug screen.
 
 ## Current product audit
 
@@ -225,7 +227,7 @@ repository-local.
 | Structured error and automation contracts | `fc1a8fa`; actionable Doctor target/artifact/remediation report `fe18c67` | Contextual CLI commands inherit the envelope | Desktop retains its typed bridge errors | Shipped |
 | Development lifecycle event protocol | `c273d21` | Android/iOS hosts emit schema 1 | `392a6eb` | Shipped |
 | Versioned DevTools snapshots | `1b3f3f3` | `d4dec09` | `ea34d52` | Shipped |
-| Cross-surface observability | Prometheus/control-plane metrics, structured access logs and W3C server-child trace lineage `338c780`; redacted Chrome/Perfetto timeline exporter `7d334f0`; bounded OTLP/HTTP JSON server spans `5884a71`; signed official-Collector certification and evidence `e5811cf` | Bounded offline events plus certified signal-correct OTLP traces, logs, delta counters, and gauges in the optional observability package `ab4805e` | Explicit-opt-in, privacy-bounded command root spans, non-blocking queue, diagnostic loss counters and signed official-Collector CI `789a1f1` | Server, Native and Desktop OTLP mappings independently certified |
+| Cross-surface observability | Prometheus/control-plane metrics, structured access logs and W3C server-child trace lineage `338c780`; redacted Chrome/Perfetto timeline exporter `7d334f0`; bounded OTLP/HTTP JSON server spans `5884a71`; signed official-Collector certification and evidence `e5811cf` | Certified traces/logs/metrics `ab4805e`; strict Server context import with preserved sampling and Collector-proven parent lineage `622df52` | Explicit-opt-in command spans and signed Collector CI `789a1f1`; authenticated bridge context continuation `d93c63b` | Server-to-Native and Server-to-Desktop lineage shipped; capability-scoped outbound injection remains open |
 | Contextual live snapshot transport | Desktop routing `77f578f`; Android routing `bddab4c`; iOS routing `15c32cb` | Privilege-gated Android export `5b4b5f5`; app-scoped iOS Simulator export and generated overlay `8a95f55` | Authenticated development session `47b489b` | Server, Android, iOS Simulator and Desktop shipped; physical-device Native export intentionally excluded pending a pairing protocol |
 | Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
 | Accessible adaptive design tokens | Desktop starter run-green identity and WCAG/forced-color gate `0634ce7` | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `9099df7` | Generated Desktop starter inherits the runtime-owned design contract | Native system and Desktop first-run surface shipped; reusable cross-surface package remains open |
