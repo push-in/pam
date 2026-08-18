@@ -113,6 +113,24 @@ publisher compromise, `3` policy violation and `4` withdrawn release. A catalog
 is invalid if it advertises the same package/version as both installable and
 revoked.
 
+## Authenticated PAM Desktop host
+
+A Desktop project with `pam-registry.json` resolves
+`pushinbr/pam-desktop-host` on surface `3`, artifact kind `3` and Desktop
+protocol `6` before any Desktop command starts. The catalog URL points to the
+standalone `pam-desktop-<version>-<target>` executable published and attested by
+the Desktop release workflow, not to the portable archive.
+
+PAM downloads only over HTTPS/TLS 1.2 or newer, caps the executable at 512 MiB,
+checks the catalog SHA-256 and then executes `--version` to require the exact
+`pam-desktop <version>` identity. It publishes the verified bytes atomically to
+`.pam/desktop-host/<sha256>/pam-desktop`, records the registry, root generation,
+catalog sequence, package, version and digest in
+`.pam/desktop-host.artifact.json`, and removes superseded host directories.
+The project sequence advances only after a valid executable and provenance are
+durable. Without `pam-registry.json`, the existing sibling, `PATH` and
+`PAM_DESKTOP_BINARY` development lookup remains unchanged.
+
 ## Enforcing signed releases in `pam add`
 
 Place `pam-registry.json` at the project root to opt into authenticated installs:

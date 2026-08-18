@@ -198,15 +198,15 @@ repository-local.
 | Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
 | Accessible adaptive design tokens | Desktop starter run-green identity and WCAG/forced-color gate `0634ce7` | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `9099df7` | Generated Desktop starter inherits the runtime-owned design contract | Native system and Desktop first-run surface shipped; reusable cross-surface package remains open |
 | Cross-surface release authority and recovery | iOS audit artifact workflow `9018383` | Native release audit `d4746b9` | Permission policy `46fead6`; interrupted updater recovery `e82efd6` | Native/Desktop policy shipped; platform sandbox certification remains open |
-| Signed typed plugin registry | Offline schema 1 verifier, quorum rotation, rollback floor and SemVer/protocol resolver `6238dfc`; authenticated `pam add` gate `66b18aa`; exact verified-byte Composer source and bounded artifact retention `d49713b`; recoverable project rotation adoption `a36a482` | Descriptor and IDL integrity locks; signed Android runtime installer and provenance `b1e7dbb` | Executable protocol/identity/hash checks | Composer and Android runtime installer enforcement implemented; official key ceremony, hosted catalog and Desktop binary artifact installer remain open |
+| Signed typed plugin registry | Offline schema 1 verifier, quorum rotation, rollback floor and SemVer/protocol resolver `6238dfc`; authenticated `pam add` gate `66b18aa`; exact verified-byte Composer source and bounded artifact retention `d49713b`; recoverable project rotation adoption `a36a482` | Descriptor and IDL integrity locks; signed Android runtime installer and provenance `b1e7dbb` | Executable protocol/identity/hash checks; signed host acquisition, provenance and bounded retention | Composer, Android runtime and Desktop host installer enforcement implemented; official key ceremony and hosted catalog remain open |
 | Flagship cross-surface application | — | Native showcase exists | — | Open |
 
 The next registry gate is intentionally operational: conduct the independent
 production-key ceremony, publish the root hash through a PAM release and a
-second channel, sign the initial catalog, then make the Desktop binary artifact
-installer persist the accepted sequence and enforce resolver output. Android
-Native now enforces that contract; iOS runtime delivery remains source-integrated
-rather than a standalone downloaded binary artifact.
+second channel, and sign the initial catalog. Composer, Android Native and the
+Desktop host now enforce resolver output and persist the accepted sequence;
+iOS runtime delivery remains source-integrated rather than a standalone
+downloaded binary artifact.
 The canonical payload, quorum rotation, revocation model and deterministic
 offline tamper fixtures now exist in `6238dfc`; a locally generated private key
 or unsigned hosted JSON still does not satisfy the public-registry claim.
