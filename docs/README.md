@@ -44,6 +44,7 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 - [Async runtime](async-runtime.md)
 - [Production operations](production.md)
 - [Cross-surface observability and OTLP certification](observability.md)
+- [Delivery publication ledger](publication-ledger.md)
 - [Compatibility](compatibility.md)
 - [Server transport plugins](server-transports.md)
 
