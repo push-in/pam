@@ -7,6 +7,9 @@ namespace Pam;
 use Pam\Contracts\Http\ApplicationInterface;
 use Pam\Contracts\Http\MiddlewareInterface;
 use Pam\Contracts\Package\ServiceProviderInterface;
+use Pam\Contracts\Transport\TransportApplicationInterface;
+use Pam\Contracts\Transport\TransportCapability;
+use Pam\Contracts\Transport\TransportProviderInterface;
 use Pam\Api\CallableRequestHandler;
 use Pam\Api\PackageDiscovery;
 use Pam\Api\Pipeline;
@@ -17,7 +20,7 @@ use Pam\Http\Response;
 use Pam\Http\Server as HttpServer;
 use Pam\Internal\Runtime;
 
-final class App implements ApplicationInterface
+final class App implements ApplicationInterface, TransportApplicationInterface
 {
     private readonly Router $router;
 
@@ -26,6 +29,9 @@ final class App implements ApplicationInterface
 
     /** @var list<ServiceProviderInterface> */
     private array $providers = [];
+
+    /** @var array<string, TransportProviderInterface> */
+    private array $transports = [];
 
     private ?Pipeline $pipeline = null;
 
@@ -122,6 +128,30 @@ final class App implements ApplicationInterface
         $provider->register($this);
         $this->providers[] = $provider;
         return $this;
+    }
+
+    public function transport(TransportProviderInterface $provider): self
+    {
+        $this->assertMutable();
+        $descriptor = $provider->descriptor();
+        if (!$descriptor->supports(TransportCapability::Publish)
+            && !$descriptor->supports(TransportCapability::Consume)
+        ) {
+            throw new \InvalidArgumentException(
+                "Transport {$descriptor->id} must support publishing or consuming.",
+            );
+        }
+        if (isset($this->transports[$descriptor->id])) {
+            throw new \LogicException("Transport {$descriptor->id} is already registered.");
+        }
+        $this->transports[$descriptor->id] = $provider;
+        ksort($this->transports, SORT_STRING);
+        return $this;
+    }
+
+    public function transports(): array
+    {
+        return $this->transports;
     }
 
     public function onError(callable $handler): self

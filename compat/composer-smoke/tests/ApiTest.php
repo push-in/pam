@@ -7,6 +7,15 @@ namespace Pam\Compatibility\Tests;
 use Pam\App;
 use Pam\Contracts\Http\ApplicationInterface;
 use Pam\Contracts\Package\ServiceProviderInterface;
+use Pam\Contracts\Transport\MessageDisposition;
+use Pam\Contracts\Transport\MessageResult;
+use Pam\Contracts\Transport\TransportCapability;
+use Pam\Contracts\Transport\TransportContext;
+use Pam\Contracts\Transport\TransportDescriptor;
+use Pam\Contracts\Transport\TransportKind;
+use Pam\Contracts\Transport\TransportMessage;
+use Pam\Contracts\Transport\TransportProviderInterface;
+use Pam\Contracts\Transport\TransportWorker;
 use Pam\Api\Middleware\SecurityHeadersMiddleware;
 use Pam\Api\Middleware\RateLimitMiddleware;
 use Pam\Api\PackageDiscovery;
@@ -28,8 +37,203 @@ final class FixtureServiceProvider implements ServiceProviderInterface
     }
 }
 
+final class FixtureTransport implements TransportProviderInterface
+{
+    public bool $started = false;
+    public bool $stopped = false;
+    /** @var list<MessageDisposition> */
+    public array $dispositions = [];
+
+    public function __construct(
+        private readonly bool $failOnStart = false,
+        private readonly bool $supportsDelayedRetry = true,
+    ) {
+    }
+
+    public function descriptor(): TransportDescriptor
+    {
+        return new TransportDescriptor(
+            id: 'fixture.queue',
+            kind: TransportKind::Queue,
+            capabilities: $this->supportsDelayedRetry
+                ? [
+                    TransportCapability::Publish,
+                    TransportCapability::Consume,
+                    TransportCapability::DelayedRetry,
+                ]
+                : [TransportCapability::Publish, TransportCapability::Consume],
+            maxPayloadBytes: 4_096,
+            maxBatchSize: 10,
+        );
+    }
+
+    public function start(TransportContext $context): void
+    {
+        $this->started = !$context->isCancelled();
+        if ($this->failOnStart) {
+            throw new \RuntimeException('start failed');
+        }
+    }
+
+    public function receive(int $maximum, int $waitMilliseconds): iterable
+    {
+        yield new TransportMessage('message-1', 'orders.created', '{"id":42}');
+    }
+
+    public function publish(string $topic, string $payload, array $headers = []): void
+    {
+    }
+
+    public function acknowledge(
+        TransportMessage $message,
+        MessageDisposition $disposition,
+        ?int $retryAfterMilliseconds = null,
+    ): void {
+        $this->dispositions[] = $disposition;
+    }
+
+    public function stop(): void
+    {
+        $this->stopped = true;
+    }
+}
+
 final class ApiTest extends TestCase
 {
+    public function testRegistersVersionedBoundedNonHttpTransports(): void
+    {
+        $app = new App(discoverPackages: false);
+        $transport = new FixtureTransport();
+        self::assertSame($app, $app->transport($transport));
+        self::assertSame(['fixture.queue' => $transport], $app->transports());
+
+        $events = [];
+        $context = new TransportContext(
+            'worker-1',
+            static fn (): bool => false,
+            static function (int $eventCode, array $attributes) use (&$events): void {
+                $events[] = [$eventCode, $attributes];
+            },
+        );
+        $handled = [];
+        $processed = TransportWorker::run(
+            $transport,
+            static function (TransportMessage $message) use (&$handled): MessageResult {
+                $handled[] = $message;
+                return MessageResult::acknowledge();
+            },
+            $context,
+            maximumMessages: 1,
+            waitMilliseconds: 100,
+        );
+        self::assertTrue($transport->started);
+        self::assertSame(1, $processed);
+        self::assertSame('orders.created', $handled[0]->topic);
+        self::assertLessThanOrEqual(
+            $transport->descriptor()->maxPayloadBytes,
+            strlen($handled[0]->payload),
+        );
+        self::assertSame([MessageDisposition::Acknowledge], $transport->dispositions);
+        self::assertTrue($transport->stopped);
+        self::assertSame([1, 2, 3, 4, 9], array_column($events, 0));
+
+        $failing = new FixtureTransport();
+        TransportWorker::run(
+            $failing,
+            static fn (TransportMessage $message): MessageResult => throw new \RuntimeException('fixture'),
+            new TransportContext(
+                'worker-2',
+                static fn (): bool => false,
+                static function (int $eventCode, array $attributes): void {},
+            ),
+            maximumMessages: 1,
+        );
+        self::assertSame([MessageDisposition::Retry], $failing->dispositions);
+
+        $this->expectException(\LogicException::class);
+        $app->transport(new FixtureTransport());
+    }
+
+    public function testTransportContractsRejectUnsafeOrUnboundedMetadata(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new TransportDescriptor(
+            id: '../escape',
+            kind: TransportKind::Queue,
+            capabilities: [TransportCapability::Consume],
+        );
+    }
+
+    public function testTransportContractsValidateUntypedRuntimeInput(): void
+    {
+        try {
+            new TransportDescriptor(
+                id: 'fixture.invalid',
+                kind: TransportKind::Queue,
+                capabilities: [1],
+            );
+            self::fail('Integer capabilities must be rejected.');
+        } catch (\InvalidArgumentException) {
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        new TransportMessage(
+            id: 'message-1',
+            topic: 'orders.created',
+            payload: '{}',
+            headers: ['trace-id' => 42],
+        );
+    }
+
+    public function testTransportWorkerAlwaysStopsAfterStartupFailure(): void
+    {
+        $transport = new FixtureTransport(failOnStart: true);
+        $events = [];
+
+        try {
+            TransportWorker::run(
+                $transport,
+                static fn (TransportMessage $message): MessageResult => MessageResult::acknowledge(),
+                new TransportContext(
+                    'worker-failing-start',
+                    static fn (): bool => false,
+                    static function (int $eventCode, array $attributes) use (&$events): void {
+                        $events[] = $eventCode;
+                    },
+                ),
+                maximumMessages: 1,
+            );
+            self::fail('Startup failure must propagate.');
+        } catch (\RuntimeException $error) {
+            self::assertSame('start failed', $error->getMessage());
+        }
+
+        self::assertTrue($transport->stopped);
+        self::assertSame([1, 9], $events);
+    }
+
+    public function testTransportWorkerRejectsUnsupportedRetryDisposition(): void
+    {
+        $transport = new FixtureTransport(supportsDelayedRetry: false);
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('does not support delayed retries');
+        try {
+            TransportWorker::run(
+                $transport,
+                static fn (TransportMessage $message): MessageResult => MessageResult::retry(100),
+                new TransportContext(
+                    'worker-no-retry',
+                    static fn (): bool => false,
+                    static function (int $eventCode, array $attributes): void {},
+                ),
+                maximumMessages: 1,
+            );
+        } finally {
+            self::assertTrue($transport->stopped);
+        }
+    }
+
     public function testRouterMatchesParametersAndReportsAllowedMethods(): void
     {
         $router = new Router();

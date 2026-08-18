@@ -42,6 +42,7 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 - [Async runtime](async-runtime.md)
 - [Production operations](production.md)
 - [Compatibility](compatibility.md)
+- [Server transport plugins](server-transports.md)
 
 PAM Native maintains its focused guides under
 [`pam-native/docs`](../pam-native/docs/README.md), including components,

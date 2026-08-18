@@ -106,6 +106,11 @@ only when an existing mirror tag resolves to the exact expected split commit.
 
 `pam/core-api` remains the compatibility seam: packages constrain its version and
 check runtime ABI capabilities instead of depending on Pam's Rust implementation.
+
+Core API protocol 1 also defines non-HTTP transport providers for queues,
+pub/sub, streams, and RPC. Providers declare integer kinds/capabilities, payload
+and batch ceilings, explicit start/stop lifecycle, publish/receive operations,
+and acknowledgement dispositions. See [Server transport plugins](server-transports.md).
 Breaking PHP contracts require a new major package version; breaking native
 ownership or signatures require a new native ABI.
 
