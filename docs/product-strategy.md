@@ -192,6 +192,7 @@ repository-local.
 | Versioned DevTools snapshots | `1b3f3f3` | `d4dec09` | `ea34d52` | Shipped |
 | Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
 | Accessible adaptive design tokens | — | `b07d09f` | — | Native shipped; cross-surface system open |
+| Release permission audit | — | Plugin and platform capability validation | Deterministic human/JSON risk policy `46fead6` | Desktop shipped; cross-surface policy remains open |
 | Signed typed plugin registry | Existing ABI/range/path checks | Descriptor and IDL integrity locks | Executable protocol/identity/hash checks | Open: requires public registry schema, release signing root, key rotation and revocation policy |
 | Flagship cross-surface application | — | Native showcase exists | — | Open |
 
