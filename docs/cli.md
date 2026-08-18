@@ -50,6 +50,14 @@ pam commands --json
 
 Each payload contains an integer `schema`. Automation must reject schemas it
 does not understand and use the process exit code as the success contract.
+`pam doctor --json` additionally reports the resolved target, sequential integer
+result and project-type codes, relevant manifest paths, the measured footprint
+of every regenerable build directory, and an exact remediation/verification
+pair under `nextActions`. Result code `1` is healthy and `2` needs attention;
+action code `1` runs the healthy target, `2` repairs a recognized project, and
+`3` requests manual inspection when no safe automatic repair exists. Consumers
+should execute the separate `arguments` array instead of parsing display-only
+command text.
 
 Any command can request a structured error envelope without changing its normal
 success output:

@@ -762,7 +762,17 @@ fn exposes_structured_doctor_and_offline_update_checks() {
     assert!(doctor.status.success());
     let report: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
     assert_eq!(report["schema"], 1);
+    assert_eq!(report["resultCode"], 1);
     assert_eq!(report["healthy"], true);
+    assert!(report["target"].as_str().is_some());
+    assert_eq!(report["nextActions"][0]["actionCode"], 1);
+    assert_eq!(report["nextActions"][0]["arguments"][0], report["target"]);
+    assert!(
+        report["nextActions"][0]["command"]
+            .as_str()
+            .unwrap()
+            .contains("hello.php")
+    );
     assert!(
         report["diagnostics"]
             .as_str()
@@ -777,6 +787,46 @@ fn exposes_structured_doctor_and_offline_update_checks() {
     ]);
     assert!(update.status.success());
     assert!(String::from_utf8_lossy(&update.stdout).contains("is up to date"));
+}
+
+#[test]
+fn doctor_reports_project_target_paths_and_reclaimable_artifacts() {
+    let directory = temporary_path("doctor-project-context");
+    fs::create_dir_all(directory.join("target/debug")).unwrap();
+    fs::write(
+        directory.join("pam.json"),
+        r#"{"schema":1,"type":5,"name":"doctor-fixture","version":"0.1.0"}"#,
+    )
+    .unwrap();
+    fs::write(directory.join("target/debug/cache.bin"), [0_u8; 64]).unwrap();
+
+    let doctor = run_pam_in(&directory, &["doctor", "--json"]);
+    assert!(doctor.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    assert_eq!(report["project"]["typeCode"], 5);
+    assert_eq!(report["project"]["typeLabel"], "PAM Runtime");
+    assert_eq!(report["project"]["developmentArtifacts"]["bytes"], 64);
+    assert_eq!(report["project"]["developmentArtifacts"]["files"], 1);
+    assert_eq!(
+        report["project"]["developmentArtifacts"]["entries"][2]["path"],
+        "target"
+    );
+    assert!(
+        report["project"]["paths"]["manifest"]
+            .as_str()
+            .unwrap()
+            .ends_with("pam.json")
+    );
+    assert_eq!(
+        report["nextActions"][0]["arguments"],
+        serde_json::json!(["dev"])
+    );
+    assert_eq!(
+        report["nextActions"][0]["verificationCommand"],
+        "pam doctor --json"
+    );
+
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]

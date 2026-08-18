@@ -335,14 +335,67 @@ fn run() -> Result<u8, CliError> {
                     CliError::Commands(format!("cannot run structured doctor audit: {error}"))
                 })?;
             let context = project::discover(&target);
+            let project = context
+                .as_ref()
+                .map(project::diagnostic_context)
+                .transpose()
+                .map_err(CliError::Commands)?;
+            let healthy = output.status.success();
+            let next_actions = if healthy && context.is_some() {
+                serde_json::json!([
+                    {
+                        "actionCode": 1,
+                        "summary": "Start the contextual development session",
+                        "command": "pam dev",
+                        "arguments": ["dev"],
+                        "verificationCommand": "pam doctor --json"
+                    }
+                ])
+            } else if healthy {
+                let target_argument = target.to_string_lossy();
+                serde_json::json!([
+                    {
+                        "actionCode": 1,
+                        "summary": "Run the verified PHP target",
+                        "command": format!("pam {}", target.display()),
+                        "arguments": [target_argument],
+                        "verificationCommand": format!("pam doctor {} --json", target.display())
+                    }
+                ])
+            } else if context.is_some() {
+                serde_json::json!([
+                    {
+                        "actionCode": 2,
+                        "summary": "Repair the active project",
+                        "command": "pam doctor --fix",
+                        "arguments": ["doctor", "--fix"],
+                        "verificationCommand": "pam doctor --json"
+                    }
+                ])
+            } else {
+                let target_argument = target.to_string_lossy();
+                serde_json::json!([
+                    {
+                        "actionCode": 3,
+                        "summary": "Inspect the target diagnostics",
+                        "command": format!("pam doctor {}", target.display()),
+                        "arguments": ["doctor", target_argument],
+                        "verificationCommand": format!("pam doctor {} --json", target.display())
+                    }
+                ])
+            };
             println!(
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
                     "schema": 1,
-                    "healthy": output.status.success(),
+                    "resultCode": if healthy { 1 } else { 2 },
+                    "healthy": healthy,
                     "exitCode": output.status.code().unwrap_or(1),
+                    "target": target,
                     "root": context.as_ref().map(|context| &context.root),
                     "projectType": context.as_ref().map(|context| context.kind as u8),
+                    "project": project,
+                    "nextActions": next_actions,
                     "diagnostics": String::from_utf8_lossy(&output.stdout).trim_end(),
                     "errors": String::from_utf8_lossy(&output.stderr).trim_end(),
                 }))

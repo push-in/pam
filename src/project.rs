@@ -382,6 +382,79 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
     Ok(0)
 }
 
+pub fn diagnostic_context(context: &ProjectContext) -> Result<serde_json::Value, String> {
+    let artifacts = artifact_footprint(context)?;
+    Ok(serde_json::json!({
+        "root": context.root,
+        "typeCode": context.kind as u8,
+        "typeLabel": context.kind.label(),
+        "paths": {
+            "manifest": context.root.join("pam.json"),
+            "composerManifest": context.root.join("composer.json"),
+            "nativeManifest": context.root.join("pam-native.json"),
+        },
+        "developmentArtifacts": artifacts,
+        "nextCommands": contextual_next_commands(context.kind),
+    }))
+}
+
+fn artifact_footprint(context: &ProjectContext) -> Result<serde_json::Value, String> {
+    let mut entries = Vec::new();
+    let mut total_bytes = 0_u64;
+    let mut total_files = 0_u64;
+    let mut complete = true;
+    for (relative, kind) in cleanup_targets(true) {
+        let path = context.root.join(relative);
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => {
+                complete = false;
+                entries.push(serde_json::json!({
+                    "path": relative,
+                    "kindCode": kind as u8,
+                    "exists": true,
+                    "bytes": 0,
+                    "files": 0,
+                    "complete": false,
+                }));
+                continue;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                entries.push(serde_json::json!({
+                    "path": relative,
+                    "kindCode": kind as u8,
+                    "exists": false,
+                    "bytes": 0,
+                    "files": 0,
+                    "complete": true,
+                }));
+                continue;
+            }
+            Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
+        }
+        let mut bytes = 0;
+        let mut files = 0;
+        let entry_complete = measure_directory(&path, &mut bytes, &mut files)?;
+        total_bytes = total_bytes.saturating_add(bytes);
+        total_files = total_files.saturating_add(files);
+        complete &= entry_complete;
+        entries.push(serde_json::json!({
+            "path": relative,
+            "kindCode": kind as u8,
+            "exists": true,
+            "bytes": bytes,
+            "files": files,
+            "complete": entry_complete,
+        }));
+    }
+    Ok(serde_json::json!({
+        "bytes": total_bytes,
+        "files": total_files,
+        "complete": complete,
+        "entries": entries,
+    }))
+}
+
 fn development_artifacts(context: &ProjectContext) -> Result<DevelopmentArtifacts, String> {
     let root = context.root.join(".pam-native");
     if !root.is_dir() {
