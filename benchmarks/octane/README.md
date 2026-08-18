@@ -61,3 +61,10 @@ php benchmarks/octane/evidence-manifest.php \
 ```
 
 Suite IDs are `1` for a comparison, `2` for a worker matrix, and `3` for a soak.
+
+The `Performance evidence` GitHub Actions workflow runs suite 1 weekly and lets
+maintainers dispatch any suite by its integer ID. It builds the exact checked-out
+commit, verifies the generated manifest in a separate step, and retains raw
+results for 30 days even when a gate fails. A failed run is diagnostic evidence,
+not publishable benchmark evidence; only an artifact containing a verified
+manifest and passing report gates may support a performance claim.

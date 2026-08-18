@@ -1,0 +1,96 @@
+name: Performance evidence
+
+on:
+  schedule:
+    - cron: '23 3 * * 2'
+  workflow_dispatch:
+    inputs:
+      suite_id:
+        description: 1 comparison, 2 worker matrix, 3 runtime soak
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '2'
+          - '3'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pam-evidence-${{ github.ref }}-${{ github.event_name == 'schedule' && '1' || inputs.suite_id }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  benchmark:
+    name: Evidence suite ${{ github.event_name == 'schedule' && '1' || inputs.suite_id }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      PAM_EVIDENCE_SUITE_ID: ${{ github.event_name == 'schedule' && '1' || inputs.suite_id }}
+      PAM_BENCH_ROUNDS: '5'
+      PAM_BENCH_DURATION: 15s
+      PAM_BENCH_WARMUP_DURATION: 5s
+      PAM_BENCH_COOLDOWN: '1'
+      PAM_BENCH_WORKER_MATRIX: 1 4 8
+      PAM_SOAK_DURATION: 30m
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Check out the pinned PAM Native SDK
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: 26a768c9a7e0137bda9fa7de23f46c9308de2839
+          path: pam-native
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - name: Install benchmark system dependencies
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y libphp8.4-embed php8.4-dev php8.4-sqlite3 wrk
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: evidence-${{ env.PAM_EVIDENCE_SUITE_ID }}
+      - name: Preflight locked benchmark dependencies
+        run: composer install --working-dir=packages/octane --dry-run --no-interaction --prefer-dist
+      - name: Install locked benchmark dependencies
+        run: composer install --working-dir=packages/octane --no-interaction --prefer-dist
+      - name: Build the measured release binary
+        run: cargo build --locked --release
+      - name: Run selected evidence suite
+        run: |
+          case "${PAM_EVIDENCE_SUITE_ID}" in
+            1) benchmarks/octane/run.sh ;;
+            2) benchmarks/octane/matrix.sh ;;
+            3) benchmarks/octane/soak.sh ;;
+            *) printf 'unknown evidence suite id: %s\n' "${PAM_EVIDENCE_SUITE_ID}" >&2; exit 64 ;;
+          esac
+      - name: Verify evidence before publication
+        run: |
+          case "${PAM_EVIDENCE_SUITE_ID}" in
+            1) results=benchmarks/octane/results ;;
+            2) results=benchmarks/octane/results/matrix ;;
+            3) results=benchmarks/octane/results/soak ;;
+          esac
+          php benchmarks/octane/evidence-manifest.php \
+            "${results}" "${PAM_EVIDENCE_SUITE_ID}" --verify
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pam-evidence-suite-${{ env.PAM_EVIDENCE_SUITE_ID }}-${{ github.sha }}
+          path: benchmarks/octane/results/
+          if-no-files-found: warn
+          retention-days: 30
