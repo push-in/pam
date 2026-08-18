@@ -20,6 +20,18 @@ Surface codes are sequential integer enum values:
 | 2 | Native | Navigation state tree, performance metrics, bounded timeline |
 | 3 | Desktop | Command metrics, worker generations, pool size, event cursor |
 
+Snapshot access follows the discovered project surface:
+
+| Surface | Developer access |
+| --- | --- |
+| Server | `pam diagnostics [script]` |
+| Native | In-app DevTools export; external CLI transport is not available yet |
+| Desktop | `pam diagnostics` while that project is running under `pam dev` |
+
+Desktop delegates to its authenticated loopback gateway through a bounded,
+ephemeral project descriptor. The unified CLI never reads the bridge token into
+its own process; it only invokes the matching Desktop host command.
+
 The three envelope fields are required. Surface-specific fields remain at the
 top level in schema 1 for compatibility with existing consumers. Native also
 retains its legacy payload `version` while clients migrate to `schemaVersion`.

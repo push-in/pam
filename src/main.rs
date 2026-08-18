@@ -598,6 +598,14 @@ fn run() -> Result<u8, CliError> {
         "diagnostics" | "heap" | "fibers" | "connections" | "profile" | "trace"
     ) {
         let command = script_arg.to_string_lossy().into_owned();
+        if command == "diagnostics"
+            && let Some(context) = current_project()
+            && context.kind == project::ProjectKind::Desktop
+        {
+            let mut arguments = vec![OsString::from("diagnostics"), context.root.into_os_string()];
+            arguments.extend(raw_args);
+            return desktop::run(&executable, arguments).map_err(CliError::Commands);
+        }
         if command == "profile"
             && let Some(context) = current_project()
             && context.kind == project::ProjectKind::Native

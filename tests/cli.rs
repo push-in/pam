@@ -746,6 +746,19 @@ fn delegates_desktop_commands_and_exposes_the_pam_binary() {
         r#"{"name":"app/desktop","require":{"pam/desktop":"^0.5"}}"#,
     )
     .unwrap();
+    let diagnostics = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .arg("diagnostics")
+        .current_dir(&directory)
+        .env("PAM_DESKTOP_BINARY", &desktop)
+        .output()
+        .unwrap();
+    assert_eq!(diagnostics.status.code(), Some(23));
+    let diagnostics_output = String::from_utf8_lossy(&diagnostics.stdout);
+    assert!(
+        diagnostics_output.contains(&format!("args=diagnostics|{}|", directory.display())),
+        "{diagnostics_output}"
+    );
+
     let package = Command::new(env!("CARGO_BIN_EXE_pam"))
         .arg("package")
         .current_dir(&directory)
