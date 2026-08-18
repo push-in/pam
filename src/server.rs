@@ -3704,15 +3704,34 @@ fn traceparent(headers: &HeaderMap, state: &ServerState) -> String {
         .and_then(|value| value.to_str().ok())
         .filter(|value| valid_traceparent(value))
     {
-        return value.to_owned();
+        let mut parts = value.split('-');
+        let version = parts.next().expect("validated trace version");
+        let trace_id = parts.next().expect("validated trace ID");
+        let _parent_id = parts.next().expect("validated parent ID");
+        let flags = parts.next().expect("validated trace flags");
+        return format!(
+            "{version}-{trace_id}-{}-{flags}",
+            server_span_identifier(state)
+        );
     }
 
-    let sequence = state.next_request_id.load(Ordering::Relaxed) as u128;
+    let sequence = state.next_request_id.fetch_add(1, Ordering::Relaxed) as u128;
     let timestamp = epoch_millis() as u128;
     let pid = std::process::id() as u128;
     let trace_id = (timestamp << 64) ^ (pid << 32) ^ sequence;
     let span_id = ((timestamp as u64).rotate_left(17)) ^ sequence as u64;
     format!("00-{trace_id:032x}-{span_id:016x}-01")
+}
+
+fn server_span_identifier(state: &ServerState) -> String {
+    let sequence = state.next_request_id.fetch_add(1, Ordering::Relaxed);
+    let timestamp = epoch_millis();
+    let pid = u64::from(std::process::id());
+    let mut span_id = timestamp.rotate_left(17) ^ sequence.rotate_left(7) ^ (pid << 32);
+    if span_id == 0 {
+        span_id = 1;
+    }
+    format!("{span_id:016x}")
 }
 
 fn request_traceparent(headers: &HeaderMap, state: &ServerState) -> String {
@@ -3726,16 +3745,16 @@ fn request_traceparent(headers: &HeaderMap, state: &ServerState) -> String {
 fn valid_traceparent(value: &str) -> bool {
     let parts = value.split('-').collect::<Vec<_>>();
     parts.len() == 4
-        && parts[0].len() == 2
-        && parts[0] != "ff"
+        && parts[0] == "00"
         && parts[1].len() == 32
         && parts[1] != "00000000000000000000000000000000"
         && parts[2].len() == 16
         && parts[2] != "0000000000000000"
         && parts[3].len() == 2
-        && parts
-            .iter()
-            .all(|part| part.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        && parts.iter().all(|part| {
+            part.bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
 }
 
 fn header_bytes(headers: &HeaderMap) -> usize {

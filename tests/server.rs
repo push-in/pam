@@ -280,6 +280,26 @@ fn caches_only_explicit_public_anonymous_responses() {
 }
 
 #[test]
+fn continues_w3c_traces_with_a_distinct_server_span() {
+    let server = ServerProcess::start();
+    let inbound = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-03";
+    let response = server.http_request(&format!(
+        "GET / HTTP/1.1\r\nHost: 127.0.0.1\r\ntraceparent: {inbound}\r\nConnection: close\r\n\r\n"
+    ));
+    let outbound = response
+        .lines()
+        .find_map(|line| line.strip_prefix("traceparent: "))
+        .expect("telemetry-enabled server should return traceparent");
+    assert_ne!(outbound, inbound, "the server must create a child span");
+    assert!(
+        outbound.starts_with("00-4bf92f3577b34da6a3ce929d0e0e4736-"),
+        "{outbound}"
+    );
+    assert!(outbound.ends_with("-03"), "{outbound}");
+    assert_eq!(outbound.len(), 55);
+}
+
+#[test]
 fn serves_stale_cache_entries_while_one_request_revalidates() {
     let server = ServerProcess::start_with_response_cache();
     let warm =

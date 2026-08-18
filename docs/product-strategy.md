@@ -50,6 +50,33 @@ Scores are intentionally omitted until PAM has a repeatable scoring harness.
 | Desktop | [Tauri](https://tauri.app/concept/architecture/) | Small Rust-based applications, system WebViews, composable plugins, and explicit JS/Rust invocation | **Shipped:** PAM Desktop uses a Rust boundary and explicit capabilities. **Prove:** package size, memory, startup, permission enforcement, signing, and updates on all desktop targets. |
 | Desktop | [Electron](https://www.electronjs.org/docs/latest/tutorial/security) | Mature Chromium compatibility, process model, packaging, updates, and a large ecosystem | **Shipped:** capability-scoped PAM commands reduce ambient renderer privilege. **Explore:** hardened renderer isolation, permission auditing, crash recovery, and update ergonomics while keeping the smaller trusted boundary. |
 
+### Competitive research refresh — 2026-08-18
+
+Official documentation shows observability becoming part of the product rather
+than an optional integration. [FrankenPHP exposes Prometheus worker/thread,
+queue, latency, crash and restart metrics](https://frankenphp.dev/docs/metrics/)
+and presents a zero-configuration TUI/exporter in its
+[observability guide](https://frankenphp.dev/docs/observability/).
+[RoadRunner](https://docs.roadrunner.dev/docs/logging-and-observability/otel)
+connects HTTP, jobs, gRPC and other plugins through OpenTelemetry, although its
+own documentation still labels only tracing stable for production.
+
+The same convergence exists in application tooling. React Native DevTools now
+places JavaScript execution, React work, network activity and user timings in a
+single [performance timeline](https://reactnative.dev/docs/react-native-devtools),
+while Tauri generates schemas for explicit per-window capabilities and warns
+that overlapping capabilities merge security boundaries in its
+[capability model](https://v2.tauri.app/security/capabilities/).
+
+PAM already has bounded Prometheus metrics, a live `top`, structured logs,
+cross-surface diagnostics and capability audits. The immediate correctness gap
+was distributed trace lineage: an accepted W3C `traceparent` was previously
+echoed with its caller parent ID. PAM now retains the incoming trace ID and
+flags but creates a distinct server span ID, allowing logs and downstream
+requests to form a real parent-child tree. The next differentiator is a bounded
+cross-surface performance timeline and stable OTLP export, not another isolated
+debug screen.
+
 ## Current product audit
 
 ### PAM runtime and CLI

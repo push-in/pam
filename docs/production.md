@@ -113,7 +113,11 @@ deve coletar os logs e reiniciar o master caso ele próprio falhe.
 
 `telemetryHeaders` habilita `x-request-id`, `traceparent` e `Server-Timing` nas
 respostas. Ele é desligado por padrão para evitar formatação e bytes extras em
-cada resposta; habilite quando a correlação distribuída for necessária.
+cada resposta; habilite quando a correlação distribuída for necessária. Um
+`traceparent` W3C versão `00` válido conserva o trace ID e os flags, mas PAM cria
+um span ID servidor distinto. Valores malformados, em maiúsculas, com IDs
+zerados ou versões desconhecidas não são continuados, evitando representar o
+cliente e o servidor como o mesmo span.
 
 ## Cache nativo de respostas
 
