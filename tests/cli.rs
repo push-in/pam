@@ -38,6 +38,36 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn css_hex(styles: &str, property: &str) -> [f64; 3] {
+    let prefix = format!("{property}: #");
+    let value = styles
+        .lines()
+        .map(str::trim)
+        .find_map(|line| line.strip_prefix(&prefix))
+        .and_then(|value| value.strip_suffix(';'))
+        .unwrap_or_else(|| panic!("missing CSS color token {property}"));
+    assert_eq!(value.len(), 6, "{property} must use six hexadecimal digits");
+    let channel =
+        |offset| u8::from_str_radix(&value[offset..offset + 2], 16).unwrap() as f64 / 255.0;
+    [channel(0), channel(2), channel(4)]
+}
+
+fn contrast_ratio(foreground: [f64; 3], background: [f64; 3]) -> f64 {
+    let luminance = |color: [f64; 3]| {
+        let linear = |channel: f64| {
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color[0]) + 0.7152 * linear(color[1]) + 0.0722 * linear(color[2])
+    };
+    let foreground = luminance(foreground);
+    let background = luminance(background);
+    (foreground.max(background) + 0.05) / (foreground.min(background) + 0.05)
+}
+
 #[test]
 fn creates_and_verifies_benchmark_evidence_manifests() {
     let results = temporary_path("benchmark-evidence");
@@ -1031,12 +1061,40 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(application.contains("$window->title"));
     assert!(html.contains("/_pam/bridge.js"));
     assert!(html.contains("aria-live=\"polite\""));
+    assert!(html.contains("aria-atomic=\"true\""));
+    assert!(html.contains("runtime conectando"));
+    assert!(html.contains("NATIVE AUTHORITY · API 1"));
+    assert!(html.contains("SIGNED UPDATES · API 1"));
+    assert!(html.contains("aria-describedby=\"name-hint\""));
+    assert!(!html.contains("value=\"David\""));
+    assert!(!html.contains("CAPABILITIES 0.3"));
+    assert!(!html.contains("SIGNED UPDATES · 0.5"));
     assert!(html.contains("IPC v6"));
     assert!(html.contains("Native Lab"));
     assert!(html.contains("Atualizações com rollback"));
     assert!(styles.contains("prefers-reduced-motion"));
+    assert!(styles.contains("prefers-contrast: more"));
+    assert!(styles.contains("forced-colors: active"));
     assert!(styles.contains(":focus-visible"));
+    assert!(styles.contains("width: min(100%, 440px)"));
+    assert!(!styles.contains("width: min(96vw, 440px)"));
+    for (foreground, background) in [
+        ("--text", "--ink"),
+        ("--text-soft", "--ink"),
+        ("--text-faint", "--ink"),
+        ("--run-ink", "--run"),
+    ] {
+        let ratio = contrast_ratio(css_hex(&styles, foreground), css_hex(&styles, background));
+        assert!(
+            ratio >= 4.5,
+            "{foreground} on {background} has insufficient contrast: {ratio:.2}:1"
+        );
+    }
     assert!(javascript.contains("window.pam.invoke(\"greet\""));
+    assert!(javascript.contains("runtimeStatus.dataset.state = \"ready\""));
+    assert!(javascript.contains("state === \"error\" ? \"assertive\" : \"polite\""));
+    assert!(javascript.contains("document.querySelectorAll(\"button, input\")"));
+    assert!(javascript.contains("response.focus()"));
     assert!(javascript.contains("window.pam.on(\"pam.dev.reloaded\""));
     assert!(javascript.contains("{ timeout: 5_000 }"));
     assert!(javascript.contains("window.pam.fs.writeText"));

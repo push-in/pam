@@ -1593,8 +1593,8 @@ HelloApp::run();
 
             <div class="runtime-status" aria-label="Estado da runtime">
                 <span class="status-pulse" aria-hidden="true"></span>
-                <span>runtime online</span>
-                <kbd>0.5</kbd>
+                <span id="runtime-status-text">runtime conectando</span>
+                <kbd>API 1</kbd>
             </div>
         </header>
 
@@ -1637,10 +1637,12 @@ HelloApp::run();
                                     name="name"
                                     maxlength="40"
                                     autocomplete="name"
+                                    aria-describedby="name-hint"
                                     placeholder="Seu nome"
-                                    value="David"
+                                    required
                                 >
                             </div>
+                            <small id="name-hint" class="field-hint">Até 40 caracteres; enviado somente ao comando local.</small>
                         </div>
                         <button id="hello-button" type="submit">
                             <span>Conversar com o PHP</span>
@@ -1666,7 +1668,7 @@ HelloApp::run();
                     <section class="native-lab" aria-labelledby="native-lab-title">
                         <div class="native-lab-heading">
                             <div>
-                                <span>CAPABILITIES 0.3</span>
+                                <span>NATIVE AUTHORITY · API 1</span>
                                 <h2 id="native-lab-title">Native Lab</h2>
                             </div>
                             <span class="capability-lock">autorizado no PHP</span>
@@ -1688,7 +1690,7 @@ HelloApp::run();
 
                     <section class="update-console" aria-labelledby="update-title">
                         <div>
-                            <span>SIGNED UPDATES · 0.5</span>
+                            <span>SIGNED UPDATES · API 1</span>
                             <h2 id="update-title">Atualizações com rollback</h2>
                             <p id="update-status" role="status" aria-live="polite">
                                 Desativadas por padrão; a chave pública fica no manifesto PHP.
@@ -1697,7 +1699,7 @@ HelloApp::run();
                         <button id="update-button" type="button">Verificar estado</button>
                     </section>
 
-                    <div class="response" id="response" role="status" aria-live="polite">
+                    <div class="response" id="response" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
                         <span class="response-label">aguardando comando</span>
                         <p id="response-message">
                             A primeira resposta da sua aplicação vai aparecer aqui.
@@ -1797,6 +1799,8 @@ HelloApp::run();
     --text-faint: #718792;
     --violet: #a69aff;
     --cyan: #68ded2;
+    --run: #67e8a5;
+    --run-ink: #062315;
     --coral: #ff9279;
     --line: rgba(176, 209, 220, 0.14);
     --line-strong: rgba(176, 209, 220, 0.26);
@@ -1819,6 +1823,7 @@ html {
 
 body {
     min-height: 100vh;
+    min-height: 100dvh;
     margin: 0;
     overflow-x: hidden;
     background:
@@ -1846,7 +1851,7 @@ a {
     left: 12px;
     padding: 10px 14px;
     color: var(--ink);
-    background: var(--cyan);
+    background: var(--run);
     border-radius: 8px;
     transform: translateY(-160%);
 }
@@ -1856,7 +1861,7 @@ a {
 }
 
 :focus-visible {
-    outline: 3px solid var(--cyan);
+    outline: 3px solid var(--run);
     outline-offset: 4px;
 }
 
@@ -1935,6 +1940,16 @@ a {
     box-shadow: 0 0 0 4px rgba(104, 222, 210, 0.1), 0 0 18px rgba(104, 222, 210, 0.8);
 }
 
+.runtime-status[data-state="ready"] .status-pulse {
+    background: var(--run);
+    box-shadow: 0 0 0 4px rgba(103, 232, 165, 0.1), 0 0 18px rgba(103, 232, 165, 0.72);
+}
+
+.runtime-status[data-state="error"] .status-pulse {
+    background: var(--coral);
+    box-shadow: 0 0 0 4px rgba(255, 146, 121, 0.12);
+}
+
 .hero {
     min-height: calc(100vh - 208px);
     display: grid;
@@ -1979,7 +1994,7 @@ h1 {
 
 h1 span {
     color: transparent;
-    background: linear-gradient(105deg, var(--violet) 10%, #d7d1ff 54%, var(--cyan));
+    background: linear-gradient(105deg, var(--run) 8%, #baf7d4 52%, var(--cyan));
     background-clip: text;
 }
 
@@ -2006,6 +2021,14 @@ h1 span {
     color: var(--text-soft);
     font-size: 12px;
     font-weight: 600;
+}
+
+.field-hint {
+    display: block;
+    margin: 8px 2px 0;
+    color: var(--text-faint);
+    font-size: 11px;
+    line-height: 1.45;
 }
 
 .input-wrap {
@@ -2056,11 +2079,11 @@ h1 span {
     justify-content: center;
     gap: 10px;
     padding: 0 20px;
-    color: #10131d;
+    color: var(--run-ink);
     border: 0;
     border-radius: 12px;
-    background: linear-gradient(120deg, #c4bbff, var(--violet));
-    box-shadow: 0 12px 28px rgba(119, 101, 235, 0.23);
+    background: linear-gradient(120deg, var(--run), #8ef0c0);
+    box-shadow: 0 12px 28px rgba(45, 190, 116, 0.2);
     cursor: pointer;
     font-size: 14px;
     font-weight: 700;
@@ -2069,7 +2092,7 @@ h1 span {
 
 .hello-form button:hover {
     filter: brightness(1.08);
-    box-shadow: 0 16px 34px rgba(119, 101, 235, 0.32);
+    box-shadow: 0 16px 34px rgba(45, 190, 116, 0.3);
     transform: translateY(-1px);
 }
 
@@ -2704,7 +2727,13 @@ footer kbd {
     }
 
     .runtime-status > span:not(.status-pulse) {
-        display: none;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        white-space: nowrap;
     }
 
     .hero {
@@ -2734,7 +2763,7 @@ footer kbd {
     }
 
     .runtime-visual {
-        width: min(96vw, 440px);
+        width: min(100%, 440px);
     }
 
     .runtime-node {
@@ -2773,6 +2802,28 @@ footer kbd {
         transition-duration: 0.01ms !important;
     }
 }
+
+@media (prefers-contrast: more) {
+    :root {
+        --text-soft: #d4e0e5;
+        --text-faint: #b5c8d0;
+        --line: rgba(226, 241, 246, 0.34);
+        --line-strong: rgba(226, 241, 246, 0.58);
+    }
+}
+
+@media (forced-colors: active) {
+    :focus-visible {
+        outline-color: Highlight;
+    }
+
+    .status-pulse,
+    .runtime-status[data-state="ready"] .status-pulse,
+    .runtime-status[data-state="error"] .status-pulse {
+        background: CanvasText;
+        box-shadow: none;
+    }
+}
 "#,
     )?;
     write_new(
@@ -2788,6 +2839,8 @@ footer kbd {
     const message = document.querySelector("#response-message");
     const detail = document.querySelector("#response-detail");
     const inspectorButton = document.querySelector("#inspector-button");
+    const runtimeStatus = document.querySelector(".runtime-status");
+    const runtimeStatusText = document.querySelector("#runtime-status-text");
     const eventStatus = document.querySelector("#event-status");
     const nativeStatus = document.querySelector("#native-status");
     const dropZone = document.querySelector("#drop-zone");
@@ -2800,6 +2853,7 @@ footer kbd {
 
     const setState = (state, title, body, supportingText) => {
         response.dataset.state = state;
+        response.setAttribute("aria-live", state === "error" ? "assertive" : "polite");
         label.textContent = title;
         message.textContent = body;
         detail.textContent = supportingText;
@@ -2819,21 +2873,23 @@ footer kbd {
     };
 
     if (!window.pam) {
+        runtimeStatus.dataset.state = "error";
+        runtimeStatusText.textContent = "runtime indisponível";
         setState(
             "error",
             "bridge indisponível",
             "A bridge Pam não foi carregada.",
             "Abra este projeto com `pam desktop dev .`.",
         );
-        form.querySelectorAll("button, input").forEach((element) => {
+        document.querySelectorAll("button, input").forEach((element) => {
             element.disabled = true;
         });
-        inspectorButton.disabled = true;
-        updateButton.disabled = true;
         return;
     }
 
     window.pam.on("runtime.ready", ({ protocol }) => {
+        runtimeStatus.dataset.state = "ready";
+        runtimeStatusText.textContent = "runtime online";
         eventStatus.textContent = `eventos online · IPC v${protocol}`;
     });
     window.pam.on("hello.completed", ({ name: completedName }) => {
@@ -2996,6 +3052,7 @@ footer kbd {
                 error instanceof Error ? error.message : "Não foi possível executar o comando.",
                 "Confira o worker PHP e tente novamente.",
             );
+            response.focus();
         } finally {
             button.disabled = false;
             button.removeAttribute("aria-busy");

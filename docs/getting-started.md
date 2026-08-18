@@ -42,6 +42,12 @@ pam init my-native-app --template mobile
 pam init my-desktop-app --template desktop
 ```
 
+The Desktop preset opens with a responsive PAM workbench that demonstrates the
+typed PHP command bridge, explicit native capabilities, signed updates and the
+runtime inspector. Its local-only assets include keyboard focus, reduced-motion,
+high-contrast and forced-color behavior; the runtime status becomes “online”
+only after the authenticated bridge handshake.
+
 Every generated project contains `pam.json`. This lets the CLI select the right
 implementation when you use the same short commands everywhere:
 

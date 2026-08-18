@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Refresh the PAM Desktop starter with the cross-surface run-green identity,
+  truthful bridge lifecycle states, WCAG contrast gates, high-contrast and
+  forced-color support, and a 375 px responsive visual contract.
+
 ## 1.0.3 - 2026-08-11
 
 - Add the optional `pushinbr/pam-octane` bridge for Laravel Octane 2.19+ on
