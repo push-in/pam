@@ -36,10 +36,16 @@ Com um simulador inicializado:
 pam devices
 pam run
 pam logs
+pam mobile ios:screenshot . --output artifacts/screenshots/home-ios.png
 ```
 
 `ios:run` prepara o host, compila, instala e inicia o bundle ID declarado em
 `pam-native.json`.
+
+`ios:screenshot` captura o simulador inicializado, valida o PNG e remove o arquivo
+temporário de `.pam-native` antes de concluir. O destino precisa permanecer dentro
+do projeto e não é sobrescrito sem `--force`; por padrão, a captura fica em
+`artifacts/screenshots/ios.png`.
 
 ## Assinatura e IPA
 

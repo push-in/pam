@@ -34,11 +34,17 @@ pam run
 pam dev
 pam logs
 pam devtools
+pam mobile screenshot . --output artifacts/screenshots/home.png
 ```
 
 `run` detecta a ABI do aparelho conectado. `dev` mantém o runtime em modo debug
 e entrega hot reload. Para escolher explicitamente a ABI use `--abi
 arm64-v8a` ou `--abi x86_64`.
+
+`screenshot` captura a tela do aparelho via `adb exec-out`, valida assinatura e
+header PNG antes de gravar e restringe o destino ao projeto. Ele recusa substituir
+uma golden existente; use `--force` somente quando a atualização visual for
+intencional. O caminho padrão é `artifacts/screenshots/android.png`.
 
 ## Gerar uma release assinada
 

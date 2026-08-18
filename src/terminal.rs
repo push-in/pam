@@ -573,6 +573,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "Inspect iOS simulators and application logs",
                 ),
                 (
+                    "screenshot | ios:screenshot",
+                    "Capture a validated PNG for visual tests",
+                ),
+                (
                     "ios:sign | ios:package",
                     "Validate signing and export a signed IPA",
                 ),
@@ -606,6 +610,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "mobile doctor",
                 "mobile dev .",
                 "mobile devtools .",
+                "mobile screenshot . --output artifacts/home.png",
                 "mobile runtime:use 8.5 .",
                 "mobile runtime:install .",
                 "mobile make:screen Dashboard .",

@@ -619,6 +619,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "ios:package" => package_ios(parse_project_only(arguments)?),
         "ios:logs" => logs_ios(parse_project_only(arguments)?),
         "ios:devices" => devices_ios(parse_project_only(arguments)?),
+        "ios:screenshot" => screenshot_ios(parse_screenshot_options(arguments, "ios.png")?),
         "build" => {
             let options = parse_options(arguments, true)?;
             build(options).map(|_| 0)
@@ -652,6 +653,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "devtools" => toggle_devtools(parse_project_only(arguments)?),
         "logs" => logs(parse_project_only(arguments)?),
         "devices" => devices(parse_project_only(arguments)?),
+        "screenshot" => screenshot_android(parse_screenshot_options(arguments, "android.png")?),
         "plugin:list" => list_plugins(parse_project_only(arguments)?),
         "plugin:doctor" => doctor_plugins(parse_project_only(arguments)?),
         "runtime:list" => list_runtimes(parse_project_only(arguments)?),
@@ -680,6 +682,28 @@ fn logs(project_path: PathBuf) -> Result<u8, String> {
         .status()
         .map_err(|error| format!("cannot start adb logcat: {error}"))?;
     Ok(if status.success() { 0 } else { 1 })
+}
+
+fn screenshot_android(options: ScreenshotOptions) -> Result<u8, String> {
+    let project = load_project(&options.project)?;
+    let output = Command::new("adb")
+        .args(["exec-out", "screencap", "-p"])
+        .output()
+        .map_err(|error| format!("cannot capture Android screenshot: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "Android screenshot failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let path = write_screenshot(
+        &project.root,
+        &options.output,
+        &output.stdout,
+        options.force,
+    )?;
+    println!("Captured Android screenshot at {}", path.display());
+    Ok(0)
 }
 
 fn android_pid(application_id: &str) -> Result<String, String> {
@@ -809,6 +833,59 @@ fn parse_project_only(mut arguments: impl Iterator<Item = OsString>) -> Result<P
         ));
     }
     Ok(PathBuf::from(project))
+}
+
+struct ScreenshotOptions {
+    project: PathBuf,
+    output: PathBuf,
+    force: bool,
+}
+
+fn parse_screenshot_options(
+    mut arguments: impl Iterator<Item = OsString>,
+    default_name: &str,
+) -> Result<ScreenshotOptions, String> {
+    let mut project = PathBuf::from(".");
+    let mut output = PathBuf::from("artifacts/screenshots").join(default_name);
+    let mut positional = false;
+    let mut force = false;
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--output" => {
+                output =
+                    PathBuf::from(arguments.next().ok_or_else(|| {
+                        "--output requires a project-relative PNG path".to_owned()
+                    })?);
+            }
+            "--force" => force = true,
+            option if option.starts_with('-') => {
+                return Err(format!("unknown screenshot option {option}"));
+            }
+            _ if !positional => {
+                project = PathBuf::from(argument);
+                positional = true;
+            }
+            _ => return Err("screenshot accepts at most one project directory".to_owned()),
+        }
+    }
+    if output.is_absolute()
+        || output.extension() != Some(OsStr::new("png"))
+        || output.components().any(|component| {
+            matches!(
+                component,
+                Component::ParentDir | Component::RootDir | Component::Prefix(_)
+            )
+        })
+    {
+        return Err(
+            "screenshot output must be a project-relative .png path without `..`".to_owned(),
+        );
+    }
+    Ok(ScreenshotOptions {
+        project,
+        output,
+        force,
+    })
 }
 
 fn parse_options(
@@ -3343,6 +3420,85 @@ fn logs_ios(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
+fn screenshot_ios(options: ScreenshotOptions) -> Result<u8, String> {
+    let project = load_project(&options.project)?;
+    let simulator = booted_ios_simulator()?;
+    let capture_directory = project.root.join(".pam-native/screenshots");
+    fs::create_dir_all(&capture_directory).map_err(|error| {
+        format!(
+            "cannot create temporary screenshot directory {}: {error}",
+            capture_directory.display()
+        )
+    })?;
+    let temporary = capture_directory.join(format!("capture-{}.png", std::process::id()));
+    let status = Command::new("xcrun")
+        .args(["simctl", "io", &simulator, "screenshot"])
+        .arg(&temporary)
+        .status()
+        .map_err(|error| format!("cannot capture iOS screenshot: {error}"))?;
+    if !status.success() {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("iOS screenshot failed with {status}"));
+    }
+    let bytes = fs::read(&temporary)
+        .map_err(|error| format!("cannot read {}: {error}", temporary.display()));
+    let _ = fs::remove_file(&temporary);
+    let path = write_screenshot(&project.root, &options.output, &bytes?, options.force)?;
+    println!("Captured iOS screenshot at {}", path.display());
+    Ok(0)
+}
+
+fn write_screenshot(
+    project_root: &Path,
+    relative: &Path,
+    bytes: &[u8],
+    force: bool,
+) -> Result<PathBuf, String> {
+    const PNG_SIGNATURE: &[u8] = b"\x89PNG\r\n\x1a\n";
+    if bytes.len() < 24 || !bytes.starts_with(PNG_SIGNATURE) || &bytes[12..16] != b"IHDR" {
+        return Err("captured image is not a valid PNG".to_owned());
+    }
+    let destination = project_root.join(relative);
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "screenshot output has no parent directory".to_owned())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    let canonical_parent = fs::canonicalize(parent)
+        .map_err(|error| format!("cannot resolve {}: {error}", parent.display()))?;
+    if !canonical_parent.starts_with(project_root) {
+        return Err("screenshot output escapes the project through a symbolic link".to_owned());
+    }
+    if destination.exists() || destination.symlink_metadata().is_ok() {
+        if !force {
+            return Err(format!(
+                "screenshot already exists at {}; pass --force to replace it",
+                destination.display()
+            ));
+        }
+        let metadata = destination
+            .symlink_metadata()
+            .map_err(|error| error.to_string())?;
+        if metadata.is_dir() {
+            return Err(format!(
+                "screenshot output is a directory: {}",
+                destination.display()
+            ));
+        }
+        fs::remove_file(&destination)
+            .map_err(|error| format!("cannot replace {}: {error}", destination.display()))?;
+    }
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&destination)
+        .map_err(|error| format!("cannot create {}: {error}", destination.display()))?;
+    file.write_all(bytes)
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("cannot write {}: {error}", destination.display()))?;
+    Ok(destination)
+}
+
 fn validate_ios_signing(project: &Project) -> Result<(String, PathBuf), String> {
     let team = std::env::var("PAM_IOS_DEVELOPMENT_TEAM")
         .map_err(|_| "PAM_IOS_DEVELOPMENT_TEAM is required for an iOS release".to_owned())?;
@@ -5709,6 +5865,52 @@ mod tests {
         assert!(valid_mime_type("application/vnd.example+json"));
         assert!(!valid_mime_type("image"));
         assert!(!valid_mime_type("image/<script>"));
+    }
+
+    #[test]
+    fn screenshot_paths_are_scoped_and_pngs_are_validated() {
+        let options = parse_screenshot_options(
+            [
+                OsString::from("project"),
+                OsString::from("--output"),
+                OsString::from("artifacts/home.png"),
+                OsString::from("--force"),
+            ]
+            .into_iter(),
+            "android.png",
+        )
+        .expect("screenshot options");
+        assert_eq!(options.project, PathBuf::from("project"));
+        assert_eq!(options.output, PathBuf::from("artifacts/home.png"));
+        assert!(options.force);
+        assert!(
+            parse_screenshot_options(
+                [OsString::from("--output"), OsString::from("../escape.png")].into_iter(),
+                "android.png",
+            )
+            .is_err()
+        );
+
+        let root = std::env::temp_dir().join(format!(
+            "pam-screenshot-test-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("test project");
+        let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+        png.extend_from_slice(&[0, 0, 0, 13]);
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&[0; 8]);
+        let output = Path::new("artifacts/screen.png");
+        let written = write_screenshot(&root, output, &png, false).expect("valid PNG");
+        assert_eq!(fs::read(&written).expect("screenshot"), png);
+        assert!(write_screenshot(&root, output, &png, false).is_err());
+        write_screenshot(&root, output, &png, true).expect("forced replacement");
+        assert!(write_screenshot(&root, Path::new("bad.png"), b"not png", false).is_err());
+        fs::remove_dir_all(root).expect("cleanup");
     }
 
     #[test]
