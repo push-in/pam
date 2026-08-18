@@ -1,0 +1,72 @@
+name: Observability interoperability
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/observability.yml'
+      - 'Cargo.lock'
+      - 'Cargo.toml'
+      - 'scripts/certify-otlp.sh'
+      - 'scripts/otlp-evidence.py'
+      - 'src/otlp.rs'
+      - 'src/server.rs'
+      - 'tests/fixtures/otel-collector.yaml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pam-observability-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  otlp-collector:
+    name: Official Collector / OTLP HTTP JSON
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Install the integrity-verified Cosign release
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Verify the official Collector image signature
+        run: |
+          cosign verify \
+            --certificate-identity='https://github.com/open-telemetry/opentelemetry-collector-releases/.github/workflows/base-release.yaml@refs/tags/v0.157.0' \
+            --certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+            'ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector:0.157.0@sha256:4019ce4d7e7791a1a255fffb2f407af66d5017cc65543469ba565c4f47f795b8'
+      - name: Install PHP Embed build dependencies
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo apt-get install -y libphp8.4-embed php8.4-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: otlp-collector-certification
+      - name: Build the locked PAM runtime
+        run: cargo build --locked
+      - name: Test the evidence verifier
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python3 -m unittest tests/test_otlp_evidence.py
+      - name: Certify against the pinned official Collector
+        env:
+          PAM_BIN: target/debug/pam
+        run: scripts/certify-otlp.sh
+      - name: Verify bounded evidence
+        run: python3 scripts/otlp-evidence.py artifacts/otlp 1 --verify
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pam-otlp-collector-${{ github.sha }}
+          path: artifacts/otlp/
+          if-no-files-found: error
+          retention-days: 30

@@ -43,6 +43,7 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 - [PAM Octane security boundaries](octane-security.md)
 - [Async runtime](async-runtime.md)
 - [Production operations](production.md)
+- [Cross-surface observability and OTLP certification](observability.md)
 - [Compatibility](compatibility.md)
 - [Server transport plugins](server-transports.md)
 

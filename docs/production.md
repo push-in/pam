@@ -148,6 +148,7 @@ concreta, query string e request ID não são exportados. Headers do collector
 aceitam percent-encoding e nunca são escritos nos logs. Monitore
 `pam_otlp_spans_exported_total`, `pam_otlp_spans_dropped_total`,
 `pam_otlp_export_errors_total` e `pam_otlp_spans_rejected_total`.
+Veja também a [matriz cross-surface e a certificação reproduzível do Collector](observability.md).
 
 ## Cache nativo de respostas
 

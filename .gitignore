@@ -4,6 +4,8 @@
 /.idea/
 /.vscode/
 /dist/
+/artifacts/
+/tests/__pycache__/
 /benchmarks/octane/results/
 /fuzz/artifacts/
 /fuzz/coverage/
