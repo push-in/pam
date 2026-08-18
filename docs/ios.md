@@ -49,6 +49,18 @@ do projeto e não é sobrescrito sem `--force`; por padrão, a captura fica em
 
 ## Assinatura e IPA
 
+Execute o mesmo gate de autoridade antes do archive:
+
+```bash
+pam mobile audit . --deny-high
+pam mobile audit . --deny-high --json > artifacts/mobile-release-audit.json
+```
+
+No iOS, o relatório cobre privacy usage descriptions, tracking, entitlements,
+extensões e requisitos Swift Package que possam mudar sem alteração no descritor.
+O JSON usa contrato estável: `schemaVersion: 1`, `surfaceCode: 2`, resultado
+inteiro `1` (pass) ou `2` (fail), e severidades sequenciais de `1` a `4`.
+
 PAM não grava certificados, credenciais ou provisioning profiles no projeto.
 Defina o time Apple e forneça um `ExportOptions.plist` controlado pelo ambiente
 de release:

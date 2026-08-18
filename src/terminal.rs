@@ -561,6 +561,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             "mobile <command> [project] [options]",
             &[
                 ("doctor", "Validate the Android and PAM Native toolchain"),
+                (
+                    "audit",
+                    "Audit native permissions and release dependency authority",
+                ),
                 ("prepare", "Stage the project and generate its Android host"),
                 ("codegen", "Regenerate Kotlin native-module bindings"),
                 (
@@ -608,6 +612,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &[
                 "mobile doctor",
+                "mobile audit . --deny-high --json",
                 "mobile dev .",
                 "mobile devtools .",
                 "mobile screenshot . --output artifacts/home.png",

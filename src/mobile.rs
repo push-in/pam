@@ -554,6 +554,91 @@ struct Project {
     plugins: Vec<NativePlugin>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+#[repr(u8)]
+enum MobileAuditSeverity {
+    Info = 1,
+    Warning = 2,
+    High = 3,
+    Critical = 4,
+}
+
+impl MobileAuditSeverity {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::Info => "info",
+            Self::Warning => "warning",
+            Self::High => "high",
+            Self::Critical => "critical",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MobileAuditFinding {
+    severity_code: u8,
+    rule: &'static str,
+    resource: String,
+    message: &'static str,
+    remediation: &'static str,
+}
+
+impl MobileAuditFinding {
+    fn new(
+        severity: MobileAuditSeverity,
+        rule: &'static str,
+        resource: impl Into<String>,
+        message: &'static str,
+        remediation: &'static str,
+    ) -> Self {
+        Self {
+            severity_code: severity as u8,
+            rule,
+            resource: resource.into(),
+            message,
+            remediation,
+        }
+    }
+
+    fn severity(&self) -> MobileAuditSeverity {
+        match self.severity_code {
+            1 => MobileAuditSeverity::Info,
+            2 => MobileAuditSeverity::Warning,
+            3 => MobileAuditSeverity::High,
+            4 => MobileAuditSeverity::Critical,
+            _ => unreachable!("audit findings use declared severity values"),
+        }
+    }
+}
+
+struct MobileAuditOptions {
+    project: PathBuf,
+    json: bool,
+    deny: MobileAuditSeverity,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MobileAuditCounts {
+    info: usize,
+    warning: usize,
+    high: usize,
+    critical: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct MobileAuditReport<'a> {
+    schema_version: u8,
+    surface_code: u8,
+    result_code: u8,
+    deny_severity_code: u8,
+    application_identifier: &'a str,
+    counts: MobileAuditCounts,
+    findings: &'a [MobileAuditFinding],
+}
+
 struct MobileOptions {
     project: PathBuf,
     mode: BuildMode,
@@ -572,6 +657,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             Ok(0)
         }
         "doctor" => doctor(parse_project_only(arguments)?),
+        "audit" => audit_mobile(parse_mobile_audit_options(arguments)?),
         "prepare" => {
             let options = parse_options(arguments, false)?;
             let project = load_project(&options.project)?;
@@ -833,6 +919,33 @@ fn parse_project_only(mut arguments: impl Iterator<Item = OsString>) -> Result<P
         ));
     }
     Ok(PathBuf::from(project))
+}
+
+fn parse_mobile_audit_options(
+    arguments: impl Iterator<Item = OsString>,
+) -> Result<MobileAuditOptions, String> {
+    let mut project = PathBuf::from(".");
+    let mut positional = false;
+    let mut json = false;
+    let mut deny = MobileAuditSeverity::Critical;
+    for argument in arguments {
+        match argument.to_str() {
+            Some("--json") => json = true,
+            Some("--deny-high") => deny = MobileAuditSeverity::High,
+            Some(value) if !value.starts_with('-') && !positional => {
+                project = PathBuf::from(value);
+                positional = true;
+            }
+            _ => {
+                return Err("usage: pam mobile audit [project] [--json] [--deny-high]".to_owned());
+            }
+        }
+    }
+    Ok(MobileAuditOptions {
+        project,
+        json,
+        deny,
+    })
 }
 
 struct ScreenshotOptions {
@@ -3598,6 +3711,310 @@ fn package_ios(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
+fn audit_mobile(options: MobileAuditOptions) -> Result<u8, String> {
+    let project = load_project(&options.project)?;
+    let findings = collect_mobile_audit_findings(&project);
+    let failed = findings
+        .iter()
+        .any(|finding| finding.severity() >= options.deny);
+    let report = MobileAuditReport {
+        schema_version: 1,
+        surface_code: 2,
+        result_code: if failed { 2 } else { 1 },
+        deny_severity_code: options.deny as u8,
+        application_identifier: &project.manifest.application_id,
+        counts: mobile_audit_counts(&findings),
+        findings: &findings,
+    };
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("cannot encode mobile audit: {error}"))?
+        );
+    } else {
+        print_mobile_audit(&report);
+    }
+    Ok(if failed { 1 } else { 0 })
+}
+
+fn collect_mobile_audit_findings(project: &Project) -> Vec<MobileAuditFinding> {
+    let mut findings = Vec::new();
+    for permission in &project.manifest.android.permissions {
+        audit_android_permission("application", permission, &mut findings);
+    }
+    for link in &project.manifest.android.deep_links {
+        findings.push(MobileAuditFinding::new(
+            if link.auto_verify {
+                MobileAuditSeverity::Warning
+            } else {
+                MobileAuditSeverity::Info
+            },
+            if link.auto_verify {
+                "android.verified-deep-link"
+            } else {
+                "android.deep-link"
+            },
+            format!("application:{}", link.scheme),
+            "The application accepts external navigation into a declared route.",
+            "Validate every incoming route and parameter, and keep verified domain ownership current.",
+        ));
+    }
+    if !project.manifest.android.share_targets.is_empty() {
+        findings.push(MobileAuditFinding::new(
+            MobileAuditSeverity::Warning,
+            "android.share-target",
+            format!("{} MIME types", project.manifest.android.share_targets.len()),
+            "Other applications can send content into this application.",
+            "Accept only necessary MIME types and validate size, content and provenance before processing.",
+        ));
+    }
+
+    for plugin in &project.plugins {
+        audit_mobile_plugin(plugin, &mut findings);
+    }
+    findings.sort_by(|left, right| {
+        right
+            .severity_code
+            .cmp(&left.severity_code)
+            .then_with(|| left.rule.cmp(right.rule))
+            .then_with(|| left.resource.cmp(&right.resource))
+    });
+    findings
+}
+
+fn audit_mobile_plugin(plugin: &NativePlugin, findings: &mut Vec<MobileAuditFinding>) {
+    let version = plugin.package_version.trim();
+    if version.is_empty() || version.starts_with("dev-") || version.ends_with("-dev") {
+        findings.push(MobileAuditFinding::new(
+            if version.is_empty() {
+                MobileAuditSeverity::Critical
+            } else {
+                MobileAuditSeverity::High
+            },
+            if version.is_empty() {
+                "plugin.unversioned"
+            } else {
+                "plugin.development-version"
+            },
+            &plugin.package,
+            "The native plugin does not use an immutable release version.",
+            "Release from a reviewed immutable package version and retain Composer lock metadata.",
+        ));
+    }
+    for permission in &plugin.manifest.android.permissions {
+        audit_android_permission(&plugin.package, permission, findings);
+    }
+    for repository in &plugin.manifest.android.repositories {
+        findings.push(MobileAuditFinding::new(
+            MobileAuditSeverity::Warning,
+            "android.external-repository",
+            &plugin.package,
+            "The plugin adds an external Maven repository to dependency resolution.",
+            "Prefer Maven Central or Google, and pin repository content through the release lock and CI provenance.",
+        ));
+        if repository.contains("jitpack.io") {
+            findings.push(MobileAuditFinding::new(
+                MobileAuditSeverity::High,
+                "android.source-build-repository",
+                &plugin.package,
+                "The plugin resolves Android artifacts from a source-build repository.",
+                "Publish reviewed immutable artifacts to a controlled repository before release.",
+            ));
+        }
+    }
+    for dependency in &plugin.manifest.android.dependencies {
+        if dependency.contains('+')
+            || dependency.to_ascii_lowercase().contains("latest")
+            || dependency.to_ascii_uppercase().contains("SNAPSHOT")
+        {
+            findings.push(MobileAuditFinding::new(
+                MobileAuditSeverity::Critical,
+                "android.dependency-unpinned",
+                format!("{}:{dependency}", plugin.package),
+                "The Maven dependency can resolve to different code without a manifest change.",
+                "Use one immutable release version and refresh it only through a reviewed dependency update.",
+            ));
+        }
+    }
+    for (key, value) in &plugin.manifest.ios.usage_descriptions {
+        findings.push(MobileAuditFinding::new(
+            ios_usage_severity(key),
+            if key == "NSUserTrackingUsageDescription" {
+                "ios.tracking"
+            } else {
+                "ios.protected-resource"
+            },
+            format!("{}:{key}", plugin.package),
+            "The plugin requests access to an iOS protected resource.",
+            if value.trim().len() < 24 {
+                "Use a specific, user-facing purpose string and request access only at the feature boundary."
+            } else {
+                "Request access only from an explicit feature action and disclose how the data is used."
+            },
+        ));
+    }
+    if plugin.manifest.ios.entitlements.is_some() {
+        findings.push(MobileAuditFinding::new(
+            MobileAuditSeverity::High,
+            "ios.application-entitlements",
+            &plugin.package,
+            "The plugin merges entitlements into the signed application identity.",
+            "Review the entitlement plist during every plugin update and keep only required production grants.",
+        ));
+    }
+    for extension in &plugin.manifest.ios.extensions {
+        findings.push(MobileAuditFinding::new(
+            if extension.entitlements.is_some()
+                || matches!(extension.kind, IosExtensionKind::NotificationService)
+            {
+                MobileAuditSeverity::High
+            } else {
+                MobileAuditSeverity::Warning
+            },
+            "ios.extension",
+            format!("{}:{}", plugin.package, extension.name),
+            "The plugin adds a separately executing iOS extension to the application bundle.",
+            "Review its activation rules, data sharing, entitlements and bounded execution behavior.",
+        ));
+    }
+    for package in &plugin.manifest.ios.swift_packages {
+        let severity = match package.requirement.kind {
+            SwiftPackageRequirementKind::Branch => MobileAuditSeverity::Critical,
+            SwiftPackageRequirementKind::From | SwiftPackageRequirementKind::UpToNextMinor => {
+                MobileAuditSeverity::High
+            }
+            SwiftPackageRequirementKind::Exact | SwiftPackageRequirementKind::Revision => continue,
+        };
+        findings.push(MobileAuditFinding::new(
+            severity,
+            "ios.dependency-unpinned",
+            format!("{}:{}", plugin.package, package.url),
+            "The Swift package requirement can select different source without a plugin descriptor change.",
+            "Use an exact release or immutable revision and review lockfile changes in CI.",
+        ));
+    }
+}
+
+fn audit_android_permission(owner: &str, permission: &str, findings: &mut Vec<MobileAuditFinding>) {
+    let name = permission
+        .strip_prefix("android.permission.")
+        .unwrap_or(permission);
+    let (severity, rule) = if matches!(
+        name,
+        "MANAGE_EXTERNAL_STORAGE"
+            | "REQUEST_INSTALL_PACKAGES"
+            | "QUERY_ALL_PACKAGES"
+            | "SYSTEM_ALERT_WINDOW"
+    ) {
+        (MobileAuditSeverity::Critical, "android.broad-permission")
+    } else if name.contains("LOCATION")
+        || name.contains("CONTACTS")
+        || name.contains("CALENDAR")
+        || name.contains("SMS")
+        || name.contains("CALL")
+        || name.contains("HEALTH")
+        || name.contains("BODY_SENSORS")
+        || name.contains("READ_MEDIA")
+        || matches!(
+            name,
+            "CAMERA"
+                | "RECORD_AUDIO"
+                | "BLUETOOTH_SCAN"
+                | "BLUETOOTH_CONNECT"
+                | "NEARBY_WIFI_DEVICES"
+        )
+    {
+        (MobileAuditSeverity::High, "android.sensitive-permission")
+    } else if matches!(name, "INTERNET" | "ACCESS_NETWORK_STATE") {
+        (MobileAuditSeverity::Info, "android.network-permission")
+    } else {
+        (MobileAuditSeverity::Warning, "android.permission")
+    };
+    findings.push(MobileAuditFinding::new(
+        severity,
+        rule,
+        format!("{owner}:{permission}"),
+        "The application package declares an Android platform permission.",
+        "Keep the permission only when a shipped feature requires it and request runtime access at a clear user action.",
+    ));
+}
+
+fn ios_usage_severity(key: &str) -> MobileAuditSeverity {
+    if key == "NSUserTrackingUsageDescription" {
+        MobileAuditSeverity::Critical
+    } else if key.contains("Camera")
+        || key.contains("Microphone")
+        || key.contains("Location")
+        || key.contains("Contacts")
+        || key.contains("Calendars")
+        || key.contains("PhotoLibrary")
+        || key.contains("Health")
+        || key.contains("FaceID")
+        || key.contains("Bluetooth")
+        || key.starts_with("NFC")
+    {
+        MobileAuditSeverity::High
+    } else {
+        MobileAuditSeverity::Warning
+    }
+}
+
+fn mobile_audit_counts(findings: &[MobileAuditFinding]) -> MobileAuditCounts {
+    MobileAuditCounts {
+        info: findings
+            .iter()
+            .filter(|finding| finding.severity() == MobileAuditSeverity::Info)
+            .count(),
+        warning: findings
+            .iter()
+            .filter(|finding| finding.severity() == MobileAuditSeverity::Warning)
+            .count(),
+        high: findings
+            .iter()
+            .filter(|finding| finding.severity() == MobileAuditSeverity::High)
+            .count(),
+        critical: findings
+            .iter()
+            .filter(|finding| finding.severity() == MobileAuditSeverity::Critical)
+            .count(),
+    }
+}
+
+fn print_mobile_audit(report: &MobileAuditReport<'_>) {
+    println!(
+        "PAM Native release audit · {}",
+        report.application_identifier
+    );
+    println!(
+        "Critical {} · High {} · Warning {} · Info {}\n",
+        report.counts.critical, report.counts.high, report.counts.warning, report.counts.info
+    );
+    if report.findings.is_empty() {
+        println!("No declared native authority requires review.");
+    } else {
+        for finding in report.findings {
+            println!(
+                "[{}] {} · {}\n  {}\n  Next: {}",
+                finding.severity().label(),
+                finding.rule,
+                finding.resource,
+                finding.message,
+                finding.remediation
+            );
+        }
+    }
+    println!(
+        "\nResult: {} (deny severity {} or higher)",
+        if report.result_code == 1 {
+            "pass"
+        } else {
+            "fail"
+        },
+        report.deny_severity_code
+    );
+}
+
 fn list_plugins(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
     if project.plugins.is_empty() {
@@ -5846,6 +6263,82 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mobile_audit_uses_stable_integer_contracts() {
+        assert_eq!(MobileAuditSeverity::Info as u8, 1);
+        assert_eq!(MobileAuditSeverity::Warning as u8, 2);
+        assert_eq!(MobileAuditSeverity::High as u8, 3);
+        assert_eq!(MobileAuditSeverity::Critical as u8, 4);
+        let findings = vec![MobileAuditFinding::new(
+            MobileAuditSeverity::High,
+            "android.sensitive-permission",
+            "application:android.permission.CAMERA",
+            "Sensitive authority.",
+            "Remove it.",
+        )];
+        let report = MobileAuditReport {
+            schema_version: 1,
+            surface_code: 2,
+            result_code: 2,
+            deny_severity_code: MobileAuditSeverity::High as u8,
+            application_identifier: "app.pam.audit",
+            counts: mobile_audit_counts(&findings),
+            findings: &findings,
+        };
+        let value = serde_json::to_value(report).expect("audit JSON");
+        assert_eq!(value["schemaVersion"], 1);
+        assert_eq!(value["surfaceCode"], 2);
+        assert_eq!(value["resultCode"], 2);
+        assert_eq!(value["denySeverityCode"], 3);
+        assert_eq!(value["counts"]["high"], 1);
+        assert_eq!(value["findings"][0]["severityCode"], 3);
+        assert!(value["findings"][0].get("severity").is_none());
+    }
+
+    #[test]
+    fn mobile_audit_classifies_sensitive_native_authority() {
+        let mut findings = Vec::new();
+        audit_android_permission(
+            "application",
+            "android.permission.MANAGE_EXTERNAL_STORAGE",
+            &mut findings,
+        );
+        audit_android_permission(
+            "community/camera",
+            "android.permission.CAMERA",
+            &mut findings,
+        );
+        audit_android_permission("application", "android.permission.INTERNET", &mut findings);
+        assert_eq!(findings[0].severity(), MobileAuditSeverity::Critical);
+        assert_eq!(findings[1].severity(), MobileAuditSeverity::High);
+        assert_eq!(findings[2].severity(), MobileAuditSeverity::Info);
+        assert_eq!(
+            ios_usage_severity("NSUserTrackingUsageDescription"),
+            MobileAuditSeverity::Critical
+        );
+        assert_eq!(
+            ios_usage_severity("NSFaceIDUsageDescription"),
+            MobileAuditSeverity::High
+        );
+    }
+
+    #[test]
+    fn parses_mobile_audit_ci_policy() {
+        let options = parse_mobile_audit_options(
+            [
+                OsString::from("fixture"),
+                OsString::from("--json"),
+                OsString::from("--deny-high"),
+            ]
+            .into_iter(),
+        )
+        .expect("audit options");
+        assert_eq!(options.project, Path::new("fixture"));
+        assert!(options.json);
+        assert_eq!(options.deny, MobileAuditSeverity::High);
+        assert!(parse_mobile_audit_options([OsString::from("--unknown")].into_iter()).is_err());
+    }
+
+    #[test]
     fn detects_supported_java_major_versions() {
         assert_eq!(java_major_version("openjdk version \"17.0.12\""), Some(17));
         assert_eq!(java_major_version("java version \"1.8.0_402\""), Some(8));
@@ -6201,6 +6694,21 @@ mod tests {
         let project = load_project(&root).expect("discover plugin");
         assert_eq!(project.plugins.len(), 1);
         assert_eq!(project.plugins[0].package, "community/example");
+        let audit = collect_mobile_audit_findings(&project);
+        assert!(audit.iter().any(|finding| {
+            finding.rule == "android.sensitive-permission"
+                && finding.resource == "community/example:android.permission.CAMERA"
+                && finding.severity() == MobileAuditSeverity::High
+        }));
+        assert!(audit.iter().any(|finding| {
+            finding.rule == "ios.protected-resource"
+                && finding.resource == "community/example:NSFaceIDUsageDescription"
+                && finding.severity() == MobileAuditSeverity::High
+        }));
+        assert!(audit.iter().any(|finding| {
+            finding.rule == "ios.application-entitlements"
+                && finding.severity() == MobileAuditSeverity::High
+        }));
 
         let workspace = root.join(".pam-native/android");
         fs::create_dir_all(workspace.join("app/src/main/java/dev/pam/nativeapp/modules"))

@@ -48,6 +48,20 @@ intencional. O caminho padrão é `artifacts/screenshots/android.png`.
 
 ## Gerar uma release assinada
 
+Antes de assinar, audite toda autoridade nativa agregada pelo aplicativo e por
+plugins Composer:
+
+```bash
+pam mobile audit . --deny-high
+pam mobile audit . --deny-high --json > artifacts/mobile-release-audit.json
+```
+
+O relatório ordena permissões Android, deep links, share targets, repositórios e
+dependências nativas por severidade. Dependências dinâmicas, acesso amplo a
+arquivos, instalação de pacotes e enumeração global de apps bloqueiam a release
+por padrão. `--deny-high` também transforma câmera, microfone, localização e
+outras autoridades sensíveis em falha de CI.
+
 PAM lê as credenciais somente do ambiente:
 
 ```bash
