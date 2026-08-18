@@ -107,8 +107,10 @@ Scores are intentionally omitted until PAM has a repeatable scoring harness.
 
 - The desktop source and release artifact must be audited as a separate product;
   delegation from this repository does not prove implementation quality.
-- Cross-platform CI artifacts, signing/notarization, update recovery, sandboxing,
-  accessibility, Web compatibility, crash reporting, and resource budgets.
+- Cross-platform CI artifacts, signing/notarization, sandboxing, accessibility,
+  Web compatibility, crash reporting, startup/memory/CPU budgets, and real
+  graphical-session evidence. Linux package footprint and update recovery have
+  deterministic gates.
 - A documented fallback policy where Servo does not meet application needs.
 
 ## North-star outcomes and metrics
@@ -188,7 +190,7 @@ repository-local.
 | --- | --- | --- | --- | --- |
 | Product audit, competitor map, metrics, roadmap | `a363bb7` | Covered by the cross-product audit | Covered by the cross-product audit | Shipped |
 | Project-scoped bounded development artifacts | Cleanup contract `c7c79c7`; measured 9.51 GB reclaimed across the three local product workspaces | Android/iOS generated hosts and Cargo targets use the same scoped command | Host cache retention `f895be8`; Cargo target uses the shared cleanup contract | Shipped |
-| Verifiable benchmark evidence | `58ca0e0`, workflow `1fcd2cd` | Manifest `742e0e4` | Attested package reproducibility manifest `acc3a7c` | Shipped; public runs depend on CI execution |
+| Verifiable benchmark evidence | `58ca0e0`, workflow `1fcd2cd` | Manifest `742e0e4` | Attested package reproducibility `acc3a7c`; authenticated footprint and 5% release-baseline gate `2dad206` | Shipped; public runs depend on CI execution |
 | Structured error and automation contracts | `fc1a8fa`; actionable Doctor target/artifact/remediation report `fe18c67` | Contextual CLI commands inherit the envelope | Desktop retains its typed bridge errors | Shipped |
 | Development lifecycle event protocol | `c273d21` | Android/iOS hosts emit schema 1 | `392a6eb` | Shipped |
 | Versioned DevTools snapshots | `1b3f3f3` | `d4dec09` | `ea34d52` | Shipped |
