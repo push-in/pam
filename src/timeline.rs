@@ -10,6 +10,33 @@ use serde_json::{Value, json};
 const MAX_SNAPSHOT_BYTES: u64 = 1024 * 1024;
 const MAX_SERVER_EVENTS: usize = 1024;
 const MAX_NATIVE_EVENTS: usize = 8;
+const MAX_NATIVE_REQUEST_BYTES: u64 = 1024 * 1024;
+const MAX_NATIVE_RESPONSE_BYTES: u64 = 900 * 1024;
+
+#[derive(Debug, Clone, Copy)]
+#[repr(u8)]
+enum NativeHttpMethod {
+    Get = 1,
+    Post = 2,
+    Put = 3,
+    Patch = 4,
+    Delete = 5,
+}
+
+impl TryFrom<u64> for NativeHttpMethod {
+    type Error = String;
+
+    fn try_from(value: u64) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Self::Get),
+            2 => Ok(Self::Post),
+            3 => Ok(Self::Put),
+            4 => Ok(Self::Patch),
+            5 => Ok(Self::Delete),
+            _ => Err("Native network methodCode must be between 1 and 5".to_owned()),
+        }
+    }
+}
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -197,10 +224,34 @@ fn native_events(snapshot: &Value) -> Result<Vec<TraceEvent>, String> {
                 2 => "native.event",
                 3 => "native.error",
                 4 => "native.lifecycle",
-                _ => return Err("Native timeline kindCode must be 1, 2, 3, or 4".to_owned()),
+                5 => "native.network",
+                _ => return Err("Native timeline kindCode must be between 1 and 5".to_owned()),
             };
             let mut args = BTreeMap::new();
             args.insert("failed", json!(failed));
+            if kind == 5 {
+                let method = NativeHttpMethod::try_from(unsigned(event, "methodCode")?)?;
+                args.insert("method_code", json!(method as u8));
+                if let Some(status) = optional_unsigned(event, "statusCode")? {
+                    if !(100..=599).contains(&status) {
+                        return Err(
+                            "Native network statusCode must be between 100 and 599".to_owned()
+                        );
+                    }
+                    args.insert("status_code", json!(status));
+                }
+                for (source, target, maximum) in [
+                    ("requestBytes", "request_bytes", MAX_NATIVE_REQUEST_BYTES),
+                    ("responseBytes", "response_bytes", MAX_NATIVE_RESPONSE_BYTES),
+                ] {
+                    if let Some(bytes) = optional_unsigned(event, source)? {
+                        if bytes > maximum {
+                            return Err(format!("Native network {source} exceeds its limit"));
+                        }
+                        args.insert(target, json!(bytes));
+                    }
+                }
+            }
             let trace = TraceEvent {
                 name,
                 cat: "pam.native",
@@ -279,6 +330,16 @@ fn unsigned(value: &Value, field: &str) -> Result<u64, String> {
         .ok_or_else(|| format!("diagnostic snapshot requires unsigned integer {field}"))
 }
 
+fn optional_unsigned(value: &Value, field: &str) -> Result<Option<u64>, String> {
+    match value.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .map(Some)
+            .ok_or_else(|| format!("diagnostic snapshot requires unsigned integer {field}")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -291,7 +352,12 @@ mod tests {
         });
         let native = json!({
             "schemaVersion": 1, "surfaceCode": 2, "capturedAtUnixMs": 101,
-            "timeline": [{"kindCode": 1, "durationMicros": 42, "failed": false, "label": "private/path"}]
+            "timeline": [{
+                "kindCode": 5, "durationMicros": 42, "failed": false,
+                "methodCode": 2, "statusCode": 201, "requestBytes": 12,
+                "responseBytes": 34, "label": "private/path",
+                "url": "https://secret.example/private", "headers": {"authorization": "secret"}
+            }]
         });
         let desktop = json!({
             "schemaVersion": 1, "surfaceCode": 3, "capturedAtUnixMs": 102,
@@ -303,7 +369,11 @@ mod tests {
         let native_trace = serde_json::to_string(&export(&native).unwrap()).unwrap();
         let desktop_trace = serde_json::to_string(&export(&desktop).unwrap()).unwrap();
         assert!(server_trace.contains("request.start"));
-        assert!(native_trace.contains("native.module_call"));
+        assert!(native_trace.contains("native.network"));
+        assert!(native_trace.contains("\"method_code\":2"));
+        assert!(native_trace.contains("\"status_code\":201"));
+        assert!(native_trace.contains("\"request_bytes\":12"));
+        assert!(native_trace.contains("\"response_bytes\":34"));
         assert!(desktop_trace.contains("average_command_microseconds"));
         for trace in [&server_trace, &native_trace, &desktop_trace] {
             assert!(!trace.contains("secret"));
@@ -322,5 +392,18 @@ mod tests {
             "schemaVersion": 1, "surfaceCode": 4, "capturedAtUnixMs": 1
         });
         assert!(export(&unknown).is_err());
+
+        for invalid_network in [
+            json!({"kindCode": 5, "durationMicros": 1, "methodCode": 6}),
+            json!({"kindCode": 5, "durationMicros": 1, "methodCode": 1, "statusCode": 99}),
+            json!({"kindCode": 5, "durationMicros": 1, "methodCode": 1, "requestBytes": MAX_NATIVE_REQUEST_BYTES + 1}),
+            json!({"kindCode": 5, "durationMicros": 1, "methodCode": 1, "responseBytes": MAX_NATIVE_RESPONSE_BYTES + 1}),
+        ] {
+            let snapshot = json!({
+                "schemaVersion": 1, "surfaceCode": 2, "capturedAtUnixMs": 1,
+                "timeline": [invalid_network]
+            });
+            assert!(export(&snapshot).is_err());
+        }
     }
 }

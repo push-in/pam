@@ -727,7 +727,7 @@ fn exports_a_bounded_redacted_cross_surface_timeline() {
     let output = directory.join("native-trace.json");
     fs::write(
         &snapshot,
-        r#"{"schemaVersion":1,"surfaceCode":2,"capturedAtUnixMs":1234,"timeline":[{"kindCode":1,"durationMicros":42,"failed":false,"label":"private-label"}]}"#,
+        r#"{"schemaVersion":1,"surfaceCode":2,"capturedAtUnixMs":1234,"timeline":[{"kindCode":5,"durationMicros":42,"failed":false,"methodCode":1,"statusCode":204,"requestBytes":0,"responseBytes":17,"label":"private-label","url":"https://secret.example/private"}]}"#,
     )
     .unwrap();
     let first = Command::new(env!("CARGO_BIN_EXE_pam"))
@@ -742,8 +742,12 @@ fn exports_a_bounded_redacted_cross_surface_timeline() {
     );
     let trace = fs::read_to_string(&output).unwrap();
     assert!(trace.contains("\"traceEvents\""));
-    assert!(trace.contains("native.module_call"));
+    assert!(trace.contains("native.network"));
+    assert!(trace.contains("\"method_code\": 1"));
+    assert!(trace.contains("\"status_code\": 204"));
+    assert!(trace.contains("\"response_bytes\": 17"));
     assert!(!trace.contains("private-label"));
+    assert!(!trace.contains("secret.example"));
 
     let second = Command::new(env!("CARGO_BIN_EXE_pam"))
         .args(["timeline", snapshot.to_str().unwrap(), "--output"])
