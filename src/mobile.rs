@@ -3170,6 +3170,12 @@ fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Res
 
 fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
+    crate::dev_event::emit(
+        crate::dev_event::EventCode::SessionStarting,
+        crate::dev_event::SurfaceCode::Ios,
+        &project.root,
+        serde_json::json!({}),
+    );
     clean_ios_dev_artifacts(&project.root)?;
     let simulator = booted_ios_simulator()?;
     let app = build_ios(project.root.clone(), false)?;
@@ -3179,6 +3185,12 @@ fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
         "Watching {} for iOS changes. Press Ctrl+C to stop.",
         project.root.display()
     );
+    crate::dev_event::emit(
+        crate::dev_event::EventCode::SessionReady,
+        crate::dev_event::SurfaceCode::Ios,
+        &project.root,
+        serde_json::json!({"deviceId": simulator}),
+    );
     loop {
         std::thread::sleep(Duration::from_millis(350));
         let next = project_fingerprint(&project.root)?;
@@ -3186,12 +3198,40 @@ fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
             continue;
         }
         fingerprint = next;
+        crate::dev_event::emit(
+            crate::dev_event::EventCode::ChangeDetected,
+            crate::dev_event::SurfaceCode::Ios,
+            &project.root,
+            serde_json::json!({}),
+        );
         println!("Change detected; rebuilding {}…", project.manifest.name);
+        crate::dev_event::emit(
+            crate::dev_event::EventCode::ReloadStarted,
+            crate::dev_event::SurfaceCode::Ios,
+            &project.root,
+            serde_json::json!({}),
+        );
         match build_ios(project.root.clone(), false)
             .and_then(|app| install_and_launch_ios(&project, &simulator, &app))
         {
-            Ok(()) => println!("Reloaded {}.", project.manifest.name),
-            Err(error) => eprintln!("iOS rebuild failed: {error}"),
+            Ok(()) => {
+                println!("Reloaded {}.", project.manifest.name);
+                crate::dev_event::emit(
+                    crate::dev_event::EventCode::ReloadSucceeded,
+                    crate::dev_event::SurfaceCode::Ios,
+                    &project.root,
+                    serde_json::json!({}),
+                );
+            }
+            Err(error) => {
+                crate::dev_event::emit(
+                    crate::dev_event::EventCode::ReloadFailed,
+                    crate::dev_event::SurfaceCode::Ios,
+                    &project.root,
+                    serde_json::json!({"message": error}),
+                );
+                eprintln!("iOS rebuild failed: {error}");
+            }
         }
     }
 }
@@ -5404,6 +5444,12 @@ fn command_status(command: &str, arguments: &[&str]) -> Result<(), String> {
 
 fn dev(options: MobileOptions) -> Result<u8, String> {
     let apk = build(options)?;
+    crate::dev_event::emit(
+        crate::dev_event::EventCode::SessionStarting,
+        crate::dev_event::SurfaceCode::Android,
+        &apk.project.root,
+        serde_json::json!({}),
+    );
     command_status(
         "adb",
         &[
@@ -5433,6 +5479,12 @@ fn hot_reload_server(
     let mut version = String::new();
     let mut bundle = Vec::new();
     refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle)?;
+    crate::dev_event::emit(
+        crate::dev_event::EventCode::SessionReady,
+        crate::dev_event::SurfaceCode::Android,
+        &project.root,
+        serde_json::json!({"port": DEFAULT_PORT, "bundleVersion": version}),
+    );
     loop {
         match listener.accept() {
             Ok((mut stream, _)) => {
@@ -5444,9 +5496,37 @@ fn hot_reload_server(
         let next = project_fingerprint(&project.root)?;
         if next != fingerprint {
             fingerprint = next;
+            crate::dev_event::emit(
+                crate::dev_event::EventCode::ChangeDetected,
+                crate::dev_event::SurfaceCode::Android,
+                &project.root,
+                serde_json::json!({}),
+            );
+            crate::dev_event::emit(
+                crate::dev_event::EventCode::ReloadStarted,
+                crate::dev_event::SurfaceCode::Android,
+                &project.root,
+                serde_json::json!({}),
+            );
             match refresh_dev_bundle(project, native_home, workspace, &mut version, &mut bundle) {
-                Ok(()) => println!("Reload ready · {}", &version[..16]),
-                Err(error) => eprintln!("pam mobile dev: {error}"),
+                Ok(()) => {
+                    println!("Reload ready · {}", &version[..16]);
+                    crate::dev_event::emit(
+                        crate::dev_event::EventCode::ReloadSucceeded,
+                        crate::dev_event::SurfaceCode::Android,
+                        &project.root,
+                        serde_json::json!({"bundleVersion": version}),
+                    );
+                }
+                Err(error) => {
+                    crate::dev_event::emit(
+                        crate::dev_event::EventCode::ReloadFailed,
+                        crate::dev_event::SurfaceCode::Android,
+                        &project.root,
+                        serde_json::json!({"message": error}),
+                    );
+                    eprintln!("pam mobile dev: {error}");
+                }
             }
         }
         std::thread::sleep(Duration::from_millis(100));

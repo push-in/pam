@@ -11,6 +11,7 @@ mod composer;
 mod control_plane;
 mod desktop;
 mod dev;
+mod dev_event;
 mod doctor;
 mod ecosystem;
 mod editor;

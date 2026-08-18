@@ -38,9 +38,10 @@ impl DevProcess {
             .arg("index.php")
             .current_dir(&directory)
             .env("PAM_TEST_PORT", port.to_string())
+            .env("PAM_DEV_EVENTS", "1")
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::piped())
             .spawn()
             .expect("Pam dev should start");
 
@@ -92,6 +93,21 @@ impl DevProcess {
 
         panic!("Pam dev did not stop after SIGINT");
     }
+
+    fn events(&mut self) -> Vec<serde_json::Value> {
+        let mut output = String::new();
+        self.child
+            .stderr
+            .take()
+            .expect("development stderr should be captured")
+            .read_to_string(&mut output)
+            .unwrap();
+        output
+            .lines()
+            .filter_map(|line| line.strip_prefix("@pam-event "))
+            .map(|line| serde_json::from_str(line).expect("event should be valid JSON"))
+            .collect()
+    }
 }
 
 impl Drop for DevProcess {
@@ -113,6 +129,17 @@ fn reloads_the_php_process_after_a_file_change() {
     dev.wait_for_response("after-reload");
 
     dev.stop();
+    let events = dev.events();
+    let codes = events
+        .iter()
+        .map(|event| event["eventCode"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, [1, 2, 3, 4, 5, 8]);
+    assert!(events.iter().all(|event| event["schemaVersion"] == 1));
+    assert!(events.iter().all(|event| event["surfaceCode"] == 1));
+    assert!(events.windows(2).all(|pair| {
+        pair[0]["sequence"].as_u64().unwrap() < pair[1]["sequence"].as_u64().unwrap()
+    }));
 }
 
 fn http_get(port: u16) -> std::io::Result<String> {

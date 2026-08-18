@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, UNIX_EPOCH};
 
+use crate::dev_event::{self, EventCode, SurfaceCode};
 use crate::terminal::Terminal;
+use serde_json::json;
 
 const WATCH_INTERVAL: Duration = Duration::from_millis(250);
 const RELOAD_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -34,6 +36,12 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
         .ok_or_else(|| "the PHP script has no parent directory".to_owned())?;
     let stopped = install_ctrl_c_listener()?;
     let mut files = snapshot(watch_root)?;
+    dev_event::emit(
+        EventCode::SessionStarting,
+        SurfaceCode::Server,
+        watch_root,
+        json!({}),
+    );
     let mut child = Some(spawn_child(&executable, script, arguments)?);
     let ui = Terminal::stderr();
 
@@ -49,12 +57,24 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
         ui.command(watch_root.display())
     );
     eprintln!("{}", ui.muted("  Ctrl+C stops the development runtime."));
+    dev_event::emit(
+        EventCode::SessionReady,
+        SurfaceCode::Server,
+        watch_root,
+        json!({"processId": child.as_ref().map(std::process::Child::id)}),
+    );
 
     while !stopped.load(Ordering::SeqCst) {
         thread::sleep(WATCH_INTERVAL);
         let current_files = snapshot(watch_root)?;
 
         if current_files != files {
+            dev_event::emit(
+                EventCode::ChangeDetected,
+                SurfaceCode::Server,
+                watch_root,
+                json!({}),
+            );
             thread::sleep(RELOAD_DEBOUNCE);
             files = snapshot(watch_root)?;
             eprintln!(
@@ -63,9 +83,21 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
             );
 
             if let Some(mut running_child) = child.take() {
+                dev_event::emit(
+                    EventCode::ReloadStarted,
+                    SurfaceCode::Server,
+                    watch_root,
+                    json!({}),
+                );
                 stop_child(&mut running_child);
             }
             child = Some(spawn_child(&executable, script, arguments)?);
+            dev_event::emit(
+                EventCode::ReloadSucceeded,
+                SurfaceCode::Server,
+                watch_root,
+                json!({"processId": child.as_ref().map(std::process::Child::id)}),
+            );
             continue;
         }
 
@@ -81,6 +113,12 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
                     format!("Runtime exited with {status} · waiting for a file change")
                 )
             );
+            dev_event::emit(
+                EventCode::RuntimeExited,
+                SurfaceCode::Server,
+                watch_root,
+                json!({"exitCode": status.code()}),
+            );
             child = None;
         }
     }
@@ -90,6 +128,12 @@ pub fn run(script: &Path, arguments: &[OsString]) -> Result<u8, String> {
     }
 
     eprintln!("{}", ui.status("info", "Development runtime stopped"));
+    dev_event::emit(
+        EventCode::SessionStopped,
+        SurfaceCode::Server,
+        watch_root,
+        json!({}),
+    );
     Ok(0)
 }
 
