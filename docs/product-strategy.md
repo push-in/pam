@@ -193,7 +193,7 @@ repository-local.
 | Development lifecycle event protocol | `c273d21` | Android/iOS hosts emit schema 1 | `392a6eb` | Shipped |
 | Versioned DevTools snapshots | `1b3f3f3` | `d4dec09` | `ea34d52` | Shipped |
 | Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
-| Accessible adaptive design tokens | — | `b07d09f` | — | Native shipped; cross-surface system open |
+| Accessible adaptive design tokens | — | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `9099df7` | — | Native shipped with four-theme component matrices; cross-surface system open |
 | Cross-surface release authority and recovery | iOS audit artifact workflow `9018383` | Native release audit `d4746b9` | Permission policy `46fead6`; interrupted updater recovery `e82efd6` | Native/Desktop policy shipped; platform sandbox certification remains open |
 | Signed typed plugin registry | Existing ABI/range/path checks | Descriptor and IDL integrity locks | Executable protocol/identity/hash checks | Open: requires public registry schema, release signing root, key rotation and revocation policy |
 | Flagship cross-surface application | — | Native showcase exists | — | Open |
