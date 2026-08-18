@@ -55,6 +55,29 @@ from installing a root the new quorum did not approve. Emergency compromise is
 handled by rotating with remaining active keys and publishing the affected
 plugin releases in the revocation list.
 
+Projects adopt a verified rotation together with its first catalog:
+
+```bash
+pam registry adopt \
+  --project . \
+  --next-root registry/root-v2.json \
+  --next-catalog registry/catalog-v2.json \
+  --json
+```
+
+Both document paths must be normalized and project-relative. Adoption verifies
+the pinned current root, the old and new root quorums, the exact one-generation
+advance, the new catalog quorum and the project's accepted sequence floor before
+writing anything. It preserves Native/Desktop protocol selections while replacing
+the root path, computed root fingerprint, catalog path, generation and sequence.
+
+The update is interruption-recoverable through
+`.pam/plugin-registry-rotation.json`. The receipt records operation code `1`, the
+previous state and the fully verified next configuration/state before the first
+replacement. On the next registry read, PAM either restores the previous state if
+the configuration remained old or completes the new state if the configuration
+was committed. A mismatched or malformed receipt fails closed.
+
 ## Catalog and compatibility
 
 Catalogs expire after at most seven days and carry positive monotonic
@@ -130,8 +153,8 @@ remain available for reproducible `composer install` runs.
 The accepted registry identity, root fingerprint/generation, and catalog sequence
 are stored atomically in `.pam/plugin-registry-state.json`. A later catalog cannot
 move below that sequence. `pam add` refuses a changed root fingerprint; operators
-must validate root rotation separately with `pam registry rotate`. Persisting a
-rotation receipt into project state remains a distinct operational gate.
+can inspect a candidate with `pam registry rotate` and commit it transactionally
+with `pam registry adopt`.
 
 ## Canonical signed bytes
 

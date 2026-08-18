@@ -1,7 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, OpenOptions};
 use std::io::Read;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use crate::composer;
@@ -9,39 +9,13 @@ use crate::plugin_registry::{self, VerifiedRelease};
 use crate::project::{ProjectContext, ProjectKind};
 use crate::terminal::Terminal;
 use semver::Version;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-const REGISTRY_CONFIG: &str = "pam-registry.json";
-const REGISTRY_STATE: &str = ".pam/plugin-registry-state.json";
-const MAX_REGISTRY_CONFIG_BYTES: u64 = 16 * 1024;
 const MAX_COMPOSER_LOCK_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_PLUGIN_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_PLUGIN_ARTIFACTS: usize = 256;
 const MAX_RELEASES_PER_PLUGIN: usize = 32;
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RegistryConfig {
-    schema_version: u8,
-    root_path: PathBuf,
-    root_sha256: String,
-    catalog_path: PathBuf,
-    #[serde(default)]
-    native_protocol: Option<u32>,
-    #[serde(default)]
-    desktop_protocol: Option<u32>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RegistryState {
-    schema_version: u8,
-    registry: String,
-    root_sha256: String,
-    root_generation: u32,
-    catalog_sequence: u64,
-}
 
 #[derive(Clone, Copy)]
 struct Package {
@@ -288,7 +262,7 @@ pub fn add(executable: &OsStr, context: &ProjectContext, alias: &str) -> Result<
                     .as_deref()
                     .expect("authenticated artifact"),
             )?;
-            persist_registry_state(project, release)?;
+            plugin_registry::persist_project_state(project, release)?;
             prune_superseded_artifacts(
                 verified_artifact
                     .as_deref()
@@ -317,14 +291,9 @@ fn resolve_authenticated(
     context: &ProjectContext,
     package: &str,
 ) -> Result<Option<VerifiedRelease>, String> {
-    let path = context.root.join(REGISTRY_CONFIG);
-    if !path.exists() {
+    let Some(config) = plugin_registry::load_project_config(&context.root)? else {
         return Ok(None);
-    }
-    let config: RegistryConfig = read_bounded_json(&path, "registry configuration")?;
-    if config.schema_version != 1 {
-        return Err("unsupported pam-registry.json schema; expected integer 1".to_owned());
-    }
+    };
     let (surface_code, native_protocol, desktop_protocol) = match context.kind {
         ProjectKind::Native => (2, config.native_protocol, None),
         ProjectKind::Desktop => (3, None, config.desktop_protocol),
@@ -336,9 +305,11 @@ fn resolve_authenticated(
     if surface_code == 3 && desktop_protocol.is_none() {
         return Err("pam-registry.json requires desktopProtocol for a Desktop project".to_owned());
     }
-    let state = read_registry_state(&context.root)?;
-    let root = confined_project_path(&context.root, &config.root_path, "rootPath")?;
-    let catalog = confined_project_path(&context.root, &config.catalog_path, "catalogPath")?;
+    let state = plugin_registry::load_project_state(&context.root)?;
+    let root =
+        plugin_registry::project_document_path(&context.root, &config.root_path, "rootPath")?;
+    let catalog =
+        plugin_registry::project_document_path(&context.root, &config.catalog_path, "catalogPath")?;
     let pam_version = Version::parse(env!("CARGO_PKG_VERSION"))
         .map_err(|error| format!("invalid PAM package version: {error}"))?;
     let release = plugin_registry::resolve_verified(
@@ -374,24 +345,6 @@ fn resolve_authenticated(
     Ok(Some(release))
 }
 
-fn confined_project_path(project: &Path, relative: &Path, field: &str) -> Result<PathBuf, String> {
-    if relative.as_os_str().is_empty()
-        || relative.is_absolute()
-        || relative
-            .components()
-            .any(|part| !matches!(part, Component::Normal(_)))
-    {
-        return Err(format!(
-            "pam-registry.json {field} must be a normalized project-relative path"
-        ));
-    }
-    Ok(project.join(relative))
-}
-
-fn read_bounded_json<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Result<T, String> {
-    read_json_with_limit(path, label, MAX_REGISTRY_CONFIG_BYTES)
-}
-
 fn read_json_with_limit<T: for<'de> Deserialize<'de>>(
     path: &Path,
     label: &str,
@@ -407,49 +360,6 @@ fn read_json_with_limit<T: for<'de> Deserialize<'de>>(
     let bytes =
         fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid {}: {error}", path.display()))
-}
-
-fn read_registry_state(project: &Path) -> Result<Option<RegistryState>, String> {
-    let path = project.join(REGISTRY_STATE);
-    if !path.exists() {
-        return Ok(None);
-    }
-    let state: RegistryState = read_bounded_json(&path, "registry state")?;
-    if state.schema_version != 1 || state.registry.is_empty() || state.catalog_sequence == 0 {
-        return Err("invalid project plugin-registry state".to_owned());
-    }
-    Ok(Some(state))
-}
-
-fn persist_registry_state(project: &Path, release: &VerifiedRelease) -> Result<(), String> {
-    let path = project.join(REGISTRY_STATE);
-    let parent = path.parent().expect("state path has parent");
-    if parent.exists() {
-        let metadata = fs::symlink_metadata(parent)
-            .map_err(|error| format!("cannot inspect {}: {error}", parent.display()))?;
-        if !metadata.file_type().is_dir() {
-            return Err(format!(
-                "registry state parent is not a real directory: {}",
-                parent.display()
-            ));
-        }
-    } else {
-        fs::create_dir(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-    }
-    let temporary = parent.join(format!(".plugin-registry-state-{}.tmp", std::process::id()));
-    let bytes = serde_json::to_vec_pretty(&RegistryState {
-        schema_version: 1,
-        registry: release.registry.clone(),
-        root_sha256: release.root_sha256.clone(),
-        root_generation: release.root_generation,
-        catalog_sequence: release.catalog_sequence,
-    })
-    .map_err(|error| format!("cannot encode registry state: {error}"))?;
-    fs::write(&temporary, bytes)
-        .map_err(|error| format!("cannot write {}: {error}", temporary.display()))?;
-    fs::rename(&temporary, &path)
-        .map_err(|error| format!("cannot replace {}: {error}", path.display()))
 }
 
 fn validate_locked_release(
@@ -964,8 +874,10 @@ mod tests {
     fn registry_state_persists_the_rollback_floor_and_root_identity() {
         let project = temporary_project("state");
         let release = signed_release();
-        persist_registry_state(&project, &release).unwrap();
-        let state = read_registry_state(&project).unwrap().unwrap();
+        plugin_registry::persist_project_state(&project, &release).unwrap();
+        let state = plugin_registry::load_project_state(&project)
+            .unwrap()
+            .unwrap();
         assert_eq!(state.registry, release.registry);
         assert_eq!(state.root_sha256, release.root_sha256);
         assert_eq!(state.root_generation, 2);
@@ -977,10 +889,21 @@ mod tests {
     fn registry_documents_must_stay_beneath_the_project() {
         let project = temporary_project("paths");
         assert!(
-            confined_project_path(&project, Path::new("registry/root.json"), "rootPath").is_ok()
+            plugin_registry::project_document_path(
+                &project,
+                Path::new("registry/root.json"),
+                "rootPath"
+            )
+            .is_ok()
         );
-        assert!(confined_project_path(&project, Path::new("../root.json"), "rootPath").is_err());
-        assert!(confined_project_path(&project, Path::new("/root.json"), "rootPath").is_err());
+        assert!(
+            plugin_registry::project_document_path(&project, Path::new("../root.json"), "rootPath")
+                .is_err()
+        );
+        assert!(
+            plugin_registry::project_document_path(&project, Path::new("/root.json"), "rootPath")
+                .is_err()
+        );
         fs::remove_dir_all(project).unwrap();
     }
 

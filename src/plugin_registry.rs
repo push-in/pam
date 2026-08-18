@@ -1,7 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsString;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Component, Path, PathBuf};
 
 use ed25519_dalek::{Signature, VerifyingKey};
 use semver::{Version, VersionReq};
@@ -17,6 +18,56 @@ const MAX_REVOCATIONS: usize = 10_000;
 const CLOCK_SKEW_SECONDS: u64 = 300;
 const ROOT_MAX_VALIDITY_SECONDS: u64 = 366 * 24 * 60 * 60;
 const CATALOG_MAX_VALIDITY_SECONDS: u64 = 7 * 24 * 60 * 60;
+pub(crate) const PROJECT_REGISTRY_CONFIG: &str = "pam-registry.json";
+pub(crate) const PROJECT_REGISTRY_STATE: &str = ".pam/plugin-registry-state.json";
+const PROJECT_ROTATION_RECEIPT: &str = ".pam/plugin-registry-rotation.json";
+const MAX_PROJECT_REGISTRY_BYTES: u64 = 16 * 1024;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProjectRegistryConfig {
+    pub schema_version: u8,
+    pub root_path: PathBuf,
+    pub root_sha256: String,
+    pub catalog_path: PathBuf,
+    #[serde(default)]
+    pub native_protocol: Option<u32>,
+    #[serde(default)]
+    pub desktop_protocol: Option<u32>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct ProjectRegistryState {
+    pub schema_version: u8,
+    pub registry: String,
+    pub root_sha256: String,
+    pub root_generation: u32,
+    pub catalog_sequence: u64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ProjectRotationReceipt {
+    schema_version: u8,
+    operation_code: u8,
+    previous_root_sha256: String,
+    previous_state: Option<ProjectRegistryState>,
+    next_config: ProjectRegistryConfig,
+    next_state: ProjectRegistryState,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RotationAdoptionReport<'a> {
+    schema_version: u8,
+    result_code: u8,
+    registry: &'a str,
+    previous_root_generation: u32,
+    root_generation: u32,
+    catalog_sequence: u64,
+    root_sha256: &'a str,
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -159,6 +210,189 @@ pub(crate) struct VerifiedRelease {
     pub sha256: String,
 }
 
+pub(crate) fn load_project_config(project: &Path) -> Result<Option<ProjectRegistryConfig>, String> {
+    recover_project_rotation(project)?;
+    let path = project.join(PROJECT_REGISTRY_CONFIG);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let config: ProjectRegistryConfig = read_small_document(&path, "registry configuration")?;
+    if config.schema_version != SCHEMA_VERSION {
+        return Err("unsupported pam-registry.json schema; expected integer 1".to_owned());
+    }
+    Ok(Some(config))
+}
+
+pub(crate) fn load_project_state(project: &Path) -> Result<Option<ProjectRegistryState>, String> {
+    recover_project_rotation(project)?;
+    let path = project.join(PROJECT_REGISTRY_STATE);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let state: ProjectRegistryState = read_small_document(&path, "registry state")?;
+    if state.schema_version != SCHEMA_VERSION
+        || state.registry.is_empty()
+        || state.root_generation == 0
+        || state.catalog_sequence == 0
+    {
+        return Err("invalid project plugin-registry state".to_owned());
+    }
+    validate_lower_hex(&state.root_sha256, 32, "project root SHA-256")?;
+    Ok(Some(state))
+}
+
+pub(crate) fn persist_project_state(
+    project: &Path,
+    release: &VerifiedRelease,
+) -> Result<(), String> {
+    write_project_state(
+        project,
+        &ProjectRegistryState {
+            schema_version: SCHEMA_VERSION,
+            registry: release.registry.clone(),
+            root_sha256: release.root_sha256.clone(),
+            root_generation: release.root_generation,
+            catalog_sequence: release.catalog_sequence,
+        },
+    )
+}
+
+fn write_project_state(project: &Path, state: &ProjectRegistryState) -> Result<(), String> {
+    let path = project.join(PROJECT_REGISTRY_STATE);
+    let parent = path.parent().expect("state path has parent");
+    ensure_real_directory(parent)?;
+    write_json_atomic(&path, state, "registry state")
+}
+
+fn recover_project_rotation(project: &Path) -> Result<(), String> {
+    let receipt_path = project.join(PROJECT_ROTATION_RECEIPT);
+    if !receipt_path.exists() {
+        return Ok(());
+    }
+    let receipt: ProjectRotationReceipt =
+        read_small_document(&receipt_path, "registry rotation receipt")?;
+    if receipt.schema_version != SCHEMA_VERSION || receipt.operation_code != 1 {
+        return Err("invalid project registry rotation receipt".to_owned());
+    }
+    let config_path = project.join(PROJECT_REGISTRY_CONFIG);
+    let config: ProjectRegistryConfig =
+        read_small_document(&config_path, "registry configuration")?;
+    if config.root_sha256 == receipt.previous_root_sha256 {
+        if let Some(previous_state) = &receipt.previous_state {
+            write_project_state(project, previous_state)?;
+        } else {
+            let state_path = project.join(PROJECT_REGISTRY_STATE);
+            if state_path.exists() {
+                let metadata = fs::symlink_metadata(&state_path)
+                    .map_err(|error| format!("cannot inspect {}: {error}", state_path.display()))?;
+                if !metadata.file_type().is_file() {
+                    return Err("registry state recovery target is not a regular file".to_owned());
+                }
+                fs::remove_file(&state_path)
+                    .map_err(|error| format!("cannot restore absent registry state: {error}"))?;
+            }
+        }
+        fs::remove_file(&receipt_path).map_err(|error| {
+            format!(
+                "cannot discard uncommitted registry rotation {}: {error}",
+                receipt_path.display()
+            )
+        })?;
+        return Ok(());
+    }
+    if config != receipt.next_config {
+        return Err("registry rotation receipt does not match project configuration".to_owned());
+    }
+    write_project_state(project, &receipt.next_state)?;
+    fs::remove_file(&receipt_path).map_err(|error| {
+        format!(
+            "cannot finalize registry rotation {}: {error}",
+            receipt_path.display()
+        )
+    })
+}
+
+pub(crate) fn project_document_path(
+    project: &Path,
+    relative: &Path,
+    field: &str,
+) -> Result<PathBuf, String> {
+    if relative.as_os_str().is_empty()
+        || relative.is_absolute()
+        || relative
+            .components()
+            .any(|part| !matches!(part, Component::Normal(_)))
+    {
+        return Err(format!(
+            "pam-registry.json {field} must be a normalized project-relative path"
+        ));
+    }
+    Ok(project.join(relative))
+}
+
+fn read_small_document<T: for<'de> Deserialize<'de>>(
+    path: &Path,
+    label: &str,
+) -> Result<T, String> {
+    serde_json::from_slice(&read_bounded_with_limit(
+        path,
+        label,
+        MAX_PROJECT_REGISTRY_BYTES,
+    )?)
+    .map_err(|error| format!("invalid {}: {error}", path.display()))
+}
+
+fn ensure_real_directory(path: &Path) -> Result<(), String> {
+    if path.exists() {
+        let metadata = fs::symlink_metadata(path)
+            .map_err(|error| format!("cannot inspect {}: {error}", path.display()))?;
+        if metadata.file_type().is_dir() {
+            return Ok(());
+        }
+        return Err(format!("{} is not a real directory", path.display()));
+    }
+    fs::create_dir(path).map_err(|error| format!("cannot create {}: {error}", path.display()))
+}
+
+fn write_json_atomic<T: Serialize>(path: &Path, value: &T, label: &str) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("{label} path has no parent"))?;
+    let bytes = serde_json::to_vec_pretty(value)
+        .map_err(|error| format!("cannot encode {label}: {error}"))?;
+    for attempt in 0..32_u8 {
+        let temporary = parent.join(format!(
+            ".{}-{}-{attempt}.tmp",
+            label.replace(' ', "-"),
+            std::process::id()
+        ));
+        let mut file = match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => {
+                return Err(format!("cannot create {}: {error}", temporary.display()));
+            }
+        };
+        let result = file
+            .write_all(&bytes)
+            .and_then(|()| file.sync_all())
+            .map_err(|error| format!("cannot write {}: {error}", temporary.display()))
+            .and_then(|()| {
+                fs::rename(&temporary, path)
+                    .map_err(|error| format!("cannot replace {}: {error}", path.display()))
+            });
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        return result;
+    }
+    Err(format!("cannot allocate temporary {label} file"))
+}
+
 #[derive(Default)]
 struct VerifyOptions {
     root: Option<PathBuf>,
@@ -179,6 +413,14 @@ struct ResolveOptions {
     desktop_protocol: Option<u32>,
 }
 
+struct AdoptOptions {
+    project: PathBuf,
+    next_root: PathBuf,
+    next_catalog: PathBuf,
+    at_unix: Option<u64>,
+    json: bool,
+}
+
 pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut arguments = arguments.into_iter();
     let Some(command) = arguments.next() else {
@@ -192,11 +434,48 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         }
         "verify" => verify_command(parse_options(arguments, false)?),
         "rotate" => verify_rotation_command(parse_options(arguments, true)?),
+        "adopt" => adopt_rotation_command(parse_adopt_options(arguments)?),
         "resolve" => resolve_command(parse_resolve_options(arguments)?),
         unknown => Err(format!(
-            "unknown registry command {unknown:?}; expected verify, resolve, or rotate"
+            "unknown registry command {unknown:?}; expected verify, resolve, rotate, or adopt"
         )),
     }
+}
+
+fn parse_adopt_options(
+    mut arguments: impl Iterator<Item = OsString>,
+) -> Result<AdoptOptions, String> {
+    let mut project = None;
+    let mut next_root = None;
+    let mut next_catalog = None;
+    let mut at_unix = None;
+    let mut json = false;
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--project" => project = Some(required_path(&mut arguments, "--project")?),
+            "--next-root" => next_root = Some(required_path(&mut arguments, "--next-root")?),
+            "--next-catalog" => {
+                next_catalog = Some(required_path(&mut arguments, "--next-catalog")?)
+            }
+            "--at-unix" => {
+                at_unix = Some(
+                    required_utf8(&mut arguments, "--at-unix")?
+                        .parse()
+                        .map_err(|_| "--at-unix must be an unsigned integer".to_owned())?,
+                )
+            }
+            "--json" => json = true,
+            unknown => return Err(format!("unknown registry adopt option {unknown:?}")),
+        }
+    }
+    Ok(AdoptOptions {
+        project: project.ok_or_else(|| "registry adoption requires --project".to_owned())?,
+        next_root: next_root.ok_or_else(|| "registry adoption requires --next-root".to_owned())?,
+        next_catalog: next_catalog
+            .ok_or_else(|| "registry adoption requires --next-catalog".to_owned())?,
+        at_unix,
+        json,
+    })
 }
 
 fn parse_resolve_options(
@@ -384,18 +663,39 @@ fn verify_command(options: VerifyOptions) -> Result<u8, String> {
 
 fn verify_rotation_command(options: VerifyOptions) -> Result<u8, String> {
     let now = options.at_unix.unwrap_or_else(unix_seconds);
-    let (current, _) = load_trusted_root(
+    let (_current, next, _) = verify_rotation(
         options.root.as_deref().expect("validated root"),
         options
             .root_sha256
             .as_deref()
             .expect("validated root fingerprint"),
+        options.next_root.as_deref().expect("validated next root"),
         now,
     )?;
-    let next: RegistryRoot = read_document(
-        options.next_root.as_deref().expect("validated next root"),
-        "next registry root",
-    )?;
+    let report = VerificationReport {
+        schema_version: SCHEMA_VERSION,
+        result_code: 1,
+        registry: &next.registry,
+        root_generation: next.generation,
+        catalog_sequence: None,
+        plugin_releases: 0,
+        revocations: 0,
+    };
+    print_report(&report, options.json)?;
+    Ok(0)
+}
+
+fn verify_rotation(
+    current_path: &Path,
+    current_sha256: &str,
+    next_path: &Path,
+    now: u64,
+) -> Result<(RegistryRoot, RegistryRoot, String), String> {
+    let (current, _) = load_trusted_root(current_path, current_sha256, now)?;
+    let next_bytes = read_bounded(next_path, "next registry root")?;
+    let next_sha256 = encode_hex(&Sha256::digest(&next_bytes));
+    let next: RegistryRoot = serde_json::from_slice(&next_bytes)
+        .map_err(|error| format!("invalid next registry root: {error}"))?;
     validate_root_structure(&next, now)?;
     if next.registry != current.registry || next.generation != current.generation + 1 {
         return Err(
@@ -411,16 +711,102 @@ fn verify_rotation_command(options: VerifyOptions) -> Result<u8, String> {
         &current.keys,
         current.threshold,
     )?;
-    let report = VerificationReport {
+    Ok((current, next, next_sha256))
+}
+
+fn adopt_rotation_command(options: AdoptOptions) -> Result<u8, String> {
+    let project = fs::canonicalize(&options.project).map_err(|error| {
+        format!(
+            "cannot resolve registry project {}: {error}",
+            options.project.display()
+        )
+    })?;
+    if !project.is_dir() {
+        return Err("registry adoption project must be a directory".to_owned());
+    }
+    let current_config = load_project_config(&project)?
+        .ok_or_else(|| "registry adoption requires project pam-registry.json".to_owned())?;
+    let current_state = load_project_state(&project)?;
+    let current_root_path = project_document_path(&project, &current_config.root_path, "rootPath")?;
+    let next_root_path = project_document_path(&project, &options.next_root, "nextRoot")?;
+    let next_catalog_path = project_document_path(&project, &options.next_catalog, "nextCatalog")?;
+    let now = options.at_unix.unwrap_or_else(unix_seconds);
+    let (current_root, next_root, next_root_sha256) = verify_rotation(
+        &current_root_path,
+        &current_config.root_sha256,
+        &next_root_path,
+        now,
+    )?;
+    if let Some(state) = &current_state
+        && (state.registry != current_root.registry
+            || state.root_sha256 != current_config.root_sha256
+            || state.root_generation != current_root.generation)
+    {
+        return Err("project registry state does not match the current trusted root".to_owned());
+    }
+    let next_catalog: PluginCatalog = read_document(&next_catalog_path, "next plugin catalog")?;
+    validate_catalog(&next_catalog, &next_root, now)?;
+    enforce_minimum_sequence(
+        next_catalog.sequence,
+        current_state.as_ref().map(|state| state.catalog_sequence),
+    )?;
+    let next_config = ProjectRegistryConfig {
+        schema_version: SCHEMA_VERSION,
+        root_path: options.next_root,
+        root_sha256: next_root_sha256.clone(),
+        catalog_path: options.next_catalog,
+        native_protocol: current_config.native_protocol,
+        desktop_protocol: current_config.desktop_protocol,
+    };
+    let next_state = ProjectRegistryState {
+        schema_version: SCHEMA_VERSION,
+        registry: next_root.registry.clone(),
+        root_sha256: next_root_sha256.clone(),
+        root_generation: next_root.generation,
+        catalog_sequence: next_catalog.sequence,
+    };
+    let receipt = ProjectRotationReceipt {
+        schema_version: SCHEMA_VERSION,
+        operation_code: 1,
+        previous_root_sha256: current_config.root_sha256,
+        previous_state: current_state,
+        next_config: next_config.clone(),
+        next_state: next_state.clone(),
+    };
+    let receipt_path = project.join(PROJECT_ROTATION_RECEIPT);
+    let receipt_parent = receipt_path.parent().expect("receipt path has parent");
+    ensure_real_directory(receipt_parent)?;
+    write_json_atomic(&receipt_path, &receipt, "registry rotation receipt")?;
+    write_json_atomic(
+        &project.join(PROJECT_REGISTRY_CONFIG),
+        &next_config,
+        "registry configuration",
+    )?;
+    write_project_state(&project, &next_state)?;
+    fs::remove_file(&receipt_path).map_err(|error| {
+        format!("registry rotation was adopted but its receipt could not be removed: {error}")
+    })?;
+    let report = RotationAdoptionReport {
         schema_version: SCHEMA_VERSION,
         result_code: 1,
-        registry: &next.registry,
-        root_generation: next.generation,
-        catalog_sequence: None,
-        plugin_releases: 0,
-        revocations: 0,
+        registry: &next_root.registry,
+        previous_root_generation: current_root.generation,
+        root_generation: next_root.generation,
+        catalog_sequence: next_catalog.sequence,
+        root_sha256: &next_root_sha256,
     };
-    print_report(&report, options.json)?;
+    if options.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("cannot encode registry adoption: {error}"))?
+        );
+    } else {
+        println!(
+            "Adopted registry {} root generation {} and catalog sequence {} (SHA-256 {}).",
+            report.registry, report.root_generation, report.catalog_sequence, report.root_sha256
+        );
+    }
     Ok(0)
 }
 
@@ -785,14 +1171,15 @@ fn read_document<T: for<'de> Deserialize<'de>>(path: &Path, label: &str) -> Resu
 }
 
 fn read_bounded(path: &Path, label: &str) -> Result<Vec<u8>, String> {
+    read_bounded_with_limit(path, label, MAX_DOCUMENT_BYTES)
+}
+
+fn read_bounded_with_limit(path: &Path, label: &str, maximum: u64) -> Result<Vec<u8>, String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("cannot inspect {label} {}: {error}", path.display()))?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.len() > MAX_DOCUMENT_BYTES
-    {
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > maximum {
         return Err(format!(
-            "{label} must be a regular file no larger than 1 MiB"
+            "{label} must be a regular file no larger than {maximum} bytes"
         ));
     }
     fs::read(path).map_err(|error| format!("cannot read {label} {}: {error}", path.display()))
@@ -939,7 +1326,7 @@ fn unix_seconds() -> u64 {
 
 fn print_usage() {
     println!(
-        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]"
+        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]\n       pam registry adopt --project <directory> --next-root <project-relative.json> --next-catalog <project-relative.json> [--at-unix <seconds>] [--json]"
     );
 }
 
@@ -966,6 +1353,114 @@ mod tests {
             key_id: key_id.to_owned(),
             signature: encode_hex(&key.sign(payload).to_bytes()),
         }
+    }
+
+    fn rotation_project(
+        label: &str,
+        next_sequence: u64,
+        accepted_sequence: u64,
+    ) -> (PathBuf, AdoptOptions, String, String) {
+        let project =
+            std::env::temp_dir().join(format!("pam-registry-adopt-{label}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir_all(project.join("registry")).unwrap();
+        let (old_signing, old_key) = key(10, 1);
+        let (new_signing, new_key) = key(11, 1);
+        let mut current = RegistryRoot {
+            schema_version: 1,
+            registry: "https://plugins.pam.dev/v1".to_owned(),
+            generation: 1,
+            issued_at_unix: 900,
+            expires_at_unix: 5_000,
+            threshold: 1,
+            keys: vec![old_key],
+            signatures: Vec::new(),
+            previous_signatures: Vec::new(),
+        };
+        let current_payload = canonical_root_payload(&current).unwrap();
+        current.signatures = vec![signature(
+            &old_signing,
+            &current.keys[0].key_id,
+            &current_payload,
+        )];
+        let mut next = RegistryRoot {
+            schema_version: 1,
+            registry: current.registry.clone(),
+            generation: 2,
+            issued_at_unix: 1_000,
+            expires_at_unix: 8_000,
+            threshold: 1,
+            keys: vec![new_key],
+            signatures: Vec::new(),
+            previous_signatures: Vec::new(),
+        };
+        let next_payload = canonical_root_payload(&next).unwrap();
+        next.signatures = vec![signature(&new_signing, &next.keys[0].key_id, &next_payload)];
+        next.previous_signatures = vec![signature(
+            &old_signing,
+            &current.keys[0].key_id,
+            &next_payload,
+        )];
+        let mut catalog = PluginCatalog {
+            schema_version: 1,
+            registry: next.registry.clone(),
+            root_generation: 2,
+            sequence: next_sequence,
+            generated_at_unix: 1_100,
+            expires_at_unix: 2_000,
+            plugins: Vec::new(),
+            revocations: Vec::new(),
+            signatures: Vec::new(),
+        };
+        let catalog_payload = canonical_catalog_payload(&catalog).unwrap();
+        catalog.signatures = vec![signature(
+            &new_signing,
+            &next.keys[0].key_id,
+            &catalog_payload,
+        )];
+        let current_bytes = serde_json::to_vec_pretty(&current).unwrap();
+        let next_bytes = serde_json::to_vec_pretty(&next).unwrap();
+        let current_sha256 = encode_hex(&Sha256::digest(&current_bytes));
+        let next_sha256 = encode_hex(&Sha256::digest(&next_bytes));
+        fs::write(project.join("registry/root-v1.json"), current_bytes).unwrap();
+        fs::write(project.join("registry/root-v2.json"), next_bytes).unwrap();
+        fs::write(
+            project.join("registry/catalog-v2.json"),
+            serde_json::to_vec_pretty(&catalog).unwrap(),
+        )
+        .unwrap();
+        write_json_atomic(
+            &project.join(PROJECT_REGISTRY_CONFIG),
+            &ProjectRegistryConfig {
+                schema_version: 1,
+                root_path: PathBuf::from("registry/root-v1.json"),
+                root_sha256: current_sha256.clone(),
+                catalog_path: PathBuf::from("registry/catalog-v1.json"),
+                native_protocol: Some(1),
+                desktop_protocol: None,
+            },
+            "test registry config",
+        )
+        .unwrap();
+        write_project_state(
+            &project,
+            &ProjectRegistryState {
+                schema_version: 1,
+                registry: current.registry,
+                root_sha256: current_sha256.clone(),
+                root_generation: 1,
+                catalog_sequence: accepted_sequence,
+            },
+        )
+        .unwrap();
+        let options = AdoptOptions {
+            project: project.clone(),
+            next_root: PathBuf::from("registry/root-v2.json"),
+            next_catalog: PathBuf::from("registry/catalog-v2.json"),
+            at_unix: Some(1_200),
+            json: false,
+        };
+        (project, options, current_sha256, next_sha256)
     }
 
     #[test]
@@ -1163,5 +1658,101 @@ mod tests {
         )
         .unwrap();
         verify_threshold(&payload, &next.signatures, &next.keys, next.threshold).unwrap();
+    }
+
+    #[test]
+    fn adopts_a_rotated_root_and_catalog_as_one_recoverable_project_change() {
+        let (project, options, current_sha256, next_sha256) = rotation_project("success", 8, 7);
+        assert_eq!(adopt_rotation_command(options).unwrap(), 0);
+        let config = load_project_config(&project).unwrap().unwrap();
+        let state = load_project_state(&project).unwrap().unwrap();
+        assert_eq!(config.root_path, Path::new("registry/root-v2.json"));
+        assert_eq!(config.catalog_path, Path::new("registry/catalog-v2.json"));
+        assert_eq!(config.root_sha256, next_sha256);
+        assert_eq!(config.native_protocol, Some(1));
+        assert_eq!(state.root_generation, 2);
+        assert_eq!(state.catalog_sequence, 8);
+        assert!(!project.join(PROJECT_ROTATION_RECEIPT).exists());
+
+        write_project_state(
+            &project,
+            &ProjectRegistryState {
+                schema_version: 1,
+                registry: state.registry.clone(),
+                root_sha256: current_sha256.clone(),
+                root_generation: 1,
+                catalog_sequence: 7,
+            },
+        )
+        .unwrap();
+        write_json_atomic(
+            &project.join(PROJECT_ROTATION_RECEIPT),
+            &ProjectRotationReceipt {
+                schema_version: 1,
+                operation_code: 1,
+                previous_root_sha256: current_sha256,
+                previous_state: None,
+                next_config: config.clone(),
+                next_state: state.clone(),
+            },
+            "test rotation receipt",
+        )
+        .unwrap();
+        let recovered = load_project_state(&project).unwrap().unwrap();
+        assert_eq!(recovered.root_generation, 2);
+        assert_eq!(recovered.catalog_sequence, 8);
+        assert!(!project.join(PROJECT_ROTATION_RECEIPT).exists());
+
+        let previous_state = ProjectRegistryState {
+            schema_version: 1,
+            registry: state.registry.clone(),
+            root_sha256: "aa".repeat(32),
+            root_generation: 1,
+            catalog_sequence: 7,
+        };
+        let mut previous_config = config.clone();
+        previous_config.root_path = PathBuf::from("registry/root-v1.json");
+        previous_config.root_sha256 = previous_state.root_sha256.clone();
+        previous_config.catalog_path = PathBuf::from("registry/catalog-v1.json");
+        write_json_atomic(
+            &project.join(PROJECT_REGISTRY_CONFIG),
+            &previous_config,
+            "test previous config",
+        )
+        .unwrap();
+        write_project_state(&project, &state).unwrap();
+        write_json_atomic(
+            &project.join(PROJECT_ROTATION_RECEIPT),
+            &ProjectRotationReceipt {
+                schema_version: 1,
+                operation_code: 1,
+                previous_root_sha256: previous_config.root_sha256.clone(),
+                previous_state: Some(previous_state.clone()),
+                next_config: config,
+                next_state: state,
+            },
+            "test rollback receipt",
+        )
+        .unwrap();
+        let rolled_back_config = load_project_config(&project).unwrap().unwrap();
+        let rolled_back_state = load_project_state(&project).unwrap().unwrap();
+        assert_eq!(rolled_back_config, previous_config);
+        assert_eq!(rolled_back_state, previous_state);
+        assert!(!project.join(PROJECT_ROTATION_RECEIPT).exists());
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn rejects_catalog_rollback_before_writing_a_rotation_receipt() {
+        let (project, options, current_sha256, _next_sha256) = rotation_project("rollback", 6, 7);
+        assert!(
+            adopt_rotation_command(options)
+                .unwrap_err()
+                .contains("older than the required minimum")
+        );
+        let config = load_project_config(&project).unwrap().unwrap();
+        assert_eq!(config.root_sha256, current_sha256);
+        assert!(!project.join(PROJECT_ROTATION_RECEIPT).exists());
+        fs::remove_dir_all(project).unwrap();
     }
 }
