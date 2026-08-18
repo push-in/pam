@@ -66,16 +66,39 @@ pub fn discover(entry: &Path) -> Result<Option<ComposerProject>, String> {
 }
 
 pub fn run(executable: &OsStr, arguments: &[OsString]) -> Result<u8, String> {
+    run_with_home(executable, arguments, None)
+}
+
+pub fn run_with_home(
+    executable: &OsStr,
+    arguments: &[OsString],
+    composer_home: Option<&Path>,
+) -> Result<u8, String> {
     let composer = resolve_or_install(executable)?;
     // SAFETY: Composer execution owns the single-threaded Embed lifecycle and
     // this flag is removed before control returns to the caller.
     unsafe { env::set_var("PAM_COMPOSER_MODE", "1") };
+    let previous_home = env::var_os("COMPOSER_HOME");
+    if let Some(home) = composer_home {
+        // SAFETY: Composer execution owns the single-threaded Embed lifecycle.
+        unsafe { env::set_var("COMPOSER_HOME", home) };
+    }
     let result = (|| {
         let mut runtime = PhpRuntime::initialize(executable, &composer, arguments)?;
         runtime.execute_file(&composer)
     })();
     // SAFETY: See the set_var safety note above.
     unsafe { env::remove_var("PAM_COMPOSER_MODE") };
+    if composer_home.is_some() {
+        // SAFETY: Restore the process environment before returning control.
+        unsafe {
+            if let Some(home) = previous_home {
+                env::set_var("COMPOSER_HOME", home);
+            } else {
+                env::remove_var("COMPOSER_HOME");
+            }
+        }
+    }
     result
 }
 

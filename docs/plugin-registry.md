@@ -114,8 +114,18 @@ root and catalog quorum, expiration, revocations, PAM compatibility, exact surfa
 protocol, and the previously accepted catalog sequence. Composer receives the
 resolved version rather than a floating range. Before Composer mutates the project,
 PAM downloads the bounded HTTPS artifact to a temporary file and verifies its
-SHA-256. After installation, `composer.lock` must contain that exact version and
-distribution URL; otherwise the command fails.
+SHA-256. The verified ZIP is promoted into the project-local bounded artifact
+store and exposed through an ephemeral canonical Composer `artifact` repository,
+so both dry-run and installation consume those exact bytes instead of downloading
+the URL again. After installation, `composer.lock` must contain that exact version
+and local artifact path; otherwise the command fails. This follows Composer's
+official [artifact repository contract](https://getcomposer.org/doc/05-repositories.md#artifact).
+
+The store keeps at most one archive per package: once an updated release has been
+installed and locked successfully, PAM removes superseded archives for that same
+package. The ephemeral Composer home and its cache are always removed after the
+operation, including failed installs, while archives for other installed packages
+remain available for reproducible `composer install` runs.
 
 The accepted registry identity, root fingerprint/generation, and catalog sequence
 are stored atomically in `.pam/plugin-registry-state.json`. A later catalog cannot
