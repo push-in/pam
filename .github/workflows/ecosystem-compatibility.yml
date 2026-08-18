@@ -35,6 +35,10 @@ jobs:
       matrix: ${{ steps.catalog.outputs.matrix }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam
+          ref: ${{ github.repository == 'push-in/pam' && github.sha || 'main' }}
+          persist-credentials: false
       - name: Match the complete public ecosystem
         env:
           GH_TOKEN: ${{ github.token }}
@@ -57,11 +61,16 @@ jobs:
     steps:
       - uses: actions/checkout@v5
         with:
+          repository: push-in/pam
+          ref: ${{ github.repository == 'push-in/pam' && github.sha || 'main' }}
           path: pam
+          persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/${{ matrix.package.repository }}
+          ref: ${{ github.event.repository.name == matrix.package.repository && github.ref_type == 'tag' && github.ref || 'main' }}
           path: package
+          persist-credentials: false
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.4'

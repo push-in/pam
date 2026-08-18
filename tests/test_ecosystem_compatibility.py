@@ -48,6 +48,15 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must constrain pushinbr/pam-native", result.stderr)
 
+    def test_reusable_workflow_certifies_the_calling_package_tag(self) -> None:
+        workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("workflow_call:", workflow)
+        self.assertIn("repository: push-in/pam", workflow)
+        self.assertIn("github.event.repository.name == matrix.package.repository", workflow)
+        self.assertIn("github.ref_type == 'tag'", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
