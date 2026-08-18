@@ -176,3 +176,27 @@ A roadmap item enters implementation only when it has:
 An item is complete only when the evidence is reproducible from a clean checkout.
 Screenshots, benchmarks, and release claims must identify the exact commit and
 environment that produced them.
+
+## Execution ledger
+
+This ledger separates shipped work from open product claims. Commit hashes are
+repository-local.
+
+| Roadmap evidence | Runtime / CLI | Native | Desktop | State |
+| --- | --- | --- | --- | --- |
+| Product audit, competitor map, metrics, roadmap | `a363bb7` | Covered by the cross-product audit | Covered by the cross-product audit | Shipped |
+| Project-scoped bounded development artifacts | `a363bb7` | Android/iOS cleanup runs through the CLI | Host cache retention in `f895be8` | Shipped |
+| Verifiable benchmark evidence | `58ca0e0`, workflow `1fcd2cd` | Manifest `742e0e4` | Package reproducibility remains in Desktop CI | Shipped; public runs depend on CI execution |
+| Structured error and automation contracts | `fc1a8fa` | Contextual CLI commands inherit the envelope | Desktop retains its typed bridge errors | Shipped |
+| Development lifecycle event protocol | `c273d21` | Android/iOS hosts emit schema 1 | `392a6eb` | Shipped |
+| Versioned DevTools snapshots | `1b3f3f3` | `d4dec09` | `ea34d52` | Shipped |
+| Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Open: Desktop capture/golden harness | Partial |
+| Accessible adaptive design tokens | — | `b07d09f` | — | Native shipped; cross-surface system open |
+| Signed typed plugin registry | Existing ABI/range/path checks | Descriptor and IDL integrity locks | Executable protocol/identity/hash checks | Open: requires public registry schema, release signing root, key rotation and revocation policy |
+| Flagship cross-surface application | — | Native showcase exists | — | Open |
+
+The next registry implementation gate is intentionally strict: choose and
+publish the signing root, canonical payload, key-rotation and revocation model,
+then add offline verification fixtures before trusting registry metadata. A
+locally generated private key or an unsigned JSON catalog does not satisfy the
+product claim.
