@@ -1,9 +1,8 @@
 # Cross-surface observability
 
 PAM uses one trace lineage and explicit privacy boundaries across Server,
-Native, and Desktop. The surfaces do not pretend to have equal evidence:
-Server exports online protocol spans today, while Native and Desktop retain
-bounded specialized snapshots until their online mappings are certified.
+Native, and Desktop. Each online mapping remains explicit, privacy-bounded and
+independently certified while specialized snapshots preserve local tooling.
 
 ## Interoperability status
 
@@ -11,7 +10,7 @@ bounded specialized snapshots until their online mappings are certified.
 | --- | --- | --- | --- |
 | Server | Prometheus metrics, structured logs, W3C trace context | Redacted Chrome/Perfetto timeline | OTLP/HTTP JSON traces implemented and certified against the official Collector |
 | Native | Navigation metrics/timeline and the optional observability package | Schema 1 snapshot, surface code `2` | OTLP/HTTP JSON traces, logs, delta counters, and gauges certified by the package; PAM JSON remains the compatibility default |
-| Desktop | Authenticated aggregate command/worker diagnostics | Schema 1 snapshot, surface code `3` | Aggregate-only; individual command spans are not fabricated |
+| Desktop | Authenticated aggregate command/worker diagnostics | Schema 1 snapshot, surface code `3` | Explicit-opt-in OTLP/HTTP JSON root spans for validated commands, certified against the official Collector |
 
 This distinction is a compatibility promise. A JSON endpoint is not called
 OTLP merely because it accepts telemetry-shaped data. PAM publishes the claim
@@ -49,6 +48,17 @@ of Git. Publishable manifests require a clean worktree. During harness
 development, `PAM_OTLP_ALLOW_DIRTY=1` permits a clearly marked local diagnostic
 manifest, but CI never uses that escape hatch.
 
+PAM Desktop has an independent acceptance harness in its repository:
+
+```bash
+scripts/certify-desktop-otlp.sh
+```
+
+It runs an ignored Rust integration test against the same immutable Collector,
+checks the exported span and static command name in Collector output, and
+removes its container, downloaded image and temporary Cargo target at exit. CI
+verifies the Collector's Sigstore identity before running the harness.
+
 ## Online architecture and remaining boundary
 
 The next protocol revision must preserve these boundaries:
@@ -57,8 +67,8 @@ The next protocol revision must preserve these boundaries:
 Server HTTP request ───────────────► OTLP trace receiver
 Native explicit app spans ─adapter─► OTLP trace receiver       ✓
 Native logs/metrics ───────adapter─► matching OTLP endpoint    ✓
-Desktop aggregate snapshot ────────► local timeline/evidence only
-Desktop future command spans ─gate─► OTLP only with explicit production opt-in
+Desktop aggregate snapshot ────────► local diagnostics
+Desktop validated commands ──gate──► OTLP trace receiver        ✓
 ```
 
 - Server remains non-blocking with bounded batch and queue controls.
@@ -69,7 +79,8 @@ Desktop future command spans ─gate─► OTLP only with explicit production op
   paths and exception messages require a separately documented consent policy.
 - Desktop production export defaults off. The development bridge token,
   application arguments, filesystem paths and command payloads are never span
-  attributes.
+  attributes. Its bounded queue cannot stall command execution, and diagnostic
+  counters expose dropped, failed and Collector-rejected spans.
 - Cross-surface trace IDs may be propagated only through authenticated product
   channels. Snapshots and offline timelines never invent missing trace IDs or
   timestamps.
