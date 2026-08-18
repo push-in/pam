@@ -737,6 +737,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "benchmark" => benchmark(parse_project_only(arguments)?),
         "profile" => baseline_profile(parse_project_only(arguments)?),
         "devtools" => toggle_devtools(parse_project_only(arguments)?),
+        "diagnostics" => capture_android_diagnostics(parse_project_only(arguments)?),
         "logs" => logs(parse_project_only(arguments)?),
         "devices" => devices(parse_project_only(arguments)?),
         "screenshot" => screenshot_android(parse_screenshot_options(arguments, "android.png")?),
@@ -1047,6 +1048,17 @@ fn default_abis() -> Vec<AndroidAbi> {
 }
 
 fn load_project(path: &Path) -> Result<Project, String> {
+    let (root, manifest) = load_project_manifest(path)?;
+    validate_manifest(&root, &manifest)?;
+    let plugins = discover_plugins(&root, &manifest)?;
+    Ok(Project {
+        root,
+        manifest,
+        plugins,
+    })
+}
+
+fn load_project_manifest(path: &Path) -> Result<(PathBuf, NativeManifest), String> {
     let root = fs::canonicalize(path)
         .map_err(|error| format!("cannot resolve mobile project {}: {error}", path.display()))?;
     if !root.is_dir() {
@@ -1060,13 +1072,10 @@ fn load_project(path: &Path) -> Result<Project, String> {
         .map_err(|error| format!("cannot read {}: {error}", manifest_path.display()))?;
     let manifest: NativeManifest = serde_json::from_str(&contents)
         .map_err(|error| format!("invalid {}: {error}", manifest_path.display()))?;
-    validate_manifest(&root, &manifest)?;
-    let plugins = discover_plugins(&root, &manifest)?;
-    Ok(Project {
-        root,
-        manifest,
-        plugins,
-    })
+    if manifest.version != 1 || !valid_application_id(&manifest.application_id) {
+        return Err("invalid Pam Native project identity".to_owned());
+    }
+    Ok((root, manifest))
 }
 
 fn validate_manifest(root: &Path, manifest: &NativeManifest) -> Result<(), String> {
@@ -5546,8 +5555,8 @@ fn baseline_profile(project_path: PathBuf) -> Result<u8, String> {
 }
 
 fn toggle_devtools(project_path: PathBuf) -> Result<u8, String> {
-    let project = load_project(&project_path)?;
-    let application_id = debug_application_id(&project);
+    let (root, manifest) = load_project_manifest(&project_path)?;
+    let application_id = debug_application_id_for(&root, &manifest);
     let running = Command::new("adb")
         .args(["shell", "pidof", &application_id])
         .output()
@@ -5555,7 +5564,7 @@ fn toggle_devtools(project_path: PathBuf) -> Result<u8, String> {
     if !running.status.success() || running.stdout.is_empty() {
         return Err(format!(
             "{application_id} is not running; start it with `pam mobile dev {}` first",
-            project.root.display()
+            root.display()
         ));
     }
     command_status(
@@ -5572,6 +5581,105 @@ fn toggle_devtools(project_path: PathBuf) -> Result<u8, String> {
     )?;
     println!("Toggled Pam Native DevTools in {application_id}");
     Ok(0)
+}
+
+fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
+    const MAX_SNAPSHOT_BYTES: usize = 64 * 1024;
+    const ATTEMPTS: usize = 30;
+
+    let (root, manifest) = load_project_manifest(&project_path)?;
+    let application_id = debug_application_id_for(&root, &manifest);
+    let running = Command::new("adb")
+        .args(["shell", "pidof", &application_id])
+        .output()
+        .map_err(|error| format!("cannot query Android device: {error}"))?;
+    if !running.status.success() || running.stdout.is_empty() {
+        return Err(format!(
+            "{application_id} is not running; start it with `pam dev` first"
+        ));
+    }
+    let nonce_material = format!(
+        "{}:{}:{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        root.display(),
+    );
+    let request_id = format!("{:x}", Sha256::digest(nonce_material.as_bytes()))[..32].to_owned();
+    let file = format!("cache/pam-diagnostics-{request_id}.json");
+    command_status(
+        "adb",
+        &[
+            "shell",
+            "am",
+            "broadcast",
+            "-a",
+            "dev.pam.nativeapp.action.CAPTURE_DIAGNOSTICS",
+            "-p",
+            &application_id,
+            "--es",
+            "requestId",
+            &request_id,
+        ],
+    )?;
+
+    let mut snapshot = None;
+    for _ in 0..ATTEMPTS {
+        let output = Command::new("adb")
+            .args(["exec-out", "run-as", &application_id, "cat", &file])
+            .output()
+            .map_err(|error| format!("cannot read Native diagnostics through adb: {error}"))?;
+        if output.status.success() && !output.stdout.is_empty() {
+            snapshot = Some(output.stdout);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let _ = Command::new("adb")
+        .args(["shell", "run-as", &application_id, "rm", "-f", &file])
+        .status();
+    let snapshot = snapshot.ok_or_else(|| {
+        "Native diagnostic snapshot was not published; restart the debug app and retry".to_owned()
+    })?;
+    if snapshot.len() > MAX_SNAPSHOT_BYTES {
+        return Err("Native diagnostic snapshot exceeds 64 KiB".to_owned());
+    }
+    let snapshot: serde_json::Value = serde_json::from_slice(&snapshot)
+        .map_err(|error| format!("Native diagnostic snapshot is invalid JSON: {error}"))?;
+    validate_native_diagnostic_snapshot(&snapshot)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&snapshot)
+            .map_err(|error| format!("cannot encode Native diagnostics: {error}"))?
+    );
+    Ok(0)
+}
+
+fn validate_native_diagnostic_snapshot(snapshot: &serde_json::Value) -> Result<(), String> {
+    if snapshot
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+        || snapshot
+            .get("surfaceCode")
+            .and_then(serde_json::Value::as_u64)
+            != Some(2)
+        || snapshot
+            .get("capturedAtUnixMs")
+            .and_then(serde_json::Value::as_u64)
+            .is_none()
+        || snapshot
+            .get("timeline")
+            .and_then(serde_json::Value::as_array)
+            .is_none_or(|items| items.len() > 8)
+    {
+        return Err(
+            "Native diagnostic snapshot violates the DevTools schema 1 envelope".to_owned(),
+        );
+    }
+    Ok(())
 }
 
 fn run_android_performance_suite(
@@ -5989,17 +6097,21 @@ fn install_and_launch(project: &Project, apk: &Path, mode: BuildMode) -> Result<
 }
 
 fn debug_application_id(project: &Project) -> String {
+    debug_application_id_for(&project.root, &project.manifest)
+}
+
+fn debug_application_id_for(root: &Path, manifest: &NativeManifest) -> String {
     let firebase_enabled = [
-        project.root.join(".pam/google-services.json"),
-        project.root.join("google-services.json"),
+        root.join(".pam/google-services.json"),
+        root.join("google-services.json"),
     ]
     .into_iter()
     .any(|path| path.is_file());
 
     if firebase_enabled {
-        project.manifest.application_id.clone()
+        manifest.application_id.clone()
     } else {
-        format!("{}.debug", project.manifest.application_id)
+        format!("{}.debug", manifest.application_id)
     }
 }
 
@@ -6292,6 +6404,34 @@ mod tests {
         assert_eq!(value["counts"]["high"], 1);
         assert_eq!(value["findings"][0]["severityCode"], 3);
         assert!(value["findings"][0].get("severity").is_none());
+    }
+
+    #[test]
+    fn validates_bounded_native_devtools_envelopes() {
+        let snapshot = serde_json::json!({
+            "schemaVersion": 1,
+            "surfaceCode": 2,
+            "capturedAtUnixMs": 1,
+            "timeline": [{"kindCode": 3, "durationMicros": 0, "failed": true}],
+        });
+        assert!(validate_native_diagnostic_snapshot(&snapshot).is_ok());
+
+        let oversized = serde_json::json!({
+            "schemaVersion": 1,
+            "surfaceCode": 2,
+            "capturedAtUnixMs": 1,
+            "timeline": vec![serde_json::json!({}); 9],
+        });
+        assert!(validate_native_diagnostic_snapshot(&oversized).is_err());
+        assert!(
+            validate_native_diagnostic_snapshot(&serde_json::json!({
+                "schemaVersion": 1,
+                "surfaceCode": 3,
+                "capturedAtUnixMs": 1,
+                "timeline": [],
+            }))
+            .is_err()
+        );
     }
 
     #[test]

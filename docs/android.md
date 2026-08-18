@@ -34,12 +34,17 @@ pam run
 pam dev
 pam logs
 pam devtools
+pam diagnostics
 pam mobile screenshot . --output artifacts/screenshots/home.png
 ```
 
 `run` detecta a ABI do aparelho conectado. `dev` mantém o runtime em modo debug
 e entrega hot reload. Para escolher explicitamente a ABI use `--abi
 arm64-v8a` ou `--abi x86_64`.
+
+`diagnostics` captura o snapshot vivo e redigido do host Android em JSON. A
+timeline omite mensagens e rótulos da aplicação, é limitada a oito eventos e o
+arquivo privado intermediário é apagado após a leitura.
 
 `screenshot` captura a tela do aparelho via `adb exec-out`, valida assinatura e
 header PNG antes de gravar e restringe o destino ao projeto. Ele recusa substituir

@@ -607,6 +607,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "Measure performance or create a baseline profile",
                 ),
                 ("devtools", "Toggle the live performance overlay"),
+                ("diagnostics", "Capture a redacted live Android snapshot"),
                 ("logs | devices", "Inspect app logs and connected targets"),
                 ("plugin:list | plugin:doctor", "Inspect native plugins"),
                 (
@@ -628,6 +629,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "mobile audit . --deny-high --json",
                 "mobile dev .",
                 "mobile devtools .",
+                "mobile diagnostics .",
                 "mobile screenshot . --output artifacts/home.png",
                 "mobile runtime:use 8.5 .",
                 "mobile runtime:install .",

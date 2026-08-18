@@ -994,6 +994,61 @@ fn initializes_mobile_with_tree_default_and_pam_components_enabled() {
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn captures_contextual_redacted_android_diagnostics() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = temporary_path("native-diagnostics");
+    let output = run_pam(&[
+        "init",
+        directory.to_str().unwrap(),
+        "--template",
+        "mobile",
+        "--no-install",
+        "--no-interaction",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tools = directory.join("test-tools");
+    fs::create_dir(&tools).unwrap();
+    let adb = tools.join("adb");
+    fs::write(
+        &adb,
+        r#"#!/bin/sh
+case "$*" in
+  "shell pidof "*) printf '42\n' ;;
+  *" cat cache/pam-diagnostics-"*) printf '%s' '{"schemaVersion":1,"surfaceCode":2,"capturedAtUnixMs":1234,"platformCode":1,"timeline":[{"kindCode":3,"durationMicros":8,"failed":true}]}' ;;
+esac
+exit 0
+"#,
+    )
+    .unwrap();
+    fs::set_permissions(&adb, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let diagnostics = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .arg("diagnostics")
+        .current_dir(&directory)
+        .env("PATH", &tools)
+        .output()
+        .unwrap();
+    assert!(
+        diagnostics.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&diagnostics.stdout),
+        String::from_utf8_lossy(&diagnostics.stderr),
+    );
+    let snapshot: serde_json::Value = serde_json::from_slice(&diagnostics.stdout).unwrap();
+    assert_eq!(snapshot["schemaVersion"], 1);
+    assert_eq!(snapshot["surfaceCode"], 2);
+    assert_eq!(snapshot["timeline"][0]["kindCode"], 3);
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let directory = temporary_path("init-mobile-ui");
