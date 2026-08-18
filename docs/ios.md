@@ -36,11 +36,22 @@ Com um simulador inicializado:
 pam devices
 pam run
 pam logs
+pam devtools
+pam diagnostics
 pam mobile ios:screenshot . --output artifacts/screenshots/home-ios.png
 ```
 
 `ios:run` prepara o host, compila, instala e inicia o bundle ID declarado em
 `pam-native.json`.
+
+`devtools` alterna a overlay UIKit no host debug gerado, com FPS, custos de
+decode/mount, p95 do engine, commits e timeline de capacidades.
+
+`diagnostics` captura um snapshot schema 1 do simulador em execução, com
+métricas agregadas, timeline limitada e sem mensagens ou labels da aplicação.
+O host debug grava em seu cache privado fora da main thread; a CLI impõe limite
+de 64 KiB e remove o arquivo imediatamente após a leitura. A forma explícita é
+`pam mobile ios:diagnostics .`.
 
 `ios:screenshot` captura o simulador inicializado, valida o PNG e remove o arquivo
 temporário de `.pam-native` antes de concluir. O destino precisa permanecer dentro

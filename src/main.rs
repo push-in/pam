@@ -602,7 +602,16 @@ fn run() -> Result<u8, CliError> {
             && let Some(context) = current_project()
             && context.kind == project::ProjectKind::Native
         {
-            let mut arguments = vec![OsString::from("diagnostics"), context.root.into_os_string()];
+            let diagnostics_command =
+                if project::native_platforms(&context).map_err(CliError::Commands)? == [2] {
+                    "ios:diagnostics"
+                } else {
+                    "diagnostics"
+                };
+            let mut arguments = vec![
+                OsString::from(diagnostics_command),
+                context.root.into_os_string(),
+            ];
             arguments.extend(raw_args);
             return mobile::run(arguments).map_err(CliError::Commands);
         }
@@ -1016,6 +1025,7 @@ fn run() -> Result<u8, CliError> {
                 "run" => OsString::from("ios:run"),
                 "logs" => OsString::from("ios:logs"),
                 "devices" => OsString::from("ios:devices"),
+                "devtools" => OsString::from("ios:devtools"),
                 "sign" => OsString::from("ios:sign"),
                 _ => script_arg,
             }

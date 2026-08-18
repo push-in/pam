@@ -1049,6 +1049,99 @@ exit 0
     fs::remove_dir_all(directory).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn captures_redacted_ios_simulator_diagnostics() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = temporary_path("ios-native-diagnostics");
+    let output = run_pam(&[
+        "init",
+        directory.to_str().unwrap(),
+        "--template",
+        "mobile",
+        "--platform",
+        "ios",
+        "--no-install",
+        "--no-interaction",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let tools = directory.join("test-tools");
+    let container = directory.join("simulator-container");
+    fs::create_dir_all(&tools).unwrap();
+    fs::create_dir_all(&container).unwrap();
+    let xcrun = tools.join("xcrun");
+    fs::write(
+        &xcrun,
+        format!(
+            r#"#!/bin/sh
+case "$*" in
+  "simctl list devices booted --json") printf '%s' '{{"devices":{{"runtime":[{{"udid":"SIM-1"}}]}}}}' ;;
+  "simctl openurl "*)
+    for last do :; done
+    case "$last" in
+      *://devtools) ;;
+      *)
+        request="${{last##*/}}"
+        /bin/mkdir -p '{container}/Library/Caches'
+        printf '%s' '{{"schemaVersion":1,"surfaceCode":2,"capturedAtUnixMs":1234,"platformCode":2,"timeline":[{{"kindCode":4,"durationMicros":0,"failed":false}}]}}' > '{container}/Library/Caches/pam-diagnostics-'"$request"'.json'
+        ;;
+    esac
+    ;;
+  "simctl get_app_container "*) printf '%s\n' '{container}' ;;
+esac
+exit 0
+"#,
+            container = container.display(),
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&xcrun, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let diagnostics = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .arg("diagnostics")
+        .current_dir(&directory)
+        .env("PATH", &tools)
+        .output()
+        .unwrap();
+    assert!(
+        diagnostics.status.success(),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&diagnostics.stdout),
+        String::from_utf8_lossy(&diagnostics.stderr),
+    );
+    let snapshot: serde_json::Value = serde_json::from_slice(&diagnostics.stdout).unwrap();
+    assert_eq!(snapshot["schemaVersion"], 1);
+    assert_eq!(snapshot["surfaceCode"], 2);
+    assert_eq!(snapshot["platformCode"], 2);
+    assert!(
+        fs::read_dir(container.join("Library/Caches"))
+            .unwrap()
+            .next()
+            .is_none(),
+        "the simulator snapshot must be removed after capture"
+    );
+
+    let devtools = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .arg("devtools")
+        .current_dir(&directory)
+        .env("PATH", &tools)
+        .output()
+        .unwrap();
+    assert!(
+        devtools.status.success(),
+        "{}",
+        String::from_utf8_lossy(&devtools.stderr)
+    );
+    assert!(String::from_utf8_lossy(&devtools.stdout).contains("Toggled Pam Native DevTools"));
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
 #[test]
 fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let directory = temporary_path("init-mobile-ui");

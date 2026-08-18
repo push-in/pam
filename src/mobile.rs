@@ -706,6 +706,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "ios:logs" => logs_ios(parse_project_only(arguments)?),
         "ios:devices" => devices_ios(parse_project_only(arguments)?),
         "ios:screenshot" => screenshot_ios(parse_screenshot_options(arguments, "ios.png")?),
+        "ios:devtools" => toggle_devtools_ios(parse_project_only(arguments)?),
         "build" => {
             let options = parse_options(arguments, true)?;
             build(options).map(|_| 0)
@@ -737,7 +738,9 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "benchmark" => benchmark(parse_project_only(arguments)?),
         "profile" => baseline_profile(parse_project_only(arguments)?),
         "devtools" => toggle_devtools(parse_project_only(arguments)?),
-        "diagnostics" => capture_android_diagnostics(parse_project_only(arguments)?),
+        "diagnostics" => capture_native_diagnostics(parse_project_only(arguments)?),
+        "android:diagnostics" => capture_android_diagnostics(parse_project_only(arguments)?),
+        "ios:diagnostics" => capture_ios_diagnostics(parse_project_only(arguments)?),
         "logs" => logs(parse_project_only(arguments)?),
         "devices" => devices(parse_project_only(arguments)?),
         "screenshot" => screenshot_android(parse_screenshot_options(arguments, "android.png")?),
@@ -2633,7 +2636,18 @@ fn prepare_ios(project: &Project) -> Result<PathBuf, String> {
         &[
             ("__PAM_ENTRY_BASENAME__", "index"),
             ("__PAM_ENTRY_EXTENSION__", "php"),
+            (
+                "__PAM_DIAGNOSTICS_SCHEME__",
+                &ios_diagnostics_scheme(&project.manifest.application_id),
+            ),
         ],
+    )?;
+    replace_ios_placeholders(
+        &workspace.join("App/Info.plist"),
+        &[(
+            "__PAM_DIAGNOSTICS_SCHEME__",
+            &ios_diagnostics_scheme(&project.manifest.application_id),
+        )],
     )?;
     Ok(workspace)
 }
@@ -5598,16 +5612,7 @@ fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
             "{application_id} is not running; start it with `pam dev` first"
         ));
     }
-    let nonce_material = format!(
-        "{}:{}:{}",
-        std::process::id(),
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos(),
-        root.display(),
-    );
-    let request_id = format!("{:x}", Sha256::digest(nonce_material.as_bytes()))[..32].to_owned();
+    let request_id = diagnostic_request_id(&root);
     let file = format!("cache/pam-diagnostics-{request_id}.json");
     command_status(
         "adb",
@@ -5655,6 +5660,138 @@ fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
             .map_err(|error| format!("cannot encode Native diagnostics: {error}"))?
     );
     Ok(0)
+}
+
+fn capture_native_diagnostics(project_path: PathBuf) -> Result<u8, String> {
+    let (root, manifest) = load_project_manifest(&project_path)?;
+    let application_id = debug_application_id_for(&root, &manifest);
+    let android_running = Command::new("adb")
+        .args(["shell", "pidof", &application_id])
+        .output()
+        .is_ok_and(|output| output.status.success() && !output.stdout.is_empty());
+    if android_running || !cfg!(target_os = "macos") {
+        capture_android_diagnostics(root)
+    } else {
+        capture_ios_diagnostics(root)
+    }
+}
+
+fn capture_ios_diagnostics(project_path: PathBuf) -> Result<u8, String> {
+    const MAX_SNAPSHOT_BYTES: u64 = 64 * 1024;
+    const ATTEMPTS: usize = 30;
+
+    let (root, manifest) = load_project_manifest(&project_path)?;
+    let simulator = booted_ios_simulator()?;
+    let request_id = diagnostic_request_id(&root);
+    let scheme = ios_diagnostics_scheme(&manifest.application_id);
+    let url = format!("{scheme}://diagnostics/{request_id}");
+    command_status("xcrun", &["simctl", "openurl", &simulator, &url])?;
+    let container = Command::new("xcrun")
+        .args([
+            "simctl",
+            "get_app_container",
+            &simulator,
+            &manifest.application_id,
+            "data",
+        ])
+        .output()
+        .map_err(|error| format!("cannot locate the iOS application container: {error}"))?;
+    if !container.status.success() {
+        return Err(format!(
+            "{} is not installed on the booted simulator; start it with `pam dev` first",
+            manifest.application_id
+        ));
+    }
+    let container = String::from_utf8(container.stdout)
+        .map_err(|_| "simctl returned a non-UTF-8 application container path".to_owned())?;
+    let container = PathBuf::from(container.trim());
+    if !container.is_absolute() || !container.is_dir() {
+        return Err("simctl returned an invalid application container path".to_owned());
+    }
+    let path = container
+        .join("Library/Caches")
+        .join(format!("pam-diagnostics-{request_id}.json"));
+    let mut snapshot = None;
+    for _ in 0..ATTEMPTS {
+        match fs::symlink_metadata(&path) {
+            Ok(metadata)
+                if metadata.is_file()
+                    && !metadata.file_type().is_symlink()
+                    && metadata.len() <= MAX_SNAPSHOT_BYTES =>
+            {
+                snapshot = Some(
+                    fs::read(&path)
+                        .map_err(|error| format!("cannot read iOS Native diagnostics: {error}"))?,
+                );
+                break;
+            }
+            Ok(metadata) if metadata.len() > MAX_SNAPSHOT_BYTES => {
+                let _ = fs::remove_file(&path);
+                return Err("Native diagnostic snapshot exceeds 64 KiB".to_owned());
+            }
+            Ok(_) => return Err("iOS Native diagnostic path is not a regular file".to_owned()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(error) => return Err(format!("cannot inspect iOS Native diagnostics: {error}")),
+        }
+    }
+    let _ = fs::remove_file(&path);
+    let snapshot = snapshot.ok_or_else(|| {
+        "iOS Native diagnostic snapshot was not published; restart the debug app and retry"
+            .to_owned()
+    })?;
+    let snapshot: serde_json::Value = serde_json::from_slice(&snapshot)
+        .map_err(|error| format!("Native diagnostic snapshot is invalid JSON: {error}"))?;
+    validate_native_diagnostic_snapshot(&snapshot)?;
+    if snapshot
+        .get("platformCode")
+        .and_then(serde_json::Value::as_u64)
+        != Some(2)
+    {
+        return Err("Native diagnostic snapshot does not identify the iOS platform".to_owned());
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&snapshot)
+            .map_err(|error| format!("cannot encode Native diagnostics: {error}"))?
+    );
+    Ok(0)
+}
+
+fn toggle_devtools_ios(project_path: PathBuf) -> Result<u8, String> {
+    let (_, manifest) = load_project_manifest(&project_path)?;
+    let simulator = booted_ios_simulator()?;
+    let scheme = ios_diagnostics_scheme(&manifest.application_id);
+    command_status(
+        "xcrun",
+        &[
+            "simctl",
+            "openurl",
+            &simulator,
+            &format!("{scheme}://devtools"),
+        ],
+    )?;
+    println!("Toggled Pam Native DevTools in {}", manifest.application_id);
+    Ok(0)
+}
+
+fn diagnostic_request_id(root: &Path) -> String {
+    let material = format!(
+        "{}:{}:{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+        root.display(),
+    );
+    format!("{:x}", Sha256::digest(material.as_bytes()))[..32].to_owned()
+}
+
+fn ios_diagnostics_scheme(application_id: &str) -> String {
+    let digest = format!("{:x}", Sha256::digest(application_id.as_bytes()));
+    format!("pam-native-{}", &digest[..12])
 }
 
 fn validate_native_diagnostic_snapshot(snapshot: &serde_json::Value) -> Result<(), String> {
@@ -6431,6 +6568,20 @@ mod tests {
                 "timeline": [],
             }))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn ios_diagnostics_schemes_are_stable_and_application_scoped() {
+        let first = ios_diagnostics_scheme("app.pam.first");
+        assert_eq!(first, ios_diagnostics_scheme("app.pam.first"));
+        assert_ne!(first, ios_diagnostics_scheme("app.pam.second"));
+        assert!(first.starts_with("pam-native-"));
+        assert_eq!(first.len(), 23);
+        assert!(
+            first[11..]
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         );
     }
 

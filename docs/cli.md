@@ -33,7 +33,7 @@ Laravel, `4` Desktop, and `5` raw runtime. Legacy discovery from
 | `pam lint` | Composer/PHPStan | Composer/PHPStan | PAM formatter/PHPStan | Composer/PHPStan |
 | `pam build` | production bundle | production bundle | release APK | desktop build |
 | `pam package` | `tar.gz` + SHA-256 | `tar.gz` + SHA-256 | AAB + SHA-256 | desktop implementation |
-| `pam diagnostics` | runtime snapshot | runtime snapshot | live Android debug snapshot | live development snapshot |
+| `pam diagnostics` | runtime snapshot | runtime snapshot | live Android/iOS Simulator snapshot | live development snapshot |
 
 Explicit namespaces such as `pam mobile ...` and `pam desktop ...` are stable
 advanced interfaces for CI and cross-project automation.

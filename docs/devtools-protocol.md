@@ -25,7 +25,7 @@ Snapshot access follows the discovered project surface:
 | Surface | Developer access |
 | --- | --- |
 | Server | `pam diagnostics [script]` |
-| Native | `pam diagnostics` on a running Android debug app; iOS remains in-app |
+| Native | `pam diagnostics` on Android debug or an iOS debug simulator |
 | Desktop | `pam diagnostics` while that project is running under `pam dev` |
 
 Desktop delegates to its authenticated loopback gateway through a bounded,
