@@ -194,7 +194,7 @@ repository-local.
 | Structured error and automation contracts | `fc1a8fa`; actionable Doctor target/artifact/remediation report `fe18c67` | Contextual CLI commands inherit the envelope | Desktop retains its typed bridge errors | Shipped |
 | Development lifecycle event protocol | `c273d21` | Android/iOS hosts emit schema 1 | `392a6eb` | Shipped |
 | Versioned DevTools snapshots | `1b3f3f3` | `d4dec09` | `ea34d52` | Shipped |
-| Contextual live snapshot transport | Desktop routing `77f578f` | In-app export shipped; external transport remains open | Authenticated development session `47b489b` | Desktop shipped; Native external transport open |
+| Contextual live snapshot transport | Desktop routing `77f578f`; Native routing `bddab4c` | Privilege-gated, redacted Android export `5b4b5f5`; iOS remains in-app | Authenticated development session `47b489b` | Server, Android and Desktop shipped; iOS external transport open |
 | Visual capture foundation | `20fb5cc` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
 | Accessible adaptive design tokens | Desktop starter run-green identity and WCAG/forced-color gate `0634ce7` | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `9099df7` | Generated Desktop starter inherits the runtime-owned design contract | Native system and Desktop first-run surface shipped; reusable cross-surface package remains open |
 | Cross-surface release authority and recovery | iOS audit artifact workflow `9018383` | Native release audit `d4746b9` | Permission policy `46fead6`; interrupted updater recovery `e82efd6` | Native/Desktop policy shipped; platform sandbox certification remains open |
