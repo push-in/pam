@@ -118,3 +118,19 @@ Commit `6670118` added PHP 8.4/8.5 validation, Composer preflight/install,
 optimized strict PSR autoload validation and syntax checks; its
 [first run passed](https://github.com/push-in/pam-native-php/actions/runs/32190912248).
 The other 25 gate commits also completed their repository-owned CI successfully.
+
+## 2026-08-18 Native outbound trace propagation
+
+PAM Native source commit `e041449` added strict W3C version `00` propagation
+for the host-owned HTTP client. The context is a dedicated value bound to one
+exact HTTPS origin; case-insensitive generic `traceparent` and `tracestate`
+headers are rejected, and Android/iOS independently revalidate the value and
+origin before transmission. Follow-up `26bbc5f` adds negative contracts for
+forged IDs, plaintext origins, embedded credentials, path-bearing origins,
+cross-origin use and generic-header spoofing.
+
+The first published-source CI run passed Swift/UIKit, Rust, PHP 8.4/8.5,
+Android build/lint and instrumented renderer contracts on API 26 and API 36.
+The Composer package split is deliberately not claimed as released until a new
+versioned Native tag passes the newly connected global ecosystem gate and its
+mirror publication workflow.
