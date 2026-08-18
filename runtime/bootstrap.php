@@ -831,6 +831,12 @@ namespace Pam\Internal {
         public static function runtimeDiagnostics(): string
         {
             $snapshot = \Pam\Diagnostics\Diagnostics::snapshot();
+            $snapshot = [
+                'schemaVersion' => 1,
+                'surfaceCode' => 1,
+                'capturedAtUnixMs' => (int) floor(microtime(true) * 1000),
+                ...$snapshot,
+            ];
             $snapshot['connections'] = [
                 'httpDispatches' => count(self::$httpDispatches),
                 'websockets' => count(self::$connectedSockets),

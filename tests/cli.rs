@@ -277,6 +277,9 @@ fn exposes_native_diagnostics_and_builds_a_portable_bundle() {
         String::from_utf8_lossy(&diagnostics.stderr)
     );
     let snapshot: serde_json::Value = serde_json::from_slice(&diagnostics.stdout).unwrap();
+    assert_eq!(snapshot["schemaVersion"], 1);
+    assert_eq!(snapshot["surfaceCode"], 1);
+    assert!(snapshot["capturedAtUnixMs"].as_u64().is_some());
     assert!(snapshot["memory"]["allocatedBytes"].as_u64().is_some());
     assert_eq!(snapshot["fibers"]["pending"], 0);
     for (command, expected_key) in [
