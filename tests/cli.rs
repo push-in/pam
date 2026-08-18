@@ -147,6 +147,25 @@ fn initializes_and_discovers_a_contextual_native_project() {
     assert_eq!(payload["type"], 2);
     assert_eq!(payload["typeLabel"], "PAM Native");
     assert_eq!(payload["root"], project.to_string_lossy().as_ref());
+    assert_eq!(payload["developmentArtifacts"]["exists"], false);
+    assert_eq!(payload["developmentArtifacts"]["bytes"], 0);
+    assert_eq!(
+        payload["nextCommands"],
+        serde_json::json!(["pam doctor", "pam dev", "pam test", "pam build"])
+    );
+    fs::create_dir_all(project.join(".pam-native/android/app/build")).unwrap();
+    fs::write(
+        project.join(".pam-native/android/app/build/artifact.bin"),
+        [0_u8; 64],
+    )
+    .unwrap();
+    let measured = run_pam_in(&project, &["info", "--json"]);
+    assert!(measured.status.success());
+    let measured: serde_json::Value = serde_json::from_slice(&measured.stdout).unwrap();
+    assert_eq!(measured["developmentArtifacts"]["exists"], true);
+    assert_eq!(measured["developmentArtifacts"]["bytes"], 64);
+    assert_eq!(measured["developmentArtifacts"]["files"], 1);
+    assert_eq!(measured["developmentArtifacts"]["complete"], true);
     fs::remove_dir_all(parent).unwrap();
 }
 

@@ -40,6 +40,18 @@ pub struct RegisteredCommand {
     pub script: PathBuf,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DevelopmentArtifacts {
+    root: PathBuf,
+    exists: bool,
+    bytes: u64,
+    files: u64,
+    complete: bool,
+}
+
+const MAX_ARTIFACT_ENTRIES: u64 = 100_000;
+
 pub fn native_platforms(context: &ProjectContext) -> Result<Vec<u8>, String> {
     if context.kind != ProjectKind::Native {
         return Ok(Vec::new());
@@ -89,6 +101,8 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
     } else {
         None
     };
+    let development = development_artifacts(context)?;
+    let next_commands = contextual_next_commands(context.kind);
     if json {
         println!(
             "{}",
@@ -103,6 +117,8 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
                 "name": project_manifest.as_ref().and_then(|manifest| manifest.get("name")),
                 "version": project_manifest.as_ref().and_then(|manifest| manifest.get("version")),
                 "native": project_manifest.as_ref().and_then(|manifest| manifest.get("native")),
+                "developmentArtifacts": development,
+                "nextCommands": next_commands,
             }))
             .map_err(|error| error.to_string())?
         );
@@ -139,8 +155,100 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
         println!("  {}  {}", ui.heading("Version"), version);
     }
     println!();
-    println!("{}", ui.muted("Run `pam doctor` to validate this project."));
+    println!("{}", ui.heading("DEVELOPMENT"));
+    println!(
+        "  {}  {} across {} files{}",
+        ui.heading("Artifacts"),
+        human_bytes(development.bytes),
+        development.files,
+        if development.complete {
+            ""
+        } else {
+            " (partial scan)"
+        }
+    );
+    println!(
+        "  {}  {}",
+        ui.heading("Location"),
+        development.root.display()
+    );
+    println!();
+    println!("{}", ui.heading("NEXT"));
+    for command in next_commands {
+        println!("  {}", ui.command(command));
+    }
     Ok(0)
+}
+
+fn development_artifacts(context: &ProjectContext) -> Result<DevelopmentArtifacts, String> {
+    let root = context.root.join(".pam-native");
+    if !root.is_dir() {
+        return Ok(DevelopmentArtifacts {
+            root,
+            exists: false,
+            bytes: 0,
+            files: 0,
+            complete: true,
+        });
+    }
+    let mut bytes = 0_u64;
+    let mut files = 0_u64;
+    let complete = measure_directory(&root, &mut bytes, &mut files)?;
+    Ok(DevelopmentArtifacts {
+        root,
+        exists: true,
+        bytes,
+        files,
+        complete,
+    })
+}
+
+fn measure_directory(root: &Path, bytes: &mut u64, files: &mut u64) -> Result<bool, String> {
+    for entry in
+        fs::read_dir(root).map_err(|error| format!("cannot inspect {}: {error}", root.display()))?
+    {
+        if *files >= MAX_ARTIFACT_ENTRIES {
+            return Ok(false);
+        }
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("cannot inspect {}: {error}", entry.path().display()))?;
+        if file_type.is_dir() {
+            if !measure_directory(&entry.path(), bytes, files)? {
+                return Ok(false);
+            }
+        } else if file_type.is_file() {
+            *files = files.saturating_add(1);
+            *bytes =
+                bytes.saturating_add(entry.metadata().map_err(|error| error.to_string())?.len());
+        }
+    }
+    Ok(true)
+}
+
+fn contextual_next_commands(kind: ProjectKind) -> &'static [&'static str] {
+    match kind {
+        ProjectKind::Native => &["pam doctor", "pam dev", "pam test", "pam build"],
+        ProjectKind::Desktop => &["pam doctor", "pam dev", "pam test", "pam build"],
+        ProjectKind::Laravel => &["pam doctor", "pam dev", "pam test", "pam benchmark <url>"],
+        ProjectKind::Api | ProjectKind::Raw => &["pam doctor", "pam dev", "pam test", "pam build"],
+    }
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
 }
 
 pub fn ensure_manifest(context: &ProjectContext) -> Result<bool, String> {

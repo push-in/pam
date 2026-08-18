@@ -644,6 +644,7 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
             if options.abis == default_abis() {
                 options.abis = vec![connected_abi()?];
             }
+            clean_android_dev_artifacts(&options.project)?;
             dev(options)
         }
         "benchmark" => benchmark(parse_project_only(arguments)?),
@@ -3169,6 +3170,7 @@ fn install_and_launch_ios(project: &Project, simulator: &str, app: &Path) -> Res
 
 fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
     let project = load_project(&project_path)?;
+    clean_ios_dev_artifacts(&project.root)?;
     let simulator = booted_ios_simulator()?;
     let app = build_ios(project.root.clone(), false)?;
     install_and_launch_ios(&project, &simulator, &app)?;
@@ -3191,6 +3193,86 @@ fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
             Ok(()) => println!("Reloaded {}.", project.manifest.name),
             Err(error) => eprintln!("iOS rebuild failed: {error}"),
         }
+    }
+}
+
+fn clean_android_dev_artifacts(project_path: &Path) -> Result<(), String> {
+    let project = load_project(project_path)?;
+    let generated = project.root.join(".pam-native");
+    let paths = [
+        generated.join("android"),
+        generated.join("gradle-home/caches"),
+        generated.join("gradle-home/daemon"),
+        generated.join("gradle-home/native"),
+        generated.join("gradle-home/workers"),
+    ];
+    clean_dev_paths(&project.root, &paths)
+}
+
+fn clean_ios_dev_artifacts(project_root: &Path) -> Result<(), String> {
+    clean_dev_paths(
+        project_root,
+        &[project_root.join(".pam-native/ios/DerivedData")],
+    )
+}
+
+fn clean_dev_paths(project_root: &Path, paths: &[PathBuf]) -> Result<(), String> {
+    let generated_root = project_root.join(".pam-native");
+    let mut removed = 0_u64;
+    for path in paths {
+        if !path.starts_with(&generated_root) || path == &generated_root {
+            return Err(format!(
+                "refusing to clean development artifacts outside {}",
+                generated_root.display()
+            ));
+        }
+        if !path.exists() {
+            continue;
+        }
+        removed = removed.saturating_add(directory_size(path)?);
+        fs::remove_dir_all(path)
+            .map_err(|error| format!("cannot clean {}: {error}", path.display()))?;
+    }
+    if removed > 0 {
+        println!(
+            "Cleaned {} of previous development build artifacts.",
+            human_bytes(removed)
+        );
+    }
+    Ok(())
+}
+
+fn directory_size(path: &Path) -> Result<u64, String> {
+    let mut bytes = 0_u64;
+    for entry in
+        fs::read_dir(path).map_err(|error| format!("cannot inspect {}: {error}", path.display()))?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let file_type = entry
+            .file_type()
+            .map_err(|error| format!("cannot inspect {}: {error}", entry.path().display()))?;
+        if file_type.is_dir() {
+            bytes = bytes.saturating_add(directory_size(&entry.path())?);
+        } else if file_type.is_file() {
+            bytes =
+                bytes.saturating_add(entry.metadata().map_err(|error| error.to_string())?.len());
+        }
+    }
+    Ok(bytes)
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }
 
@@ -5975,5 +6057,28 @@ mod tests {
         assert!(!safe_android_runtime_archive_path(Path::new(
             "native/Cargo.toml"
         )));
+    }
+
+    #[test]
+    fn development_cleanup_is_scoped_to_generated_artifacts() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-dev-clean-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let generated = root.join(".pam-native/android/app/build");
+        let source = root.join("index.php");
+        fs::create_dir_all(&generated).expect("generated build");
+        fs::write(generated.join("artifact.bin"), [0_u8; 32]).expect("artifact");
+        fs::write(&source, "<?php\n").expect("source");
+
+        clean_dev_paths(&root, &[root.join(".pam-native/android")]).expect("clean artifacts");
+
+        assert!(!root.join(".pam-native/android").exists());
+        assert!(source.is_file());
+        assert!(clean_dev_paths(&root, &[root.join("vendor")]).is_err());
+        fs::remove_dir_all(root).expect("cleanup");
     }
 }
