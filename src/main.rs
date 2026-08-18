@@ -34,17 +34,28 @@ fn main() -> ExitCode {
     match run() {
         Ok(code) => ExitCode::from(code),
         Err(error) => {
-            let ui = terminal::Terminal::stderr();
-            eprintln!("{} {}", ui.danger("× ERROR"), error);
-            if matches!(error, CliError::Commands(_)) {
-                eprintln!(
-                    "{}",
-                    ui.muted("  Run `pam --help` to see commands and examples.")
-                );
+            if json_errors_requested() {
+                println!("{}", error.json());
+                return ExitCode::from(error.exit_code());
             }
+            let ui = terminal::Terminal::stderr();
+            eprintln!(
+                "{} {} {}",
+                ui.danger("× ERROR"),
+                ui.muted(format!("[PAM-E{:03}]", error.code() as u8)),
+                error
+            );
+            eprintln!("{}", ui.muted(format!("  Fix: {}", error.remediation())));
             ExitCode::from(error.exit_code())
         }
     }
+}
+
+fn json_errors_requested() -> bool {
+    env::args_os()
+        .nth(1)
+        .is_some_and(|argument| argument == "--json-errors")
+        || env::var("PAM_ERROR_FORMAT").is_ok_and(|value| value == "json")
 }
 
 fn run() -> Result<u8, CliError> {
@@ -57,6 +68,11 @@ fn run() -> Result<u8, CliError> {
         print_usage(&executable);
         return Ok(0);
     };
+    if script_arg == "--json-errors" {
+        script_arg = raw_args.next().ok_or_else(|| {
+            CliError::Commands("--json-errors requires a command or PHP script".to_owned())
+        })?;
+    }
 
     let mut ini_entries = Vec::new();
     let mut ini_file = None::<OsString>;
@@ -1212,7 +1228,33 @@ enum CliError {
     Server(server::ServerError),
 }
 
+#[derive(Clone, Copy, Debug)]
+#[repr(u8)]
+enum CliErrorCode {
+    ScriptUnavailable = 1,
+    NotAFile = 2,
+    Development = 3,
+    Cluster = 4,
+    Command = 5,
+    Doctor = 6,
+    Runtime = 7,
+    Server = 8,
+}
+
 impl CliError {
+    fn code(&self) -> CliErrorCode {
+        match self {
+            Self::ScriptUnavailable { .. } => CliErrorCode::ScriptUnavailable,
+            Self::NotAFile(_) => CliErrorCode::NotAFile,
+            Self::Dev(_) => CliErrorCode::Development,
+            Self::Cluster(_) => CliErrorCode::Cluster,
+            Self::Commands(_) => CliErrorCode::Command,
+            Self::Doctor(_) => CliErrorCode::Doctor,
+            Self::Runtime(_) => CliErrorCode::Runtime,
+            Self::Server(_) => CliErrorCode::Server,
+        }
+    }
+
     fn exit_code(&self) -> u8 {
         match self {
             Self::ScriptUnavailable { .. } | Self::NotAFile(_) => EX_NOINPUT,
@@ -1223,6 +1265,31 @@ impl CliError {
             | Self::Runtime(_)
             | Self::Server(_) => EX_SOFTWARE,
         }
+    }
+
+    fn remediation(&self) -> &'static str {
+        match self {
+            Self::ScriptUnavailable { .. } | Self::NotAFile(_) => {
+                "check that the path exists and points to the intended file"
+            }
+            Self::Dev(_) => "fix the reported development error, then restart `pam dev`",
+            Self::Cluster(_) => "run `pam doctor`, inspect worker logs, then retry the command",
+            Self::Commands(_) => "run `pam --help` or `pam help <command>` for valid usage",
+            Self::Doctor(_) => "run `pam doctor --fix`, then repeat `pam doctor`",
+            Self::Runtime(_) => "run `pam doctor` and inspect the PHP runtime diagnostics",
+            Self::Server(_) => "inspect the server configuration and retry after `pam doctor`",
+        }
+    }
+
+    fn json(&self) -> String {
+        serde_json::to_string_pretty(&serde_json::json!({
+            "schema": 1,
+            "errorCode": self.code() as u8,
+            "message": self.to_string(),
+            "remediation": self.remediation(),
+            "exitCode": self.exit_code(),
+        }))
+        .expect("CLI error envelope is serializable")
     }
 }
 

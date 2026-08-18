@@ -225,6 +225,11 @@ pub fn print_help(executable: &OsStr) {
     eprintln!(
         "  {} {}",
         ui.command(program),
+        ui.accent("--json-errors <command> [options]")
+    );
+    eprintln!(
+        "  {} {}",
+        ui.command(program),
         ui.accent("<script.php> [arguments...]")
     );
     eprintln!(

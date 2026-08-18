@@ -443,6 +443,36 @@ fn reports_a_missing_script_with_ex_noinput() {
 }
 
 #[test]
+fn exposes_stable_structured_error_envelopes() {
+    let output = run_pam(&["--json-errors", "missing-script.php"]);
+
+    assert_eq!(output.status.code(), Some(66));
+    assert!(output.stderr.is_empty());
+    let error: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(error["schema"], 1);
+    assert_eq!(error["errorCode"], 1);
+    assert_eq!(error["exitCode"], 66);
+    assert!(
+        error["message"]
+            .as_str()
+            .unwrap()
+            .contains("missing-script.php")
+    );
+    assert!(
+        error["remediation"]
+            .as_str()
+            .unwrap()
+            .contains("check that the path")
+    );
+
+    let usage = run_pam(&["--json-errors", "benchmark"]);
+    assert_eq!(usage.status.code(), Some(70));
+    let usage: serde_json::Value = serde_json::from_slice(&usage.stdout).unwrap();
+    assert_eq!(usage["errorCode"], 5);
+    assert!(usage["remediation"].as_str().unwrap().contains("pam help"));
+}
+
+#[test]
 fn automatically_loads_composer_with_a_custom_vendor_directory() {
     let output = run_pam(&[fixture("composer-app/index.php").to_str().unwrap()]);
 
