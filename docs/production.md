@@ -119,6 +119,36 @@ um span ID servidor distinto. Valores malformados, em maiúsculas, com IDs
 zerados ou versões desconhecidas não são continuados, evitando representar o
 cliente e o servidor como o mesmo span.
 
+### Exportação OTLP/HTTP JSON
+
+O runtime exporta spans HTTP diretamente para collectors OpenTelemetry quando
+`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (endpoint completo) ou
+`OTEL_EXPORTER_OTLP_ENDPOINT` (recebe `/v1/traces`) está definido. Declare
+`OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/json`. Uma configuração incompatível
+impede o startup com erro acionável, evitando enviar JSON como se fosse
+Protobuf.
+
+```bash
+OTEL_SERVICE_NAME=catalog-api \
+OTEL_EXPORTER_OTLP_ENDPOINT=https://collector.example \
+OTEL_EXPORTER_OTLP_TRACES_PROTOCOL=http/json \
+OTEL_EXPORTER_OTLP_HEADERS='authorization=Bearer%20token' \
+pam server.php
+```
+
+São aceitos os controles padronizados `OTEL_BSP_MAX_QUEUE_SIZE` (2.048),
+`OTEL_BSP_MAX_EXPORT_BATCH_SIZE` (512), `OTEL_BSP_SCHEDULE_DELAY` (5.000 ms) e
+os timeouts de trace/global (10.000 ms). A fila usa `try_send`: collector lento
+nunca segura uma resposta nem faz a memória crescer sem limite. Erros de rede e
+429/502/503/504 recebem até três tentativas curtas. HTTP sem TLS só é permitido
+para `localhost` e endereços loopback; endpoints remotos exigem HTTPS.
+
+O payload inclui somente método, status e o template de rota validado. URL
+concreta, query string e request ID não são exportados. Headers do collector
+aceitam percent-encoding e nunca são escritos nos logs. Monitore
+`pam_otlp_spans_exported_total`, `pam_otlp_spans_dropped_total`,
+`pam_otlp_export_errors_total` e `pam_otlp_spans_rejected_total`.
+
 ## Cache nativo de respostas
 
 `responseCachePaths` aceita uma lista explícita de caminhos públicos. O cache

@@ -18,6 +18,7 @@ mod editor;
 mod ingress;
 mod mobile;
 mod octane;
+mod otlp;
 mod php;
 mod plugin_registry;
 mod project;

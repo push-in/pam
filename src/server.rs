@@ -99,6 +99,7 @@ struct ServerState {
     request_slots: Arc<Semaphore>,
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
+    otlp: Option<crate::otlp::Exporter>,
     rate_limits: Arc<Mutex<HashMap<String, RateBucket>>>,
     worker_state: WorkerStateReporter,
     next_worker_metrics_at: Arc<AtomicU64>,
@@ -117,12 +118,18 @@ struct ServerState {
 }
 
 impl ServerState {
-    fn new(config: ServerConfig, php: PhpExecutor) -> Self {
+    fn new(config: ServerConfig, php: PhpExecutor) -> Result<Self, String> {
         let (shutdown, _) = watch::channel(false);
         let worker = std::env::var("PAM_WORKER_ID").unwrap_or_else(|_| "standalone".to_owned());
         let route_metrics = config.route_metrics;
         let route_metrics_max_entries = config.route_metrics_max_entries;
-        Self {
+        let otlp = crate::otlp::Exporter::from_environment()?;
+        let otlp_counters = otlp
+            .as_ref()
+            .map_or_else(crate::otlp::Counters::default, |exporter| {
+                exporter.counters.clone()
+            });
+        Ok(Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             next_socket_id: Arc::new(AtomicU64::new(1)),
             next_request_id: Arc::new(AtomicU64::new(1)),
@@ -139,7 +146,12 @@ impl ServerState {
             websocket_slots: Arc::new(Semaphore::new(config.websocket_max_connections)),
             request_slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
             config: Arc::new(config),
-            metrics: Arc::new(Metrics::new(route_metrics, route_metrics_max_entries)),
+            metrics: Arc::new(Metrics::new(
+                route_metrics,
+                route_metrics_max_entries,
+                otlp_counters,
+            )),
+            otlp,
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
             worker_state: WorkerStateReporter::from_environment(),
             next_worker_metrics_at: Arc::new(AtomicU64::new(0)),
@@ -157,7 +169,7 @@ impl ServerState {
             cache_invalidation_offset: Arc::new(AtomicU64::new(0)),
             next_cache_invalidation_at: Arc::new(AtomicU64::new(0)),
             php,
-        }
+        })
     }
 
     fn allocate_socket_id(&self) -> String {
@@ -791,6 +803,7 @@ struct Metrics {
     route_metrics_max_entries: usize,
     route_metrics: StdMutex<HashMap<RouteMetricKey, RouteMetric>>,
     route_metrics_overflow: AtomicU64,
+    otlp: crate::otlp::Counters,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -813,7 +826,11 @@ struct RateBucket {
 }
 
 impl Metrics {
-    fn new(route_metrics_enabled: bool, route_metrics_max_entries: usize) -> Self {
+    fn new(
+        route_metrics_enabled: bool,
+        route_metrics_max_entries: usize,
+        otlp: crate::otlp::Counters,
+    ) -> Self {
         Self {
             requests: AtomicU64::new(0),
             errors: AtomicU64::new(0),
@@ -835,6 +852,7 @@ impl Metrics {
             route_metrics_max_entries,
             route_metrics: StdMutex::new(HashMap::new()),
             route_metrics_overflow: AtomicU64::new(0),
+            otlp,
         }
     }
 
@@ -879,6 +897,14 @@ impl Metrics {
                 "pam_php_fibers {}\n",
                 "# TYPE pam_process_info gauge\n",
                 "pam_process_info{{worker=\"{}\",generation=\"{}\",pid=\"{}\"}} 1\n",
+                "# TYPE pam_otlp_spans_exported_total counter\n",
+                "pam_otlp_spans_exported_total {}\n",
+                "# TYPE pam_otlp_spans_dropped_total counter\n",
+                "pam_otlp_spans_dropped_total {}\n",
+                "# TYPE pam_otlp_export_errors_total counter\n",
+                "pam_otlp_export_errors_total {}\n",
+                "# TYPE pam_otlp_spans_rejected_total counter\n",
+                "pam_otlp_spans_rejected_total {}\n",
             ),
             self.requests.load(Ordering::Relaxed),
             self.errors.load(Ordering::Relaxed),
@@ -901,6 +927,10 @@ impl Metrics {
             std::env::var("PAM_WORKER_ID").unwrap_or_else(|_| "standalone".to_owned()),
             std::env::var("PAM_WORKER_GENERATION").unwrap_or_else(|_| "1".to_owned()),
             std::process::id(),
+            self.otlp.exported.load(Ordering::Relaxed),
+            self.otlp.dropped.load(Ordering::Relaxed),
+            self.otlp.errors.load(Ordering::Relaxed),
+            self.otlp.rejected.load(Ordering::Relaxed),
         );
         output.push_str("# TYPE pam_http_request_duration_seconds histogram\n");
         let labels = [
@@ -1006,6 +1036,8 @@ struct RequestTelemetry {
     state: ServerState,
     metrics: Arc<Metrics>,
     started: Instant,
+    started_unix_nanos: Option<u64>,
+    parent_span_id: Option<String>,
     alt_svc: Option<HeaderValue>,
     telemetry_headers: bool,
     log_request: bool,
@@ -1019,6 +1051,7 @@ impl RequestTelemetry {
         telemetry_headers: bool,
         access_log: bool,
         access_log_sample_rate: u64,
+        parent_span_id: Option<String>,
     ) -> Self {
         let metrics = state.metrics.clone();
         let request_number = metrics.requests.fetch_add(1, Ordering::Relaxed) + 1;
@@ -1030,6 +1063,8 @@ impl RequestTelemetry {
             state: state.clone(),
             metrics,
             started: Instant::now(),
+            started_unix_nanos: state.otlp.as_ref().map(|_| epoch_nanos()),
+            parent_span_id,
             alt_svc,
             telemetry_headers,
             log_request: access_log && request_number.is_multiple_of(access_log_sample_rate.max(1)),
@@ -1066,6 +1101,24 @@ impl RequestTelemetry {
             .fetch_add(response_bytes as u64, Ordering::Relaxed);
         if response.status().is_server_error() {
             self.metrics.errors.fetch_add(1, Ordering::Relaxed);
+        }
+
+        if let Some(exporter) = &self.state.otlp
+            && let Some(start_unix_nano) = self.started_unix_nanos
+            && let Some((trace_id, span_id, flags)) = traceparent_parts(traceparent)
+            && flags & 1 == 1
+        {
+            exporter.export(crate::otlp::Span {
+                trace_id: trace_id.to_owned(),
+                span_id: span_id.to_owned(),
+                parent_span_id: self.parent_span_id.clone(),
+                trace_flags: flags,
+                method: method.as_str().to_owned(),
+                route: route_template,
+                status: response.status().as_u16(),
+                start_unix_nano,
+                end_unix_nano: epoch_nanos(),
+            });
         }
 
         if self.telemetry_headers {
@@ -1293,7 +1346,8 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
     // overload deterministic and prevents a slow application from turning a
     // traffic spike into unbounded process memory growth.
     let (php_sender, php_receiver) = mpsc::channel(config.php_executor_queue_capacity.max(1));
-    let state = ServerState::new(config, PhpExecutor { sender: php_sender });
+    let state = ServerState::new(config, PhpExecutor { sender: php_sender })
+        .map_err(ServerError::Configuration)?;
     start_php_executor(state.clone(), php_receiver);
     let recycle = state.shutdown.subscribe();
     let shutdown_sender = state.shutdown.clone();
@@ -1570,6 +1624,10 @@ async fn handle_http3_request(
         .map_or_else(|| uri.path().to_owned(), ToString::to_string);
     let request_id = request_identifier(&headers).unwrap_or_else(|| state.allocate_request_id());
     let traceparent = request_traceparent(&headers, &state);
+    let parent_span_id = state
+        .otlp
+        .as_ref()
+        .and_then(|_| incoming_parent_span_id(&headers));
     let telemetry = RequestTelemetry::begin(
         &state,
         0,
@@ -1577,6 +1635,7 @@ async fn handle_http3_request(
         state.config.telemetry_headers,
         state.config.access_log,
         state.config.access_log_sample_rate,
+        parent_span_id,
     );
 
     let (response, response_bytes, cors_origin) = if uri.path() == state.config.metrics_path {
@@ -1776,6 +1835,10 @@ async fn http_dispatch(
     state.record_request();
     let request_id = request_identifier(&headers).unwrap_or_else(|| state.allocate_request_id());
     let traceparent = request_traceparent(&headers, &state);
+    let parent_span_id = state
+        .otlp
+        .as_ref()
+        .and_then(|_| incoming_parent_span_id(&headers));
     let telemetry = RequestTelemetry::begin(
         &state,
         0,
@@ -1783,6 +1846,7 @@ async fn http_dispatch(
         state.config.telemetry_headers,
         state.config.access_log,
         state.config.access_log_sample_rate,
+        parent_span_id,
     );
     let target = uri
         .path_and_query()
@@ -3735,11 +3799,44 @@ fn server_span_identifier(state: &ServerState) -> String {
 }
 
 fn request_traceparent(headers: &HeaderMap, state: &ServerState) -> String {
-    if state.config.telemetry_headers || headers.contains_key("traceparent") {
+    if state.config.telemetry_headers || state.otlp.is_some() || headers.contains_key("traceparent")
+    {
         traceparent(headers, state)
     } else {
         String::new()
     }
+}
+
+fn incoming_parent_span_id(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get("traceparent")?.to_str().ok()?;
+    valid_traceparent(value).then(|| {
+        value
+            .split('-')
+            .nth(2)
+            .expect("validated parent span ID")
+            .to_owned()
+    })
+}
+
+fn traceparent_parts(value: &str) -> Option<(&str, &str, u8)> {
+    if !valid_traceparent(value) {
+        return None;
+    }
+    let mut parts = value.split('-');
+    let _version = parts.next()?;
+    let trace_id = parts.next()?;
+    let span_id = parts.next()?;
+    let flags = u8::from_str_radix(parts.next()?, 16).ok()?;
+    Some((trace_id, span_id, flags))
+}
+
+fn epoch_nanos() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
+        })
 }
 
 fn valid_traceparent(value: &str) -> bool {

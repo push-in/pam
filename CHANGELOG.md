@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Add bounded, non-blocking OTLP/HTTP JSON server-span export with W3C parent
+  lineage, HTTPS enforcement, controlled retries, redacted attributes and
+  Prometheus delivery counters.
 - Refresh the PAM Desktop starter with the cross-surface run-green identity,
   truthful bridge lifecycle states, WCAG contrast gates, high-contrast and
   forced-color support, and a 375 px responsive visual contract.
