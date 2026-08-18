@@ -45,3 +45,34 @@ authorization values, and application secrets before persistence.
 The live development lifecycle is a separate streaming contract documented in
 `development-events.md`; snapshots describe current state, while those events
 describe state transitions.
+
+## Bounded performance timeline
+
+Any schema 1 snapshot can be normalized into Chrome Trace Event JSON for Chrome
+DevTools, Perfetto or another compatible viewer:
+
+```bash
+pam diagnostics > snapshot.json
+pam timeline snapshot.json --output timeline.json
+
+# The bounded snapshot can also stay entirely in a pipe:
+pam diagnostics | pam timeline - > timeline.json
+```
+
+`--output` uses create-new semantics and never overwrites existing evidence.
+Input is limited to a regular, non-symlink file of at most 1 MiB, or the same
+bounded amount from standard input. Server snapshots accept at most 1,024
+events; Native accepts its protocol limit of eight; Desktop exports its bounded
+aggregate counters as a Trace Event counter sample.
+
+Server monotonic nanoseconds are rebased to the first event. Native durations
+are placed sequentially because schema 1 deliberately does not persist device
+timestamps. Desktop schema 1 has aggregate metrics rather than individual
+events. These distinctions remain explicit: the exporter does not fabricate
+wall-clock precision or individual Desktop command spans.
+
+Only static PAM event names, integer timings, failure state and operational
+counters enter the trace. Server `context` and request IDs, Native labels, and
+unknown Desktop fields are discarded. This makes exported evidence useful for
+performance comparison without turning a diagnostic artifact into an
+application-data or credential archive.

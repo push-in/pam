@@ -521,6 +521,19 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &["top", "top http://127.0.0.1:3010 --iterations 60"],
         ),
+        "timeline" => (
+            "Normalize a redacted DevTools snapshot into Chrome Trace Event JSON.",
+            "timeline <snapshot.json|-> [options]",
+            &[(
+                "--output PATH",
+                "Create a new timeline file instead of writing standard output",
+            )],
+            &[
+                "diagnostics index.php > snapshot.json",
+                "timeline snapshot.json --output timeline.json",
+                "diagnostics index.php | timeline -",
+            ],
+        ),
         "benchmark" => (
             "Measure HTTP throughput, success rate, and latency percentiles.",
             "benchmark <url> [options]",

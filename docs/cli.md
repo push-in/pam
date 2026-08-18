@@ -34,6 +34,7 @@ Laravel, `4` Desktop, and `5` raw runtime. Legacy discovery from
 | `pam build` | production bundle | production bundle | release APK | desktop build |
 | `pam package` | `tar.gz` + SHA-256 | `tar.gz` + SHA-256 | AAB + SHA-256 | desktop implementation |
 | `pam diagnostics` | runtime snapshot | runtime snapshot | live Android/iOS Simulator snapshot | live development snapshot |
+| `pam timeline snapshot.json` | Chrome/Perfetto timeline | Chrome/Perfetto timeline | Chrome/Perfetto timeline from bounded device events | Chrome/Perfetto counter sample from bounded host metrics |
 
 Explicit namespaces such as `pam mobile ...` and `pam desktop ...` are stable
 advanced interfaces for CI and cross-project automation.

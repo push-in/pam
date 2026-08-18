@@ -109,6 +109,11 @@ pub const COMMANDS: &[CommandSpec] = &[
     command("inspect", "Inspect runtime capabilities", "Observe"),
     command("routes", "List application routes", "Observe"),
     command("diagnostics", "Capture runtime diagnostics", "Observe"),
+    command(
+        "timeline",
+        "Export a bounded performance timeline",
+        "Observe",
+    ),
     command("top", "Stream live runtime metrics", "Observe"),
     command("mobile", "Use explicit PAM Native commands", "Advanced"),
     command("desktop", "Use explicit PAM Desktop commands", "Advanced"),

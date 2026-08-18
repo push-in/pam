@@ -34,9 +34,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Ecosystem
 
 - `pam packages` — List official PAM capabilities.
-- `pam registry verify|resolve|rotate|adopt` — Verify signed metadata, resolve
-  compatible artifacts, inspect key rotation, or adopt root and catalog
-  transactionally.
+- `pam registry` — Verify signed plugin metadata and compatibility.
 - `pam add` — Install an official capability.
 - `pam remove` — Remove an official capability.
 - `pam outdated` — Inspect available dependency updates.
@@ -68,6 +66,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam inspect` — Inspect runtime capabilities.
 - `pam routes` — List application routes.
 - `pam diagnostics` — Capture runtime diagnostics.
+- `pam timeline` — Export a bounded performance timeline.
 - `pam top` — Stream live runtime metrics.
 ## Advanced
 

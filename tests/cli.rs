@@ -710,9 +710,51 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     assert!(registry_help.contains("registry payload"));
     assert!(registry_help.contains("registry key-id"));
 
+    let timeline_help = run_pam(&["help", "timeline"]);
+    assert!(timeline_help.status.success());
+    assert!(String::from_utf8_lossy(&timeline_help.stderr).contains("Chrome Trace Event JSON"));
+
     let version = run_pam(&["--version"]);
     assert!(version.status.success());
     assert!(String::from_utf8_lossy(&version.stdout).starts_with("pam "));
+}
+
+#[test]
+fn exports_a_bounded_redacted_cross_surface_timeline() {
+    let directory = temporary_path("timeline-export");
+    fs::create_dir(&directory).unwrap();
+    let snapshot = directory.join("native-snapshot.json");
+    let output = directory.join("native-trace.json");
+    fs::write(
+        &snapshot,
+        r#"{"schemaVersion":1,"surfaceCode":2,"capturedAtUnixMs":1234,"timeline":[{"kindCode":1,"durationMicros":42,"failed":false,"label":"private-label"}]}"#,
+    )
+    .unwrap();
+    let first = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(["timeline", snapshot.to_str().unwrap(), "--output"])
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    let trace = fs::read_to_string(&output).unwrap();
+    assert!(trace.contains("\"traceEvents\""));
+    assert!(trace.contains("native.module_call"));
+    assert!(!trace.contains("private-label"));
+
+    let second = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(["timeline", snapshot.to_str().unwrap(), "--output"])
+        .arg(&output)
+        .output()
+        .unwrap();
+    assert!(
+        !second.status.success(),
+        "timeline evidence must not be overwritten"
+    );
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[cfg(unix)]

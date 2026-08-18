@@ -27,6 +27,7 @@ mod self_update;
 mod server;
 mod ship;
 mod terminal;
+mod timeline;
 mod worker_state;
 
 const EX_NOINPUT: u8 = 66;
@@ -472,6 +473,10 @@ fn run() -> Result<u8, CliError> {
 
     if script_arg == "registry" {
         return plugin_registry::run(raw_args.collect()).map_err(CliError::Commands);
+    }
+
+    if script_arg == "timeline" {
+        return timeline::run(raw_args).map_err(CliError::Commands);
     }
 
     if script_arg == "start" {
