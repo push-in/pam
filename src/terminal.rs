@@ -499,6 +499,19 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "doctor --json",
             ],
         ),
+        "clean" => (
+            "Inspect and remove regenerable development artifacts inside one project.",
+            "clean [path] [options]",
+            &[
+                ("--dry-run", "Measure and report without deleting anything"),
+                (
+                    "--all",
+                    "Also remove complete generated hosts and Cargo target",
+                ),
+                ("--json", "Emit a stable machine-readable cleanup report"),
+            ],
+            &["clean --dry-run", "clean . --json", "clean . --all"],
+        ),
         "top" => (
             "Display live metrics from a Pam cluster control plane.",
             "top [admin-url] [options]",

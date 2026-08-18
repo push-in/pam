@@ -13,6 +13,11 @@ pub const COMMANDS: &[CommandSpec] = &[
     command("init", "Create a project from a preset", "Project"),
     command("info", "Describe the active project", "Project"),
     command("doctor", "Validate or repair the active project", "Project"),
+    command(
+        "clean",
+        "Remove bounded project development artifacts",
+        "Project",
+    ),
     command("dev", "Start the contextual development session", "Develop"),
     command("run", "Build and launch the active application", "Develop"),
     command("logs", "Stream logs from the active application", "Develop"),

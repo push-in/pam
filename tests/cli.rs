@@ -217,6 +217,28 @@ fn initializes_and_discovers_a_contextual_native_project() {
     assert_eq!(measured["developmentArtifacts"]["bytes"], 64);
     assert_eq!(measured["developmentArtifacts"]["files"], 1);
     assert_eq!(measured["developmentArtifacts"]["complete"], true);
+    let preview = run_pam_in(&project, &["clean", "--dry-run", "--json"]);
+    assert!(preview.status.success());
+    let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
+    assert_eq!(preview["schemaVersion"], 1);
+    assert_eq!(preview["resultCode"], 1);
+    assert_eq!(preview["operationCode"], 1);
+    assert_eq!(preview["projectTypeCode"], 2);
+    assert_eq!(preview["bytes"], 64);
+    assert!(
+        project
+            .join(".pam-native/android/app/build/artifact.bin")
+            .is_file()
+    );
+    let cleaned = run_pam_in(&project, &["clean", "--json"]);
+    assert!(cleaned.status.success());
+    let cleaned: serde_json::Value = serde_json::from_slice(&cleaned.stdout).unwrap();
+    assert_eq!(cleaned["operationCode"], 2);
+    assert_eq!(cleaned["bytes"], 64);
+    assert_eq!(cleaned["entries"][0]["kindCode"], 2);
+    assert_eq!(cleaned["entries"][0]["removed"], true);
+    assert!(!project.join(".pam-native/android/app/build").exists());
+    assert!(project.join("index.php").is_file());
     fs::remove_dir_all(parent).unwrap();
 }
 

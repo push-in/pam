@@ -110,6 +110,12 @@ before it changes the manifest or lockfile.
 
 ## Automation
 
+Generated build state stays project-scoped. Use `pam clean --dry-run --json` to
+measure reclaimable bytes in CI or `pam clean` for the safe daily tier. Complete
+host and Cargo rebuilds can use `pam clean --all`; see
+[development artifact retention](development-artifacts.md) for the exact
+allowlist and stable integer contract.
+
 Interactive flows always have deterministic command forms for CI:
 
 ```bash

@@ -40,6 +40,16 @@ pub struct RegisteredCommand {
     pub script: PathBuf,
 }
 
+pub fn discover_cleanable(path: &Path) -> Option<ProjectContext> {
+    discover(path).or_else(|| {
+        let root = fs::canonicalize(path).ok()?;
+        (root.is_dir() && root.join("Cargo.toml").is_file()).then_some(ProjectContext {
+            root,
+            kind: ProjectKind::Raw,
+        })
+    })
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct DevelopmentArtifacts {
@@ -51,6 +61,198 @@ struct DevelopmentArtifacts {
 }
 
 const MAX_ARTIFACT_ENTRIES: u64 = 100_000;
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum CleanupArtifactKind {
+    Cache = 1,
+    Build = 2,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CleanupEntry {
+    path: PathBuf,
+    kind_code: u8,
+    existed: bool,
+    bytes: u64,
+    files: u64,
+    complete: bool,
+    removed: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CleanupReport<'a> {
+    schema_version: u8,
+    result_code: u8,
+    operation_code: u8,
+    project_type_code: u8,
+    root: &'a Path,
+    bytes: u64,
+    files: u64,
+    entries: &'a [CleanupEntry],
+}
+
+pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> Result<u8, String> {
+    let root = fs::canonicalize(&context.root).map_err(|error| {
+        format!(
+            "cannot resolve project root {}: {error}",
+            context.root.display()
+        )
+    })?;
+    let targets = cleanup_targets(all);
+    let mut entries = Vec::with_capacity(targets.len());
+    for (relative, kind) in targets {
+        let path = root.join(relative);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                entries.push(CleanupEntry {
+                    path: relative.to_owned(),
+                    kind_code: kind as u8,
+                    existed: false,
+                    bytes: 0,
+                    files: 0,
+                    complete: true,
+                    removed: false,
+                });
+                continue;
+            }
+            Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
+        };
+        if metadata.file_type().is_symlink() {
+            return Err(format!(
+                "refusing to clean generated artifact symlink {}",
+                path.display()
+            ));
+        }
+        if !metadata.is_dir() {
+            return Err(format!(
+                "refusing to clean non-directory artifact {}",
+                path.display()
+            ));
+        }
+        let mut bytes = 0;
+        let mut files = 0;
+        let complete = measure_directory(&path, &mut bytes, &mut files)?;
+        let removed = if dry_run {
+            false
+        } else {
+            fs::remove_dir_all(&path)
+                .map_err(|error| format!("cannot clean {}: {error}", path.display()))?;
+            true
+        };
+        entries.push(CleanupEntry {
+            path: relative.to_owned(),
+            kind_code: kind as u8,
+            existed: true,
+            bytes,
+            files,
+            complete,
+            removed,
+        });
+    }
+    let bytes = entries.iter().map(|entry| entry.bytes).sum();
+    let files = entries.iter().map(|entry| entry.files).sum();
+    let report = CleanupReport {
+        schema_version: 1,
+        result_code: 1,
+        operation_code: if dry_run {
+            1
+        } else if all {
+            3
+        } else {
+            2
+        },
+        project_type_code: context.kind as u8,
+        root: &root,
+        bytes,
+        files,
+        entries: &entries,
+    };
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("cannot encode cleanup report: {error}"))?
+        );
+    } else {
+        let ui = Terminal::stdout();
+        println!("{}", ui.brand("PAM / CLEAN"));
+        println!("{}\n", ui.rule());
+        println!("  {}  {}", ui.heading("Project"), root.display());
+        println!(
+            "  {}  {} across {} files",
+            ui.heading(if dry_run { "Reclaimable" } else { "Removed" }),
+            human_bytes(bytes),
+            files
+        );
+        for entry in entries.iter().filter(|entry| entry.existed) {
+            println!(
+                "  {}  {} ({})",
+                if entry.removed { "✓" } else { "·" },
+                entry.path.display(),
+                human_bytes(entry.bytes)
+            );
+        }
+        if dry_run {
+            println!(
+                "\n  Preview only. Run `pam clean{}` to remove these artifacts.",
+                if all { " --all" } else { "" }
+            );
+        }
+    }
+    Ok(0)
+}
+
+fn cleanup_targets(all: bool) -> Vec<(&'static Path, CleanupArtifactKind)> {
+    if all {
+        return vec![
+            (Path::new(".pam-native/android"), CleanupArtifactKind::Build),
+            (Path::new(".pam-native/ios"), CleanupArtifactKind::Build),
+            (Path::new("target"), CleanupArtifactKind::Build),
+        ];
+    }
+    vec![
+        (
+            Path::new(".pam-native/android/app/build"),
+            CleanupArtifactKind::Build,
+        ),
+        (
+            Path::new(".pam-native/android/build"),
+            CleanupArtifactKind::Build,
+        ),
+        (
+            Path::new(".pam-native/android/gradle-home/caches"),
+            CleanupArtifactKind::Cache,
+        ),
+        (
+            Path::new(".pam-native/android/gradle-home/daemon"),
+            CleanupArtifactKind::Cache,
+        ),
+        (
+            Path::new(".pam-native/android/gradle-home/native"),
+            CleanupArtifactKind::Cache,
+        ),
+        (
+            Path::new(".pam-native/android/gradle-home/notifications"),
+            CleanupArtifactKind::Cache,
+        ),
+        (
+            Path::new(".pam-native/ios/App/DerivedData"),
+            CleanupArtifactKind::Build,
+        ),
+        (
+            Path::new("target/debug/incremental"),
+            CleanupArtifactKind::Cache,
+        ),
+        (
+            Path::new("target/release/incremental"),
+            CleanupArtifactKind::Cache,
+        ),
+    ]
+}
 
 pub fn native_platforms(context: &ProjectContext) -> Result<Vec<u8>, String> {
     if context.kind != ProjectKind::Native {
@@ -578,6 +780,61 @@ mod tests {
         assert_eq!(context.root, root);
         assert_eq!(context.kind, ProjectKind::Native);
         fs::remove_dir_all(context.root).unwrap();
+    }
+
+    #[test]
+    fn project_cleanup_is_scoped_previewable_and_tiered() {
+        let root = temporary("clean");
+        fs::create_dir_all(root.join("target/debug/incremental/session")).unwrap();
+        fs::create_dir_all(root.join("target/debug/deps")).unwrap();
+        fs::create_dir_all(root.join(".pam-native/android/app/build")).unwrap();
+        fs::write(root.join("index.php"), "<?php\n").unwrap();
+        fs::write(
+            root.join("target/debug/incremental/session/cache.bin"),
+            [1_u8; 32],
+        )
+        .unwrap();
+        fs::write(root.join("target/debug/deps/application"), [2_u8; 16]).unwrap();
+        fs::write(
+            root.join(".pam-native/android/app/build/app.apk"),
+            [3_u8; 64],
+        )
+        .unwrap();
+        let context = ProjectContext {
+            root: root.clone(),
+            kind: ProjectKind::Native,
+        };
+
+        clean(&context, false, true, false).expect("preview");
+        assert!(
+            root.join("target/debug/incremental/session/cache.bin")
+                .is_file()
+        );
+        clean(&context, false, false, false).expect("cache cleanup");
+        assert!(!root.join("target/debug/incremental").exists());
+        assert!(!root.join(".pam-native/android/app/build").exists());
+        assert!(root.join("target/debug/deps/application").is_file());
+        assert!(root.join("index.php").is_file());
+
+        clean(&context, true, false, false).expect("full cleanup");
+        assert!(!root.join("target").exists());
+        assert!(!root.join(".pam-native/android").exists());
+        assert!(root.join("index.php").is_file());
+        assert_eq!(CleanupArtifactKind::Cache as u8, 1);
+        assert_eq!(CleanupArtifactKind::Build as u8, 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn discovers_rust_workspaces_only_for_scoped_cleanup() {
+        let root = temporary("rust-clean");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        assert!(discover(&root).is_none());
+        let context = discover_cleanable(&root).expect("cleanable Rust workspace");
+        assert_eq!(context.root, fs::canonicalize(&root).unwrap());
+        assert_eq!(context.kind, ProjectKind::Raw);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

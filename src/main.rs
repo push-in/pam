@@ -185,6 +185,36 @@ fn run() -> Result<u8, CliError> {
         return editor::install(raw_args).map_err(CliError::Commands);
     }
 
+    if script_arg == "clean" {
+        let mut all = false;
+        let mut dry_run = false;
+        let mut json = false;
+        let mut target = None;
+        for argument in raw_args {
+            match argument.to_string_lossy().as_ref() {
+                "--all" => all = true,
+                "--dry-run" => dry_run = true,
+                "--json" => json = true,
+                option if option.starts_with('-') => {
+                    return Err(CliError::Commands(format!(
+                        "unknown clean option: {option}"
+                    )));
+                }
+                _ if target.is_none() => target = Some(argument),
+                _ => {
+                    return Err(CliError::Commands(
+                        "clean accepts at most one project path".to_owned(),
+                    ));
+                }
+            }
+        }
+        let target = resolve_target(&target.unwrap_or_else(|| OsString::from(".")))?;
+        let context = project::discover_cleanable(&target).ok_or_else(|| {
+            CliError::Commands("`pam clean` must target a PAM project or Rust workspace".to_owned())
+        })?;
+        return project::clean(&context, all, dry_run, json).map_err(CliError::Commands);
+    }
+
     if script_arg == "self-update" {
         return self_update::run(raw_args).map_err(CliError::Commands);
     }
