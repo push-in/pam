@@ -80,3 +80,41 @@ The direct PAM `main` push was accepted through an administrator bypass even
 though the branch rule requires a pull request and four status checks. This is
 recorded as a governance exception; successful post-push checks establish the
 technical evidence but do not erase the bypass.
+
+## Universal package publication enforcement
+
+PAM commits `94fe522` and `116fa26` made the compatibility workflow callable
+from external repositories, made a package-tag invocation test that exact tag,
+and made the central contract reject packages without a publication gate. The
+[final current-head matrix](https://github.com/push-in/pam/actions/runs/32190927475)
+passed all 26 repositories. A real invocation owned by
+[`pam-native-auth`](https://github.com/push-in/pam-native-auth/actions/runs/32190632958)
+also passed, proving that the reusable workflow works across repository
+boundaries rather than only in PAM's own CI.
+
+Every catalog entry now invokes the central matrix for `v*` tags and supports a
+manual pre-publication run. Nitro's automated publisher additionally declares
+the compatibility job as a hard dependency, so neither its GitHub Release nor
+its Packagist update can execute first. The package gate commits are:
+
+| Package | Gate commit | Package | Gate commit |
+| --- | --- | --- | --- |
+| auth | `51cb8bf` | background-transfer | `3fa9fd9` |
+| bluetooth | `3b12352` | devtools | `0888ae5` |
+| feature-flags | `97658ff` | firebase | `04fd711` |
+| health | `a59e2e1` | intents | `c006358` |
+| laravel-sync | `43696d5` | live-activities | `a51a408` |
+| maps | `5349f16` | media | `dc0ec33` |
+| nfc | `dfb0dea` | nitro | `de882de` |
+| observability | `92a4d43` | payments | `ca27749` |
+| php aggregate | `8cbf19c` | plugin-kit | `61099a0` |
+| realtime | `282dd11` | scanner | `5c15b77` |
+| share-extension | `ba97b37` | subscriptions | `8c64a26` |
+| sync | `5ced27e` | testing | `c8ff32b` |
+| video | `1226362` | widgets | `dd5fe1e` |
+
+The aggregate `pushinbr/pam-native` distribution had no independent push CI.
+Commit `6670118` added PHP 8.4/8.5 validation, Composer preflight/install,
+optimized strict PSR autoload validation and syntax checks; its
+[first run passed](https://github.com/push-in/pam-native-php/actions/runs/32190912248).
+The other 25 gate commits also completed their repository-owned CI successfully.
