@@ -156,6 +156,28 @@ move below that sequence. `pam add` refuses a changed root fingerprint; operator
 can inspect a candidate with `pam registry rotate` and commit it transactionally
 with `pam registry adopt`.
 
+## PAM Native Android runtime
+
+An authenticated Native project resolves the Android runtime as
+`pushinbr/pam-android-runtime`, surface code `2`, artifact kind code `2`, and the
+CLI's exact Native protocol (`1` for the current release). A different configured
+protocol or artifact kind is rejected before network access.
+
+`pam doctor --fix` and `pam mobile runtime:install` then download the catalog's
+HTTPS `artifactUrl` once, cap it at 1 GiB, and compare its bytes with the signed
+SHA-256. The sibling release checksum is deliberately not requested in this mode.
+Only after the existing archive path checks, runtime/ABI validation, extraction,
+and installation succeed does PAM advance `.pam/plugin-registry-state.json` to
+the catalog sequence. Provenance is recorded in
+`.pam-native/android-runtime.artifact.json`; a different registry root, catalog
+sequence, version, package or artifact hash forces reinstallation even when the
+shared runtime files already exist. The temporary archive and extracted tree are
+removed on success or failure.
+
+Projects without `pam-registry.json` retain the compatible release-asset flow and
+its bounded sibling checksum. This fallback can be removed after an official root
+ceremony and catalog become universally available.
+
 ## Canonical signed bytes
 
 Signatures cover compact UTF-8 JSON without trailing newline. Object fields use

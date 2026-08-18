@@ -257,6 +257,81 @@ pub(crate) fn persist_project_state(
     )
 }
 
+pub(crate) fn resolve_project_release(
+    project: &Path,
+    package: &str,
+    surface_code: u8,
+    native_protocol: Option<u32>,
+    desktop_protocol: Option<u32>,
+) -> Result<Option<VerifiedRelease>, String> {
+    resolve_project_release_at(
+        project,
+        package,
+        surface_code,
+        native_protocol,
+        desktop_protocol,
+        None,
+    )
+}
+
+fn resolve_project_release_at(
+    project: &Path,
+    package: &str,
+    surface_code: u8,
+    native_protocol: Option<u32>,
+    desktop_protocol: Option<u32>,
+    at_unix: Option<u64>,
+) -> Result<Option<VerifiedRelease>, String> {
+    let Some(config) = load_project_config(project)? else {
+        return Ok(None);
+    };
+    if surface_code == 2 && config.native_protocol != native_protocol {
+        return Err(format!(
+            "pam-registry.json nativeProtocol {:?} does not match runtime protocol {:?}",
+            config.native_protocol, native_protocol
+        ));
+    }
+    if surface_code == 3 && config.desktop_protocol != desktop_protocol {
+        return Err(format!(
+            "pam-registry.json desktopProtocol {:?} does not match runtime protocol {:?}",
+            config.desktop_protocol, desktop_protocol
+        ));
+    }
+    let state = load_project_state(project)?;
+    let root = project_document_path(project, &config.root_path, "rootPath")?;
+    let catalog = project_document_path(project, &config.catalog_path, "catalogPath")?;
+    let pam_version = Version::parse(env!("CARGO_PKG_VERSION"))
+        .map_err(|error| format!("invalid PAM package version: {error}"))?;
+    let release = resolve_verified(
+        &root,
+        &config.root_sha256,
+        &catalog,
+        package,
+        surface_code,
+        &pam_version,
+        native_protocol,
+        desktop_protocol,
+        state.as_ref().map(|value| value.catalog_sequence),
+        at_unix,
+    )?;
+    if let Some(state) = state {
+        if state.registry != release.registry {
+            return Err(
+                "signed registry identity does not match the accepted project state".to_owned(),
+            );
+        }
+        if state.root_sha256 != release.root_sha256 {
+            return Err(
+                "trusted registry root changed without an authenticated rotation".to_owned(),
+            );
+        }
+        if release.root_generation < state.root_generation {
+            return Err("signed registry root generation would roll the project back".to_owned());
+        }
+    }
+    Ok(Some(release))
+}
+
 fn write_project_state(project: &Path, state: &ProjectRegistryState) -> Result<(), String> {
     let path = project.join(PROJECT_REGISTRY_STATE);
     let parent = path.parent().expect("state path has parent");
@@ -1408,7 +1483,20 @@ mod tests {
             sequence: next_sequence,
             generated_at_unix: 1_100,
             expires_at_unix: 2_000,
-            plugins: Vec::new(),
+            plugins: vec![PluginRelease {
+                package: "pushinbr/pam-android-runtime".to_owned(),
+                version: "1.0.3".to_owned(),
+                artifact_kind_code: 2,
+                artifact_url: "https://plugins.pam.dev/pam-android-runtime.tar.gz".to_owned(),
+                sha256: "cd".repeat(32),
+                published_at_unix: 1_050,
+                surface_codes: vec![2],
+                compatibility: PluginCompatibility {
+                    pam: "^1.0".to_owned(),
+                    native_protocol: Some(1),
+                    desktop_protocol: None,
+                },
+            }],
             revocations: Vec::new(),
             signatures: Vec::new(),
         };
@@ -1673,6 +1761,18 @@ mod tests {
         assert_eq!(state.root_generation, 2);
         assert_eq!(state.catalog_sequence, 8);
         assert!(!project.join(PROJECT_ROTATION_RECEIPT).exists());
+        let runtime = resolve_project_release_at(
+            &project,
+            "pushinbr/pam-android-runtime",
+            2,
+            Some(1),
+            None,
+            Some(1_200),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(runtime.artifact_kind_code, 2);
+        assert_eq!(runtime.catalog_sequence, 8);
 
         write_project_state(
             &project,
@@ -1753,6 +1853,32 @@ mod tests {
         let config = load_project_config(&project).unwrap().unwrap();
         assert_eq!(config.root_sha256, current_sha256);
         assert!(!project.join(PROJECT_ROTATION_RECEIPT).exists());
+        fs::remove_dir_all(project).unwrap();
+    }
+
+    #[test]
+    fn project_resolution_rejects_a_protocol_different_from_the_runtime() {
+        let project =
+            std::env::temp_dir().join(format!("pam-registry-protocol-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&project);
+        fs::create_dir(&project).unwrap();
+        write_json_atomic(
+            &project.join(PROJECT_REGISTRY_CONFIG),
+            &ProjectRegistryConfig {
+                schema_version: 1,
+                root_path: PathBuf::from("registry/root.json"),
+                root_sha256: "ab".repeat(32),
+                catalog_path: PathBuf::from("registry/catalog.json"),
+                native_protocol: Some(2),
+                desktop_protocol: None,
+            },
+            "test protocol config",
+        )
+        .unwrap();
+        let error =
+            resolve_project_release(&project, "pushinbr/pam-android-runtime", 2, Some(1), None)
+                .unwrap_err();
+        assert!(error.contains("does not match runtime protocol"));
         fs::remove_dir_all(project).unwrap();
     }
 }

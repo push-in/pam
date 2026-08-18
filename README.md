@@ -421,7 +421,9 @@ Superglobals, output buffers, headers, sessions, uploads, Fiber context, and req
 
 ## Composer stays Composer
 
-Pam does not ship a package registry or a competing dependency format.
+Composer remains the dependency resolver and PAM does not introduce a competing
+package format. Projects may opt into PAM's signed compatibility catalog to
+authenticate official versions and artifact bytes before Composer sees them.
 
 ```bash
 pam composer require guzzlehttp/guzzle
@@ -430,7 +432,7 @@ pam doctor
 pam test
 ```
 
-Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and loads the normal Composer autoloader. Your lockfile remains the source of truth.
+Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and loads the normal Composer autoloader. Your lockfile remains the dependency source of truth; the signed PAM catalog is an authenticity and compatibility gate, not a second solver.
 
 Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pushinbr/pam-api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
 

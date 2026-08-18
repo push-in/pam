@@ -10,6 +10,8 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
+use crate::plugin_registry;
+
 const MANIFEST_NAME: &str = "pam-native.json";
 const DEFAULT_PORT: u16 = 39_100;
 const MAX_PROJECT_FILES: usize = 10_000;
@@ -20,6 +22,9 @@ const PLUGIN_PROTOCOL_VERSION: u32 = 1;
 const PLUGIN_LOCK_VERSION: u32 = 1;
 const PLUGIN_MANIFEST_MAX_BYTES: u64 = 1024 * 1024;
 const RUNTIME_LOCK_VERSION: u32 = 1;
+const ANDROID_RUNTIME_PACKAGE: &str = "pushinbr/pam-android-runtime";
+const MAX_ANDROID_RUNTIME_ARCHIVE_BYTES: u64 = 1024 * 1024 * 1024;
+const MAX_CHECKSUM_BYTES: u64 = 4 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum BuildMode {
@@ -160,6 +165,19 @@ struct RuntimeLock<'a> {
     android_api: u32,
     ndk_version: &'a str,
     extensions: &'a [String],
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AndroidRuntimeArtifactLock {
+    schema_version: u32,
+    registry: String,
+    root_sha256: String,
+    root_generation: u32,
+    catalog_sequence: u64,
+    package: String,
+    version: String,
+    artifact_sha256: String,
 }
 
 struct ResolvedRuntime {
@@ -2140,12 +2158,19 @@ pub fn repair_android(project_path: &Path) -> Result<(), String> {
     let pam_home = pam_home()?;
     let native_home = native_home()?;
     let runtime = resolve_runtime(&project, &pam_home)?;
+    let signed_release = signed_android_runtime_release(&project)?;
 
-    if default_abis()
-        .into_iter()
-        .any(|abi| !runtime_ready_at(&runtime.root, abi) || !engine_ready_at(&native_home, abi))
+    if signed_release
+        .as_ref()
+        .is_some_and(|release| !android_runtime_artifact_is_current(&project, release))
+        || default_abis()
+            .into_iter()
+            .any(|abi| !runtime_ready_at(&runtime.root, abi) || !engine_ready_at(&native_home, abi))
     {
-        install_android_runtime_bundle(&project, &pam_home, &native_home)?;
+        install_android_runtime_bundle(&project, &pam_home, &native_home, signed_release.as_ref())?;
+    }
+    if let Some(release) = &signed_release {
+        plugin_registry::persist_project_state(&project.root, release)?;
     }
 
     write_runtime_lock(&project, &runtime)?;
@@ -2167,6 +2192,7 @@ fn install_android_runtime_bundle(
     project: &Project,
     pam_home: &Path,
     native_home: &Path,
+    signed_release: Option<&plugin_registry::VerifiedRelease>,
 ) -> Result<(), String> {
     let asset = "pam-android-runtime.tar.gz";
     let release_tag = format!("v{}", env!("CARGO_PKG_VERSION"));
@@ -2188,10 +2214,27 @@ fn install_android_runtime_bundle(
         .map_err(|error| format!("cannot create {}: {error}", temporary.display()))?;
     let result = (|| {
         let archive = temporary.join(asset);
-        let checksum = temporary.join(format!("{asset}.sha256"));
-        download_release_asset(&format!("{base}/{asset}"), &archive)?;
-        download_release_asset(&format!("{base}/{asset}.sha256"), &checksum)?;
-        verify_release_checksum(&archive, &checksum, asset)?;
+        if let Some(release) = signed_release {
+            download_release_asset(
+                &release.artifact_url,
+                &archive,
+                MAX_ANDROID_RUNTIME_ARCHIVE_BYTES,
+            )?;
+            verify_artifact_sha256(&archive, &release.sha256)?;
+        } else {
+            let checksum = temporary.join(format!("{asset}.sha256"));
+            download_release_asset(
+                &format!("{base}/{asset}"),
+                &archive,
+                MAX_ANDROID_RUNTIME_ARCHIVE_BYTES,
+            )?;
+            download_release_asset(
+                &format!("{base}/{asset}.sha256"),
+                &checksum,
+                MAX_CHECKSUM_BYTES,
+            )?;
+            verify_release_checksum(&archive, &checksum, asset)?;
+        }
 
         let listing = Command::new("tar")
             .args(["-tzf"])
@@ -2249,6 +2292,9 @@ fn install_android_runtime_bundle(
             &native_home.join("target"),
             &[],
         )?;
+        if let Some(release) = signed_release {
+            write_android_runtime_artifact_lock(project, release)?;
+        }
         Ok(())
     })();
     let cleanup = fs::remove_dir_all(&temporary);
@@ -2261,7 +2307,89 @@ fn install_android_runtime_bundle(
     }
 }
 
-fn download_release_asset(url: &str, destination: &Path) -> Result<(), String> {
+fn signed_android_runtime_release(
+    project: &Project,
+) -> Result<Option<plugin_registry::VerifiedRelease>, String> {
+    let release = plugin_registry::resolve_project_release(
+        &project.root,
+        ANDROID_RUNTIME_PACKAGE,
+        2,
+        Some(PLUGIN_PROTOCOL_VERSION),
+        None,
+    )?;
+    if let Some(release) = &release {
+        validate_android_runtime_release(release)?;
+    }
+    Ok(release)
+}
+
+fn android_runtime_artifact_lock_path(project: &Project) -> PathBuf {
+    project
+        .root
+        .join(".pam-native/android-runtime.artifact.json")
+}
+
+fn android_runtime_artifact_is_current(
+    project: &Project,
+    release: &plugin_registry::VerifiedRelease,
+) -> bool {
+    let path = android_runtime_artifact_lock_path(project);
+    let Ok(bytes) = fs::read(&path) else {
+        return false;
+    };
+    if bytes.len() > 16 * 1024
+        || !fs::symlink_metadata(&path).is_ok_and(|metadata| metadata.file_type().is_file())
+    {
+        return false;
+    }
+    let Ok(lock) = serde_json::from_slice::<AndroidRuntimeArtifactLock>(&bytes) else {
+        return false;
+    };
+    lock.schema_version == 1
+        && lock.registry == release.registry
+        && lock.root_sha256 == release.root_sha256
+        && lock.root_generation == release.root_generation
+        && lock.catalog_sequence == release.catalog_sequence
+        && lock.package == release.package
+        && lock.version == release.version
+        && lock.artifact_sha256 == release.sha256
+}
+
+fn write_android_runtime_artifact_lock(
+    project: &Project,
+    release: &plugin_registry::VerifiedRelease,
+) -> Result<(), String> {
+    let lock = AndroidRuntimeArtifactLock {
+        schema_version: 1,
+        registry: release.registry.clone(),
+        root_sha256: release.root_sha256.clone(),
+        root_generation: release.root_generation,
+        catalog_sequence: release.catalog_sequence,
+        package: release.package.clone(),
+        version: release.version.clone(),
+        artifact_sha256: release.sha256.clone(),
+    };
+    let bytes = serde_json::to_vec_pretty(&lock)
+        .map_err(|error| format!("cannot encode Android runtime artifact lock: {error}"))?;
+    write_atomic(
+        &android_runtime_artifact_lock_path(project),
+        &[bytes, b"\n".to_vec()].concat(),
+    )
+}
+
+fn validate_android_runtime_release(
+    release: &plugin_registry::VerifiedRelease,
+) -> Result<(), String> {
+    if release.artifact_kind_code == 2 {
+        Ok(())
+    } else {
+        Err(format!(
+            "signed {ANDROID_RUNTIME_PACKAGE} release must use Native artifactKindCode 2"
+        ))
+    }
+}
+
+fn download_release_asset(url: &str, destination: &Path, maximum_bytes: u64) -> Result<(), String> {
     let mut command = Command::new("curl");
     if url.starts_with("https://") {
         command.args([
@@ -2279,6 +2407,8 @@ fn download_release_asset(url: &str, destination: &Path) -> Result<(), String> {
         return Err("refusing a non-HTTPS Android runtime asset".to_owned());
     }
     let status = command
+        .arg("--max-filesize")
+        .arg(maximum_bytes.to_string())
         .arg("--output")
         .arg(destination)
         .arg(url)
@@ -2290,7 +2420,27 @@ fn download_release_asset(url: &str, destination: &Path) -> Result<(), String> {
         .ok_or_else(|| format!("Android runtime download failed with {status}"))
 }
 
+fn verify_artifact_sha256(archive: &Path, expected: &str) -> Result<(), String> {
+    let actual = bounded_file_sha256(
+        archive,
+        MAX_ANDROID_RUNTIME_ARCHIVE_BYTES,
+        "Android runtime archive",
+    )?;
+    if actual == expected {
+        Ok(())
+    } else {
+        Err(format!(
+            "signed Android runtime SHA-256 mismatch: expected {expected}, got {actual}"
+        ))
+    }
+}
+
 fn verify_release_checksum(archive: &Path, checksum: &Path, asset: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(checksum)
+        .map_err(|error| format!("cannot inspect {}: {error}", checksum.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_CHECKSUM_BYTES {
+        return Err("Android runtime checksum must be a bounded regular file".to_owned());
+    }
     let expected_line = fs::read_to_string(checksum)
         .map_err(|error| format!("cannot read {}: {error}", checksum.display()))?;
     let mut fields = expected_line.split_whitespace();
@@ -2303,20 +2453,11 @@ fn verify_release_checksum(archive: &Path, checksum: &Path, asset: &str) -> Resu
     {
         return Err("invalid Android runtime checksum manifest".to_owned());
     }
-    let mut input = fs::File::open(archive)
-        .map_err(|error| format!("cannot read {}: {error}", archive.display()))?;
-    let mut digest = Sha256::new();
-    let mut buffer = [0_u8; 8192];
-    loop {
-        let read = input
-            .read(&mut buffer)
-            .map_err(|error| format!("cannot read {}: {error}", archive.display()))?;
-        if read == 0 {
-            break;
-        }
-        digest.update(&buffer[..read]);
-    }
-    let actual = format!("{:x}", digest.finalize());
+    let actual = bounded_file_sha256(
+        archive,
+        MAX_ANDROID_RUNTIME_ARCHIVE_BYTES,
+        "Android runtime archive",
+    )?;
     if actual.eq_ignore_ascii_case(expected) {
         Ok(())
     } else {
@@ -2324,6 +2465,30 @@ fn verify_release_checksum(archive: &Path, checksum: &Path, asset: &str) -> Resu
             "Android runtime checksum mismatch: expected {expected}, got {actual}"
         ))
     }
+}
+
+fn bounded_file_sha256(path: &Path, maximum_bytes: u64, label: &str) -> Result<String, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect {label} {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > maximum_bytes {
+        return Err(format!(
+            "{label} must be a regular file no larger than {maximum_bytes} bytes"
+        ));
+    }
+    let mut input =
+        fs::File::open(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let read = input
+            .read(&mut buffer)
+            .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+        if read == 0 {
+            break;
+        }
+        digest.update(&buffer[..read]);
+    }
+    Ok(format!("{:x}", digest.finalize()))
 }
 
 fn safe_android_runtime_archive_path(path: &Path) -> bool {
@@ -7138,6 +7303,56 @@ mod tests {
         assert!(!safe_android_runtime_archive_path(Path::new(
             "native/Cargo.toml"
         )));
+    }
+
+    #[test]
+    fn signed_android_runtime_requires_native_kind_and_exact_sha256() {
+        let root =
+            std::env::temp_dir().join(format!("pam-native-runtime-hash-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir(&root).unwrap();
+        let archive = root.join("runtime.tar.gz");
+        fs::write(&archive, b"bounded runtime archive").unwrap();
+        let expected = format!("{:x}", Sha256::digest(b"bounded runtime archive"));
+        assert!(verify_artifact_sha256(&archive, &expected).is_ok());
+        assert!(
+            verify_artifact_sha256(&archive, &"00".repeat(32))
+                .unwrap_err()
+                .contains("signed Android runtime SHA-256 mismatch")
+        );
+
+        let mut release = plugin_registry::VerifiedRelease {
+            registry: "https://plugins.pam.dev/v1".to_owned(),
+            root_sha256: "ab".repeat(32),
+            root_generation: 2,
+            catalog_sequence: 8,
+            package: ANDROID_RUNTIME_PACKAGE.to_owned(),
+            version: "1.0.3".to_owned(),
+            artifact_kind_code: 1,
+            artifact_url: "https://plugins.pam.dev/pam-android-runtime.tar.gz".to_owned(),
+            sha256: expected,
+        };
+        assert!(validate_android_runtime_release(&release).is_err());
+        release.artifact_kind_code = 2;
+        assert!(validate_android_runtime_release(&release).is_ok());
+
+        let project = Project {
+            root: root.clone(),
+            manifest: serde_json::from_value(serde_json::json!({
+                "version": 1,
+                "applicationId": "dev.pam.runtime",
+                "name": "Runtime",
+                "entry": "index.php"
+            }))
+            .unwrap(),
+            plugins: Vec::new(),
+        };
+        fs::create_dir(root.join(".pam-native")).unwrap();
+        write_android_runtime_artifact_lock(&project, &release).unwrap();
+        assert!(android_runtime_artifact_is_current(&project, &release));
+        release.catalog_sequence += 1;
+        assert!(!android_runtime_artifact_is_current(&project, &release));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

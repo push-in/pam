@@ -15,8 +15,10 @@ lifecycle and diagnostics. Composer owns every optional application feature.
 | `pushinbr/pam-testing` | In-memory HTTP client and fluent response assertions |
 | `pushinbr/pam-skeleton` | Minimal production-oriented project template |
 
-Applications should depend on packages directly. There is no hidden Pam lockfile,
-global package store or alternative registry.
+Applications should depend on packages directly. There is no hidden dependency
+lockfile or alternative package format. The optional signed PAM catalog
+authenticates official compatibility metadata and bytes; Composer and
+`composer.lock` still own dependency resolution.
 
 ```bash
 pam composer require pushinbr/pam-api
@@ -130,6 +132,7 @@ SSH host keys are loaded through its authenticated API instead of accepting an
 unverified host key.
 
 After the mirrors become public, submit each repository to Packagist once and
-enable its GitHub hook. Composer then installs the tagged distribution archives
-normally; Pam does not operate a package registry or add a custom repository to
-consumer applications.
+enable its GitHub hook. Composer then installs tagged distribution archives
+normally. For authenticated official capabilities, PAM exposes only the already
+verified archive through an ephemeral canonical Composer artifact repository; it
+does not persist a competing repository in consumer manifests.
