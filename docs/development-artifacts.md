@@ -46,6 +46,11 @@ The command also accepts the root of a Rust workspace containing `Cargo.toml`.
 This keeps development of PAM Runtime, PAM Native and PAM Desktop under the same
 retention contract as applications built with them.
 
+Ordinary runtime CI builds and smoke-tests the release binary on an ephemeral
+runner but does not upload that disposable binary. Versioned distribution stays
+in the release workflow, preventing every source push from retaining a duplicate
+multi-megabyte executable for the repository's default artifact lifetime.
+
 The JSON contract uses `schemaVersion: 1`, `resultCode: 1`, project type codes
 from the public PAM project enum, operation codes `1` (preview), `2` (default
 cleanup), and `3` (complete cleanup), plus artifact kind codes `1` (cache) and

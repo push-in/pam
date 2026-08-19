@@ -94,8 +94,3 @@ jobs:
               }
           }
           '
-      - uses: actions/upload-artifact@v4
-        with:
-          name: pam-linux-x86_64
-          path: target/release/pam
-          if-no-files-found: error

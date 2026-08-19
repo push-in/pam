@@ -4,6 +4,8 @@
 
 - Add `pam support` for bounded, path-redacted and integrity-digested Doctor
   reports, with zero persistence by default and private create-once JSON output.
+- Stop retaining the disposable release binary from ordinary CI pushes after its
+  isolated bundle smoke test; distributable artifacts remain release-owned.
 - Run all 26 ecosystem packages against their newest constraint-compatible
   dependency graph after a non-mutating preflight, validating committed locks
   instead of allowing stale locks to hide publication incompatibilities.
