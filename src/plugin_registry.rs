@@ -2261,6 +2261,40 @@ mod tests {
             .unwrap(),
             0
         );
+        let dashboard_path = fixture.join("dashboard");
+        assert_eq!(
+            dashboard_command(DashboardOptions {
+                matrix: MatrixOptions {
+                    verify: VerifyOptions {
+                        root: Some(root_path.clone()),
+                        root_sha256: Some(root_sha256.clone()),
+                        catalog: Some(catalog_path.clone()),
+                        at_unix: Some(1_100),
+                        minimum_sequence: Some(1),
+                        json: false,
+                        next_root: None,
+                    },
+                    pam_version: Version::parse("1.0.3").unwrap(),
+                    native_protocol: 1,
+                    desktop_protocol: 6,
+                },
+                output: dashboard_path.clone(),
+            })
+            .unwrap(),
+            0
+        );
+        let dashboard_matrix: serde_json::Value = serde_json::from_slice(
+            &fs::read(dashboard_path.join("compatibility-matrix.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(dashboard_matrix["rootSha256"], root_sha256);
+        assert_eq!(dashboard_matrix["catalogSequence"], 1);
+        assert_eq!(dashboard_matrix["compatibleEntries"], 2);
+        assert!(
+            fs::read_to_string(dashboard_path.join("index.html"))
+                .unwrap()
+                .contains("pushinbr/pam-native-camera")
+        );
         let mut tampered: serde_json::Value =
             serde_json::from_slice(&fs::read(&catalog_path).unwrap()).unwrap();
         tampered["plugins"][0]["artifactUrl"] =
