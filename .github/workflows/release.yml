@@ -18,6 +18,8 @@ jobs:
   ecosystem-compatibility:
     name: Certify the complete PAM Native ecosystem
     uses: ./.github/workflows/ecosystem-compatibility.yml
+    with:
+      pam_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
 
   android-runtime:
     name: Build verified Android runtimes and engines

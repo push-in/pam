@@ -48,15 +48,51 @@ the PAM repository push.
 ## Universal ecosystem gate
 
 Every future PAM publication must run the `Ecosystem compatibility` workflow.
+The `main` push trigger has no path filter, so documentation, governance and
+workflow-only source publications receive the same 26-package evidence as
+runtime changes. An executable regression test rejects restoration of a push
+path filter.
+Each package validates a committed lock when present, resolves the newest graph
+allowed by its published constraints in a non-mutating preflight, installs that
+graph only inside the disposable runner checkout, and then executes its tests
+and declared static analysis on PHP 8.4 and 8.5. The 26 × 2 execution contract
+matches both Native runtime lines. Each combination tests both the newest and
+lowest dependency graph allowed by the package constraints, with an independent
+non-mutating preflight before each installation. This prevents stale locks,
+single-version runs and dishonest lower bounds from masking incompatibilities.
+Composer plugins and scripts are disabled during both resolution paths. Each
+resulting lock is then audited for known advisories and abandoned dependencies
+with fail-closed policy before package code or static analysis is executed.
+The inventory is bounded to 10 minutes and every package/PHP combination to 30
+minutes; one hung resolver cannot consume a runner for the platform default.
+Every successful combination uploads a schema 1 result tied to the actual PAM
+checkout SHA, exact package checkout SHA and SHA-256 fingerprints of the latest
+and lowest Composer locks that passed. Native-core tag runs additionally record
+one candidate Git SHA across every dependent combination. A final job rejects missing/duplicate combinations, mixed commits,
+identity/role drift or incomplete graph codes, then publishes one validated
+`ecosystem-compatibility-evidence` artifact containing all 52 rows and 104 graph
+executions with 30-day retention.
+For a `pam-native-php` tag, every dependent job additionally checks out the
+exact candidate ref and binds `pushinbr/pam-native` to it through an ephemeral
+canonical Composer path repository. The installed lock must contain the exact
+tag version and path-repository provenance before package tests can run, so the
+gate does not accidentally certify dependents against the previously published
+Native core or an identically numbered Packagist artifact during a re-run.
+Runtime releases also pass their selected PAM ref into the reusable matrix.
+This is essential for manual publication: `workflow_dispatch` certifies
+`inputs.release_tag` rather than the branch commit from which the operator
+started the workflow, matching every build and publish job in the release DAG.
+Its concurrency key uses the same selected ref, preventing an unrelated `main`
+push from cancelling an in-flight manual tag certification.
 Its schema 1 catalog uses integer role codes: `1` core distribution, `2` device
 capability, `3` product integration and `4` tooling. The inventory job compares
 the catalog with every public `push-in/pam-native-*` repository, so adding or
 removing a package without updating the compatibility authority fails closed.
 
-For all 26 current repositories, the matrix checks the Composer identity, PHP
-8.4 contract, PAM Native constraint where applicable, metadata validity,
+For all 26 current repositories on both supported PHP series, the matrix checks
+the Composer identity, PHP contract, PAM Native constraint where applicable, metadata validity,
 dependency dry-run, real installation, declared tests and declared static
-analysis. The workflow also runs weekly to detect ecosystem drift between PAM
+analysis on both constraint boundaries. The workflow also runs weekly to detect ecosystem drift between PAM
 publications. A green core build cannot substitute for this matrix.
 
 ## 2026-08-18 ecosystem certification outcome
@@ -188,3 +224,29 @@ real publication. GitHub accepted and executed the reusable workflow syntax on
 the source pushes, while the regression contracts verify the tag dependency
 graph statically. The next legitimate tag will exercise that graph on its exact
 immutable commit before either publisher can run.
+
+## 2026-08-18 Desktop macOS and Windows source certification
+
+Desktop commits `20395fd`, `f8c2cb2`, `0bd55e5`, `f367fe1` and `228ff9e`
+introduced a native pre-release matrix and removed Linux-only dependency,
+notification, portal, secret-store, fixture and async-I/O assumptions. Commit
+`ac93248` aligned the embedded engine and its cryptography, JavaScript and
+SQLite graph with Servo 0.5 and made the platform matrix a hard dependency of
+both tagged-release paths. Commit `fd86e98` corrected the workflow to install
+the declared Rust 1.88 compiler by action ref and verify it at runtime instead
+of silently following the moving stable toolchain.
+
+The published `servo-fonts 0.5.0` crate still borrowed a temporary Core
+Foundation language string on macOS. Commit `264ceec` carries a 476 KiB,
+MPL-licensed source override from the exact upstream revision, retains the
+value through the native call and omits the 14 MiB upstream test-fixture
+corpus. Its executable regression contract rejects restoration of the invalid
+expression and records when the override may be removed.
+
+The final [native platform run](https://github.com/push-in/pam-desktop/actions/runs/32201537932)
+passed gateway/plugin tests, strict Clippy and compilation of the real Servo
+host on macOS arm64 and Windows x64. The matching [Linux source and package
+CI](https://github.com/push-in/pam-desktop/actions/runs/32201537939) also passed.
+These runs certify source compilation; they do not claim supported installers,
+signing, notarization, clean-machine launch or production updates on macOS and
+Windows. No version tag or binary release was created.

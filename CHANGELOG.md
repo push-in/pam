@@ -2,6 +2,30 @@
 
 ## Unreleased
 
+- Run all 26 ecosystem packages against their newest constraint-compatible
+  dependency graph after a non-mutating preflight, validating committed locks
+  instead of allowing stale locks to hide publication incompatibilities.
+- Execute every ecosystem package on both supported PHP 8.4 and PHP 8.5 runtime
+  lines before any PAM or PAM Native publication can proceed.
+- Test both the newest and lowest dependency graphs permitted by every package,
+  including exact Native-candidate provenance at both constraint boundaries.
+- Disable Composer plugins/scripts during ecosystem resolution and fail each
+  graph on security advisories or abandoned dependencies before tests execute.
+- Publish a validated schema 1 compatibility artifact covering all 52
+  package/PHP combinations and 104 dependency-graph executions for one PAM SHA.
+- Record each package commit and SHA-256 fingerprints of both tested Composer
+  locks so compatibility evidence can be reproduced at exact source boundaries.
+- Record and enforce one exact Native candidate Git commit across every
+  dependent package/PHP result emitted by a core tag certification.
+- Bind every Native-dependent ecosystem job to the exact `pam-native-php` tag
+  candidate and verify its resolved lock version before allowing publication.
+- Bind manual Runtime releases and their 26-package compatibility matrix to the
+  same explicitly selected immutable tag.
+- Report the complete Runtime, Native and Desktop build footprint from
+  `pam info` while retaining the legacy `.pam-native` JSON measurement.
+- Clean only regenerable Android build/Gradle outputs and Xcode's canonical
+  `.pam-native/ios/App/DerivedData` before Native development rebuilds without
+  removing generated hosts, sources or evidence.
 - Add bounded, non-blocking OTLP/HTTP JSON server-span export with W3C parent
   lineage, HTTPS enforcement, controlled retries, redacted attributes and
   Prometheus delivery counters.

@@ -2,14 +2,14 @@ name: Ecosystem compatibility
 
 on:
   workflow_call:
+    inputs:
+      pam_ref:
+        description: Exact PAM ref to certify; defaults to the triggering commit
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main]
-    paths:
-      - 'config/ecosystem-packages.json'
-      - 'scripts/ecosystem-compatibility.py'
-      - '.github/workflows/ecosystem-compatibility.yml'
-      - 'Cargo.toml'
-      - 'src/mobile.rs'
   pull_request:
     paths:
       - 'config/ecosystem-packages.json'
@@ -25,19 +25,20 @@ permissions:
   contents: read
 
 concurrency:
-  group: ecosystem-compatibility-${{ github.ref }}
+  group: ecosystem-compatibility-${{ inputs.pam_ref != '' && inputs.pam_ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
   inventory:
     runs-on: ubuntu-24.04
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.catalog.outputs.matrix }}
     steps:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam
-          ref: ${{ github.repository == 'push-in/pam' && github.sha || 'main' }}
+          ref: ${{ inputs.pam_ref != '' && inputs.pam_ref || (github.repository == 'push-in/pam' && github.sha || 'main') }}
           persist-credentials: false
       - name: Match the complete public ecosystem
         env:
@@ -53,16 +54,18 @@ jobs:
   packages:
     needs: inventory
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         package: ${{ fromJSON(needs.inventory.outputs.matrix) }}
-    name: ${{ matrix.package.repository }}
+        php: ['8.4', '8.5']
+    name: ${{ matrix.package.repository }} / PHP ${{ matrix.php }}
     steps:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam
-          ref: ${{ github.repository == 'push-in/pam' && github.sha || 'main' }}
+          ref: ${{ inputs.pam_ref != '' && inputs.pam_ref || (github.repository == 'push-in/pam' && github.sha || 'main') }}
           path: pam
           persist-credentials: false
       - uses: actions/checkout@v5
@@ -71,19 +74,84 @@ jobs:
           ref: ${{ github.event.repository.name == matrix.package.repository && github.ref_type == 'tag' && github.ref || 'main' }}
           path: package
           persist-credentials: false
+      - uses: actions/checkout@v5
+        if: >-
+          github.event.repository.name == 'pam-native-php' &&
+          github.ref_type == 'tag' &&
+          matrix.package.requiresNative
+        with:
+          repository: push-in/pam-native-php
+          ref: ${{ github.ref }}
+          path: pam-native-candidate
+          persist-credentials: false
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: ${{ matrix.php }}
           tools: composer:v2
           coverage: none
       - name: Validate package contract and metadata
+        shell: bash
         run: |
           pam/scripts/ecosystem-compatibility.py verify package '${{ matrix.package.repository }}'
-          composer validate --strict --no-check-lock --no-check-publish package/composer.json
-      - name: Preflight the current dependency graph
-        run: composer install --working-dir=package --dry-run --no-interaction --prefer-dist
-      - name: Install the compatible graph
-        run: composer install --working-dir=package --no-interaction --prefer-dist
+          validate=(--strict --no-check-publish package/composer.json)
+          if test -f package/composer.lock; then
+            validate=(--strict --check-lock --no-check-publish package/composer.json)
+          fi
+          composer validate "${validate[@]}"
+      - id: native-candidate
+        name: Bind dependents to the PAM Native release candidate
+        if: >-
+          github.event.repository.name == 'pam-native-php' &&
+          github.ref_type == 'tag' &&
+          matrix.package.requiresNative
+        shell: bash
+        env:
+          CANDIDATE_TAG: ${{ github.ref_name }}
+        run: |
+          candidate_version=${CANDIDATE_TAG#v}
+          if [[ ! "${candidate_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+            printf 'Invalid PAM Native release tag: %s\n' "${CANDIDATE_TAG}" >&2
+            exit 1
+          fi
+          repository=$(jq -cn --arg version "${candidate_version}" '{
+            type: "path",
+            url: "../pam-native-candidate",
+            canonical: true,
+            options: {
+              symlink: false,
+              versions: {"pushinbr/pam-native": $version}
+            }
+          }')
+          composer config --working-dir=package --json \
+            repositories.pam-native-candidate "${repository}"
+          printf 'version=%s\n' "${candidate_version}" >>"${GITHUB_OUTPUT}"
+      - name: Preflight the latest compatible dependency graph
+        run: >-
+          composer update --working-dir=package --dry-run --no-interaction
+          --prefer-dist --no-plugins --no-scripts
+      - name: Install the latest compatible dependency graph
+        run: >-
+          composer update --working-dir=package --no-interaction --prefer-dist
+          --no-plugins --no-scripts --no-progress
+      - name: Verify the exact PAM Native release candidate
+        if: steps.native-candidate.outcome == 'success'
+        env:
+          CANDIDATE_VERSION: ${{ steps.native-candidate.outputs.version }}
+        run: >-
+          jq -e --arg version "${CANDIDATE_VERSION}"
+          '.packages[] | select(
+            .name == "pushinbr/pam-native" and
+            .version == $version and
+            .dist.type == "path" and
+            .dist.url == "../pam-native-candidate"
+          )'
+          package/composer.lock
+      - name: Audit the latest compatible dependency graph
+        run: >-
+          composer audit --working-dir=package --locked --abandoned=fail
+          --format=summary --no-interaction --no-plugins
+      - name: Fingerprint the latest compatible lock
+        run: echo "LATEST_LOCK_SHA256=$(sha256sum package/composer.lock | cut -d' ' -f1)" >>"${GITHUB_ENV}"
       - name: Run package tests
         if: ${{ matrix.package.testRequired }}
         run: composer test --working-dir=package
@@ -93,3 +161,114 @@ jobs:
           if jq -e '.scripts.analyse | type == "string"' package/composer.json >/dev/null; then
             composer analyse --working-dir=package
           fi
+      - name: Preflight the lowest compatible dependency graph
+        run: >-
+          composer update --working-dir=package --dry-run --no-interaction
+          --prefer-dist --prefer-lowest --no-plugins --no-scripts
+      - name: Install the lowest compatible dependency graph
+        run: >-
+          composer update --working-dir=package --no-interaction --prefer-dist
+          --prefer-lowest --no-plugins --no-scripts --no-progress
+      - name: Verify the PAM Native candidate in the lowest graph
+        if: steps.native-candidate.outcome == 'success'
+        env:
+          CANDIDATE_VERSION: ${{ steps.native-candidate.outputs.version }}
+        run: >-
+          jq -e --arg version "${CANDIDATE_VERSION}"
+          '.packages[] | select(
+            .name == "pushinbr/pam-native" and
+            .version == $version and
+            .dist.type == "path" and
+            .dist.url == "../pam-native-candidate"
+          )'
+          package/composer.lock
+      - name: Audit the lowest compatible dependency graph
+        run: >-
+          composer audit --working-dir=package --locked --abandoned=fail
+          --format=summary --no-interaction --no-plugins
+      - name: Fingerprint the lowest compatible lock
+        run: echo "LOWEST_LOCK_SHA256=$(sha256sum package/composer.lock | cut -d' ' -f1)" >>"${GITHUB_ENV}"
+      - name: Run package tests on the lowest graph
+        if: ${{ matrix.package.testRequired }}
+        run: composer test --working-dir=package
+      - name: Run package static analysis on the lowest graph when declared
+        shell: bash
+        run: |
+          if jq -e '.scripts.analyse | type == "string"' package/composer.json >/dev/null; then
+            composer analyse --working-dir=package
+          fi
+      - name: Record compatibility evidence
+        env:
+          COMPOSER_NAME: ${{ matrix.package.composerName }}
+          PHP_SERIES: ${{ matrix.php }}
+          REPOSITORY: ${{ matrix.package.repository }}
+          ROLE_CODE: ${{ matrix.package.roleCode }}
+        run: |
+          mkdir -p evidence
+          pam_commit=$(git -C pam rev-parse HEAD)
+          package_commit=$(git -C package rev-parse HEAD)
+          native_candidate_commit=
+          if test -d pam-native-candidate/.git; then
+            native_candidate_commit=$(git -C pam-native-candidate rev-parse HEAD)
+          fi
+          jq -n \
+            --arg repository "${REPOSITORY}" \
+            --arg composerName "${COMPOSER_NAME}" \
+            --arg phpSeries "${PHP_SERIES}" \
+            --arg pamCommit "${pam_commit}" \
+            --arg packageCommit "${package_commit}" \
+            --arg nativeCandidateCommit "${native_candidate_commit}" \
+            --arg latestLockSha256 "${LATEST_LOCK_SHA256}" \
+            --arg lowestLockSha256 "${LOWEST_LOCK_SHA256}" \
+            --argjson roleCode "${ROLE_CODE}" \
+            '{
+              schemaVersion: 1,
+              resultCode: 1,
+              repository: $repository,
+              composerName: $composerName,
+              roleCode: $roleCode,
+              phpSeries: $phpSeries,
+              graphCodes: [1, 2],
+              pamCommit: $pamCommit,
+              packageCommit: $packageCommit,
+              nativeCandidateCommit: (
+                if $nativeCandidateCommit == "" then null else $nativeCandidateCommit end
+              ),
+              graphs: [
+                {graphCode: 1, lockSha256: $latestLockSha256},
+                {graphCode: 2, lockSha256: $lowestLockSha256}
+              ]
+            }' >"evidence/${REPOSITORY}-php${PHP_SERIES/./}.json"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecosystem-result-${{ matrix.package.repository }}-php${{ matrix.php }}
+          path: evidence/*.json
+          if-no-files-found: error
+          retention-days: 30
+
+  evidence:
+    name: Aggregate compatibility evidence
+    needs: packages
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam
+          ref: ${{ inputs.pam_ref != '' && inputs.pam_ref || (github.repository == 'push-in/pam' && github.sha || 'main') }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: ecosystem-result-*
+          path: evidence/results
+          merge-multiple: true
+      - name: Validate and aggregate all results
+        run: >-
+          scripts/ecosystem-compatibility.py evidence evidence/results
+          evidence/ecosystem-compatibility.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ecosystem-compatibility-evidence
+          path: evidence/ecosystem-compatibility.json
+          if-no-files-found: error
+          retention-days: 30
