@@ -51,6 +51,13 @@ runner but does not upload that disposable binary. Versioned distribution stays
 in the release workflow, preventing every source push from retaining a duplicate
 multi-megabyte executable for the repository's default artifact lifetime.
 
+GitHub Actions uses the same bounded-retention principle. Cross-job build
+prerequisites expire after 1 day, ordinary CI diagnostics and intermediate
+release archives after 7 days, and reproducible benchmark or compatibility
+evidence after 30 days. Published GitHub Release assets remain the durable
+distribution channel. `scripts/check-artifact-retention.py` rejects workflow
+uploads without an explicit lifetime or with retention above 30 days.
+
 The JSON contract uses `schemaVersion: 1`, `resultCode: 1`, project type codes
 from the public PAM project enum, operation codes `1` (preview), `2` (default
 cleanup), and `3` (complete cleanup), plus artifact kind codes `1` (cache) and

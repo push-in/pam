@@ -111,6 +111,15 @@ other. Composer's documented `update --prefer-lowest` mode is now exercised as
 a separate graph for Mobile UI, so its declared PAM Native lower bound is a
 tested contract rather than metadata optimism.
 
+GitHub documents that workflow artifacts otherwise inherit repository retention
+and may remain for up to 90 days, while `actions/upload-artifact` supports a
+shorter per-artifact `retention-days` contract. PAM now classifies artifacts by
+purpose: one day for cross-job prerequisites, seven days for diagnostics and
+intermediate release archives, and 30 days for reproducible evidence. Durable
+packages remain GitHub Release assets. A repository verifier makes an omitted or
+overlong lifetime a CI failure instead of allowing storage growth to return
+silently.
+
 ## Current product audit
 
 ### PAM runtime and CLI
@@ -251,6 +260,7 @@ repository-local.
 | --- | --- | --- | --- | --- |
 | Product audit, competitor map, metrics, roadmap | `a573d19` | Covered by the cross-product audit | Covered by the cross-product audit | Shipped |
 | Project-scoped bounded development artifacts | Cleanup contract `b69a23d`; measured 9.51 GB reclaimed across the three local product workspaces | Android/iOS generated hosts and Cargo targets use the same scoped command | Host cache retention `f895be8`; Cargo target uses the shared cleanup contract | Shipped |
+| Bounded CI artifact retention | Runtime CI policy and verifier | Native prerequisites expire after 1 day; diagnostics and release intermediates after 7 days | Release evidence follows the shared 30-day ceiling | Implemented; workflow certification pending |
 | Verifiable benchmark evidence | `f37716a`, workflow `0c4a2f7` | Manifest `742e0e4` | Attested package reproducibility `acc3a7c`; authenticated footprint and 5% release-baseline gate `2dad206` | Shipped; public runs depend on CI execution |
 | Structured error and automation contracts | `7d9fff3`; actionable Doctor target/artifact/remediation report `f5709ce` | Contextual CLI commands inherit the envelope | Desktop retains its typed bridge errors | Shipped |
 | Privacy-safe support handoff | Bounded `pam support` JSON, path redaction, payload digest, opt-in private persistence and overwrite refusal | Contextual Doctor data is represented through the same project envelope | Contextual Doctor data is represented through the same project envelope | Implemented; clean-host CI evidence required before release claim |

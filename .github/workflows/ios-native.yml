@@ -310,3 +310,4 @@ jobs:
             ${{ runner.temp }}/pam-ios-fixture/lldb.log
             ${{ runner.temp }}/pam-ios-fixture/crashes
           if-no-files-found: warn
+          retention-days: 7

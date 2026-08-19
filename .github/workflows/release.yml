@@ -78,6 +78,7 @@ jobs:
             dist/pam-android-runtime.tar.gz
             dist/pam-android-runtime.tar.gz.sha256
           if-no-files-found: error
+          retention-days: 7
 
   build:
     strategy:
@@ -185,6 +186,7 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
           if-no-files-found: error
+          retention-days: 7
 
   build-macos:
     strategy:
@@ -267,6 +269,7 @@ jobs:
             dist/*.tar.gz
             dist/*.sha256
           if-no-files-found: error
+          retention-days: 7
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))
