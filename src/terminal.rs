@@ -274,6 +274,7 @@ pub fn print_help(executable: &OsStr) {
                 "diagnostics [index.php]",
                 "Print the complete runtime snapshot",
             ),
+            ("support [path]", "Create a bounded redacted support report"),
             (
                 "heap | fibers | connections",
                 "Inspect one diagnostics subsystem",
@@ -498,6 +499,15 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "doctor ./my-project --ci",
                 "doctor --json",
             ],
+        ),
+        "support" => (
+            "Create a bounded redacted report for support without collecting file contents, environment variables, or network data.",
+            "support [path] [options]",
+            &[(
+                "--output FILE.json",
+                "Write once with private permissions instead of standard output",
+            )],
+            &["support", "support . --output pam-support.json"],
         ),
         "clean" => (
             "Inspect and remove regenerable development artifacts inside one project.",

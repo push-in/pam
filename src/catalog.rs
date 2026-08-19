@@ -14,6 +14,11 @@ pub const COMMANDS: &[CommandSpec] = &[
     command("info", "Describe the active project", "Project"),
     command("doctor", "Validate or repair the active project", "Project"),
     command(
+        "support",
+        "Create a bounded redacted support report",
+        "Project",
+    ),
+    command(
         "clean",
         "Remove bounded project development artifacts",
         "Project",

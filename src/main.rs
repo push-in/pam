@@ -27,6 +27,7 @@ mod quality;
 mod self_update;
 mod server;
 mod ship;
+mod support;
 mod terminal;
 mod timeline;
 mod worker_state;
@@ -220,6 +221,10 @@ fn run() -> Result<u8, CliError> {
 
     if script_arg == "self-update" {
         return self_update::run(raw_args).map_err(CliError::Commands);
+    }
+
+    if script_arg == "support" {
+        return support::run(&executable, raw_args).map_err(CliError::Commands);
     }
 
     if script_arg == "docs:generate" {

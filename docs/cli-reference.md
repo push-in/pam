@@ -8,6 +8,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam init` — Create a project from a preset.
 - `pam info` — Describe the active project.
 - `pam doctor` — Validate or repair the active project.
+- `pam support` — Create a bounded redacted support report.
 - `pam clean` — Remove bounded project development artifacts.
 ## Develop
 

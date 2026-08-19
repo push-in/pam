@@ -8,6 +8,7 @@ gates are reached through the same contextual command surface.
 
 ```bash
 pam doctor --fix
+pam support --output pam-support.json
 pam dev
 pam make:component ProfileCard
 pam format
@@ -38,6 +39,26 @@ Laravel, `4` Desktop, and `5` raw runtime. Legacy discovery from
 
 Explicit namespaces such as `pam mobile ...` and `pam desktop ...` are stable
 advanced interfaces for CI and cross-project automation.
+
+## Privacy-safe support reports
+
+`pam support [path]` runs the structured Doctor audit and emits one bounded JSON
+report to standard output. It does not read application file contents, copy
+environment variables, capture network data, or create a cache. Absolute project
+and home paths are replaced with `$PROJECT` and `$HOME`; the embedded diagnostic
+payload has a SHA-256 digest so a support recipient can detect accidental changes.
+
+Persistence is opt-in:
+
+```bash
+pam support . --output pam-support.json
+```
+
+The output path must end in `.json`, must not already exist, and is created with
+owner-only permissions on Unix. PAM refuses oversized Doctor output instead of
+producing an unbounded report. Review every report before sharing it: installed
+package names and toolchain diagnostics can still reveal project metadata even
+when paths and common secret-bearing sources are excluded.
 
 ## Machine interfaces
 

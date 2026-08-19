@@ -897,6 +897,74 @@ fn exposes_structured_doctor_and_offline_update_checks() {
 }
 
 #[test]
+fn creates_a_bounded_redacted_support_report_without_persisting_by_default() {
+    let target = fixture("hello.php");
+    let support = run_pam(&["support", target.to_str().unwrap()]);
+    assert!(
+        support.status.success(),
+        "{}",
+        String::from_utf8_lossy(&support.stderr)
+    );
+    assert!(support.stdout.len() < 256 * 1024);
+    let report: serde_json::Value = serde_json::from_slice(&support.stdout).unwrap();
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["resultCode"], 1);
+    assert_eq!(report["surfaceCode"], 1);
+    assert_eq!(report["privacy"]["redactionCode"], 1);
+    assert_eq!(report["privacy"]["includesEnvironment"], false);
+    assert_eq!(report["privacy"]["includesFileContents"], false);
+    assert_eq!(report["privacy"]["includesNetworkData"], false);
+    assert_eq!(report["diagnostics"]["target"], "$PROJECT");
+    assert!(!String::from_utf8_lossy(&support.stdout).contains(target.to_str().unwrap()));
+
+    let diagnostics = serde_json::to_vec(&report["diagnostics"]).unwrap();
+    assert_eq!(
+        report["diagnosticsSha256"],
+        format!("{:x}", Sha256::digest(diagnostics))
+    );
+}
+
+#[test]
+fn support_report_writes_once_and_refuses_to_overwrite() {
+    let directory = temporary_path("support-output");
+    fs::create_dir_all(&directory).unwrap();
+    let output = directory.join("report.json");
+    let target = fixture("hello.php");
+    let first = run_pam(&[
+        "support",
+        target.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(
+        first.status.success(),
+        "{}",
+        String::from_utf8_lossy(&first.stderr)
+    );
+    assert!(output.is_file());
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&output).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+    let original = fs::read(&output).unwrap();
+
+    let second = run_pam(&[
+        "support",
+        target.to_str().unwrap(),
+        "--output",
+        output.to_str().unwrap(),
+    ]);
+    assert!(!second.status.success());
+    assert!(String::from_utf8_lossy(&second.stderr).contains("cannot create new support report"));
+    assert_eq!(fs::read(&output).unwrap(), original);
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn doctor_reports_project_target_paths_and_reclaimable_artifacts() {
     let directory = temporary_path("doctor-project-context");
     fs::create_dir_all(directory.join("target/debug")).unwrap();

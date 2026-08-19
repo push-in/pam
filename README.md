@@ -92,11 +92,17 @@ Inside every PAM project, the workflow is the same:
 
 ```bash
 pam doctor
+pam support --output pam-support.json
 pam dev
 pam test
 pam build
 pam package
 ```
+
+When a development or CI environment needs investigation, `pam support` emits a
+bounded JSON report to standard output without copying source files, environment
+variables, or network data. Paths are redacted, persistence is explicit, and an
+existing report is never overwritten. See the [CLI guide](docs/cli.md#privacy-safe-support-reports).
 
 ## Native means native. Reactive means reactive.
 
