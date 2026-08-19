@@ -61,8 +61,10 @@ lowest dependency graph allowed by the package constraints, with an independent
 non-mutating preflight before each installation. This prevents stale locks,
 single-version runs and dishonest lower bounds from masking incompatibilities.
 Composer plugins and scripts are disabled during both resolution paths. Each
-resulting lock is then audited for known advisories and abandoned dependencies
-with fail-closed policy before package code or static analysis is executed.
+non-empty resulting lock is then audited for known advisories and abandoned
+dependencies with fail-closed policy before package code or static analysis is
+executed; an empty lock is explicitly recognized as having no dependency
+packages to audit.
 The inventory is bounded to 10 minutes and every package/PHP combination to 30
 minutes; one hung resolver cannot consume a runner for the platform default.
 Every successful combination uploads a schema 1 result tied to the actual PAM

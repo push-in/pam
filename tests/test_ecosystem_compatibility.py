@@ -116,6 +116,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertTrue(update_commands)
         self.assertEqual(workflow.count("composer audit --working-dir=package --locked"), 2)
         self.assertEqual(workflow.count("--abandoned=fail"), 2)
+        self.assertEqual(workflow.count("Dependency lock is empty; there are no packages to audit."), 2)
         self.assertLess(
             workflow.index("Audit the latest compatible dependency graph"),
             workflow.index("Run package tests\n"),

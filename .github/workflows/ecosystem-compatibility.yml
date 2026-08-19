@@ -147,9 +147,14 @@ jobs:
           )'
           package/composer.lock
       - name: Audit the latest compatible dependency graph
-        run: >-
-          composer audit --working-dir=package --locked --abandoned=fail
-          --format=summary --no-interaction --no-plugins
+        shell: bash
+        run: |
+          if jq -e '((.packages // []) + (."packages-dev" // [])) | length > 0' package/composer.lock >/dev/null; then
+            composer audit --working-dir=package --locked --abandoned=fail \
+              --format=summary --no-interaction --no-plugins
+          else
+            echo 'Dependency lock is empty; there are no packages to audit.'
+          fi
       - name: Fingerprint the latest compatible lock
         run: echo "LATEST_LOCK_SHA256=$(sha256sum package/composer.lock | cut -d' ' -f1)" >>"${GITHUB_ENV}"
       - name: Run package tests
@@ -183,9 +188,14 @@ jobs:
           )'
           package/composer.lock
       - name: Audit the lowest compatible dependency graph
-        run: >-
-          composer audit --working-dir=package --locked --abandoned=fail
-          --format=summary --no-interaction --no-plugins
+        shell: bash
+        run: |
+          if jq -e '((.packages // []) + (."packages-dev" // [])) | length > 0' package/composer.lock >/dev/null; then
+            composer audit --working-dir=package --locked --abandoned=fail \
+              --format=summary --no-interaction --no-plugins
+          else
+            echo 'Dependency lock is empty; there are no packages to audit.'
+          fi
       - name: Fingerprint the lowest compatible lock
         run: echo "LOWEST_LOCK_SHA256=$(sha256sum package/composer.lock | cut -d' ' -f1)" >>"${GITHUB_ENV}"
       - name: Run package tests on the lowest graph
