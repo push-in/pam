@@ -33,6 +33,9 @@ jobs:
         timeout-minutes: 8
         run: |
           timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php
+          sudo sed -i \
+            's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/apt-mirrors.txt
           timeout 120s sudo apt-get update \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
