@@ -45,7 +45,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --paginate 'orgs/push-in/repos?per_page=100&type=public' --jq '.[].name' |
-            sort | grep '^pam-native-' |
+            sort | grep -E '^(pam-native-|pam-mobile-ui$)' |
             scripts/ecosystem-compatibility.py inventory
       - id: catalog
         name: Publish the validated matrix

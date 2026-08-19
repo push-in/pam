@@ -25,7 +25,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         packages = json.loads(result.stdout)
         repositories = [package["repository"] for package in packages]
-        self.assertEqual(len(repositories), 26)
+        self.assertEqual(len(repositories), 27)
         self.assertEqual(len(repositories), len(set(repositories)))
         self.assertEqual({package["roleCode"] for package in packages}, {1, 2, 3, 4})
 
@@ -35,6 +35,20 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         result = self.run_script("inventory", stdin=f"{inventory}\npam-native-forgotten\n")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("pam-native-forgotten", result.stderr)
+
+    def test_inventory_includes_the_official_mobile_ui_package(self) -> None:
+        matrix = json.loads(self.run_script("matrix").stdout)
+        mobile_ui = next(
+            package for package in matrix if package["repository"] == "pam-mobile-ui"
+        )
+        self.assertEqual(mobile_ui["composerName"], "pushinbr/pam-mobile-ui")
+        self.assertEqual(mobile_ui["roleCode"], 3)
+        self.assertTrue(mobile_ui["requiresNative"])
+        self.assertTrue(mobile_ui["testRequired"])
+        workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("pam-mobile-ui$", workflow)
 
     def test_checkout_contract_requires_test_and_native_constraints(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -157,9 +171,9 @@ class EcosystemCompatibilityTests(unittest.TestCase):
             self.assertEqual(aggregated.returncode, 0, aggregated.stderr)
             report = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(report["resultCode"], 1)
-            self.assertEqual(report["packageCount"], 26)
-            self.assertEqual(report["combinationCount"], 52)
-            self.assertEqual(report["graphExecutionCount"], 104)
+            self.assertEqual(report["packageCount"], 27)
+            self.assertEqual(report["combinationCount"], 54)
+            self.assertEqual(report["graphExecutionCount"], 108)
             self.assertEqual(report["pamCommit"], commit)
             self.assertEqual(report["nativeCandidateCommit"], "e" * 40)
 

@@ -1,6 +1,7 @@
 {
   "schemaVersion": 1,
   "packages": [
+    {"repository": "pam-mobile-ui", "composerName": "pushinbr/pam-mobile-ui", "roleCode": 3, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-auth", "composerName": "pushinbr/pam-native-auth", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-background-transfer", "composerName": "pushinbr/pam-native-background-transfer", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-bluetooth", "composerName": "pushinbr/pam-native-bluetooth", "roleCode": 2, "requiresNative": true, "testRequired": true},

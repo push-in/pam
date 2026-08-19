@@ -49,13 +49,13 @@ the PAM repository push.
 
 Every future PAM publication must run the `Ecosystem compatibility` workflow.
 The `main` push trigger has no path filter, so documentation, governance and
-workflow-only source publications receive the same 26-package evidence as
+workflow-only source publications receive the same 27-package evidence as
 runtime changes. An executable regression test rejects restoration of a push
 path filter.
 Each package validates a committed lock when present, resolves the newest graph
 allowed by its published constraints in a non-mutating preflight, installs that
 graph only inside the disposable runner checkout, and then executes its tests
-and declared static analysis on PHP 8.4 and 8.5. The 26 × 2 execution contract
+and declared static analysis on PHP 8.4 and 8.5. The 27 × 2 execution contract
 matches both Native runtime lines. Each combination tests both the newest and
 lowest dependency graph allowed by the package constraints, with an independent
 non-mutating preflight before each installation. This prevents stale locks,
@@ -72,7 +72,7 @@ checkout SHA, exact package checkout SHA and SHA-256 fingerprints of the latest
 and lowest Composer locks that passed. Native-core tag runs additionally record
 one candidate Git SHA across every dependent combination. A final job rejects missing/duplicate combinations, mixed commits,
 identity/role drift or incomplete graph codes, then publishes one validated
-`ecosystem-compatibility-evidence` artifact containing all 52 rows and 104 graph
+`ecosystem-compatibility-evidence` artifact containing all 54 rows and 108 graph
 executions with 30-day retention.
 For a `pam-native-php` tag, every dependent job additionally checks out the
 exact candidate ref and binds `pushinbr/pam-native` to it through an ephemeral
@@ -88,14 +88,22 @@ Its concurrency key uses the same selected ref, preventing an unrelated `main`
 push from cancelling an in-flight manual tag certification.
 Its schema 1 catalog uses integer role codes: `1` core distribution, `2` device
 capability, `3` product integration and `4` tooling. The inventory job compares
-the catalog with every public `push-in/pam-native-*` repository, so adding or
-removing a package without updating the compatibility authority fails closed.
+the catalog with every public `push-in/pam-native-*` repository plus the
+official `pam-mobile-ui` package, so adding or removing a package without
+updating the compatibility authority fails closed.
 
-For all 26 current repositories on both supported PHP series, the matrix checks
+For all 27 current repositories on both supported PHP series, the matrix checks
 the Composer identity, PHP contract, PAM Native constraint where applicable, metadata validity,
 dependency dry-run, real installation, declared tests and declared static
 analysis on both constraint boundaries. The workflow also runs weekly to detect ecosystem drift between PAM
 publications. A green core build cannot substitute for this matrix.
+
+The authoritative inventory includes the official `pam-mobile-ui` design-system
+package in addition to every public `pam-native-*` repository. Mobile UI keeps
+its Android emulator and UIKit simulator gates in its own repository, while the
+central Composer matrix proves its PHP API against both supported runtimes and
+both dependency-constraint boundaries. Its GitHub, native-archive and Composer
+tag publishers all wait for the same central compatibility workflow.
 
 ## 2026-08-18 ecosystem certification outcome
 
@@ -150,6 +158,7 @@ its Packagist update can execute first. The package gate commits are:
 | share-extension | `ba97b37` | subscriptions | `8c64a26` |
 | sync | `5ced27e` | testing | `c8ff32b` |
 | video | `1226362` | widgets | `dd5fe1e` |
+| Mobile UI design system | `1247bdd` |  |  |
 
 The aggregate `pushinbr/pam-native` distribution had no independent push CI.
 Commit `6670118` added PHP 8.4/8.5 validation, Composer preflight/install,

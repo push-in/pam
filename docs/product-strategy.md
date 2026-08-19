@@ -97,6 +97,20 @@ export method/status integer codes, duration, failure state and byte counts.
 URLs, origins, paths, queries, headers and bodies are excluded by construction;
 the CLI rejects invalid codes and counts outside the Native transport bounds.
 
+### Competitive research refresh — 2026-08-19
+
+[React Native's testing guidance](https://reactnative.dev/docs/testing-overview)
+explicitly keeps Android/iOS end-to-end tests in the quality pyramid because
+JavaScript component tests cannot prove native platform behavior. Flutter makes
+the same distinction between its general
+[test levels](https://docs.flutter.dev/testing/overview) and executable
+[accessibility guideline tests](https://docs.flutter.dev/ui/accessibility-and-internationalization/accessibility).
+PAM Mobile UI therefore retains real Android emulator and UIKit simulator gates
+while joining the Composer ecosystem matrix; neither layer substitutes for the
+other. Composer's documented `update --prefer-lowest` mode is now exercised as
+a separate graph for Mobile UI, so its declared PAM Native lower bound is a
+tested contract rather than metadata optimism.
+
 ## Current product audit
 
 ### PAM runtime and CLI
@@ -244,7 +258,7 @@ repository-local.
 | Cross-surface observability | Prometheus/control-plane metrics, structured access logs and W3C server-child trace lineage `ab0d0da`; redacted Chrome/Perfetto timeline exporter `4aff197`; bounded OTLP/HTTP JSON server spans `93aec7a`; signed official-Collector certification and evidence `5e51c03`; validated Native network trace export `58f9d4d` | Certified traces/logs/metrics `ab4805e`; strict Server context import with preserved sampling and Collector-proven parent lineage `622df52`; exact-origin outbound Native HTTP propagation `e041449`; bounded/redacted network diagnostics `bad65bd` | Explicit-opt-in command spans and signed Collector CI `789a1f1`; authenticated bridge continuation `d93c63b`; renderer trace-header spoofing closed `0b01551`; exact-origin outbound injection `e2c7840` | End-to-end lineage, scoped outbound propagation and bounded Native network timeline events shipped across all three surfaces |
 | Contextual live snapshot transport | Desktop routing `cf2609f`; Android routing `00b4df5`; iOS routing `9cf68fa` | Privilege-gated Android export `5b4b5f5`; app-scoped iOS Simulator export and generated overlay `8a95f55` | Authenticated development session `47b489b` | Server, Android, iOS Simulator and Desktop shipped; physical-device Native export intentionally excluded pending a pairing protocol |
 | Visual capture foundation | `42a4a07` | Scoped Android/iOS PNG capture | Pixel-normalized golden harness `361287d` | Shipped; platform capture remains user-mediated |
-| Accessible adaptive design tokens | Desktop starter run-green identity and WCAG/forced-color gate `f58a2ba` | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `9099df7` | Generated Desktop starter inherits the runtime-owned design contract | Native system and Desktop first-run surface shipped; reusable cross-surface package remains open |
+| Accessible adaptive design tokens | Desktop starter run-green identity and WCAG/forced-color gate `f58a2ba` | Native tokens `b07d09f`; contrast-gated PAM Mobile UI themes and Studio `2597bd6` | Generated Desktop starter inherits the runtime-owned design contract | Native system and Desktop first-run surface shipped; reusable cross-surface package remains open |
 | Cross-surface release authority and recovery | iOS audit artifact workflow `8e5e1fc` | Native release audit `58fe1d8`; source, device-host and aggregate plugin tag gates `9da8325` | Permission policy `46fead6`; interrupted updater recovery `e82efd6`; source and macOS/Windows tag gates `bd8ec18`, `20395fd`, `ac93248`; pinned Rust 1.88 and reproducible Servo patch `fd86e98`, `264ceec` | Fail-closed tag publication and native source compilation certified across Linux x64, macOS arm64 and Windows x64; signed installers and clean-machine sandbox certification remain open |
 | Signed typed plugin registry | Offline schema 1 verifier, quorum rotation, rollback floor and SemVer/protocol resolver `bdb2148`; authenticated `pam add` gate `7cf672e`; exact verified-byte Composer source and bounded artifact retention `01f0273`; recoverable project rotation adoption `3bf6d08`; canonical ceremony payload, Ed25519 key identity and operational runbook `c8f9a5f` | Descriptor and IDL integrity locks; signed Android runtime installer and provenance `9ddb46d` | Executable protocol/identity/hash checks; signed host acquisition, provenance and bounded retention | Composer, Android runtime and Desktop host installer enforcement implemented; official multi-custodian ceremony, independent fingerprint publication and hosted catalog remain open |
 | Flagship cross-surface application | — | Native showcase exists | — | Open |
