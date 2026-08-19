@@ -32,7 +32,7 @@ jobs:
       - name: Install PHP Embed development package
         timeout-minutes: 8
         run: |
-          timeout 60s sudo add-apt-repository -y ppa:ondrej/php
+          timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php
           timeout 120s sudo apt-get update \
             -o Acquire::Retries=3 \
             -o Acquire::http::Timeout=30 \
