@@ -115,6 +115,35 @@ matrix is evidence derived from signed metadata. `rootSha256`,
 traceable and freshness-checkable; it is not itself a substitute for the
 trusted root and catalog.
 
+Generate the public, human-readable projection from the same inputs. The output
+directory must not exist, which prevents an interrupted or mistaken generation
+from silently replacing a previously published dashboard:
+
+```bash
+pam registry dashboard \
+  --root root.json \
+  --root-sha256 "$root_sha256" \
+  --catalog catalog.json \
+  --pam-version 1.0.3 \
+  --native-protocol 1 \
+  --desktop-protocol 6 \
+  --minimum-sequence 1 \
+  --output compatibility-dashboard
+```
+
+The directory contains `index.html`, the verified
+`compatibility-matrix.json`, and one local stylesheet. It contains no JavaScript,
+remote fonts, trackers, network fetches, or build-time package dependencies. The
+HTML exposes both text and shape for every state, supports keyboard navigation
+and narrow screens, and applies a restrictive Content Security Policy. Its
+matrix fingerprint covers the exact JSON bytes beside the page.
+
+Do not publish a generated page as the official dashboard until the immutable
+root/catalog URLs, independent fingerprint channel, custody ceremony,
+attestations, incident contact, and rotation rehearsal listed below are live.
+Fixtures and rehearsal catalogs must be labelled as such and must never occupy
+the production URL.
+
 The official registry is not live until all of these independent artifacts are
 public and mutually consistent:
 

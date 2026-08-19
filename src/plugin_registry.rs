@@ -20,6 +20,7 @@ const ROOT_MAX_VALIDITY_SECONDS: u64 = 366 * 24 * 60 * 60;
 const CATALOG_MAX_VALIDITY_SECONDS: u64 = 7 * 24 * 60 * 60;
 const COMPATIBILITY_MATRIX_SCHEMA_URL: &str =
     "https://push-in.github.io/pam-docs/schemas/registry-compatibility-matrix.schema.json";
+const DASHBOARD_CSS: &str = include_str!("../assets/registry-dashboard.css");
 pub(crate) const PROJECT_REGISTRY_CONFIG: &str = "pam-registry.json";
 pub(crate) const PROJECT_REGISTRY_STATE: &str = ".pam/plugin-registry-state.json";
 const PROJECT_ROTATION_RECEIPT: &str = ".pam/plugin-registry-rotation.json";
@@ -544,6 +545,11 @@ struct MatrixOptions {
     desktop_protocol: u32,
 }
 
+struct DashboardOptions {
+    matrix: MatrixOptions,
+    output: PathBuf,
+}
+
 struct AdoptOptions {
     project: PathBuf,
     next_root: PathBuf,
@@ -573,12 +579,52 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "adopt" => adopt_rotation_command(parse_adopt_options(arguments)?),
         "resolve" => resolve_command(parse_resolve_options(arguments)?),
         "matrix" => matrix_command(parse_matrix_options(arguments)?),
+        "dashboard" => dashboard_command(parse_dashboard_options(arguments)?),
         "payload" => payload_command(parse_payload_options(arguments)?),
         "key-id" => key_id_command(arguments),
         unknown => Err(format!(
-            "unknown registry command {unknown:?}; expected verify, resolve, matrix, rotate, adopt, payload, or key-id"
+            "unknown registry command {unknown:?}; expected verify, resolve, matrix, dashboard, rotate, adopt, payload, or key-id"
         )),
     }
+}
+
+fn parse_dashboard_options(
+    arguments: impl Iterator<Item = OsString>,
+) -> Result<DashboardOptions, String> {
+    let mut output = None;
+    let mut matrix_arguments = Vec::new();
+    let mut arguments = arguments;
+    while let Some(argument) = arguments.next() {
+        if argument == "--output" {
+            output = Some(required_path(&mut arguments, "--output")?);
+        } else {
+            matrix_arguments.push(argument);
+            if matrix_arguments.last().is_some_and(|argument| {
+                matches!(
+                    argument.to_string_lossy().as_ref(),
+                    "--root"
+                        | "--root-sha256"
+                        | "--catalog"
+                        | "--at-unix"
+                        | "--minimum-sequence"
+                        | "--pam-version"
+                        | "--native-protocol"
+                        | "--desktop-protocol"
+                )
+            }) {
+                matrix_arguments.push(arguments.next().ok_or_else(|| {
+                    format!(
+                        "{} requires a value",
+                        matrix_arguments.last().unwrap().to_string_lossy()
+                    )
+                })?);
+            }
+        }
+    }
+    Ok(DashboardOptions {
+        matrix: parse_matrix_options(matrix_arguments.into_iter())?,
+        output: output.ok_or_else(|| "registry dashboard requires --output".to_owned())?,
+    })
 }
 
 fn parse_matrix_options(
@@ -1218,6 +1264,192 @@ fn matrix_command(options: MatrixOptions) -> Result<u8, String> {
     Ok(0)
 }
 
+fn dashboard_command(options: DashboardOptions) -> Result<u8, String> {
+    let now = options.matrix.verify.at_unix.unwrap_or_else(unix_seconds);
+    let root_sha256 = options
+        .matrix
+        .verify
+        .root_sha256
+        .as_deref()
+        .expect("validated root fingerprint");
+    let (root, _) = load_trusted_root(
+        options
+            .matrix
+            .verify
+            .root
+            .as_deref()
+            .expect("validated root"),
+        root_sha256,
+        now,
+    )?;
+    let catalog: PluginCatalog = read_document(
+        options
+            .matrix
+            .verify
+            .catalog
+            .as_deref()
+            .expect("validated catalog"),
+        "plugin catalog",
+    )?;
+    validate_catalog(&catalog, &root, now)?;
+    enforce_minimum_sequence(catalog.sequence, options.matrix.verify.minimum_sequence)?;
+    let entries = compatibility_matrix_entries(
+        &catalog,
+        &options.matrix.pam_version,
+        options.matrix.native_protocol,
+        options.matrix.desktop_protocol,
+    );
+    let compatible_entries = entries
+        .iter()
+        .filter(|entry| entry.result_code == CompatibilityResult::Compatible as u8)
+        .count();
+    let report = CompatibilityMatrixReport {
+        schema_url: COMPATIBILITY_MATRIX_SCHEMA_URL,
+        schema_version: SCHEMA_VERSION,
+        result_code: 1,
+        registry: &catalog.registry,
+        root_sha256,
+        root_generation: root.generation,
+        catalog_sequence: catalog.sequence,
+        generated_at_unix: catalog.generated_at_unix,
+        expires_at_unix: catalog.expires_at_unix,
+        pam_version: options.matrix.pam_version.to_string(),
+        native_protocol: options.matrix.native_protocol,
+        desktop_protocol: options.matrix.desktop_protocol,
+        compatible_entries,
+        surface_summaries: compatibility_surface_summaries(&entries),
+        entries,
+    };
+    let mut matrix_json = serde_json::to_vec_pretty(&report)
+        .map_err(|error| format!("cannot encode registry compatibility matrix: {error}"))?;
+    matrix_json.push(b'\n');
+    let matrix_sha256 = encode_hex(&Sha256::digest(&matrix_json));
+    let html = render_compatibility_dashboard(&report, &matrix_sha256);
+    write_dashboard(&options.output, &html, &matrix_json)?;
+    println!(
+        "Generated verified compatibility dashboard at {} (matrix SHA-256 {}).",
+        options.output.display(),
+        matrix_sha256
+    );
+    Ok(0)
+}
+
+fn write_dashboard(output: &Path, html: &str, matrix_json: &[u8]) -> Result<(), String> {
+    if output.as_os_str().is_empty() || output.parent().is_none() {
+        return Err("registry dashboard output must be a named directory".to_owned());
+    }
+    fs::create_dir(output).map_err(|error| {
+        format!(
+            "cannot create new registry dashboard directory {}: {error}",
+            output.display()
+        )
+    })?;
+    let result = (|| {
+        fs::create_dir(output.join("assets")).map_err(|error| {
+            format!("cannot create registry dashboard assets directory: {error}")
+        })?;
+        write_new_file(&output.join("index.html"), html.as_bytes())?;
+        write_new_file(&output.join("compatibility-matrix.json"), matrix_json)?;
+        write_new_file(
+            &output.join("assets/registry-dashboard.css"),
+            DASHBOARD_CSS.as_bytes(),
+        )
+    })();
+    if result.is_err() {
+        let _ = fs::remove_dir_all(output);
+    }
+    result
+}
+
+fn write_new_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
+    file.write_all(bytes)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))
+}
+
+fn render_compatibility_dashboard(
+    report: &CompatibilityMatrixReport<'_>,
+    matrix_sha256: &str,
+) -> String {
+    let surface_name = |code| match code {
+        1 => "Server",
+        2 => "Native",
+        3 => "Desktop",
+        _ => "Unknown",
+    };
+    let result_name = |code| match code {
+        1 => "Compatible",
+        2 => "PAM version mismatch",
+        3 => "Protocol mismatch",
+        _ => "Unknown result",
+    };
+    let mut rails = String::new();
+    for summary in &report.surface_summaries {
+        let percentage = if summary.total_entries == 0 {
+            0
+        } else {
+            summary.compatible_entries * 100 / summary.total_entries
+        };
+        rails.push_str(&format!(
+            "<article class=\"rail rail--{}\"><p class=\"eyebrow\">Surface {}</p><h2>{}</h2><p class=\"rail__score\"><strong>{}/{}</strong> compatible</p><meter min=\"0\" max=\"100\" value=\"{}\" aria-label=\"{} compatibility: {} percent\">{}%</meter></article>",
+            summary.surface_code,
+            summary.surface_code,
+            surface_name(summary.surface_code),
+            summary.compatible_entries,
+            summary.total_entries,
+            percentage,
+            surface_name(summary.surface_code),
+            percentage,
+            percentage,
+        ));
+    }
+    let mut rows = String::new();
+    for entry in &report.entries {
+        rows.push_str(&format!(
+            "<tr><th scope=\"row\"><code>{}</code></th><td>{}</td><td><span class=\"surface surface--{}\">{} · {}</span></td><td><span class=\"result result--{}\"><span aria-hidden=\"true\">{}</span>{}</span></td><td><code>{}</code></td></tr>",
+            html_escape(entry.package),
+            html_escape(entry.version),
+            entry.surface_code,
+            entry.surface_code,
+            surface_name(entry.surface_code),
+            entry.result_code,
+            if entry.result_code == 1 { "✓" } else { "!" },
+            result_name(entry.result_code),
+            html_escape(&entry.sha256[..12])
+        ));
+    }
+    format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'\"><meta name=\"color-scheme\" content=\"light\"><title>PAM compatibility signal</title><link rel=\"stylesheet\" href=\"assets/registry-dashboard.css\"></head><body><a class=\"skip-link\" href=\"#matrix\">Skip to compatibility matrix</a><header class=\"hero\"><nav aria-label=\"PAM registry\"><span class=\"brand\">PAM / REGISTRY</span><a href=\"compatibility-matrix.json\">Raw signed evidence ↗</a></nav><div class=\"hero__copy\"><p class=\"eyebrow\">Catalog sequence {}</p><h1>Compatibility,<br><em>without guesswork.</em></h1><p class=\"lede\">A human-readable projection of PAM's cryptographically verified plugin catalog across Server, Native and Desktop.</p></div><dl class=\"trust\"><div><dt>Root generation</dt><dd>{}</dd></div><div><dt>Root fingerprint</dt><dd><code>{}</code></dd></div><div><dt>Matrix fingerprint</dt><dd><code>{}</code></dd></div></dl></header><main><section class=\"rails\" aria-labelledby=\"coverage-title\"><div class=\"section-heading\"><p class=\"eyebrow\">Signal rails</p><h2 id=\"coverage-title\">Coverage by runtime</h2></div><div class=\"rail-grid\">{}</div></section><section class=\"matrix\" id=\"matrix\" aria-labelledby=\"matrix-title\"><div class=\"section-heading\"><p class=\"eyebrow\">Verified entries</p><h2 id=\"matrix-title\">Plugin compatibility matrix</h2><p>PAM {} · Native protocol {} · Desktop protocol {}</p></div><div class=\"table-region\" role=\"region\" aria-label=\"Plugin compatibility matrix\" tabindex=\"0\"><table><caption>{} compatible entries from {} declarations. Generated at Unix {}; expires at Unix {}.</caption><thead><tr><th scope=\"col\">Package</th><th scope=\"col\">Version</th><th scope=\"col\">Surface</th><th scope=\"col\">Result</th><th scope=\"col\">Artifact SHA-256</th></tr></thead><tbody>{}</tbody></table></div></section></main><footer><p>Registry: <code>{}</code></p><p>Integer result codes remain authoritative: 1 compatible, 2 PAM mismatch, 3 protocol mismatch.</p></footer></body></html>\n",
+        report.catalog_sequence,
+        report.root_generation,
+        html_escape(report.root_sha256),
+        matrix_sha256,
+        rails,
+        html_escape(&report.pam_version),
+        report.native_protocol,
+        report.desktop_protocol,
+        report.compatible_entries,
+        report.entries.len(),
+        report.generated_at_unix,
+        report.expires_at_unix,
+        rows,
+        html_escape(report.registry),
+    )
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
+}
+
 fn compatibility_surface_summaries(
     entries: &[CompatibilityMatrixEntry<'_>],
 ) -> Vec<SurfaceCompatibilitySummary> {
@@ -1756,7 +1988,7 @@ fn unix_seconds() -> u64 {
 
 fn print_usage() {
     println!(
-        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry matrix --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--pam-version <semver>] --native-protocol <n> --desktop-protocol <n> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]\n       pam registry adopt --project <directory> --next-root <project-relative.json> --next-catalog <project-relative.json> [--at-unix <seconds>] [--json]\n       pam registry payload --document <root-or-catalog.json> [--output <payload.json>]\n       pam registry key-id --public-key <64-lowercase-hex>"
+        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry matrix --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--pam-version <semver>] --native-protocol <n> --desktop-protocol <n> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry dashboard --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--pam-version <semver>] --native-protocol <n> --desktop-protocol <n> [--minimum-sequence <n>] [--at-unix <seconds>] --output <new-directory>\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]\n       pam registry adopt --project <directory> --next-root <project-relative.json> --next-catalog <project-relative.json> [--at-unix <seconds>] [--json]\n       pam registry payload --document <root-or-catalog.json> [--output <payload.json>]\n       pam registry key-id --public-key <64-lowercase-hex>"
     );
 }
 
@@ -2344,6 +2576,11 @@ mod tests {
             surface_summaries,
             entries,
         };
+        let html = render_compatibility_dashboard(&report, &"12".repeat(32));
+        assert!(html.contains("default-src 'none'; style-src 'self'"));
+        assert!(!html.contains("<script"));
+        assert!(html.contains("aria-label=\"Desktop compatibility: 0 percent\""));
+        assert!(html.contains("Protocol mismatch"));
         let json = serde_json::to_value(report).unwrap();
         assert_eq!(json["$schema"], COMPATIBILITY_MATRIX_SCHEMA_URL);
         assert_eq!(json["entries"][0]["surfaceCode"], 1);
@@ -2351,5 +2588,66 @@ mod tests {
         assert!(json["entries"][0]["resultCode"].is_number());
         assert_eq!(json["surfaceSummaries"][2]["surfaceCode"], 3);
         assert_eq!(json["surfaceSummaries"][2]["compatibleEntries"], 0);
+    }
+
+    #[test]
+    fn dashboard_escapes_catalog_text_and_refuses_to_replace_output() {
+        let root_sha256 = "ef".repeat(32);
+        let package = "pushinbr/pam-<unsafe>";
+        let version = "1.0.0&next";
+        let registry = "https://plugins.pam.dev/?a=1&b=<unsafe>";
+        let entries = vec![CompatibilityMatrixEntry {
+            package,
+            version,
+            surface_code: 1,
+            result_code: 1,
+            artifact_kind_code: 1,
+            sha256: &root_sha256,
+        }];
+        let report = CompatibilityMatrixReport {
+            schema_url: COMPATIBILITY_MATRIX_SCHEMA_URL,
+            schema_version: 1,
+            result_code: 1,
+            registry,
+            root_sha256: &root_sha256,
+            root_generation: 1,
+            catalog_sequence: 2,
+            generated_at_unix: 1_000,
+            expires_at_unix: 2_000,
+            pam_version: "1.0.3".to_owned(),
+            native_protocol: 1,
+            desktop_protocol: 6,
+            compatible_entries: 1,
+            surface_summaries: compatibility_surface_summaries(&entries),
+            entries,
+        };
+        let html = render_compatibility_dashboard(&report, &"12".repeat(32));
+        assert!(!html.contains("pam-<unsafe>"));
+        assert!(html.contains("pam-&lt;unsafe&gt;"));
+        assert!(html.contains("1.0.0&amp;next"));
+        assert!(html.contains("a=1&amp;b=&lt;unsafe&gt;"));
+
+        let directory =
+            std::env::temp_dir().join(format!("pam-registry-dashboard-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&directory);
+        write_dashboard(&directory, &html, b"{}\n").unwrap();
+        assert_eq!(
+            fs::read_to_string(directory.join("index.html")).unwrap(),
+            html
+        );
+        assert_eq!(
+            fs::read(directory.join("compatibility-matrix.json")).unwrap(),
+            b"{}\n"
+        );
+        assert_eq!(
+            fs::read_to_string(directory.join("assets/registry-dashboard.css")).unwrap(),
+            DASHBOARD_CSS
+        );
+        assert!(
+            write_dashboard(&directory, &html, b"{}\n")
+                .unwrap_err()
+                .contains("cannot create new registry dashboard directory")
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
 }

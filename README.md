@@ -445,6 +445,9 @@ Registry operators and CI can export one verified Server/Native/Desktop view wit
 --native-protocol <n> --desktop-protocol <n> --json`. The output uses stable
 integer surface and result codes and is suitable as the source for compatibility
 dashboards; see the [registry operations runbook](docs/registry-operations.md).
+`pam registry dashboard` turns the same verified inputs into a dependency-free,
+accessible static site plus its exact JSON evidence. It refuses to overwrite an
+existing output directory so publication can use an atomic directory swap.
 
 Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pushinbr/pam-api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
 
