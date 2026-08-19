@@ -12,6 +12,7 @@ use std::time::Instant;
 
 use crate::composer;
 use crate::php::PhpRuntime;
+use crate::project::ProjectKind;
 use crate::terminal::Terminal;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -156,6 +157,7 @@ pub enum InitTemplate {
     Desktop,
     Mobile,
     MobileUi,
+    Product,
 }
 
 impl InitTemplate {
@@ -167,8 +169,9 @@ impl InitTemplate {
             "desktop" => Ok(Self::Desktop),
             "mobile" | "android" | "mobile-pure" => Ok(Self::Mobile),
             "mobile-ui" | "android-ui" | "mobile+ui" => Ok(Self::MobileUi),
+            "product" | "fullstack" | "flagship" => Ok(Self::Product),
             _ => Err(format!(
-                "unknown init template {value:?}; expected raw, api, laravel, desktop, mobile, or mobile-ui"
+                "unknown init template {value:?}; expected raw, api, laravel, desktop, mobile, mobile-ui, or product"
             )),
         }
     }
@@ -238,13 +241,19 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     )?;
     options.template = Some(template);
     options.socket = socket;
-    if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
+    if matches!(
+        template,
+        InitTemplate::Mobile | InitTemplate::MobileUi | InitTemplate::Product
+    ) {
         configure_mobile_options(&mut options)?;
     }
 
     if matches!(
         template,
-        InitTemplate::Desktop | InitTemplate::Mobile | InitTemplate::MobileUi
+        InitTemplate::Desktop
+            | InitTemplate::Mobile
+            | InitTemplate::MobileUi
+            | InitTemplate::Product
     ) && socket
     {
         return Err(
@@ -271,6 +280,8 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
         init_raw(directory, socket)?;
     } else if template == InitTemplate::Desktop {
         init_desktop(directory)?;
+    } else if template == InitTemplate::Product {
+        init_product(directory, &options)?;
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
         init_mobile(directory, template == InitTemplate::MobileUi, &options)?;
     } else {
@@ -278,8 +289,18 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     }
     write_pam_manifest(directory, template, &options)?;
 
-    if options.install && directory.join("composer.json").is_file() {
-        run_composer_in(executable, directory, &["install", "--no-interaction"])?;
+    if options.install {
+        if template == InitTemplate::Product {
+            for application in ["apps/server", "apps/native", "apps/desktop"] {
+                run_composer_in(
+                    executable,
+                    &directory.join(application),
+                    &["install", "--no-interaction"],
+                )?;
+            }
+        } else if directory.join("composer.json").is_file() {
+            run_composer_in(executable, directory, &["install", "--no-interaction"])?;
+        }
     }
     print_init_success(directory, template, socket);
     Ok(0)
@@ -398,11 +419,12 @@ fn write_pam_manifest(
     options: &InitOptions,
 ) -> Result<(), String> {
     let kind = match template {
-        InitTemplate::Api => 1,
-        InitTemplate::Mobile | InitTemplate::MobileUi => 2,
-        InitTemplate::Laravel => 3,
-        InitTemplate::Desktop => 4,
-        InitTemplate::Raw => 5,
+        InitTemplate::Api => ProjectKind::Api,
+        InitTemplate::Mobile | InitTemplate::MobileUi => ProjectKind::Native,
+        InitTemplate::Laravel => ProjectKind::Laravel,
+        InitTemplate::Desktop => ProjectKind::Desktop,
+        InitTemplate::Raw => ProjectKind::Raw,
+        InitTemplate::Product => ProjectKind::Product,
     };
     let name = directory
         .file_name()
@@ -412,7 +434,7 @@ fn write_pam_manifest(
     let mut manifest = serde_json::json!({
         "$schema": "https://push-in.github.io/pam-docs/schemas/pam.schema.json",
         "schema": 1,
-        "type": kind,
+        "type": kind as u8,
         "name": name,
         "version": "0.1.0",
     });
@@ -421,6 +443,12 @@ fn write_pam_manifest(
             "applicationId": options.application_id,
             "starter": options.mobile_starter.unwrap_or(MobileStarter::Blank) as u8,
             "platforms": options.mobile_platforms.iter().map(|platform| *platform as u8).collect::<Vec<_>>(),
+        });
+    }
+    if template == InitTemplate::Product {
+        manifest["workspace"] = serde_json::json!({
+            "surfaceCodes": [1, 2, 3],
+            "contractPath": "packages/contracts"
         });
     }
     write_new(
@@ -765,6 +793,12 @@ fn choose_template(
         ui.heading(format!("{:<25}", "Mobile · Official UI")),
         ui.muted("PAM Mobile UI design system · recommended for apps")
     );
+    println!(
+        "  {}  {} {}",
+        ui.accent("09"),
+        ui.heading(format!("{:<25}", "Product workspace")),
+        ui.muted("Server + Native + Desktop + shared PHP contracts")
+    );
     print!("\n{} ", ui.command("Choose a preset [02] ›"));
     std::io::stdout()
         .flush()
@@ -782,6 +816,7 @@ fn choose_template(
         "6" => Ok((InitTemplate::Desktop, false)),
         "7" => Ok((InitTemplate::Mobile, false)),
         "8" => Ok((InitTemplate::MobileUi, false)),
+        "9" => Ok((InitTemplate::Product, false)),
         value => Err(format!("invalid init preset {value:?}")),
     }
 }
@@ -934,6 +969,450 @@ final class ApplicationTest extends TestCase
 "#,
     )?;
     Ok(())
+}
+
+fn init_product(directory: &Path, options: &InitOptions) -> Result<(), String> {
+    let applications = directory.join("apps");
+    let contracts = directory.join("packages/contracts");
+    fs::create_dir_all(contracts.join("src"))
+        .map_err(|error| format!("cannot create product workspace: {error}"))?;
+    fs::create_dir_all(&applications)
+        .map_err(|error| format!("cannot create product applications: {error}"))?;
+
+    write_new(
+        &contracts.join("composer.json"),
+        r#"{
+    "name": "app/product-contracts",
+    "description": "Shared integer-backed contracts for the PAM product workspace.",
+    "version": "1.0.0",
+    "type": "library",
+    "license": "proprietary",
+    "require": {"php": "^8.4"},
+    "autoload": {"psr-4": {"Product\\Contracts\\": "src/"}},
+    "config": {"platform-check": true, "sort-packages": true}
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/ProductSurface.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+enum ProductSurface: int
+{
+    case Server = 1;
+    case Native = 2;
+    case Desktop = 3;
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/ReadinessState.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+enum ReadinessState: int
+{
+    case Operational = 1;
+    case Degraded = 2;
+    case Offline = 3;
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/ProductSnapshot.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+final readonly class ProductSnapshot
+{
+    public function __construct(
+        public ProductSurface $surface,
+        public ReadinessState $state,
+        public string $headline,
+    ) {
+        if (trim($this->headline) === '' || mb_strlen($this->headline) > 120) {
+            throw new \InvalidArgumentException('Headline must contain 1 to 120 characters.');
+        }
+    }
+
+    public static function operational(ProductSurface $surface): self
+    {
+        return new self($surface, ReadinessState::Operational, 'All systems ready');
+    }
+
+    /** @return array{surfaceCode: int, stateCode: int, headline: string} */
+    public function toArray(): array
+    {
+        return [
+            'surfaceCode' => $this->surface->value,
+            'stateCode' => $this->state->value,
+            'headline' => $this->headline,
+        ];
+    }
+}
+"#,
+    )?;
+    fs::create_dir_all(contracts.join("tests"))
+        .map_err(|error| format!("cannot create product contract tests: {error}"))?;
+    write_new(
+        &contracts.join("tests/contract.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__).'/src/ProductSurface.php';
+require dirname(__DIR__).'/src/ReadinessState.php';
+require dirname(__DIR__).'/src/ProductSnapshot.php';
+
+use Product\Contracts\ProductSnapshot;
+use Product\Contracts\ProductSurface;
+
+foreach ([ProductSurface::Server, ProductSurface::Native, ProductSurface::Desktop] as $surface) {
+    $snapshot = ProductSnapshot::operational($surface)->toArray();
+    assert($snapshot['surfaceCode'] === $surface->value);
+    assert($snapshot['stateCode'] === 1);
+    assert($snapshot['headline'] === 'All systems ready');
+}
+
+echo "Cross-surface product contract verified.\n";
+"#,
+    )?;
+
+    let server = applications.join("server");
+    let native = applications.join("native");
+    let desktop = applications.join("desktop");
+    fs::create_dir_all(&server).map_err(|error| format!("cannot create server app: {error}"))?;
+    fs::create_dir_all(&native).map_err(|error| format!("cannot create native app: {error}"))?;
+    fs::create_dir_all(&desktop).map_err(|error| format!("cannot create desktop app: {error}"))?;
+    init_api(&server, false)?;
+    init_mobile(&native, true, options)?;
+    init_desktop(&desktop)?;
+    add_product_contract(&server.join("composer.json"))?;
+    add_product_contract(&native.join("composer.json"))?;
+    add_product_contract(&desktop.join("composer.json"))?;
+    write_pam_manifest(&server, InitTemplate::Api, options)?;
+    write_pam_manifest(&native, InitTemplate::MobileUi, options)?;
+    write_pam_manifest(&desktop, InitTemplate::Desktop, options)?;
+
+    replace_generated(
+        &server.join("index.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+use Pam\App;
+use Pam\Http\Request;
+use Pam\Http\Response;
+use Product\Contracts\ProductSnapshot;
+use Product\Contracts\ProductSurface;
+
+require __DIR__.'/vendor/autoload.php';
+
+$app = new App;
+$app->get('/api/status', static fn (Request $request, Response $response): Response => $response->json(
+    ProductSnapshot::operational(ProductSurface::Server)->toArray(),
+));
+$app->listen((int) (getenv('PAM_PORT') ?: 3000));
+"#,
+    )?;
+    replace_generated(
+        &server.join("tests/ApplicationTest.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+use Pam\App;
+use Pam\Http\Request;
+use Pam\Http\Response;
+use Pam\Testing\TestClient;
+use PHPUnit\Framework\TestCase;
+use Product\Contracts\ProductSnapshot;
+use Product\Contracts\ProductSurface;
+
+final class ApplicationTest extends TestCase
+{
+    public function test_shared_product_status_contract(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->get('/api/status', static fn (Request $request, Response $response): Response => $response->json(
+            ProductSnapshot::operational(ProductSurface::Server)->toArray(),
+        ));
+
+        (new TestClient($app))
+            ->get('/api/status')
+            ->assertSuccessful()
+            ->assertJson(['surfaceCode' => 1, 'stateCode' => 1, 'headline' => 'All systems ready']);
+        self::addToAssertionCount(1);
+    }
+}
+"#,
+    )?;
+    replace_generated(
+        &native.join("src/Hello.pam"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use Pam\Native\Attributes\State;
+use Pam\Native\Component;
+use Product\Contracts\ProductSnapshot;
+use Product\Contracts\ProductSurface;
+
+final class Hello extends Component
+{
+    #[State]
+    public int $refreshCount = 0;
+
+    public function refresh(): void { $this->refreshCount++; }
+
+    public function snapshot(): ProductSnapshot
+    {
+        return ProductSnapshot::operational(ProductSurface::Native);
+    }
+}
+?>
+
+<template>
+    <PamUIProvider mode="system">
+        <SafeAreaView class="flex-1 ui-surface">
+            <Center class="flex-1 px-6">
+                <Card class="w-full max-w-md gap-5 p-6">
+                    <Badge variant="secondary"><BadgeText>Native surface · code 2</BadgeText></Badge>
+                    <Heading size="2xl">{{ $this->snapshot()->headline }}</Heading>
+                    <Text class="text-muted-foreground">One typed PHP contract across every PAM runtime.</Text>
+                    <Button size="lg" on:press="refresh">
+                        <ButtonText>Verify again · {{ $refreshCount }}</ButtonText>
+                    </Button>
+                </Card>
+            </Center>
+        </SafeAreaView>
+    </PamUIProvider>
+</template>
+"#,
+    )?;
+    replace_generated_once(
+        &desktop.join("app.php"),
+        "use Pam\\Desktop\\WindowTheme;",
+        "use Pam\\Desktop\\WindowTheme;\nuse Product\\Contracts\\ProductSnapshot;\nuse Product\\Contracts\\ProductSurface;",
+        "desktop contract import",
+    )?;
+    replace_generated_once(
+        &desktop.join("app.php"),
+        "}\n\nHelloApp::run();",
+        r#"    #[Command('product.status')]
+    public function productStatus(): array
+    {
+        return ProductSnapshot::operational(ProductSurface::Desktop)->toArray();
+    }
+}
+
+HelloApp::run();"#,
+        "desktop product command",
+    )?;
+    replace_generated_once(
+        &desktop.join("resources/index.html"),
+        "            <section class=\"runtime-strip\" aria-label=\"Componentes da aplicação\">",
+        r#"            <section class="product-signal" aria-labelledby="product-signal-title">
+                <div>
+                    <span class="eyebrow">SHARED CONTRACT · SURFACE 3</span>
+                    <h2 id="product-signal-title">Um domínio.<br><strong>Três superfícies.</strong></h2>
+                    <p id="product-headline">Consultando o contrato PHP compartilhado…</p>
+                </div>
+                <dl aria-label="Estado do produto">
+                    <div><dt>surface code</dt><dd id="product-surface-code">—</dd></div>
+                    <div><dt>state code</dt><dd id="product-state-code">—</dd></div>
+                </dl>
+                <div>
+                    <button id="product-refresh" type="button">Verificar contrato</button>
+                    <p id="product-status" role="status" aria-live="polite">Aguardando o worker PHP.</p>
+                </div>
+            </section>
+
+            <section class="runtime-strip" aria-label="Componentes da aplicação">"#,
+        "desktop product status surface",
+    )?;
+    let desktop_css = fs::read_to_string(desktop.join("resources/styles.css"))
+        .map_err(|error| format!("cannot read generated desktop styles: {error}"))?;
+    replace_generated(
+        &desktop.join("resources/styles.css"),
+        &(desktop_css
+            + r##"
+
+.product-signal {
+    display: grid;
+    grid-template-columns: minmax(0, 1.4fr) minmax(220px, .8fr) minmax(220px, .8fr);
+    gap: 24px;
+    align-items: center;
+    margin: 0 0 32px;
+    padding: 28px;
+    border: 1px solid var(--line-strong);
+    border-radius: 18px;
+    background: linear-gradient(125deg, rgba(104, 222, 210, .08), rgba(166, 154, 255, .06));
+}
+
+.product-signal h2 { margin: 8px 0 10px; font-size: clamp(26px, 3vw, 42px); line-height: 1; }
+.product-signal h2 strong { color: var(--cyan); font-family: Georgia, serif; font-weight: 500; }
+.product-signal p { margin: 0; color: var(--text-soft); }
+.product-signal dl { display: grid; grid-template-columns: repeat(2, 1fr); margin: 0; }
+.product-signal dl div { padding: 14px; border-left: 1px solid var(--line); }
+.product-signal dt { color: var(--text-faint); font: 600 9px/1.2 "JetBrains Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
+.product-signal dd { margin: 8px 0 0; font-size: 28px; font-variant-numeric: tabular-nums; }
+.product-signal button { min-height: 48px; padding: 0 18px; color: var(--run-ink); background: var(--run); border: 0; border-radius: 9px; font-weight: 700; cursor: pointer; }
+.product-signal button:disabled { cursor: wait; opacity: .6; }
+.product-signal button:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+.product-signal #product-status { margin-top: 9px; font-size: 12px; }
+
+@media (max-width: 880px) {
+    .product-signal { grid-template-columns: 1fr; }
+    .product-signal dl div:first-child { border-left: 0; }
+}
+"##),
+    )?;
+    let desktop_javascript = fs::read_to_string(desktop.join("resources/app.js"))
+        .map_err(|error| format!("cannot read generated desktop JavaScript: {error}"))?;
+    replace_generated(
+        &desktop.join("resources/app.js"),
+        &(desktop_javascript
+            + r##"
+
+(() => {
+    "use strict";
+    const button = document.querySelector("#product-refresh");
+    const headline = document.querySelector("#product-headline");
+    const surfaceCode = document.querySelector("#product-surface-code");
+    const stateCode = document.querySelector("#product-state-code");
+    const status = document.querySelector("#product-status");
+    if (!window.pam || !button || !headline || !surfaceCode || !stateCode || !status) return;
+
+    const refresh = async () => {
+        button.disabled = true;
+        button.setAttribute("aria-busy", "true");
+        status.textContent = "Verificando no worker PHP…";
+        try {
+            const snapshot = await window.pam.invoke("product.status", null, { timeout: 3_000 });
+            if (!Number.isInteger(snapshot.surfaceCode) || snapshot.surfaceCode !== 3
+                || !Number.isInteger(snapshot.stateCode) || snapshot.stateCode < 1 || snapshot.stateCode > 3
+                || typeof snapshot.headline !== "string" || snapshot.headline.length > 120) {
+                throw new Error("O worker devolveu um contrato incompatível.");
+            }
+            headline.textContent = snapshot.headline;
+            surfaceCode.textContent = String(snapshot.surfaceCode);
+            stateCode.textContent = String(snapshot.stateCode);
+            status.textContent = snapshot.stateCode === 1
+                ? "✓ Contrato operacional e compatível."
+                : `! Estado ${snapshot.stateCode}; consulte o Server.`;
+        } catch (error) {
+            status.textContent = error instanceof Error ? `! ${error.message}` : "! Falha ao verificar o contrato.";
+        } finally {
+            button.disabled = false;
+            button.removeAttribute("aria-busy");
+        }
+    };
+    button.addEventListener("click", () => void refresh());
+    void refresh();
+})();
+"##),
+    )?;
+
+    write_new(
+        &directory.join("README.md"),
+        r#"# PAM product workspace
+
+One typed PHP domain across Server, Native, and Desktop.
+
+## First vertical flow
+
+- Server exposes `GET /api/status` with integer `surfaceCode` and `stateCode`.
+- Native renders the same `ProductSnapshot` through real platform controls.
+- Desktop exposes `product.status` through its authenticated local bridge.
+
+The meanings live in backed enums under `packages/contracts`; transports never
+send string status or surface discriminators.
+
+## Run
+
+```bash
+cd apps/server && pam dev index.php
+cd apps/native && pam dev
+cd apps/desktop && pam desktop dev
+php packages/contracts/tests/contract.php
+```
+
+Generated caches, native builds, Composer vendors, and desktop targets remain
+inside their owning application and are removable with `pam clean`.
+"#,
+    )?;
+    write_new(
+        &directory.join(".gitignore"),
+        "/.pam/\n/apps/*/.pam/\n/apps/*/vendor/\n/apps/*/target/\n/apps/native/android/.gradle/\n/apps/native/android/**/build/\n",
+    )
+}
+
+fn add_product_contract(path: &Path) -> Result<(), String> {
+    let mut manifest: serde_json::Value = serde_json::from_slice(
+        &fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?,
+    )
+    .map_err(|error| format!("invalid generated Composer manifest: {error}"))?;
+    manifest["require"]["app/product-contracts"] = serde_json::json!("^1.0");
+    if manifest.get("repositories").is_none() {
+        manifest["repositories"] = serde_json::json!([]);
+    }
+    let repositories = manifest["repositories"]
+        .as_array_mut()
+        .ok_or_else(|| "generated Composer repositories must be an array".to_owned())?;
+    repositories.push(serde_json::json!({
+        "type": "path",
+        "url": "../../packages/contracts",
+        "options": {"symlink": false}
+    }));
+    replace_generated(
+        path,
+        &(serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("cannot encode generated Composer manifest: {error}"))?
+            + "\n"),
+    )
+}
+
+fn replace_generated(path: &Path, contents: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect generated file {}: {error}", path.display()))?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err(format!(
+            "refusing to replace non-regular generated file {}",
+            path.display()
+        ));
+    }
+    fs::write(path, contents)
+        .map_err(|error| format!("cannot replace generated file {}: {error}", path.display()))
+}
+
+fn replace_generated_once(
+    path: &Path,
+    needle: &str,
+    replacement: &str,
+    label: &str,
+) -> Result<(), String> {
+    let source = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read generated {label} {}: {error}", path.display()))?;
+    if source.matches(needle).count() != 1 {
+        return Err(format!(
+            "generated {label} marker must occur exactly once in {}",
+            path.display()
+        ));
+    }
+    replace_generated(path, &source.replacen(needle, replacement, 1))
 }
 
 fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
@@ -3768,6 +4247,8 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
         (InitTemplate::Mobile, true) => unreachable!("mobile does not support --socket"),
         (InitTemplate::MobileUi, false) => "Mobile · Official UI",
         (InitTemplate::MobileUi, true) => unreachable!("mobile UI does not support --socket"),
+        (InitTemplate::Product, false) => "Product · Server + Native + Desktop",
+        (InitTemplate::Product, true) => unreachable!("product does not support --socket"),
     };
     let ui = Terminal::stdout();
     println!();
@@ -3783,7 +4264,9 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
         ui.muted(format!("{:<12}", "Directory")),
         directory.display()
     );
-    let next = if template == InitTemplate::Desktop {
+    let next = if template == InitTemplate::Product {
+        format!("cd {} && read README.md", directory.display())
+    } else if template == InitTemplate::Desktop {
         format!("cd {} && pam desktop dev .", directory.display())
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
         format!("cd {} && pam mobile dev .", directory.display())

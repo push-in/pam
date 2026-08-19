@@ -298,6 +298,12 @@ fn resolve_authenticated(
         ProjectKind::Native => (2, config.native_protocol, None),
         ProjectKind::Desktop => (3, None, config.desktop_protocol),
         ProjectKind::Api | ProjectKind::Laravel | ProjectKind::Raw => (1, None, None),
+        ProjectKind::Product => {
+            return Err(
+                "run package installation from apps/server, apps/native, or apps/desktop"
+                    .to_owned(),
+            );
+        }
     };
     if surface_code == 2 && native_protocol.is_none() {
         return Err("pam-registry.json requires nativeProtocol for a Native project".to_owned());

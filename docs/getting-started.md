@@ -42,7 +42,19 @@ pam init my-api --template api
 pam init my-laravel-app --template laravel
 pam init my-native-app --template mobile
 pam init my-desktop-app --template desktop
+pam init my-product --template product
 ```
+
+The `product` template creates one bounded workspace with independently runnable
+Server, Native, and Desktop applications plus `packages/contracts`, a local PHP
+package shared by all three. Its first executable flow exposes the same typed
+readiness snapshot through HTTP, native controls, and the authenticated Desktop
+bridge. Surface and readiness variants remain sequential integer-backed enums;
+the generated transports never introduce string discriminators.
+
+Use `pam clean --dry-run` at the workspace root to inspect cross-surface caches
+and builds, then `pam clean --all` to remove them without touching source,
+Composer manifests, lockfiles, or the shared contract.
 
 The Desktop preset opens with a responsive PAM workbench that demonstrates the
 typed PHP command bridge, explicit native capabilities, signed updates and the

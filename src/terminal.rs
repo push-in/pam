@@ -438,7 +438,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[
                 (
                     "--template PRESET",
-                    "raw, api, laravel, desktop, mobile, or mobile-ui",
+                    "raw, api, laravel, desktop, mobile, mobile-ui, or product",
                 ),
                 ("--socket", "Add Pam Socket support"),
                 ("--name NAME", "Human-readable mobile application name"),
@@ -459,6 +459,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "init my-app --template laravel --socket",
                 "init native-app --template mobile --no-install",
                 "init ui-app --template mobile-ui --no-install",
+                "init my-product --template product --no-install",
             ],
         ),
         "build" => (

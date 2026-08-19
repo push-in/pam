@@ -86,6 +86,7 @@ Choose another target without learning another platform CLI:
 pam init my-laravel-app --template laravel  # Persistent Laravel
 pam init my-native-app  --template mobile   # Android + iOS
 pam init my-desktop-app --template desktop  # Linux + macOS + Windows
+pam init my-product     --template product  # Server + Native + Desktop
 ```
 
 Inside every PAM project, the workflow is the same:
@@ -786,7 +787,7 @@ pam profile|trace [index.php]                       profiling and structured eve
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam benchmark http://host/path                      built-in HTTP benchmark
-pam init [directory] --template raw|api|laravel|desktop|mobile
+pam init [directory] --template raw|api|laravel|desktop|mobile|mobile-ui|product
                                                     scaffold and install a project
 pam init [directory] --template api --socket        add native Socket support
 pam init [directory] --no-interaction               accept the default API preset

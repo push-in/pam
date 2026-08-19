@@ -11,8 +11,8 @@
         "type": {
             "type": "integer",
             "minimum": 1,
-            "maximum": 5,
-            "description": "1 API, 2 Native, 3 Laravel, 4 Desktop, 5 Raw runtime"
+            "maximum": 6,
+            "description": "1 API, 2 Native, 3 Laravel, 4 Desktop, 5 Raw runtime, 6 Product workspace"
         },
         "name": {"type": "string", "minLength": 1, "maxLength": 80},
         "version": {
@@ -50,6 +50,28 @@
                 }
             }
         },
+        "workspace": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["surfaceCodes", "contractPath"],
+            "properties": {
+                "surfaceCodes": {
+                    "type": "array",
+                    "minItems": 3,
+                    "maxItems": 3,
+                    "uniqueItems": true,
+                    "prefixItems": [
+                        {"const": 1, "description": "Server"},
+                        {"const": 2, "description": "Native"},
+                        {"const": 3, "description": "Desktop"}
+                    ],
+                    "items": false
+                },
+                "contractPath": {
+                    "const": "packages/contracts"
+                }
+            }
+        },
         "commands": {
             "type": "object",
             "propertyNames": {"pattern": "^[a-z0-9][a-z0-9:_-]{0,95}$"},
@@ -68,5 +90,11 @@
                 ]
             }
         }
-    }
+    },
+    "allOf": [
+        {
+            "if": {"properties": {"type": {"const": 6}}, "required": ["type"]},
+            "then": {"required": ["workspace"]}
+        }
+    ]
 }

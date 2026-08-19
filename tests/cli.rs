@@ -701,7 +701,7 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     let init_help = run_pam(&["init", "--help"]);
     assert!(init_help.status.success());
     let init_help = String::from_utf8_lossy(&init_help.stderr);
-    assert!(init_help.contains("mobile, or mobile-ui"));
+    assert!(init_help.contains("mobile-ui, or product"));
     assert!(init_help.contains("--template mobile-ui"));
 
     let mobile_help = run_pam(&["mobile", "--help"]);
@@ -1331,6 +1331,136 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     assert!(hello.contains("#[State]"));
     assert!(hello.contains("<PamUIProvider mode=\"system\">"));
     assert!(hello.contains("<Button size=\"lg\" on:press=\"increment\">"));
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn initializes_a_bounded_cross_surface_product_workspace() {
+    let directory = temporary_path("init-product");
+    let output = run_pam(&[
+        "init",
+        directory.to_str().unwrap(),
+        "--template",
+        "product",
+        "--no-install",
+        "--no-interaction",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let root: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.join("pam.json")).unwrap()).unwrap();
+    assert_eq!(root["type"], 6);
+    assert_eq!(
+        root["workspace"]["surfaceCodes"],
+        serde_json::json!([1, 2, 3])
+    );
+    assert_eq!(root["workspace"]["contractPath"], "packages/contracts");
+    let info = run_pam_in(&directory, &["info", "--json"]);
+    assert!(info.status.success());
+    let info: serde_json::Value = serde_json::from_slice(&info.stdout).unwrap();
+    assert_eq!(info["type"], 6);
+    assert_eq!(info["typeLabel"], "PAM Product");
+
+    let surface =
+        fs::read_to_string(directory.join("packages/contracts/src/ProductSurface.php")).unwrap();
+    let state =
+        fs::read_to_string(directory.join("packages/contracts/src/ReadinessState.php")).unwrap();
+    let snapshot =
+        fs::read_to_string(directory.join("packages/contracts/src/ProductSnapshot.php")).unwrap();
+    assert!(surface.contains("case Server = 1;"));
+    assert!(surface.contains("case Native = 2;"));
+    assert!(surface.contains("case Desktop = 3;"));
+    assert!(state.contains("case Operational = 1;"));
+    assert!(state.contains("case Degraded = 2;"));
+    assert!(state.contains("case Offline = 3;"));
+    assert!(snapshot.contains("'surfaceCode' => $this->surface->value"));
+    assert!(snapshot.contains("'stateCode' => $this->state->value"));
+    let contract = run_pam(&[directory
+        .join("packages/contracts/tests/contract.php")
+        .to_str()
+        .unwrap()]);
+    assert!(
+        contract.status.success(),
+        "{}",
+        String::from_utf8_lossy(&contract.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&contract.stdout),
+        "Cross-surface product contract verified.\n"
+    );
+
+    for application in ["server", "native", "desktop"] {
+        let manifest: serde_json::Value = serde_json::from_slice(
+            &fs::read(directory.join(format!("apps/{application}/composer.json"))).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["require"]["app/product-contracts"], "^1.0");
+        assert!(
+            manifest["repositories"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|repository| {
+                    repository["type"] == "path"
+                        && repository["url"] == "../../packages/contracts"
+                        && repository["options"]["symlink"] == false
+                })
+        );
+    }
+    assert!(
+        fs::read_to_string(directory.join("apps/server/index.php"))
+            .unwrap()
+            .contains("ProductSurface::Server")
+    );
+    assert!(
+        fs::read_to_string(directory.join("apps/server/tests/ApplicationTest.php"))
+            .unwrap()
+            .contains("assertJson(['surfaceCode' => 1, 'stateCode' => 1")
+    );
+    assert!(
+        fs::read_to_string(directory.join("apps/native/src/Hello.pam"))
+            .unwrap()
+            .contains("ProductSurface::Native")
+    );
+    assert!(
+        fs::read_to_string(directory.join("apps/desktop/app.php"))
+            .unwrap()
+            .contains("ProductSurface::Desktop")
+    );
+    let desktop_html =
+        fs::read_to_string(directory.join("apps/desktop/resources/index.html")).unwrap();
+    let desktop_styles =
+        fs::read_to_string(directory.join("apps/desktop/resources/styles.css")).unwrap();
+    let desktop_javascript =
+        fs::read_to_string(directory.join("apps/desktop/resources/app.js")).unwrap();
+    assert!(desktop_html.contains("id=\"product-refresh\""));
+    assert!(desktop_html.contains("role=\"status\" aria-live=\"polite\""));
+    assert!(desktop_styles.contains(".product-signal button:focus-visible"));
+    assert!(desktop_styles.contains("min-height: 48px"));
+    assert!(desktop_javascript.contains("window.pam.invoke(\"product.status\""));
+    assert!(desktop_javascript.contains("snapshot.surfaceCode !== 3"));
+    assert!(desktop_javascript.contains("Number.isInteger(snapshot.stateCode)"));
+
+    let generated_cache = directory.join("apps/desktop/target/debug/incremental");
+    fs::create_dir_all(&generated_cache).unwrap();
+    fs::write(generated_cache.join("cache.bin"), [0_u8; 64]).unwrap();
+    let clean = run_pam_in(&directory, &["clean", "--all"]);
+    assert!(
+        clean.status.success(),
+        "{}",
+        String::from_utf8_lossy(&clean.stderr)
+    );
+    assert!(!directory.join("apps/desktop/target").exists());
+    assert!(
+        directory
+            .join("packages/contracts/src/ProductSnapshot.php")
+            .is_file()
+    );
 
     fs::remove_dir_all(directory).unwrap();
 }

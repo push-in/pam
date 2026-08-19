@@ -13,6 +13,7 @@ pub enum ProjectKind {
     Laravel = 3,
     Desktop = 4,
     Raw = 5,
+    Product = 6,
 }
 
 impl ProjectKind {
@@ -23,6 +24,7 @@ impl ProjectKind {
             Self::Laravel => "Laravel",
             Self::Desktop => "PAM Desktop",
             Self::Raw => "PAM Runtime",
+            Self::Product => "PAM Product",
         }
     }
 }
@@ -101,7 +103,7 @@ pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> 
             context.root.display()
         )
     })?;
-    let targets = cleanup_targets(all);
+    let targets = cleanup_targets(context.kind, all);
     let mut entries = Vec::with_capacity(targets.len());
     for (relative, kind) in targets {
         let path = root.join(relative);
@@ -206,7 +208,51 @@ pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> 
     Ok(0)
 }
 
-fn cleanup_targets(all: bool) -> Vec<(&'static Path, CleanupArtifactKind)> {
+fn cleanup_targets(kind: ProjectKind, all: bool) -> Vec<(&'static Path, CleanupArtifactKind)> {
+    if kind == ProjectKind::Product {
+        if all {
+            return vec![
+                (Path::new("apps/server/.pam"), CleanupArtifactKind::Cache),
+                (Path::new("apps/native/.pam"), CleanupArtifactKind::Cache),
+                (
+                    Path::new("apps/native/.pam-native/android"),
+                    CleanupArtifactKind::Build,
+                ),
+                (
+                    Path::new("apps/native/.pam-native/ios"),
+                    CleanupArtifactKind::Build,
+                ),
+                (Path::new("apps/desktop/.pam"), CleanupArtifactKind::Cache),
+                (Path::new("apps/desktop/target"), CleanupArtifactKind::Build),
+            ];
+        }
+        return vec![
+            (
+                Path::new("apps/native/.pam-native/android/app/build"),
+                CleanupArtifactKind::Build,
+            ),
+            (
+                Path::new("apps/native/.pam-native/android/build"),
+                CleanupArtifactKind::Build,
+            ),
+            (
+                Path::new("apps/native/.pam-native/android/gradle-home/caches"),
+                CleanupArtifactKind::Cache,
+            ),
+            (
+                Path::new("apps/native/.pam-native/ios/App/DerivedData"),
+                CleanupArtifactKind::Build,
+            ),
+            (
+                Path::new("apps/desktop/target/debug/incremental"),
+                CleanupArtifactKind::Cache,
+            ),
+            (
+                Path::new("apps/desktop/target/release/incremental"),
+                CleanupArtifactKind::Cache,
+            ),
+        ];
+    }
     if all {
         return vec![
             (Path::new(".pam-native/android"), CleanupArtifactKind::Build),
@@ -401,7 +447,7 @@ fn artifact_footprint(context: &ProjectContext) -> Result<serde_json::Value, Str
     let mut total_bytes = 0_u64;
     let mut total_files = 0_u64;
     let mut complete = true;
-    for (relative, kind) in cleanup_targets(true) {
+    for (relative, kind) in cleanup_targets(context.kind, true) {
         let path = context.root.join(relative);
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
@@ -505,6 +551,7 @@ fn contextual_next_commands(kind: ProjectKind) -> &'static [&'static str] {
         ProjectKind::Native => &["pam doctor", "pam dev", "pam test", "pam build"],
         ProjectKind::Desktop => &["pam doctor", "pam dev", "pam test", "pam build"],
         ProjectKind::Laravel => &["pam doctor", "pam dev", "pam test", "pam benchmark <url>"],
+        ProjectKind::Product => &["pam info", "pam clean --dry-run", "read README.md"],
         ProjectKind::Api | ProjectKind::Raw => &["pam doctor", "pam dev", "pam test", "pam build"],
     }
 }
@@ -566,13 +613,51 @@ pub fn validate_context(context: &ProjectContext) -> Result<(), String> {
         let kind = manifest
             .get("type")
             .and_then(serde_json::Value::as_u64)
-            .ok_or_else(|| "pam.json type must be an integer from 1 through 5".to_owned())?;
+            .ok_or_else(|| "pam.json type must be an integer from 1 through 6".to_owned())?;
         if kind != context.kind as u64 {
             return Err(format!(
                 "pam.json type {kind} does not match the discovered {} project type {}",
                 context.kind.label(),
                 context.kind as u8
             ));
+        }
+        if context.kind == ProjectKind::Product {
+            let surface_codes = manifest
+                .pointer("/workspace/surfaceCodes")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| {
+                    "product workspace surfaceCodes must be the integer array [1, 2, 3]".to_owned()
+                })?;
+            if surface_codes.as_slice()
+                != [
+                    serde_json::Value::from(1),
+                    serde_json::Value::from(2),
+                    serde_json::Value::from(3),
+                ]
+            {
+                return Err(
+                    "product workspace surfaceCodes must be the integer array [1, 2, 3]".to_owned(),
+                );
+            }
+            if manifest
+                .pointer("/workspace/contractPath")
+                .and_then(serde_json::Value::as_str)
+                != Some("packages/contracts")
+            {
+                return Err("product workspace contractPath must be packages/contracts".to_owned());
+            }
+            let contracts = context.root.join("packages/contracts");
+            let contracts_metadata = fs::symlink_metadata(&contracts).map_err(|error| {
+                format!(
+                    "cannot inspect product workspace contracts {}: {error}",
+                    contracts.display()
+                )
+            })?;
+            if !contracts_metadata.is_dir() || contracts_metadata.file_type().is_symlink() {
+                return Err(
+                    "product workspace contracts must be a real project-local directory".to_owned(),
+                );
+            }
         }
         let name = manifest
             .get("name")
@@ -804,6 +889,7 @@ fn manifest_kind(directory: &Path) -> Option<ProjectKind> {
         3 => Some(ProjectKind::Laravel),
         4 => Some(ProjectKind::Desktop),
         5 => Some(ProjectKind::Raw),
+        6 => Some(ProjectKind::Product),
         _ => None,
     }
 }

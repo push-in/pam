@@ -724,7 +724,7 @@ fn run() -> Result<u8, CliError> {
                 "--template" => {
                     let value = raw_args.next().ok_or_else(|| {
                         CliError::Commands(
-                            "--template requires raw, api, laravel, desktop, mobile, or mobile-ui"
+                            "--template requires raw, api, laravel, desktop, mobile, mobile-ui, or product"
                                 .to_owned(),
                         )
                     })?;
