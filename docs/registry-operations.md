@@ -86,6 +86,35 @@ pam registry verify \
   --json
 ```
 
+Generate the same signed catalog's machine-readable cross-surface view for CI,
+release notes or a public dashboard. This command repeats root fingerprint,
+signature, expiry and rollback-floor verification before producing any result:
+
+```bash
+pam registry matrix \
+  --root root.json \
+  --root-sha256 "$root_sha256" \
+  --catalog catalog.json \
+  --pam-version 1.0.3 \
+  --native-protocol 1 \
+  --desktop-protocol 6 \
+  --minimum-sequence 1 \
+  --json > compatibility-matrix.json
+```
+
+Each declared plugin surface becomes one entry. `surfaceCode` uses `1` Server,
+`2` Native and `3` Desktop. `resultCode` uses `1` compatible, `2` PAM version
+mismatch and `3` Native/Desktop protocol mismatch. The output deliberately
+retains integer codes so downstream consumers do not depend on translated or
+free-form labels. Every JSON report identifies the versioned
+[`registry-compatibility-matrix.schema.json`](schemas/registry-compatibility-matrix.schema.json)
+contract through `$schema`. `surfaceSummaries` always reports Server, Native and
+Desktop totals in that order, including zero-coverage surfaces. A generated
+matrix is evidence derived from signed metadata. `rootSha256`,
+`catalogSequence`, `generatedAtUnix` and `expiresAtUnix` make that evidence
+traceable and freshness-checkable; it is not itself a substitute for the
+trusted root and catalog.
+
 The official registry is not live until all of these independent artifacts are
 public and mutually consistent:
 

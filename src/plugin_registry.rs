@@ -18,6 +18,8 @@ const MAX_REVOCATIONS: usize = 10_000;
 const CLOCK_SKEW_SECONDS: u64 = 300;
 const ROOT_MAX_VALIDITY_SECONDS: u64 = 366 * 24 * 60 * 60;
 const CATALOG_MAX_VALIDITY_SECONDS: u64 = 7 * 24 * 60 * 60;
+const COMPATIBILITY_MATRIX_SCHEMA_URL: &str =
+    "https://push-in.github.io/pam-docs/schemas/registry-compatibility-matrix.schema.json";
 pub(crate) const PROJECT_REGISTRY_CONFIG: &str = "pam-registry.json";
 pub(crate) const PROJECT_REGISTRY_STATE: &str = ".pam/plugin-registry-state.json";
 const PROJECT_ROTATION_RECEIPT: &str = ".pam/plugin-registry-rotation.json";
@@ -195,6 +197,53 @@ struct ResolutionReport<'a> {
     artifact_kind_code: u8,
     artifact_url: &'a str,
     sha256: &'a str,
+}
+
+#[repr(u8)]
+enum CompatibilityResult {
+    Compatible = 1,
+    PamVersionMismatch = 2,
+    ProtocolMismatch = 3,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompatibilityMatrixEntry<'a> {
+    package: &'a str,
+    version: &'a str,
+    surface_code: u8,
+    result_code: u8,
+    artifact_kind_code: u8,
+    sha256: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SurfaceCompatibilitySummary {
+    surface_code: u8,
+    total_entries: usize,
+    compatible_entries: usize,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompatibilityMatrixReport<'a> {
+    #[serde(rename = "$schema")]
+    schema_url: &'static str,
+    schema_version: u8,
+    result_code: u8,
+    registry: &'a str,
+    root_sha256: &'a str,
+    root_generation: u32,
+    catalog_sequence: u64,
+    generated_at_unix: u64,
+    expires_at_unix: u64,
+    pam_version: String,
+    native_protocol: u32,
+    desktop_protocol: u32,
+    compatible_entries: usize,
+    surface_summaries: Vec<SurfaceCompatibilitySummary>,
+    entries: Vec<CompatibilityMatrixEntry<'a>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -488,6 +537,13 @@ struct ResolveOptions {
     desktop_protocol: Option<u32>,
 }
 
+struct MatrixOptions {
+    verify: VerifyOptions,
+    pam_version: Version,
+    native_protocol: u32,
+    desktop_protocol: u32,
+}
+
 struct AdoptOptions {
     project: PathBuf,
     next_root: PathBuf,
@@ -516,12 +572,78 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "rotate" => verify_rotation_command(parse_options(arguments, true)?),
         "adopt" => adopt_rotation_command(parse_adopt_options(arguments)?),
         "resolve" => resolve_command(parse_resolve_options(arguments)?),
+        "matrix" => matrix_command(parse_matrix_options(arguments)?),
         "payload" => payload_command(parse_payload_options(arguments)?),
         "key-id" => key_id_command(arguments),
         unknown => Err(format!(
-            "unknown registry command {unknown:?}; expected verify, resolve, rotate, adopt, payload, or key-id"
+            "unknown registry command {unknown:?}; expected verify, resolve, matrix, rotate, adopt, payload, or key-id"
         )),
     }
+}
+
+fn parse_matrix_options(
+    arguments: impl Iterator<Item = OsString>,
+) -> Result<MatrixOptions, String> {
+    let mut verify = VerifyOptions::default();
+    let mut pam_version = Version::parse(env!("CARGO_PKG_VERSION"))
+        .map_err(|error| format!("invalid PAM package version: {error}"))?;
+    let mut native_protocol = None;
+    let mut desktop_protocol = None;
+    let mut arguments = arguments;
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--root" => verify.root = Some(required_path(&mut arguments, "--root")?),
+            "--root-sha256" => {
+                verify.root_sha256 = Some(required_utf8(&mut arguments, "--root-sha256")?)
+            }
+            "--catalog" => verify.catalog = Some(required_path(&mut arguments, "--catalog")?),
+            "--at-unix" => {
+                verify.at_unix = Some(
+                    required_utf8(&mut arguments, "--at-unix")?
+                        .parse()
+                        .map_err(|_| "--at-unix must be an unsigned integer".to_owned())?,
+                )
+            }
+            "--minimum-sequence" => {
+                verify.minimum_sequence = Some(
+                    required_utf8(&mut arguments, "--minimum-sequence")?
+                        .parse()
+                        .map_err(|_| "--minimum-sequence must be an unsigned integer".to_owned())?,
+                )
+            }
+            "--pam-version" => {
+                pam_version = Version::parse(&required_utf8(&mut arguments, "--pam-version")?)
+                    .map_err(|error| format!("invalid --pam-version: {error}"))?
+            }
+            "--native-protocol" => {
+                native_protocol = Some(
+                    required_utf8(&mut arguments, "--native-protocol")?
+                        .parse()
+                        .map_err(|_| "--native-protocol must be an integer".to_owned())?,
+                )
+            }
+            "--desktop-protocol" => {
+                desktop_protocol = Some(
+                    required_utf8(&mut arguments, "--desktop-protocol")?
+                        .parse()
+                        .map_err(|_| "--desktop-protocol must be an integer".to_owned())?,
+                )
+            }
+            "--json" => verify.json = true,
+            unknown => return Err(format!("unknown registry matrix option {unknown:?}")),
+        }
+    }
+    if verify.root.is_none() || verify.root_sha256.is_none() || verify.catalog.is_none() {
+        return Err("registry matrix requires --root, --root-sha256, and --catalog".to_owned());
+    }
+    Ok(MatrixOptions {
+        verify,
+        pam_version,
+        native_protocol: native_protocol
+            .ok_or_else(|| "registry matrix requires --native-protocol".to_owned())?,
+        desktop_protocol: desktop_protocol
+            .ok_or_else(|| "registry matrix requires --desktop-protocol".to_owned())?,
+    })
 }
 
 fn parse_payload_options(
@@ -1020,6 +1142,138 @@ fn resolve_command(options: ResolveOptions) -> Result<u8, String> {
     Ok(0)
 }
 
+fn matrix_command(options: MatrixOptions) -> Result<u8, String> {
+    let now = options.verify.at_unix.unwrap_or_else(unix_seconds);
+    let root_sha256 = options
+        .verify
+        .root_sha256
+        .as_deref()
+        .expect("validated root fingerprint");
+    let (root, _) = load_trusted_root(
+        options.verify.root.as_deref().expect("validated root"),
+        root_sha256,
+        now,
+    )?;
+    let catalog: PluginCatalog = read_document(
+        options
+            .verify
+            .catalog
+            .as_deref()
+            .expect("validated catalog"),
+        "plugin catalog",
+    )?;
+    validate_catalog(&catalog, &root, now)?;
+    enforce_minimum_sequence(catalog.sequence, options.verify.minimum_sequence)?;
+    let entries = compatibility_matrix_entries(
+        &catalog,
+        &options.pam_version,
+        options.native_protocol,
+        options.desktop_protocol,
+    );
+    let compatible_entries = entries
+        .iter()
+        .filter(|entry| entry.result_code == CompatibilityResult::Compatible as u8)
+        .count();
+    let surface_summaries = compatibility_surface_summaries(&entries);
+    let report = CompatibilityMatrixReport {
+        schema_url: COMPATIBILITY_MATRIX_SCHEMA_URL,
+        schema_version: SCHEMA_VERSION,
+        result_code: 1,
+        registry: &catalog.registry,
+        root_sha256,
+        root_generation: root.generation,
+        catalog_sequence: catalog.sequence,
+        generated_at_unix: catalog.generated_at_unix,
+        expires_at_unix: catalog.expires_at_unix,
+        pam_version: options.pam_version.to_string(),
+        native_protocol: options.native_protocol,
+        desktop_protocol: options.desktop_protocol,
+        compatible_entries,
+        surface_summaries,
+        entries,
+    };
+    if options.verify.json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&report)
+                .map_err(|error| format!("cannot encode registry compatibility matrix: {error}"))?
+        );
+    } else {
+        println!(
+            "Verified compatibility matrix for PAM {} / Native protocol {} / Desktop protocol {}: {}/{} compatible entries (catalog sequence {}).",
+            report.pam_version,
+            report.native_protocol,
+            report.desktop_protocol,
+            report.compatible_entries,
+            report.entries.len(),
+            report.catalog_sequence
+        );
+        for entry in &report.entries {
+            println!(
+                "{} {} surface {} result {}",
+                entry.package, entry.version, entry.surface_code, entry.result_code
+            );
+        }
+    }
+    Ok(0)
+}
+
+fn compatibility_surface_summaries(
+    entries: &[CompatibilityMatrixEntry<'_>],
+) -> Vec<SurfaceCompatibilitySummary> {
+    (1..=3)
+        .map(|surface_code| {
+            let surface_entries = entries
+                .iter()
+                .filter(|entry| entry.surface_code == surface_code);
+            let total_entries = surface_entries.clone().count();
+            let compatible_entries = surface_entries
+                .filter(|entry| entry.result_code == CompatibilityResult::Compatible as u8)
+                .count();
+            SurfaceCompatibilitySummary {
+                surface_code,
+                total_entries,
+                compatible_entries,
+            }
+        })
+        .collect()
+}
+
+fn compatibility_matrix_entries<'a>(
+    catalog: &'a PluginCatalog,
+    pam_version: &Version,
+    native_protocol: u32,
+    desktop_protocol: u32,
+) -> Vec<CompatibilityMatrixEntry<'a>> {
+    let mut entries = Vec::new();
+    for release in &catalog.plugins {
+        let pam_matches = VersionReq::parse(&release.compatibility.pam)
+            .is_ok_and(|requirement| requirement.matches(pam_version));
+        for &surface_code in &release.surface_codes {
+            let result = if !pam_matches {
+                CompatibilityResult::PamVersionMismatch
+            } else if (surface_code == 2
+                && release.compatibility.native_protocol != Some(native_protocol))
+                || (surface_code == 3
+                    && release.compatibility.desktop_protocol != Some(desktop_protocol))
+            {
+                CompatibilityResult::ProtocolMismatch
+            } else {
+                CompatibilityResult::Compatible
+            };
+            entries.push(CompatibilityMatrixEntry {
+                package: &release.package,
+                version: &release.version,
+                surface_code,
+                result_code: result as u8,
+                artifact_kind_code: release.artifact_kind_code,
+                sha256: &release.sha256,
+            });
+        }
+    }
+    entries
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn resolve_verified(
     root_path: &Path,
@@ -1502,7 +1756,7 @@ fn unix_seconds() -> u64 {
 
 fn print_usage() {
     println!(
-        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]\n       pam registry adopt --project <directory> --next-root <project-relative.json> --next-catalog <project-relative.json> [--at-unix <seconds>] [--json]\n       pam registry payload --document <root-or-catalog.json> [--output <payload.json>]\n       pam registry key-id --public-key <64-lowercase-hex>"
+        "Usage: pam registry verify --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry resolve --root <root.json> --root-sha256 <hex> --catalog <catalog.json> --package <vendor/package> --surface-code <1|2|3> [--pam-version <semver>] [--native-protocol <n>] [--desktop-protocol <n>] [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry matrix --root <root.json> --root-sha256 <hex> --catalog <catalog.json> [--pam-version <semver>] --native-protocol <n> --desktop-protocol <n> [--minimum-sequence <n>] [--at-unix <seconds>] [--json]\n       pam registry rotate --root <current.json> --root-sha256 <hex> --next-root <next.json> [--at-unix <seconds>] [--json]\n       pam registry adopt --project <directory> --next-root <project-relative.json> --next-catalog <project-relative.json> [--at-unix <seconds>] [--json]\n       pam registry payload --document <root-or-catalog.json> [--output <payload.json>]\n       pam registry key-id --public-key <64-lowercase-hex>"
     );
 }
 
@@ -2014,5 +2268,88 @@ mod tests {
             canonical_root_payload(&root).unwrap()
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn compatibility_matrix_reports_each_declared_surface_with_stable_integer_codes() {
+        let catalog = PluginCatalog {
+            schema_version: 1,
+            registry: "https://plugins.pam.dev/v1".to_owned(),
+            root_generation: 1,
+            sequence: 9,
+            generated_at_unix: 1_000,
+            expires_at_unix: 2_000,
+            plugins: vec![
+                PluginRelease {
+                    package: "pushinbr/pam-everywhere".to_owned(),
+                    version: "1.2.0".to_owned(),
+                    artifact_kind_code: 1,
+                    artifact_url: "https://plugins.pam.dev/everywhere.zip".to_owned(),
+                    sha256: "ab".repeat(32),
+                    published_at_unix: 900,
+                    surface_codes: vec![1, 2, 3],
+                    compatibility: PluginCompatibility {
+                        pam: "^1.0".to_owned(),
+                        native_protocol: Some(1),
+                        desktop_protocol: Some(5),
+                    },
+                },
+                PluginRelease {
+                    package: "pushinbr/pam-future".to_owned(),
+                    version: "2.0.0".to_owned(),
+                    artifact_kind_code: 1,
+                    artifact_url: "https://plugins.pam.dev/future.zip".to_owned(),
+                    sha256: "cd".repeat(32),
+                    published_at_unix: 900,
+                    surface_codes: vec![1],
+                    compatibility: PluginCompatibility {
+                        pam: "^2.0".to_owned(),
+                        native_protocol: None,
+                        desktop_protocol: None,
+                    },
+                },
+            ],
+            revocations: Vec::new(),
+            signatures: Vec::new(),
+        };
+
+        let entries =
+            compatibility_matrix_entries(&catalog, &Version::parse("1.4.0").unwrap(), 1, 6);
+        assert_eq!(entries.len(), 4);
+        assert_eq!(entries[0].result_code, 1);
+        assert_eq!(entries[1].result_code, 1);
+        assert_eq!(entries[2].result_code, 3);
+        assert_eq!(entries[3].result_code, 2);
+        assert_eq!(entries[2].surface_code, 3);
+
+        let root_sha256 = "ef".repeat(32);
+        let surface_summaries = compatibility_surface_summaries(&entries);
+        assert_eq!(surface_summaries[0].compatible_entries, 1);
+        assert_eq!(surface_summaries[1].compatible_entries, 1);
+        assert_eq!(surface_summaries[2].compatible_entries, 0);
+        let report = CompatibilityMatrixReport {
+            schema_url: COMPATIBILITY_MATRIX_SCHEMA_URL,
+            schema_version: 1,
+            result_code: 1,
+            registry: &catalog.registry,
+            root_sha256: &root_sha256,
+            root_generation: catalog.root_generation,
+            catalog_sequence: catalog.sequence,
+            generated_at_unix: catalog.generated_at_unix,
+            expires_at_unix: catalog.expires_at_unix,
+            pam_version: "1.4.0".to_owned(),
+            native_protocol: 1,
+            desktop_protocol: 6,
+            compatible_entries: 2,
+            surface_summaries,
+            entries,
+        };
+        let json = serde_json::to_value(report).unwrap();
+        assert_eq!(json["$schema"], COMPATIBILITY_MATRIX_SCHEMA_URL);
+        assert_eq!(json["entries"][0]["surfaceCode"], 1);
+        assert_eq!(json["entries"][2]["resultCode"], 3);
+        assert!(json["entries"][0]["resultCode"].is_number());
+        assert_eq!(json["surfaceSummaries"][2]["surfaceCode"], 3);
+        assert_eq!(json["surfaceSummaries"][2]["compatibleEntries"], 0);
     }
 }

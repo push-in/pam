@@ -440,6 +440,12 @@ pam test
 
 Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and loads the normal Composer autoloader. Your lockfile remains the dependency source of truth; the signed PAM catalog is an authenticity and compatibility gate, not a second solver.
 
+Registry operators and CI can export one verified Server/Native/Desktop view with
+`pam registry matrix --root root.json --root-sha256 <hex> --catalog catalog.json
+--native-protocol <n> --desktop-protocol <n> --json`. The output uses stable
+integer surface and result codes and is suitable as the source for compatibility
+dashboards; see the [registry operations runbook](docs/registry-operations.md).
+
 Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pushinbr/pam-api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
 
 The executable compatibility project currently covers real behavior from:

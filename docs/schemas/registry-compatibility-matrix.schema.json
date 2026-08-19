@@ -1,0 +1,117 @@
+{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://push-in.github.io/pam-docs/schemas/registry-compatibility-matrix.schema.json",
+    "title": "PAM signed registry compatibility matrix",
+    "type": "object",
+    "additionalProperties": false,
+    "$defs": {
+        "surfaceSummary": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["surfaceCode", "totalEntries", "compatibleEntries"],
+            "properties": {
+                "surfaceCode": {"type": "integer", "minimum": 1, "maximum": 3},
+                "totalEntries": {"type": "integer", "minimum": 0, "maximum": 10000},
+                "compatibleEntries": {"type": "integer", "minimum": 0, "maximum": 10000}
+            }
+        }
+    },
+    "required": [
+        "$schema",
+        "schemaVersion",
+        "resultCode",
+        "registry",
+        "rootSha256",
+        "rootGeneration",
+        "catalogSequence",
+        "generatedAtUnix",
+        "expiresAtUnix",
+        "pamVersion",
+        "nativeProtocol",
+        "desktopProtocol",
+        "compatibleEntries",
+        "surfaceSummaries",
+        "entries"
+    ],
+    "properties": {
+        "$schema": {
+            "const": "https://push-in.github.io/pam-docs/schemas/registry-compatibility-matrix.schema.json"
+        },
+        "schemaVersion": {"const": 1},
+        "resultCode": {
+            "const": 1,
+            "description": "1 verified"
+        },
+        "registry": {
+            "type": "string",
+            "format": "uri",
+            "maxLength": 2048
+        },
+        "rootSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "rootGeneration": {"type": "integer", "minimum": 1},
+        "catalogSequence": {"type": "integer", "minimum": 1},
+        "generatedAtUnix": {"type": "integer", "minimum": 0},
+        "expiresAtUnix": {"type": "integer", "minimum": 1},
+        "pamVersion": {
+            "type": "string",
+            "maxLength": 64,
+            "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+        },
+        "nativeProtocol": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "desktopProtocol": {"type": "integer", "minimum": 0, "maximum": 4294967295},
+        "compatibleEntries": {"type": "integer", "minimum": 0, "maximum": 30000},
+        "surfaceSummaries": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "prefixItems": [
+                {"allOf": [{"$ref": "#/$defs/surfaceSummary"}, {"properties": {"surfaceCode": {"const": 1}}}]},
+                {"allOf": [{"$ref": "#/$defs/surfaceSummary"}, {"properties": {"surfaceCode": {"const": 2}}}]},
+                {"allOf": [{"$ref": "#/$defs/surfaceSummary"}, {"properties": {"surfaceCode": {"const": 3}}}]}
+            ],
+            "items": false
+        },
+        "entries": {
+            "type": "array",
+            "maxItems": 30000,
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                    "package",
+                    "version",
+                    "surfaceCode",
+                    "resultCode",
+                    "artifactKindCode",
+                    "sha256"
+                ],
+                "properties": {
+                    "package": {
+                        "type": "string",
+                        "maxLength": 255,
+                        "pattern": "^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?/[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
+                    },
+                    "version": {
+                        "type": "string",
+                        "maxLength": 64,
+                        "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+                    },
+                    "surfaceCode": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
+                        "description": "1 Server, 2 Native, 3 Desktop"
+                    },
+                    "resultCode": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
+                        "description": "1 compatible, 2 PAM version mismatch, 3 protocol mismatch"
+                    },
+                    "artifactKindCode": {"type": "integer", "minimum": 1, "maximum": 3},
+                    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                }
+            }
+        }
+    }
+}

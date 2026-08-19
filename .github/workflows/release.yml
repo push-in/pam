@@ -152,6 +152,7 @@ jobs:
           cargo fmt --all -- --check
           cargo run --locked -- docs:generate docs/cli-reference.md --check
           python3 -m json.tool docs/schemas/pam.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/registry-compatibility-matrix.schema.json >/dev/null
           python3 scripts/check-docs.py
           cargo clippy --locked --all-targets --all-features -- -D warnings
           cargo test --locked --all-targets --all-features -- --test-threads=1
