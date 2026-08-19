@@ -8,6 +8,18 @@ pam clean --dry-run
 pam clean --dry-run --json
 ```
 
+`pam info --json` exposes the complete reclaimable total as
+`artifactFootprint`, with project-relative entries for generated Android and
+iOS hosts plus the Cargo target. The older `developmentArtifacts` field remains
+available for consumers that specifically measure `.pam-native`. Human
+`pam info` output uses the complete footprint, so Runtime and Desktop projects
+do not report zero while their Cargo build output is consuming disk.
+
+Contextual Native development also performs bounded cleanup before rebuilding.
+Android removes only app/root build outputs and its project-local Gradle caches;
+iOS removes Xcode's actual `.pam-native/ios/App/DerivedData` directory. Both
+paths preserve generated host sources, screenshots and release evidence.
+
 The default cleanup removes only regenerable build outputs and caches from the
 generated Android/iOS hosts plus Cargo incremental directories. It does not
 touch source code, `vendor`, application data, databases, sessions, `dist`,

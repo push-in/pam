@@ -230,6 +230,9 @@ fn initializes_and_discovers_a_contextual_native_project() {
     assert_eq!(payload["root"], project.to_string_lossy().as_ref());
     assert_eq!(payload["developmentArtifacts"]["exists"], false);
     assert_eq!(payload["developmentArtifacts"]["bytes"], 0);
+    assert_eq!(payload["artifactFootprint"]["bytes"], 0);
+    assert_eq!(payload["artifactFootprint"]["files"], 0);
+    assert_eq!(payload["artifactFootprint"]["complete"], true);
     assert_eq!(
         payload["nextCommands"],
         serde_json::json!(["pam doctor", "pam dev", "pam test", "pam build"])
@@ -247,6 +250,12 @@ fn initializes_and_discovers_a_contextual_native_project() {
     assert_eq!(measured["developmentArtifacts"]["bytes"], 64);
     assert_eq!(measured["developmentArtifacts"]["files"], 1);
     assert_eq!(measured["developmentArtifacts"]["complete"], true);
+    assert_eq!(measured["artifactFootprint"]["bytes"], 64);
+    assert_eq!(measured["artifactFootprint"]["files"], 1);
+    assert_eq!(
+        measured["artifactFootprint"]["entries"][0]["path"],
+        ".pam-native/android"
+    );
     let preview = run_pam_in(&project, &["clean", "--dry-run", "--json"]);
     assert!(preview.status.success());
     let preview: serde_json::Value = serde_json::from_slice(&preview.stdout).unwrap();
@@ -923,6 +932,31 @@ fn doctor_reports_project_target_paths_and_reclaimable_artifacts() {
         report["nextActions"][0]["verificationCommand"],
         "pam doctor --json"
     );
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn info_reports_runtime_target_artifacts_without_changing_the_legacy_native_field() {
+    let directory = temporary_path("info-runtime-artifacts");
+    fs::create_dir_all(directory.join("target/debug")).unwrap();
+    fs::write(
+        directory.join("pam.json"),
+        r#"{"schema":1,"type":5,"name":"runtime-fixture","version":"0.1.0"}"#,
+    )
+    .unwrap();
+    fs::write(directory.join("target/debug/cache.bin"), [0_u8; 64]).unwrap();
+
+    let info = run_pam_in(&directory, &["info", "--json"]);
+    assert!(info.status.success());
+    let report: serde_json::Value = serde_json::from_slice(&info.stdout).unwrap();
+    assert_eq!(report["type"], 5);
+    assert_eq!(report["developmentArtifacts"]["exists"], false);
+    assert_eq!(report["developmentArtifacts"]["bytes"], 0);
+    assert_eq!(report["artifactFootprint"]["bytes"], 64);
+    assert_eq!(report["artifactFootprint"]["files"], 1);
+    assert_eq!(report["artifactFootprint"]["complete"], true);
+    assert_eq!(report["artifactFootprint"]["entries"][2]["path"], "target");
 
     fs::remove_dir_all(directory).unwrap();
 }

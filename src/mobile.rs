@@ -3616,9 +3616,10 @@ fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
 
 fn clean_android_dev_artifacts(project_path: &Path) -> Result<(), String> {
     let project = load_project(project_path)?;
-    let generated = project.root.join(".pam-native");
+    let generated = project.root.join(".pam-native/android");
     let paths = [
-        generated.join("android"),
+        generated.join("app/build"),
+        generated.join("build"),
         generated.join("gradle-home/caches"),
         generated.join("gradle-home/daemon"),
         generated.join("gradle-home/native"),
@@ -3630,7 +3631,7 @@ fn clean_android_dev_artifacts(project_path: &Path) -> Result<(), String> {
 fn clean_ios_dev_artifacts(project_root: &Path) -> Result<(), String> {
     clean_dev_paths(
         project_root,
-        &[project_root.join(".pam-native/ios/DerivedData")],
+        &[project_root.join(".pam-native/ios/App/DerivedData")],
     )
 }
 
@@ -7375,6 +7376,74 @@ mod tests {
         assert!(!root.join(".pam-native/android").exists());
         assert!(source.is_file());
         assert!(clean_dev_paths(&root, &[root.join("vendor")]).is_err());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn android_development_cleanup_preserves_the_generated_host() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-android-dev-clean-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let application_build = root.join(".pam-native/android/app/build/outputs");
+        let root_build = root.join(".pam-native/android/build");
+        let gradle_cache = root.join(".pam-native/android/gradle-home/caches/modules");
+        let source = root.join(".pam-native/android/app/src/main/AndroidManifest.xml");
+        fs::create_dir_all(&application_build).expect("application build");
+        fs::create_dir_all(&root_build).expect("root build");
+        fs::create_dir_all(&gradle_cache).expect("Gradle cache");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("sources");
+        fs::write(application_build.join("app.apk"), [0_u8; 32]).expect("APK");
+        fs::write(root_build.join("artifact.bin"), [0_u8; 32]).expect("build output");
+        fs::write(gradle_cache.join("module.bin"), [0_u8; 32]).expect("cache");
+        fs::write(&source, "<manifest />\n").expect("manifest");
+        fs::write(
+            root.join("pam-native.json"),
+            r#"{"version":1,"applicationId":"dev.pam.cleanup","name":"Cleanup","entry":"index.php"}"#,
+        )
+        .expect("manifest");
+        fs::write(root.join("index.php"), "<?php\n").expect("entry");
+        fs::create_dir_all(root.join("vendor")).expect("vendor");
+        fs::write(root.join("vendor/autoload.php"), "<?php\n").expect("autoload");
+
+        clean_android_dev_artifacts(&root).expect("clean Android artifacts");
+
+        assert!(!root.join(".pam-native/android/app/build").exists());
+        assert!(!root.join(".pam-native/android/build").exists());
+        assert!(!root.join(".pam-native/android/gradle-home/caches").exists());
+        assert!(source.is_file());
+        assert!(root.join(".pam-native/android/app/src").is_dir());
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn ios_development_cleanup_removes_xcode_derived_data_only() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-ios-dev-clean-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        let derived_data = root.join(".pam-native/ios/App/DerivedData/Build/Products");
+        let source = root.join(".pam-native/ios/App/Sources/AppDelegate.swift");
+        let neighboring_artifact = root.join("artifacts/release-evidence.json");
+        fs::create_dir_all(&derived_data).expect("derived data");
+        fs::create_dir_all(source.parent().expect("source parent")).expect("sources");
+        fs::create_dir_all(neighboring_artifact.parent().expect("artifact parent"))
+            .expect("artifacts");
+        fs::write(derived_data.join("application.bin"), [0_u8; 32]).expect("build output");
+        fs::write(&source, "// generated host source\n").expect("source");
+        fs::write(&neighboring_artifact, "{}\n").expect("evidence");
+
+        clean_ios_dev_artifacts(&root).expect("clean iOS artifacts");
+
+        assert!(!root.join(".pam-native/ios/App/DerivedData").exists());
+        assert!(source.is_file());
+        assert!(neighboring_artifact.is_file());
         fs::remove_dir_all(root).expect("cleanup");
     }
 }

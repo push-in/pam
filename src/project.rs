@@ -304,6 +304,7 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
         None
     };
     let development = development_artifacts(context)?;
+    let artifact_footprint = artifact_footprint(context)?;
     let next_commands = contextual_next_commands(context.kind);
     if json {
         println!(
@@ -320,6 +321,7 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
                 "version": project_manifest.as_ref().and_then(|manifest| manifest.get("version")),
                 "native": project_manifest.as_ref().and_then(|manifest| manifest.get("native")),
                 "developmentArtifacts": development,
+                "artifactFootprint": artifact_footprint,
                 "nextCommands": next_commands,
             }))
             .map_err(|error| error.to_string())?
@@ -361,19 +363,15 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
     println!(
         "  {}  {} across {} files{}",
         ui.heading("Artifacts"),
-        human_bytes(development.bytes),
-        development.files,
-        if development.complete {
+        human_bytes(artifact_footprint["bytes"].as_u64().unwrap_or(0)),
+        artifact_footprint["files"].as_u64().unwrap_or(0),
+        if artifact_footprint["complete"].as_bool().unwrap_or(false) {
             ""
         } else {
             " (partial scan)"
         }
     );
-    println!(
-        "  {}  {}",
-        ui.heading("Location"),
-        development.root.display()
-    );
+    println!("  {}  {}", ui.heading("Location"), context.root.display());
     println!();
     println!("{}", ui.heading("NEXT"));
     for command in next_commands {
