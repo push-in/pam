@@ -4,14 +4,19 @@
     "type": "library",
     "license": "Apache-2.0",
     "keywords": [
+        "api",
+        "dependency-injection",
         "http",
         "middleware",
+        "openapi",
         "pam",
         "php",
-        "router"
+        "router",
+        "validation"
     ],
     "homepage": "https://github.com/push-in/pam",
     "support": {
+        "docs": "https://push-in.github.io/pam-docs/packages/api/",
         "issues": "https://github.com/push-in/pam/issues",
         "source": "https://github.com/push-in/pam-api"
     },
@@ -31,7 +36,28 @@
             "Pam\\Api\\": "src/"
         }
     },
+    "autoload-dev": {
+        "psr-4": {
+            "Pam\\Api\\Tests\\": "tests/"
+        },
+        "files": [
+            "tests/bootstrap.php"
+        ]
+    },
+    "scripts": {
+        "analyse": "phpstan analyse --configuration=phpstan.neon --memory-limit=1G",
+        "benchmark": "php benchmarks/router.php",
+        "test": "phpunit --configuration=phpunit.xml",
+        "verify": [
+            "@analyse",
+            "@test"
+        ]
+    },
     "config": {
         "sort-packages": true
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^11.5"
     }
 }

@@ -43,6 +43,19 @@ final readonly class CorsMiddleware implements MiddlewareInterface
             $response->header('access-control-allow-credentials', 'true');
         }
         if ($request->method === 'OPTIONS') {
+            $requestedMethod = strtoupper($request->getHeader('access-control-request-method') ?? '');
+            if ($requestedMethod === '' || !in_array($requestedMethod, $this->methods, true)) {
+                return $response->json(['error' => 'CORS method is not allowed'], 403);
+            }
+            $requestedHeaders = array_values(array_filter(array_map(
+                static fn (string $header): string => strtolower(trim($header)),
+                explode(',', $request->getHeader('access-control-request-headers') ?? ''),
+            )));
+            foreach ($requestedHeaders as $requestedHeader) {
+                if (!in_array($requestedHeader, array_map('strtolower', $this->headers), true)) {
+                    return $response->json(['error' => 'CORS header is not allowed'], 403);
+                }
+            }
             return $response
                 ->status(204)
                 ->header('access-control-allow-methods', implode(', ', $this->methods))

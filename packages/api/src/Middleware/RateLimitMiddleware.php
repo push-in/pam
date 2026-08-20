@@ -8,50 +8,56 @@ use Pam\Contracts\Http\MiddlewareInterface;
 use Pam\Contracts\Http\RequestHandlerInterface;
 use Pam\Http\Request;
 use Pam\Http\Response;
+use Pam\Api\RateLimit\MemoryRateLimitStore;
+use Pam\Api\RateLimit\RateLimitStore;
 
 final class RateLimitMiddleware implements MiddlewareInterface
 {
-    /** @var array<string, array{tokens: float, updatedAt: float}> */
-    private array $buckets = [];
+    private readonly RateLimitStore $store;
+
+    /** @var \Closure(Request): string */
+    private readonly \Closure $keyResolver;
 
     public function __construct(
         private readonly int $requestsPerSecond,
         private readonly int $burst = 0,
         private readonly int $maxBuckets = 65_536,
         private readonly float $idleTtlSeconds = 300.0,
+        ?RateLimitStore $store = null,
+        ?callable $keyResolver = null,
     ) {
         if ($requestsPerSecond < 1 || $burst < 0 || $maxBuckets < 1 || $idleTtlSeconds <= 0) {
             throw new \InvalidArgumentException('Rate limit configuration is invalid.');
         }
+        $this->store = $store ?? new MemoryRateLimitStore($maxBuckets, $idleTtlSeconds);
+        $this->keyResolver = $keyResolver === null
+            ? static fn (Request $request): string => is_string($_SERVER['REMOTE_ADDR'] ?? null)
+                ? $_SERVER['REMOTE_ADDR']
+                : 'unknown'
+            : \Closure::fromCallable($keyResolver);
     }
 
     public function process(Request $request, Response $response, RequestHandlerInterface $next): Response
     {
-        $key = is_string($_SERVER['REMOTE_ADDR'] ?? null) ? $_SERVER['REMOTE_ADDR'] : 'unknown';
-        $now = microtime(true);
-        if (!isset($this->buckets[$key]) && count($this->buckets) >= $this->maxBuckets) {
-            $this->buckets = array_filter(
-                $this->buckets,
-                fn (array $entry): bool => $entry['updatedAt'] >= $now - $this->idleTtlSeconds,
-            );
-            if (count($this->buckets) >= $this->maxBuckets) {
-                return $response
-                    ->header('retry-after', '1')
-                    ->json(['error' => 'Too Many Requests'], 429);
-            }
+        $key = ($this->keyResolver)($request);
+        if ($key === '') {
+            throw new \UnexpectedValueException('The rate-limit key resolver returned an empty key.');
         }
         $capacity = $this->burst > 0 ? $this->burst : $this->requestsPerSecond;
-        $bucket = $this->buckets[$key] ?? ['tokens' => (float) $capacity, 'updatedAt' => $now];
-        $elapsed = max(0.0, $now - $bucket['updatedAt']);
-        $tokens = min((float) $capacity, $bucket['tokens'] + ($elapsed * $this->requestsPerSecond));
-        if ($tokens < 1.0) {
-            $this->buckets[$key] = ['tokens' => $tokens, 'updatedAt' => $now];
+        $decision = $this->store->consume($key, $this->requestsPerSecond, $capacity, microtime(true));
+        $response
+            ->header('x-ratelimit-limit', (string) $decision->limit)
+            ->header('x-ratelimit-remaining', (string) $decision->remaining);
+        if (!$decision->allowed) {
             return $response
-                ->status(429)
-                ->header('retry-after', '1')
-                ->json(['error' => 'Too Many Requests'], 429);
+                ->header('retry-after', (string) $decision->retryAfterSeconds)
+                ->json([
+                    'type' => 'https://pam.dev/problems/6',
+                    'title' => 'Too Many Requests',
+                    'status' => 429,
+                    'code' => 6,
+                ], 429);
         }
-        $this->buckets[$key] = ['tokens' => $tokens - 1.0, 'updatedAt' => $now];
         return $next->handle($request, $response);
     }
 }

@@ -4,8 +4,18 @@ declare(strict_types=1);
 
 namespace Pam\Api;
 
+use Pam\Api\Container\Container;
+
 final class Router
 {
+    public function __construct(private readonly ?Container $container = null)
+    {
+    }
+
+    public function container(): Container
+    {
+        return $this->container ?? throw new \LogicException('Router has no application container.');
+    }
     /** @var list<Route> */
     private array $routes = [];
 
@@ -19,6 +29,12 @@ final class Router
     private array $signatures = [];
 
     public function add(string $method, string $path, callable $handler): self
+    {
+        $this->register($method, $path, $handler);
+        return $this;
+    }
+
+    public function register(string $method, string $path, callable $handler): Route
     {
         $method = strtoupper(trim($method));
         if ($method === '' || preg_match('/^[A-Z!#$%&\'*+.^_`|~-]+$/D', $method) !== 1) {
@@ -42,7 +58,33 @@ final class Router
             $this->dynamicRoutes[] = $route;
         }
         $this->signatures[$signature] = true;
-        return $this;
+        return $route;
+    }
+
+    public function name(Route $route, string $name): void
+    {
+        if ($name === '' || preg_match('/^[A-Za-z0-9_.-]+$/D', $name) !== 1) {
+            throw new \InvalidArgumentException('Route names may contain letters, numbers, dots, dashes and underscores.');
+        }
+        foreach ($this->routes as $registered) {
+            if ($registered !== $route && $registered->name === $name) {
+                throw new \LogicException("Route name {$name} is already registered.");
+            }
+        }
+        $route->name = $name;
+    }
+
+    public function constrain(Route $route, string $parameter, string|RouteConstraint $constraint): void
+    {
+        if (!in_array($parameter, $route->parameterNames, true)) {
+            throw new \InvalidArgumentException("Route {$route->path} has no parameter named {$parameter}.");
+        }
+        $pattern = $constraint instanceof RouteConstraint ? $constraint->pattern() : $constraint;
+        if ($pattern === '' || @preg_match('#^(?:' . $pattern . ')$#D', '') === false) {
+            throw new \InvalidArgumentException("Constraint for {$parameter} is not a valid regular expression.");
+        }
+        $needle = '(?P<' . $parameter . '>[^/]+)';
+        $route->pattern = str_replace($needle, '(?P<' . $parameter . '>' . $pattern . ')', $route->pattern);
     }
 
     public function match(string $method, string $path): RoutingResult
