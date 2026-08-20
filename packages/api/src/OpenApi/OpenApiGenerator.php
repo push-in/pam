@@ -20,15 +20,29 @@ final readonly class OpenApiGenerator
     public function generate(): array
     {
         $paths = [];
+        $schemas = [];
         foreach ($this->router->routes() as $route) {
             $paths[$route->path][strtolower($route->method)] = $this->operation($route);
+            foreach ([$route->input, $route->output] as $class) {
+                if ($class !== null) {
+                    $schemas[self::shortName($class)] = [
+                        'type' => 'object',
+                        'x-pam-class' => $class,
+                    ];
+                }
+            }
         }
         ksort($paths, SORT_STRING);
-        return [
+        $document = [
             'openapi' => '3.1.0',
             'info' => ['title' => $this->title, 'version' => $this->version],
             'paths' => $paths,
         ];
+        if ($schemas !== []) {
+            ksort($schemas, SORT_STRING);
+            $document['components'] = ['schemas' => $schemas];
+        }
+        return $document;
     }
 
     public function toJson(): string

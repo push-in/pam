@@ -45,6 +45,13 @@ final class RouteBindingAndOpenApiTest extends TestCase
         self::assertSame('users.update', $operation['operationId']);
         self::assertSame(['Users'], $operation['tags']);
         self::assertSame('3.1.0', $document['openapi']);
+        $components = $document['components'];
+        self::assertIsArray($components);
+        $schemas = $components['schemas'];
+        self::assertIsArray($schemas);
+        $schema = $schemas['UpdateUserRequest'];
+        self::assertIsArray($schema);
+        self::assertSame(UpdateUserRequest::class, $schema['x-pam-class']);
     }
 }
 

@@ -21,7 +21,7 @@ final readonly class ClientGenerator
         };
     }
 
-    /** @return list<array{id: string, method: string, path: string}> */
+    /** @return list<array{id: string, method: string, path: string, parameters: list<string>}> */
     private function operations(): array
     {
         $result = [];
@@ -37,39 +37,64 @@ final readonly class ClientGenerator
                 if (!is_string($method) || !is_array($operation) || !is_string($operation['operationId'] ?? null)) {
                     continue;
                 }
-                $result[] = ['id' => self::identifier($operation['operationId']), 'method' => strtoupper($method), 'path' => $path];
+                preg_match_all('/\{([A-Za-z_][A-Za-z0-9_]*)\}/', $path, $matches);
+                $parameters = array_values(array_unique($matches[1]));
+                $result[] = [
+                    'id' => self::identifier($operation['operationId']),
+                    'method' => strtoupper($method),
+                    'path' => $path,
+                    'parameters' => $parameters,
+                ];
             }
         }
         return $result;
     }
 
-    /** @param list<array{id: string, method: string, path: string}> $operations */
+    /** @param list<array{id: string, method: string, path: string, parameters: list<string>}> $operations */
     private function typescript(array $operations): string
     {
         $methods = array_map(
-            static fn (array $operation): string => "  {$operation['id']} = () => this.request('{$operation['method']}', '{$operation['path']}');",
+            static fn (array $operation): string => sprintf(
+                '  %s = (%s) => this.request(\'%s\', `%s`);',
+                $operation['id'],
+                implode(', ', array_map(static fn (string $parameter): string => "{$parameter}: string | number", $operation['parameters'])),
+                $operation['method'],
+                self::typescriptPath($operation['path'], $operation['parameters']),
+            ),
             $operations,
         );
         return "export class PamApiClient {\n  constructor(private readonly request: (method: string, path: string) => Promise<unknown>) {}\n"
             . implode("\n", $methods) . "\n}\n";
     }
 
-    /** @param list<array{id: string, method: string, path: string}> $operations */
+    /** @param list<array{id: string, method: string, path: string, parameters: list<string>}> $operations */
     private function kotlin(array $operations): string
     {
         $methods = array_map(
-            static fn (array $operation): string => "    suspend fun {$operation['id']}() = request(\"{$operation['method']}\", \"{$operation['path']}\")",
+            static fn (array $operation): string => sprintf(
+                '    suspend fun %s(%s) = request("%s", "%s")',
+                $operation['id'],
+                implode(', ', array_map(static fn (string $parameter): string => "{$parameter}: String", $operation['parameters'])),
+                $operation['method'],
+                self::kotlinPath($operation['path'], $operation['parameters']),
+            ),
             $operations,
         );
         return "class PamApiClient(private val request: suspend (String, String) -> Any?) {\n"
             . implode("\n", $methods) . "\n}\n";
     }
 
-    /** @param list<array{id: string, method: string, path: string}> $operations */
+    /** @param list<array{id: string, method: string, path: string, parameters: list<string>}> $operations */
     private function swift(array $operations): string
     {
         $methods = array_map(
-            static fn (array $operation): string => "    func {$operation['id']}() async throws -> Any { try await request(\"{$operation['method']}\", \"{$operation['path']}\") }",
+            static fn (array $operation): string => sprintf(
+                '    func %s(%s) async throws -> Any { try await request("%s", "%s") }',
+                $operation['id'],
+                implode(', ', array_map(static fn (string $parameter): string => "{$parameter}: String", $operation['parameters'])),
+                $operation['method'],
+                self::swiftPath($operation['path'], $operation['parameters']),
+            ),
             $operations,
         );
         return "struct PamApiClient {\n    let request: (String, String) async throws -> Any\n"
@@ -81,5 +106,31 @@ final readonly class ClientGenerator
         $identifier = preg_replace('/[^A-Za-z0-9_]/', '_', $value) ?? 'operation';
         return preg_match('/^[A-Za-z_]/', $identifier) === 1 ? $identifier : '_' . $identifier;
     }
-}
 
+    /** @param list<string> $parameters */
+    private static function typescriptPath(string $path, array $parameters): string
+    {
+        foreach ($parameters as $parameter) {
+            $path = str_replace("{{$parameter}}", "\${encodeURIComponent(String({$parameter}))}", $path);
+        }
+        return $path;
+    }
+
+    /** @param list<string> $parameters */
+    private static function kotlinPath(string $path, array $parameters): string
+    {
+        foreach ($parameters as $parameter) {
+            $path = str_replace("{{$parameter}}", "\${java.net.URLEncoder.encode({$parameter}, Charsets.UTF_8)}", $path);
+        }
+        return $path;
+    }
+
+    /** @param list<string> $parameters */
+    private static function swiftPath(string $path, array $parameters): string
+    {
+        foreach ($parameters as $parameter) {
+            $path = str_replace("{{$parameter}}", "\\({$parameter}.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? {$parameter})", $path);
+        }
+        return $path;
+    }
+}

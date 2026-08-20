@@ -37,5 +37,12 @@ final class TestingAndClientGenerationTest extends TestCase
         self::assertStringContainsString('users_index', $openApi->client(ClientLanguage::TypeScript));
         self::assertStringContainsString('users_index', $openApi->client(ClientLanguage::Kotlin));
         self::assertStringContainsString('users_index', $openApi->client(ClientLanguage::Swift));
+
+        $app->get('/users/{id}', static fn (Request $request, Response $response): Response => $response->json([]))
+            ->name('users.show');
+        self::assertStringContainsString(
+            'encodeURIComponent(String(id))',
+            $app->openApi()->client(ClientLanguage::TypeScript),
+        );
     }
 }
