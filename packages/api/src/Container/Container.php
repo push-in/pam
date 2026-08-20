@@ -14,13 +14,19 @@ final class Container
     /** @var array<class-string|string, mixed> */
     private array $singletons = [];
 
-    /** @var array<class-string|string, mixed> */
-    private array $scoped = [];
+    /** @var \WeakMap<object, array<class-string|string, mixed>> */
+    private \WeakMap $fiberScopes;
 
-    private bool $scopeActive = false;
+    /** @var array<class-string|string, mixed>|null */
+    private ?array $mainScope = null;
 
     /** @var array<class-string, \Closure(string, Container): object> */
     private array $routeBindings = [];
+
+    public function __construct()
+    {
+        $this->fiberScopes = new \WeakMap();
+    }
 
     /** @param class-string $class @param callable(string, Container): object $resolver */
     public function bindRoute(string $class, callable $resolver): self
@@ -55,24 +61,27 @@ final class Container
 
     public function scopedInstance(string $id, mixed $instance): self
     {
-        if (!$this->scopeActive) {
+        $scope = $this->currentScope();
+        if ($scope === null) {
             throw new \LogicException("Scoped entry {$id} cannot be registered outside a request scope.");
         }
-        $this->scoped[$id] = $instance;
+        $scope[$id] = $instance;
+        $this->replaceCurrentScope($scope);
         return $this;
     }
 
     public function scopedValue(string $id): mixed
     {
-        return $this->scoped[$id] ?? null;
+        return $this->currentScope()[$id] ?? null;
     }
 
     /** @return array{state: int, scopedEntries: int, singletonEntries: int, bindings: int} */
     public function diagnostics(): array
     {
+        $scope = $this->currentScope();
         return [
-            'state' => ($this->scopeActive ? ContainerState::RequestActive : ContainerState::Idle)->value,
-            'scopedEntries' => count($this->scoped),
+            'state' => ($scope !== null ? ContainerState::RequestActive : ContainerState::Idle)->value,
+            'scopedEntries' => count($scope ?? []),
             'singletonEntries' => count($this->singletons),
             'bindings' => count($this->bindings),
         ];
@@ -80,17 +89,20 @@ final class Container
 
     public function beginScope(): void
     {
-        if ($this->scopeActive) {
+        if ($this->currentScope() !== null) {
             throw new \LogicException('A PAM API container scope is already active.');
         }
-        $this->scoped = [];
-        $this->scopeActive = true;
+        $this->replaceCurrentScope([]);
     }
 
     public function endScope(): void
     {
-        $this->scoped = [];
-        $this->scopeActive = false;
+        $fiber = \Fiber::getCurrent();
+        if ($fiber === null) {
+            $this->mainScope = null;
+            return;
+        }
+        unset($this->fiberScopes[$fiber]);
     }
 
     public function get(string $id): mixed
@@ -98,8 +110,9 @@ final class Container
         if (array_key_exists($id, $this->singletons)) {
             return $this->singletons[$id];
         }
-        if (array_key_exists($id, $this->scoped)) {
-            return $this->scoped[$id];
+        $scope = $this->currentScope();
+        if ($scope !== null && array_key_exists($id, $scope)) {
+            return $scope[$id];
         }
 
         $binding = $this->bindings[$id] ?? null;
@@ -114,10 +127,11 @@ final class Container
         if ($binding->lifetime === BindingLifetime::Singleton) {
             $this->singletons[$id] = $value;
         } elseif ($binding->lifetime === BindingLifetime::Scoped) {
-            if (!$this->scopeActive) {
+            if ($scope === null) {
                 throw new \LogicException("Scoped entry {$id} was resolved outside a request scope.");
             }
-            $this->scoped[$id] = $value;
+            $scope[$id] = $value;
+            $this->replaceCurrentScope($scope);
         }
         return $value;
     }
@@ -227,8 +241,34 @@ final class Container
             default => $factory,
         };
         $this->bindings[$id] = new Binding($resolver, $lifetime);
-        unset($this->singletons[$id], $this->scoped[$id]);
+        unset($this->singletons[$id]);
+        $scope = $this->currentScope();
+        if ($scope !== null) {
+            unset($scope[$id]);
+            $this->replaceCurrentScope($scope);
+        }
         return $this;
+    }
+
+    /** @return array<class-string|string, mixed>|null */
+    private function currentScope(): ?array
+    {
+        $fiber = \Fiber::getCurrent();
+        if ($fiber === null) {
+            return $this->mainScope;
+        }
+        return $this->fiberScopes[$fiber] ?? null;
+    }
+
+    /** @param array<class-string|string, mixed> $scope */
+    private function replaceCurrentScope(array $scope): void
+    {
+        $fiber = \Fiber::getCurrent();
+        if ($fiber === null) {
+            $this->mainScope = $scope;
+            return;
+        }
+        $this->fiberScopes[$fiber] = $scope;
     }
 
     private static function routeValue(mixed $value): string

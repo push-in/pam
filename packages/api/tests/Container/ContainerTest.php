@@ -41,6 +41,32 @@ final class ContainerTest extends TestCase
         $this->expectException(\LogicException::class);
         $container->get(ScopedValue::class);
     }
+
+    public function testConcurrentFibersKeepIndependentRequestScopes(): void
+    {
+        $container = new Container();
+        $container->scoped(ScopedValue::class);
+
+        $request = static function () use ($container): void {
+            $container->beginScope();
+            $value = $container->get(ScopedValue::class);
+            \Fiber::suspend($value);
+            self::assertSame($value, $container->get(ScopedValue::class));
+            $container->endScope();
+        };
+
+        $first = new \Fiber($request);
+        $second = new \Fiber($request);
+        $firstValue = $first->start();
+        $secondValue = $second->start();
+
+        self::assertInstanceOf(ScopedValue::class, $firstValue);
+        self::assertInstanceOf(ScopedValue::class, $secondValue);
+        self::assertNotSame($firstValue, $secondValue);
+
+        $first->resume();
+        $second->resume();
+    }
 }
 
 final class Dependency
@@ -57,4 +83,3 @@ final readonly class DependentService
 final class ScopedValue
 {
 }
-
