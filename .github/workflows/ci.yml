@@ -40,6 +40,13 @@ jobs:
           ref: 26a768c9a7e0137bda9fa7de23f46c9308de2839
           path: pam-native
           persist-credentials: false
+      - name: Check out the pinned PAM Native plugin kit
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-plugin-kit
+          ref: 4f00e4b4b84bd0d70f52cc97369d743b37d8ea0a
+          path: ecosystem/pam-native-plugin-kit
+          persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
           components: clippy,rustfmt
