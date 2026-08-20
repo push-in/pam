@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://push-in.github.io/pam/schemas/local-ecosystem-compatibility.schema.json",
+  "title": "PAM local ecosystem compatibility",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "resultCode", "packageCount", "results"],
+  "properties": {
+    "schemaVersion": {"const": 1},
+    "resultCode": {"const": 1},
+    "packageCount": {"const": 27},
+    "results": {
+      "type": "array",
+      "minItems": 27,
+      "maxItems": 27,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "composerName", "roleCode", "resultCode", "manifestSha256", "publicationWorkflowSha256"],
+        "properties": {
+          "repository": {"type": "string", "pattern": "^(pam-native-[a-z0-9]+(?:-[a-z0-9]+)*|pam-mobile-ui)$"},
+          "composerName": {"type": "string", "pattern": "^pushinbr/[a-z0-9]+(?:-[a-z0-9]+)*$"},
+          "roleCode": {"type": "integer", "enum": [1, 2, 3, 4]},
+          "resultCode": {"const": 1},
+          "manifestSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "publicationWorkflowSha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+        }
+      }
+    }
+  }
+}

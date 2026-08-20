@@ -8,9 +8,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::Instant;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
+use crate::admin_auth;
 use crate::composer;
+use crate::control_plane::ControlPlaneDiagnostics;
 use crate::php::PhpRuntime;
 use crate::project::ProjectKind;
 use crate::terminal::Terminal;
@@ -58,17 +60,60 @@ pub fn diagnostics(
     Ok(0)
 }
 
-pub fn top(address: &str, iterations: usize, interval: std::time::Duration) -> Result<u8, String> {
-    if iterations == 0 || interval.is_zero() {
-        return Err("top iterations and interval must be positive".to_owned());
+pub fn top(
+    address: &str,
+    iterations: usize,
+    interval: std::time::Duration,
+    lag_warning: std::time::Duration,
+    json: bool,
+) -> Result<u8, String> {
+    if iterations == 0 || interval.is_zero() || lag_warning.is_zero() {
+        return Err("top iterations, interval, and lag warning must be positive".to_owned());
     }
-    let endpoint = HttpEndpoint::parse(&format!("{}/metrics", address.trim_end_matches('/')))?;
+    let endpoint = HttpEndpoint::parse(&format!(
+        "{}/{}",
+        address.trim_end_matches('/'),
+        if json { "diagnostics" } else { "metrics" }
+    ))?
+    .with_optional_bearer_from_environment()?;
     let ui = Terminal::stdout();
     for iteration in 0..iterations {
         if iteration > 0 {
             std::thread::sleep(interval);
         }
         let body = endpoint.response_body()?;
+        if json {
+            let diagnostics = parse_control_plane_diagnostics(&body)?;
+            let threshold_micros = u64::try_from(lag_warning.as_micros()).unwrap_or(u64::MAX);
+            let warned_workers = diagnostics
+                .workers
+                .iter()
+                .filter(|worker| worker.current_lag_micros >= threshold_micros)
+                .count();
+            let report = TopSampleReport {
+                schema_version: 1,
+                sample_index: iteration + 1,
+                sample_count: iterations,
+                sampled_at_unix_ms: unix_millis()?,
+                result_code: if warned_workers == 0 {
+                    TopResultCode::Healthy
+                } else {
+                    TopResultCode::Warning
+                } as u8,
+                lag_warning_millis: u64::try_from(lag_warning.as_millis()).unwrap_or(u64::MAX),
+                warned_worker_count: warned_workers,
+                diagnostics,
+            };
+            println!(
+                "{}",
+                serde_json::to_string(&report)
+                    .map_err(|error| format!("cannot encode top sample: {error}"))?
+            );
+            std::io::stdout()
+                .flush()
+                .map_err(|error| format!("cannot flush top sample: {error}"))?;
+            continue;
+        }
         ui.clear_screen();
         println!(
             "{}  {}",
@@ -81,22 +126,114 @@ pub fn top(address: &str, iterations: usize, interval: std::time::Duration) -> R
             ))
         );
         println!("{}", ui.rule());
-        for line in body.lines().filter(|line| {
-            line.starts_with("pam_http_")
-                || line.starts_with("pam_websocket_")
-                || line.starts_with("pam_event_loop_")
-                || line.starts_with("pam_process_")
-                || line.starts_with("pam_php_")
-                || line.starts_with("pam_cluster_")
-        }) {
+        let lag_warning_seconds = lag_warning.as_secs_f64();
+        let warned_workers = body
+            .lines()
+            .filter_map(current_worker_lag_seconds)
+            .filter(|lag| *lag >= lag_warning_seconds)
+            .count();
+        if warned_workers == 0 {
+            println!(
+                "{}",
+                ui.status(
+                    "ok",
+                    format!(
+                        "no worker at or above {} ms current event-loop lag",
+                        lag_warning.as_millis()
+                    )
+                )
+            );
+        } else {
+            println!(
+                "{}",
+                ui.status(
+                    "warn",
+                    format!(
+                        "{warned_workers} worker(s) at or above {} ms current lag; inspect worker, generation, PID, and pool",
+                        lag_warning.as_millis()
+                    )
+                )
+            );
+        }
+        for line in body.lines().filter(|line| visible_top_metric(line)) {
             if let Some((metric, value)) = line.split_once(' ') {
-                println!("  {} {}", ui.accent(format!("{metric:<48}")), value);
+                let label = format!("{metric:<48}");
+                if current_worker_lag_seconds(line).is_some_and(|lag| lag >= lag_warning_seconds) {
+                    println!("  {} {} {}", ui.warning(label), value, ui.warning("[warn]"));
+                } else {
+                    println!("  {} {}", ui.accent(label), value);
+                }
             } else {
                 println!("  {}", ui.muted(line));
             }
         }
     }
     Ok(0)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u8)]
+enum TopResultCode {
+    Healthy = 1,
+    Warning = 2,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TopSampleReport {
+    schema_version: u8,
+    sample_index: usize,
+    sample_count: usize,
+    sampled_at_unix_ms: u64,
+    result_code: u8,
+    lag_warning_millis: u64,
+    warned_worker_count: usize,
+    diagnostics: ControlPlaneDiagnostics,
+}
+
+fn parse_control_plane_diagnostics(body: &str) -> Result<ControlPlaneDiagnostics, String> {
+    if body.len() > 1024 * 1024 {
+        return Err("control-plane diagnostics exceed the 1 MiB limit".to_owned());
+    }
+    let diagnostics: ControlPlaneDiagnostics = serde_json::from_str(body)
+        .map_err(|error| format!("invalid control-plane diagnostics: {error}"))?;
+    diagnostics.validate()?;
+    Ok(diagnostics)
+}
+
+fn unix_millis() -> Result<u64, String> {
+    let millis = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("system clock is before the Unix epoch: {error}"))?
+        .as_millis();
+    u64::try_from(millis).map_err(|_| "Unix timestamp exceeds the supported range".to_owned())
+}
+
+fn current_worker_lag_seconds(line: &str) -> Option<f64> {
+    let (metric, value) = line.split_once(' ')?;
+    if !metric.starts_with("pam_worker_event_loop_lag_seconds{") {
+        return None;
+    }
+    let value = value.parse::<f64>().ok()?;
+    value
+        .is_finite()
+        .then_some(value)
+        .filter(|value| *value >= 0.0)
+}
+
+fn visible_top_metric(line: &str) -> bool {
+    [
+        "pam_http_",
+        "pam_websocket_",
+        "pam_event_loop_",
+        "pam_process_",
+        "pam_php_",
+        "pam_cluster_",
+        "pam_pool_",
+        "pam_worker_",
+    ]
+    .iter()
+    .any(|prefix| line.starts_with(prefix))
 }
 
 pub fn test(executable: &OsStr, target: &Path, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -448,7 +585,8 @@ fn write_pam_manifest(
     if template == InitTemplate::Product {
         manifest["workspace"] = serde_json::json!({
             "surfaceCodes": [1, 2, 3],
-            "contractPath": "packages/contracts"
+            "contractPath": "packages/contracts",
+            "designTokenPath": "packages/contracts/design-tokens.json"
         });
     }
     write_new(
@@ -1026,6 +1164,177 @@ enum ReadinessState: int
 "#,
     )?;
     write_new(
+        &contracts.join("src/ContractVersion.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+enum ContractVersion: int
+{
+    case V1 = 1;
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/ProductMutationKind.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+enum ProductMutationKind: int
+{
+    case CheckIn = 1;
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/MutationResultState.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+enum MutationResultState: int
+{
+    case Accepted = 1;
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/MutationDeliveryState.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+enum MutationDeliveryState: int
+{
+    case Delivered = 1;
+    case Queued = 2;
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/ProductMutation.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+final readonly class ProductMutation
+{
+    public function __construct(
+        public ContractVersion $version,
+        public ProductMutationKind $kind,
+        public string $idempotencyKey,
+    ) {
+        if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/', $this->idempotencyKey) !== 1) {
+            throw new \InvalidArgumentException('Idempotency key is invalid.');
+        }
+    }
+
+    public static function checkIn(string $idempotencyKey): self
+    {
+        return new self(ContractVersion::V1, ProductMutationKind::CheckIn, $idempotencyKey);
+    }
+
+    /** @param array<array-key, mixed> $payload */
+    public static function fromArray(array $payload): self
+    {
+        $versionCode = $payload['versionCode'] ?? null;
+        $kindCode = $payload['mutationKindCode'] ?? null;
+        $idempotencyKey = $payload['idempotencyKey'] ?? null;
+        if (!is_int($versionCode) || !is_int($kindCode) || !is_string($idempotencyKey)) {
+            throw new \UnexpectedValueException('Product mutation is incompatible with this application.');
+        }
+
+        $version = ContractVersion::tryFrom($versionCode);
+        $kind = ProductMutationKind::tryFrom($kindCode);
+        if ($version === null || $kind === null) {
+            throw new \UnexpectedValueException('Product mutation uses unsupported contract codes.');
+        }
+
+        return new self($version, $kind, $idempotencyKey);
+    }
+
+    /** @return array{versionCode: int, mutationKindCode: int, idempotencyKey: string} */
+    public function toArray(): array
+    {
+        return [
+            'versionCode' => $this->version->value,
+            'mutationKindCode' => $this->kind->value,
+            'idempotencyKey' => $this->idempotencyKey,
+        ];
+    }
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("src/ProductMutationReceipt.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Product\Contracts;
+
+final readonly class ProductMutationReceipt
+{
+    public function __construct(
+        public ContractVersion $version,
+        public ProductMutationKind $kind,
+        public MutationResultState $state,
+        public string $idempotencyKey,
+    ) {
+        new ProductMutation($this->version, $this->kind, $this->idempotencyKey);
+    }
+
+    public static function accepted(ProductMutation $mutation): self
+    {
+        return new self($mutation->version, $mutation->kind, MutationResultState::Accepted, $mutation->idempotencyKey);
+    }
+
+    /** @param array<array-key, mixed> $payload */
+    public static function fromArray(array $payload): self
+    {
+        $versionCode = $payload['versionCode'] ?? null;
+        $kindCode = $payload['mutationKindCode'] ?? null;
+        $stateCode = $payload['mutationStateCode'] ?? null;
+        $idempotencyKey = $payload['idempotencyKey'] ?? null;
+        if (!is_int($versionCode) || !is_int($kindCode) || !is_int($stateCode) || !is_string($idempotencyKey)) {
+            throw new \UnexpectedValueException('Product mutation receipt is incompatible with this application.');
+        }
+
+        $version = ContractVersion::tryFrom($versionCode);
+        $kind = ProductMutationKind::tryFrom($kindCode);
+        $state = MutationResultState::tryFrom($stateCode);
+        if ($version === null || $kind === null || $state === null) {
+            throw new \UnexpectedValueException('Product mutation receipt uses unsupported contract codes.');
+        }
+
+        return new self($version, $kind, $state, $idempotencyKey);
+    }
+
+    /** @return array{versionCode: int, mutationKindCode: int, mutationStateCode: int, idempotencyKey: string} */
+    public function toArray(): array
+    {
+        return [
+            'versionCode' => $this->version->value,
+            'mutationKindCode' => $this->kind->value,
+            'mutationStateCode' => $this->state->value,
+            'idempotencyKey' => $this->idempotencyKey,
+        ];
+    }
+}
+"#,
+    )?;
+    write_new(
         &contracts.join("src/ProductSnapshot.php"),
         r#"<?php
 
@@ -1036,6 +1345,7 @@ namespace Product\Contracts;
 final readonly class ProductSnapshot
 {
     public function __construct(
+        public ContractVersion $version,
         public ProductSurface $surface,
         public ReadinessState $state,
         public string $headline,
@@ -1047,17 +1357,206 @@ final readonly class ProductSnapshot
 
     public static function operational(ProductSurface $surface): self
     {
-        return new self($surface, ReadinessState::Operational, 'All systems ready');
+        return new self(ContractVersion::V1, $surface, ReadinessState::Operational, 'All systems ready');
     }
 
-    /** @return array{surfaceCode: int, stateCode: int, headline: string} */
+    /** @param array<array-key, mixed> $payload */
+    public static function fromArray(array $payload): self
+    {
+        $versionCode = $payload['versionCode'] ?? null;
+        $surfaceCode = $payload['surfaceCode'] ?? null;
+        $stateCode = $payload['stateCode'] ?? null;
+        $headline = $payload['headline'] ?? null;
+
+        if (!is_int($versionCode) || !is_int($surfaceCode) || !is_int($stateCode) || !is_string($headline)) {
+            throw new \UnexpectedValueException('Product snapshot is incompatible with this application.');
+        }
+
+        $version = ContractVersion::tryFrom($versionCode);
+        $surface = ProductSurface::tryFrom($surfaceCode);
+        $state = ReadinessState::tryFrom($stateCode);
+
+        if ($version === null || $surface === null || $state === null) {
+            throw new \UnexpectedValueException('Product snapshot uses unsupported contract codes.');
+        }
+
+        return new self($version, $surface, $state, $headline);
+    }
+
+    /** @return array{versionCode: int, surfaceCode: int, stateCode: int, headline: string} */
     public function toArray(): array
     {
         return [
+            'versionCode' => $this->version->value,
             'surfaceCode' => $this->surface->value,
             'stateCode' => $this->state->value,
             'headline' => $this->headline,
         ];
+    }
+}
+"#,
+    )?;
+    fs::create_dir_all(contracts.join("schema"))
+        .map_err(|error| format!("cannot create product contract schema: {error}"))?;
+    write_new(
+        &contracts.join("design-tokens.json"),
+        r##"{
+    "schemaVersion": 1,
+    "themes": [
+        {
+            "modeCode": 1,
+            "name": "light",
+            "colors": {
+                "background": "#f8fafc",
+                "surface": "#ffffff",
+                "surfaceRaised": "#ffffff",
+                "foreground": "#0f172a",
+                "mutedForeground": "#475569",
+                "border": "#cbd5e1",
+                "primary": "#166534",
+                "onPrimary": "#ffffff",
+                "success": "#15803d",
+                "warning": "#854d0e",
+                "danger": "#b91c1c",
+                "focus": "#166534"
+            }
+        },
+        {
+            "modeCode": 2,
+            "name": "dark",
+            "colors": {
+                "background": "#0b1120",
+                "surface": "#111827",
+                "surfaceRaised": "#182235",
+                "foreground": "#f8fafc",
+                "mutedForeground": "#cbd5e1",
+                "border": "#475569",
+                "primary": "#4ade80",
+                "onPrimary": "#052e16",
+                "success": "#4ade80",
+                "warning": "#fbbf24",
+                "danger": "#fb7185",
+                "focus": "#68ded2"
+            }
+        }
+    ],
+    "spacing": [4, 8, 12, 16, 24, 32, 48],
+    "radii": [8, 12, 16, 24],
+    "motionMs": [150, 240, 360],
+    "minimumTouchTarget": 48
+}
+"##,
+    )?;
+    write_new(
+        &contracts.join("schema/product-design-tokens.schema.json"),
+        r##"{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://pam.dev/schemas/product-design-tokens-v1.json",
+    "title": "PAM Product Design Tokens v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["schemaVersion", "themes", "spacing", "radii", "motionMs", "minimumTouchTarget"],
+    "properties": {
+        "schemaVersion": {"type": "integer", "const": 1},
+        "themes": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 2,
+            "prefixItems": [
+                {"$ref": "#/$defs/lightTheme"},
+                {"$ref": "#/$defs/darkTheme"}
+            ],
+            "items": false
+        },
+        "spacing": {"type": "array", "const": [4, 8, 12, 16, 24, 32, 48]},
+        "radii": {"type": "array", "const": [8, 12, 16, 24]},
+        "motionMs": {"type": "array", "const": [150, 240, 360]},
+        "minimumTouchTarget": {"type": "integer", "minimum": 48}
+    },
+    "$defs": {
+        "colors": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["background", "surface", "surfaceRaised", "foreground", "mutedForeground", "border", "primary", "onPrimary", "success", "warning", "danger", "focus"],
+            "properties": {
+                "background": {"$ref": "#/$defs/color"},
+                "surface": {"$ref": "#/$defs/color"},
+                "surfaceRaised": {"$ref": "#/$defs/color"},
+                "foreground": {"$ref": "#/$defs/color"},
+                "mutedForeground": {"$ref": "#/$defs/color"},
+                "border": {"$ref": "#/$defs/color"},
+                "primary": {"$ref": "#/$defs/color"},
+                "onPrimary": {"$ref": "#/$defs/color"},
+                "success": {"$ref": "#/$defs/color"},
+                "warning": {"$ref": "#/$defs/color"},
+                "danger": {"$ref": "#/$defs/color"},
+                "focus": {"$ref": "#/$defs/color"}
+            }
+        },
+        "color": {"type": "string", "pattern": "^#[0-9a-f]{6}$"},
+        "lightTheme": {
+            "type": "object", "additionalProperties": false,
+            "required": ["modeCode", "name", "colors"],
+            "properties": {"modeCode": {"type": "integer", "const": 1}, "name": {"const": "light"}, "colors": {"$ref": "#/$defs/colors"}}
+        },
+        "darkTheme": {
+            "type": "object", "additionalProperties": false,
+            "required": ["modeCode", "name", "colors"],
+            "properties": {"modeCode": {"type": "integer", "const": 2}, "name": {"const": "dark"}, "colors": {"$ref": "#/$defs/colors"}}
+        }
+    }
+}
+"##,
+    )?;
+    write_new(
+        &contracts.join("schema/product-snapshot.schema.json"),
+        r#"{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://pam.dev/schemas/product-snapshot-v1.json",
+    "title": "PAM Product Snapshot v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["versionCode", "surfaceCode", "stateCode", "headline"],
+    "properties": {
+        "versionCode": {"type": "integer", "const": 1},
+        "surfaceCode": {"type": "integer", "enum": [1, 2, 3]},
+        "stateCode": {"type": "integer", "enum": [1, 2, 3]},
+        "headline": {"type": "string", "minLength": 1, "maxLength": 120}
+    }
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("schema/product-mutation.schema.json"),
+        r#"{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://pam.dev/schemas/product-mutation-v1.json",
+    "title": "PAM Product Mutation v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["versionCode", "mutationKindCode", "idempotencyKey"],
+    "properties": {
+        "versionCode": {"type": "integer", "const": 1},
+        "mutationKindCode": {"type": "integer", "const": 1},
+        "idempotencyKey": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"}
+    }
+}
+"#,
+    )?;
+    write_new(
+        &contracts.join("schema/product-mutation-receipt.schema.json"),
+        r#"{
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://pam.dev/schemas/product-mutation-receipt-v1.json",
+    "title": "PAM Product Mutation Receipt v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["versionCode", "mutationKindCode", "mutationStateCode", "idempotencyKey"],
+    "properties": {
+        "versionCode": {"type": "integer", "const": 1},
+        "mutationKindCode": {"type": "integer", "const": 1},
+        "mutationStateCode": {"type": "integer", "const": 1},
+        "idempotencyKey": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$"}
     }
 }
 "#,
@@ -1072,16 +1571,102 @@ declare(strict_types=1);
 
 require dirname(__DIR__).'/src/ProductSurface.php';
 require dirname(__DIR__).'/src/ReadinessState.php';
+require dirname(__DIR__).'/src/ContractVersion.php';
+require dirname(__DIR__).'/src/ProductMutationKind.php';
+require dirname(__DIR__).'/src/MutationResultState.php';
+require dirname(__DIR__).'/src/MutationDeliveryState.php';
+require dirname(__DIR__).'/src/ProductMutation.php';
+require dirname(__DIR__).'/src/ProductMutationReceipt.php';
 require dirname(__DIR__).'/src/ProductSnapshot.php';
 
+use Product\Contracts\ProductMutation;
+use Product\Contracts\ProductMutationReceipt;
+use Product\Contracts\MutationDeliveryState;
 use Product\Contracts\ProductSnapshot;
 use Product\Contracts\ProductSurface;
 
+function expect(bool $condition, string $message): void
+{
+    if (!$condition) {
+        throw new RuntimeException($message);
+    }
+}
+
+$schema = json_decode((string) file_get_contents(dirname(__DIR__).'/schema/product-snapshot.schema.json'), true, flags: JSON_THROW_ON_ERROR);
+expect($schema['properties']['versionCode']['const'] === 1, 'Schema version must be 1.');
+expect($schema['properties']['surfaceCode']['enum'] === [1, 2, 3], 'Schema surfaces must remain sequential.');
+expect($schema['properties']['stateCode']['enum'] === [1, 2, 3], 'Schema states must remain sequential.');
+$mutationSchema = json_decode((string) file_get_contents(dirname(__DIR__).'/schema/product-mutation.schema.json'), true, flags: JSON_THROW_ON_ERROR);
+$receiptSchema = json_decode((string) file_get_contents(dirname(__DIR__).'/schema/product-mutation-receipt.schema.json'), true, flags: JSON_THROW_ON_ERROR);
+expect($mutationSchema['properties']['mutationKindCode']['const'] === 1, 'Check-in mutation code must be 1.');
+expect($receiptSchema['properties']['mutationStateCode']['const'] === 1, 'Accepted mutation state must be 1.');
+$tokenSchema = json_decode((string) file_get_contents(dirname(__DIR__).'/schema/product-design-tokens.schema.json'), true, flags: JSON_THROW_ON_ERROR);
+$tokens = json_decode((string) file_get_contents(dirname(__DIR__).'/design-tokens.json'), true, flags: JSON_THROW_ON_ERROR);
+expect($tokenSchema['additionalProperties'] === false, 'Design token schema must be fail-closed.');
+expect(array_keys($tokens) === ['schemaVersion', 'themes', 'spacing', 'radii', 'motionMs', 'minimumTouchTarget'], 'Design token document has unknown or missing fields.');
+expect($tokens['schemaVersion'] === 1, 'Design token schema version must be 1.');
+expect(array_column($tokens['themes'], 'modeCode') === [1, 2], 'Theme modes must use sequential integer codes.');
+expect(array_column($tokens['themes'], 'name') === ['light', 'dark'], 'Theme order changed unexpectedly.');
+expect($tokens['spacing'] === [4, 8, 12, 16, 24, 32, 48], 'Spacing must preserve the 4/8 rhythm.');
+expect($tokens['radii'] === [8, 12, 16, 24], 'Radius scale changed unexpectedly.');
+expect($tokens['motionMs'] === [150, 240, 360], 'Motion must remain bounded.');
+expect($tokens['minimumTouchTarget'] >= 48, 'Touch targets must remain accessible.');
+foreach ($tokens['themes'] as $theme) {
+    expect(array_keys($theme) === ['modeCode', 'name', 'colors'], 'Theme has unknown or missing fields.');
+    expect(array_keys($theme['colors']) === ['background', 'surface', 'surfaceRaised', 'foreground', 'mutedForeground', 'border', 'primary', 'onPrimary', 'success', 'warning', 'danger', 'focus'], 'Theme colors have unknown or missing roles.');
+    foreach ($theme['colors'] as $color) {
+        expect(is_string($color) && preg_match('/^#[0-9a-f]{6}$/D', $color) === 1, 'Theme colors must use canonical lowercase hex.');
+    }
+}
+
 foreach ([ProductSurface::Server, ProductSurface::Native, ProductSurface::Desktop] as $surface) {
     $snapshot = ProductSnapshot::operational($surface)->toArray();
-    assert($snapshot['surfaceCode'] === $surface->value);
-    assert($snapshot['stateCode'] === 1);
-    assert($snapshot['headline'] === 'All systems ready');
+    expect($snapshot['versionCode'] === 1, 'Snapshot version must be 1.');
+    expect($snapshot['surfaceCode'] === $surface->value, 'Snapshot surface must round-trip.');
+    expect($snapshot['stateCode'] === 1, 'Operational state must use code 1.');
+    expect($snapshot['headline'] === 'All systems ready', 'Operational headline changed unexpectedly.');
+}
+
+$decoded = ProductSnapshot::fromArray([
+    'versionCode' => 1,
+    'surfaceCode' => 1,
+    'stateCode' => 2,
+    'headline' => 'Scheduled maintenance',
+]);
+expect($decoded->toArray()['stateCode'] === 2, 'Decoded state must round-trip.');
+
+$mutation = ProductMutation::checkIn('check-in:device-1:1');
+$receipt = ProductMutationReceipt::fromArray(ProductMutationReceipt::accepted($mutation)->toArray());
+expect($mutation->toArray()['mutationKindCode'] === 1, 'Check-in mutation kind must be 1.');
+expect($receipt->toArray() === [
+    'versionCode' => 1,
+    'mutationKindCode' => 1,
+    'mutationStateCode' => 1,
+    'idempotencyKey' => 'check-in:device-1:1',
+], 'Accepted mutation receipt must round-trip.');
+expect(MutationDeliveryState::Delivered->value === 1, 'Delivered state must be 1.');
+expect(MutationDeliveryState::Queued->value === 2, 'Queued state must be 2.');
+
+$invalidMutationRejected = false;
+try {
+    ProductMutation::fromArray(['versionCode' => 1, 'mutationKindCode' => '1', 'idempotencyKey' => '../unsafe']);
+} catch (Throwable) {
+    $invalidMutationRejected = true;
+}
+expect($invalidMutationRejected, 'Invalid mutation types and keys must be rejected.');
+
+foreach ([
+    ['versionCode' => 2, 'surfaceCode' => 1, 'stateCode' => 1, 'headline' => 'Future'],
+    ['versionCode' => 1, 'surfaceCode' => '1', 'stateCode' => 1, 'headline' => 'Wrong type'],
+    ['versionCode' => 1, 'surfaceCode' => 1, 'stateCode' => 9, 'headline' => 'Unknown state'],
+] as $invalid) {
+    $rejected = false;
+    try {
+        ProductSnapshot::fromArray($invalid);
+    } catch (Throwable) {
+        $rejected = true;
+    }
+    expect($rejected, 'Invalid snapshot must be rejected.');
 }
 
 echo "Cross-surface product contract verified.\n";
@@ -1113,15 +1698,38 @@ declare(strict_types=1);
 use Pam\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
+use Product\Contracts\ProductMutation;
+use Product\Contracts\ProductMutationReceipt;
 use Product\Contracts\ProductSnapshot;
 use Product\Contracts\ProductSurface;
 
 require __DIR__.'/vendor/autoload.php';
 
 $app = new App;
-$app->get('/api/status', static fn (Request $request, Response $response): Response => $response->json(
-    ProductSnapshot::operational(ProductSurface::Server)->toArray(),
-));
+$app->get('/api/status', static fn (Request $request, Response $response): Response => $response
+    ->header('cache-control', 'no-store')
+    ->json(ProductSnapshot::operational(ProductSurface::Server)->toArray()));
+$app->post('/api/check-ins', static function (Request $request, Response $response): Response {
+    try {
+        $payload = $request->json();
+        if (!is_array($payload)) {
+            throw new \UnexpectedValueException('Mutation payload must be an object.');
+        }
+        $mutation = ProductMutation::fromArray($payload);
+        $header = $request->getHeader('idempotency-key');
+        if (!is_string($header) || !hash_equals($mutation->idempotencyKey, $header)) {
+            throw new \UnexpectedValueException('Idempotency key does not match.');
+        }
+
+        return $response
+            ->header('cache-control', 'no-store')
+            ->json(ProductMutationReceipt::accepted($mutation)->toArray(), 202);
+    } catch (\Throwable) {
+        return $response
+            ->header('cache-control', 'no-store')
+            ->json(['message' => 'Invalid product mutation.'], 422);
+    }
+});
 $app->listen((int) (getenv('PAM_PORT') ?: 3000));
 "#,
     )?;
@@ -1136,6 +1744,8 @@ use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Testing\TestClient;
 use PHPUnit\Framework\TestCase;
+use Product\Contracts\ProductMutation;
+use Product\Contracts\ProductMutationReceipt;
 use Product\Contracts\ProductSnapshot;
 use Product\Contracts\ProductSurface;
 
@@ -1144,18 +1754,149 @@ final class ApplicationTest extends TestCase
     public function test_shared_product_status_contract(): void
     {
         $app = new App(discoverPackages: false);
-        $app->get('/api/status', static fn (Request $request, Response $response): Response => $response->json(
-            ProductSnapshot::operational(ProductSurface::Server)->toArray(),
-        ));
+        $app->get('/api/status', static fn (Request $request, Response $response): Response => $response
+            ->header('cache-control', 'no-store')
+            ->json(ProductSnapshot::operational(ProductSurface::Server)->toArray()));
 
         (new TestClient($app))
             ->get('/api/status')
             ->assertSuccessful()
-            ->assertJson(['surfaceCode' => 1, 'stateCode' => 1, 'headline' => 'All systems ready']);
+            ->assertHeader('cache-control', 'no-store')
+            ->assertJson(['versionCode' => 1, 'surfaceCode' => 1, 'stateCode' => 1, 'headline' => 'All systems ready']);
         self::addToAssertionCount(1);
+    }
+
+    public function test_check_in_mutation_is_idempotent_and_versioned(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->post('/api/check-ins', static function (Request $request, Response $response): Response {
+            try {
+                $payload = $request->json();
+                if (!is_array($payload)) {
+                    throw new \UnexpectedValueException;
+                }
+                $mutation = ProductMutation::fromArray($payload);
+                $key = $request->getHeader('idempotency-key');
+                if (!is_string($key) || !hash_equals($mutation->idempotencyKey, $key)) {
+                    throw new \UnexpectedValueException;
+                }
+                return $response->json(ProductMutationReceipt::accepted($mutation)->toArray(), 202);
+            } catch (\Throwable) {
+                return $response->json(['message' => 'Invalid product mutation.'], 422);
+            }
+        });
+
+        $payload = ProductMutation::checkIn('check-in:test-device:1')->toArray();
+        $headers = ['idempotency-key' => 'check-in:test-device:1'];
+        $expected = [
+            'versionCode' => 1,
+            'mutationKindCode' => 1,
+            'mutationStateCode' => 1,
+            'idempotencyKey' => 'check-in:test-device:1',
+        ];
+        (new TestClient($app))->postJson('/api/check-ins', $payload, $headers)->assertStatus(202)->assertJson($expected);
+        (new TestClient($app))->postJson('/api/check-ins', $payload, $headers)->assertStatus(202)->assertJson($expected);
+        (new TestClient($app))->postJson('/api/check-ins', $payload, ['idempotency-key' => 'wrong'])->assertStatus(422);
+        self::addToAssertionCount(3);
     }
 }
 "#,
+    )?;
+    write_new(
+        &native.join("src/ProductTheme.php"),
+        r##"<?php
+
+declare(strict_types=1);
+
+namespace App;
+
+use Pam\MobileUi\Enum\ColorToken;
+use Pam\MobileUi\PamUI;
+use Pam\MobileUi\Theme\Color;
+use Pam\MobileUi\Theme\Theme;
+use Pam\MobileUi\Theme\Themes;
+
+final class ProductTheme
+{
+    private const array REQUIRED_ROLES = [
+        'background', 'surface', 'surfaceRaised', 'foreground',
+        'mutedForeground', 'border', 'primary', 'onPrimary',
+        'success', 'warning', 'danger', 'focus',
+    ];
+
+    private function __construct()
+    {
+    }
+
+    public static function install(): void
+    {
+        $path = dirname(__DIR__, 3).'/packages/contracts/design-tokens.json';
+        $contents = file_get_contents($path, false, null, 0, 32_769);
+        if (!is_string($contents) || strlen($contents) > 32_768) {
+            throw new \RuntimeException('Product design token contract is missing or too large.');
+        }
+        $document = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($document)
+            || array_keys($document) !== ['schemaVersion', 'themes', 'spacing', 'radii', 'motionMs', 'minimumTouchTarget']
+            || $document['schemaVersion'] !== 1
+            || !is_array($document['themes'])
+            || count($document['themes']) !== 2) {
+            throw new \UnexpectedValueException('Product design token contract is incompatible.');
+        }
+        $light = self::theme($document['themes'][0], 1, 'light', Themes::light());
+        $dark = self::theme($document['themes'][1], 2, 'dark', Themes::dark());
+        PamUI::theme($light, $dark);
+    }
+
+    /** @param array<array-key, mixed> $payload */
+    private static function theme(array $payload, int $modeCode, string $name, Theme $base): Theme
+    {
+        if (array_keys($payload) !== ['modeCode', 'name', 'colors']
+            || $payload['modeCode'] !== $modeCode
+            || $payload['name'] !== $name
+            || !is_array($payload['colors'])
+            || array_keys($payload['colors']) !== self::REQUIRED_ROLES) {
+            throw new \UnexpectedValueException('Product theme is incompatible.');
+        }
+        $colors = $payload['colors'];
+
+        return $base->withColors([
+            ColorToken::Background->value => self::color($colors['background']),
+            ColorToken::SurfaceSunken->value => self::color($colors['background']),
+            ColorToken::Card->value => self::color($colors['surface']),
+            ColorToken::Surface->value => self::color($colors['surface']),
+            ColorToken::Popover->value => self::color($colors['surfaceRaised']),
+            ColorToken::SurfaceElevated->value => self::color($colors['surfaceRaised']),
+            ColorToken::Foreground->value => self::color($colors['foreground']),
+            ColorToken::OnSurface->value => self::color($colors['foreground']),
+            ColorToken::PopoverForeground->value => self::color($colors['foreground']),
+            ColorToken::MutedForeground->value => self::color($colors['mutedForeground']),
+            ColorToken::Border->value => self::color($colors['border']),
+            ColorToken::Input->value => self::color($colors['border']),
+            ColorToken::Primary->value => self::color($colors['primary']),
+            ColorToken::PrimaryForeground->value => self::color($colors['onPrimary']),
+            ColorToken::Success->value => self::color($colors['success']),
+            ColorToken::Warning->value => self::color($colors['warning']),
+            ColorToken::Destructive->value => self::color($colors['danger']),
+            ColorToken::Focus->value => self::color($colors['focus']),
+            ColorToken::Ring->value => self::color($colors['focus']),
+        ]);
+    }
+
+    private static function color(mixed $value): Color
+    {
+        if (!is_string($value) || preg_match('/^#[0-9a-f]{6}$/D', $value) !== 1) {
+            throw new \UnexpectedValueException('Product color must use canonical lowercase hex.');
+        }
+
+        return Color::rgb(
+            (int) hexdec(substr($value, 1, 2)),
+            (int) hexdec(substr($value, 3, 2)),
+            (int) hexdec(substr($value, 5, 2)),
+        );
+    }
+}
+"##,
     )?;
     replace_generated(
         &native.join("src/Hello.pam"),
@@ -1167,15 +1908,232 @@ namespace App;
 
 use Pam\Native\Attributes\State;
 use Pam\Native\Component;
+use Pam\Native\Http\Http;
+use Pam\Native\Http\HttpResponse;
+use Pam\Native\Storage\Storage;
+use Pam\Native\Sync\Mutation;
+use Pam\Native\Sync\OfflineMutationQueue;
+use Product\Contracts\ProductMutation;
+use Product\Contracts\ProductMutationReceipt;
 use Product\Contracts\ProductSnapshot;
 use Product\Contracts\ProductSurface;
 
 final class Hello extends Component
 {
+    private const MAX_PENDING_MUTATIONS = 32;
+
     #[State]
     public int $refreshCount = 0;
 
-    public function refresh(): void { $this->refreshCount++; }
+    #[State]
+    public int $serverStateCode = 3;
+
+    #[State]
+    public string $serverHeadline = 'Server not checked yet';
+
+    #[State]
+    public string $syncMessage = 'Start the Server, then verify the shared contract.';
+
+    #[State]
+    public bool $syncing = false;
+
+    #[State]
+    public bool $outboxLoaded = false;
+
+    #[State]
+    public int $pendingMutations = 0;
+
+    #[State]
+    public string $mutationMessage = 'Loading the private native outbox…';
+
+    private OfflineMutationQueue $outbox;
+
+    public function boot(): void
+    {
+        ProductTheme::install();
+        $this->outbox = new OfflineMutationQueue;
+    }
+
+    public function mount(): void
+    {
+        try {
+            Storage::get('product.outbox.v1', function (?string $snapshot): void {
+                try {
+                    if ($snapshot !== null) {
+                        $this->outbox = OfflineMutationQueue::restore($snapshot);
+                    }
+                    $this->mutationMessage = 'Offline outbox ready.';
+                } catch (\Throwable) {
+                    $this->outbox = new OfflineMutationQueue;
+                    $this->mutationMessage = 'Invalid outbox was isolated; a clean queue is ready.';
+                }
+                $this->outboxLoaded = true;
+                $this->updatePendingMutations();
+                $this->replayReadyMutation();
+            });
+        } catch (\Throwable) {
+            $this->outboxLoaded = true;
+            $this->mutationMessage = 'Native storage is unavailable; check-in was not queued.';
+        }
+    }
+
+    public function resumed(): void
+    {
+        if ($this->outboxLoaded) {
+            $this->replayReadyMutation();
+        }
+    }
+
+    public function refresh(): void
+    {
+        if ($this->syncing) {
+            return;
+        }
+
+        $this->syncing = true;
+        $this->refreshCount++;
+        $this->syncMessage = 'Checking the Server…';
+        $endpoint = getenv('PAM_PRODUCT_SERVER_URL') ?: 'http://127.0.0.1:3000/api/status';
+
+        try {
+            Http::request(
+                method: 'GET',
+                url: $endpoint,
+                callback: function (HttpResponse $response): void {
+                    try {
+                        if (!$response->successful() || strlen($response->body) > 65_536) {
+                            throw new \RuntimeException('Server is unavailable.');
+                        }
+
+                        $payload = json_decode($response->body, true, flags: JSON_THROW_ON_ERROR);
+                        if (!is_array($payload)) {
+                            throw new \UnexpectedValueException('Server returned an invalid document.');
+                        }
+
+                        $snapshot = ProductSnapshot::fromArray($payload);
+                        if ($snapshot->surface !== ProductSurface::Server) {
+                            throw new \UnexpectedValueException('Server returned the wrong product surface.');
+                        }
+
+                        $this->serverStateCode = $snapshot->state->value;
+                        $this->serverHeadline = $snapshot->headline;
+                        $this->syncMessage = 'Verified contract v'.$snapshot->version->value.' from Server surface 1.';
+                    } catch (\Throwable) {
+                        $this->serverStateCode = 3;
+                        $this->serverHeadline = 'Server unavailable or incompatible';
+                        $this->syncMessage = 'Check PAM_PRODUCT_SERVER_URL and the Server contract version.';
+                    } finally {
+                        $this->syncing = false;
+                    }
+                },
+                headers: ['Accept' => 'application/json'],
+                timeoutMs: 5_000,
+            );
+        } catch (\Throwable) {
+            $this->serverStateCode = 3;
+            $this->serverHeadline = 'Server request could not start';
+            $this->syncMessage = 'Check PAM_PRODUCT_SERVER_URL and the Native network policy.';
+            $this->syncing = false;
+        }
+    }
+
+    public function queueCheckIn(): void
+    {
+        if (!$this->outboxLoaded) {
+            $this->mutationMessage = 'Wait for the offline outbox to finish loading.';
+            return;
+        }
+
+        try {
+            if ($this->pendingMutations >= self::MAX_PENDING_MUTATIONS) {
+                throw new \OverflowException('Product outbox is full.');
+            }
+            $key = 'check-in:'.bin2hex(random_bytes(16));
+            $mutation = ProductMutation::checkIn($key);
+            $this->outbox->enqueue($key, 'product.check-in', $mutation->toArray());
+            $this->updatePendingMutations();
+            $this->mutationMessage = 'Check-in persisted; attempting delivery.';
+            $this->persistOutbox(function (): void {
+                $this->replayReadyMutation();
+            });
+        } catch (\Throwable) {
+            $this->mutationMessage = 'Check-in could not be queued safely.';
+        }
+    }
+
+    private function replayReadyMutation(): int
+    {
+        $mutation = $this->outbox->ready(self::nowMs(), 1)[0] ?? null;
+        if (!$mutation instanceof Mutation) {
+            return 0;
+        }
+
+        $this->outbox->sending($mutation->id);
+        $endpoint = getenv('PAM_PRODUCT_MUTATION_URL') ?: 'http://127.0.0.1:3000/api/check-ins';
+        try {
+            Http::json(
+                method: 'POST',
+                url: $endpoint,
+                data: $mutation->payload,
+                callback: function (HttpResponse $response) use ($mutation): void {
+                    try {
+                        if (!$response->successful() || strlen($response->body) > 65_536) {
+                            throw new \RuntimeException('Mutation delivery failed.');
+                        }
+                        $payload = json_decode($response->body, true, flags: JSON_THROW_ON_ERROR);
+                        if (!is_array($payload)) {
+                            throw new \UnexpectedValueException('Mutation receipt is invalid.');
+                        }
+                        $receipt = ProductMutationReceipt::fromArray($payload);
+                        if (!hash_equals($mutation->key, $receipt->idempotencyKey)) {
+                            throw new \UnexpectedValueException('Mutation receipt key does not match.');
+                        }
+                        $this->outbox->applied($mutation->id);
+                        $this->outbox->prune();
+                        $this->mutationMessage = 'Check-in accepted by Server.';
+                    } catch (\Throwable) {
+                        $this->outbox->retry($mutation->id, self::nowMs(), 'delivery');
+                        $this->mutationMessage = 'Offline: check-in retained for bounded retry.';
+                    }
+                    $this->updatePendingMutations();
+                    $this->persistOutbox(function (): void {
+                        $this->replayReadyMutation();
+                    });
+                },
+                headers: ['Idempotency-Key' => $mutation->key],
+                timeoutMs: 5_000,
+            );
+        } catch (\Throwable) {
+            $this->outbox->retry($mutation->id, self::nowMs(), 'transport');
+            $this->mutationMessage = 'Offline: check-in retained for bounded retry.';
+            $this->updatePendingMutations();
+            $this->persistOutbox();
+        }
+
+        return $mutation->id;
+    }
+
+    private function persistOutbox(?\Closure $stored = null): void
+    {
+        Storage::set('product.outbox.v1', $this->outbox->export(), $stored);
+    }
+
+    private function updatePendingMutations(): void
+    {
+        $snapshot = json_decode($this->outbox->export(), true, flags: JSON_THROW_ON_ERROR);
+        $mutations = is_array($snapshot['mutations'] ?? null) ? $snapshot['mutations'] : [];
+        $this->pendingMutations = count(array_filter(
+            $mutations,
+            static fn (mixed $item): bool => is_array($item)
+                && is_int($item['status'] ?? null)
+                && !in_array($item['status'], [3, 6], true),
+        ));
+    }
+
+    private static function nowMs(): int
+    {
+        return (int) floor(microtime(true) * 1_000);
+    }
 
     public function snapshot(): ProductSnapshot
     {
@@ -1189,11 +2147,23 @@ final class Hello extends Component
         <SafeAreaView class="flex-1 ui-surface">
             <Center class="flex-1 px-6">
                 <Card class="w-full max-w-md gap-5 p-6">
-                    <Badge variant="secondary"><BadgeText>Native surface · code 2</BadgeText></Badge>
+                    <Badge variant="secondary"><BadgeText>Contract v1 · Native surface 2</BadgeText></Badge>
                     <Heading size="2xl">{{ $this->snapshot()->headline }}</Heading>
                     <Text class="text-muted-foreground">One typed PHP contract across every PAM runtime.</Text>
+                    <Card class="gap-2 p-4">
+                        <Text>Server state · code {{ $serverStateCode }}</Text>
+                        <Heading size="md">{{ $serverHeadline }}</Heading>
+                        <Text class="text-muted-foreground">{{ $syncMessage }}</Text>
+                    </Card>
                     <Button size="lg" on:press="refresh">
-                        <ButtonText>Verify again · {{ $refreshCount }}</ButtonText>
+                        <ButtonText>Sync Server · {{ $refreshCount }}</ButtonText>
+                    </Button>
+                    <Card class="gap-2 p-4">
+                        <Text>Offline outbox · {{ $pendingMutations }} pending</Text>
+                        <Text class="text-muted-foreground">{{ $mutationMessage }}</Text>
+                    </Card>
+                    <Button size="lg" variant="outline" on:press="queueCheckIn">
+                        <ButtonText>Queue resilient check-in</ButtonText>
                     </Button>
                 </Card>
             </Center>
@@ -1205,7 +2175,7 @@ final class Hello extends Component
     replace_generated_once(
         &desktop.join("app.php"),
         "use Pam\\Desktop\\WindowTheme;",
-        "use Pam\\Desktop\\WindowTheme;\nuse Product\\Contracts\\ProductSnapshot;\nuse Product\\Contracts\\ProductSurface;",
+        "use Pam\\Desktop\\WindowTheme;\nuse Product\\Contracts\\MutationDeliveryState;\nuse Product\\Contracts\\ProductMutation;\nuse Product\\Contracts\\ProductMutationReceipt;\nuse Product\\Contracts\\ProductSnapshot;\nuse Product\\Contracts\\ProductSurface;\nuse Product\\Contracts\\ReadinessState;",
         "desktop contract import",
     )?;
     replace_generated_once(
@@ -1216,6 +2186,378 @@ final class Hello extends Component
     {
         return ProductSnapshot::operational(ProductSurface::Desktop)->toArray();
     }
+
+    #[Command('product.theme')]
+    public function productTheme(int $modeCode): array
+    {
+        if (!in_array($modeCode, [1, 2], true)) {
+            throw new \InvalidArgumentException('Product theme mode must be 1 or 2.');
+        }
+        $path = dirname(__DIR__, 2).'/packages/contracts/design-tokens.json';
+        $contents = file_get_contents($path, false, null, 0, 32_769);
+        if (!is_string($contents) || strlen($contents) > 32_768) {
+            throw new \RuntimeException('Product design token contract is missing or too large.');
+        }
+        $document = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($document)
+            || array_keys($document) !== ['schemaVersion', 'themes', 'spacing', 'radii', 'motionMs', 'minimumTouchTarget']
+            || $document['schemaVersion'] !== 1
+            || !is_array($document['themes'])
+            || count($document['themes']) !== 2) {
+            throw new \UnexpectedValueException('Product design token contract is incompatible.');
+        }
+        $theme = $document['themes'][$modeCode - 1] ?? null;
+        $roles = ['background', 'surface', 'surfaceRaised', 'foreground', 'mutedForeground', 'border', 'primary', 'onPrimary', 'success', 'warning', 'danger', 'focus'];
+        if (!is_array($theme)
+            || array_keys($theme) !== ['modeCode', 'name', 'colors']
+            || $theme['modeCode'] !== $modeCode
+            || $theme['name'] !== ($modeCode === 1 ? 'light' : 'dark')
+            || !is_array($theme['colors'])
+            || array_keys($theme['colors']) !== $roles) {
+            throw new \UnexpectedValueException('Product theme is incompatible.');
+        }
+        foreach ($theme['colors'] as $color) {
+            if (!is_string($color) || preg_match('/^#[0-9a-f]{6}$/D', $color) !== 1) {
+                throw new \UnexpectedValueException('Product theme contains an invalid color.');
+            }
+        }
+
+        return $theme;
+    }
+
+    #[Command('product.server-status')]
+    public function productServerStatus(): array
+    {
+        $startedAt = hrtime(true);
+        try {
+            $snapshot = $this->fetchProductServerStatus();
+            $this->recordProductTelemetrySample(
+                $snapshot->state->value,
+                self::elapsedProductMilliseconds($startedAt),
+            );
+            return $snapshot->toArray();
+        } catch (\Throwable $error) {
+            $this->recordProductTelemetrySample(
+                ReadinessState::Offline->value,
+                self::elapsedProductMilliseconds($startedAt),
+            );
+            throw $error;
+        }
+    }
+
+    #[Command('product.telemetry-history')]
+    public function productTelemetryHistory(): array
+    {
+        return [
+            'versionCode' => 1,
+            'samples' => $this->readProductTelemetryHistory(),
+        ];
+    }
+
+    private function fetchProductServerStatus(): ProductSnapshot
+    {
+        $endpoint = self::productEndpoint('PAM_PRODUCT_SERVER_URL', 'http://127.0.0.1:3000/api/status');
+
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => "Accept: application/json\r\n",
+                'timeout' => 5,
+                'follow_location' => 0,
+                'max_redirects' => 0,
+            ],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+        ]);
+        $body = @file_get_contents($endpoint, false, $context, 0, 65_537);
+        if (!is_string($body) || strlen($body) > 65_536) {
+            throw new \RuntimeException('Server is unavailable or returned too much data.');
+        }
+
+        $payload = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($payload)) {
+            throw new \UnexpectedValueException('Server returned an invalid document.');
+        }
+
+        $snapshot = ProductSnapshot::fromArray($payload);
+        if ($snapshot->surface !== ProductSurface::Server) {
+            throw new \UnexpectedValueException('Server returned the wrong product surface.');
+        }
+
+        return $snapshot;
+    }
+
+    #[Command('product.check-in')]
+    public function productCheckIn(): array
+    {
+        $mutation = ProductMutation::checkIn('check-in:'.bin2hex(random_bytes(16)));
+        $outbox = $this->readProductOutbox();
+        if (count($outbox) >= 32) {
+            throw new \OverflowException('Desktop product outbox is full.');
+        }
+        $outbox[] = $mutation;
+        $this->writeProductOutbox($outbox);
+        $remaining = $this->replayProductOutbox();
+        $queued = array_any(
+            $remaining,
+            static fn (ProductMutation $item): bool => hash_equals($item->idempotencyKey, $mutation->idempotencyKey),
+        );
+
+        return [
+            'deliveryStateCode' => $queued ? MutationDeliveryState::Queued->value : MutationDeliveryState::Delivered->value,
+            'pendingCount' => count($remaining),
+        ];
+    }
+
+    #[Command('product.outbox.replay')]
+    public function replayProductOutboxCommand(): array
+    {
+        $remaining = $this->replayProductOutbox();
+        return [
+            'deliveryStateCode' => $remaining === []
+                ? MutationDeliveryState::Delivered->value
+                : MutationDeliveryState::Queued->value,
+            'pendingCount' => count($remaining),
+        ];
+    }
+
+    /** @return list<ProductMutation> */
+    private function replayProductOutbox(): array
+    {
+        $remaining = $this->readProductOutbox();
+        while (($mutation = $remaining[0] ?? null) instanceof ProductMutation) {
+            try {
+                $this->sendProductMutation($mutation);
+                array_shift($remaining);
+            } catch (\Throwable) {
+                break;
+            }
+        }
+        $this->writeProductOutbox($remaining);
+        return $remaining;
+    }
+
+    private function sendProductMutation(ProductMutation $mutation): void
+    {
+        $endpoint = self::productEndpoint('PAM_PRODUCT_MUTATION_URL', 'http://127.0.0.1:3000/api/check-ins');
+        $body = json_encode($mutation->toArray(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'POST',
+                'header' => "Accept: application/json\r\nContent-Type: application/json\r\nIdempotency-Key: {$mutation->idempotencyKey}\r\n",
+                'content' => $body,
+                'timeout' => 5,
+                'follow_location' => 0,
+                'max_redirects' => 0,
+            ],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+        ]);
+        $response = @file_get_contents($endpoint, false, $context, 0, 65_537);
+        if (!is_string($response) || strlen($response) > 65_536) {
+            throw new \RuntimeException('Mutation endpoint is unavailable or returned too much data.');
+        }
+        $payload = json_decode($response, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($payload)) {
+            throw new \UnexpectedValueException('Mutation endpoint returned an invalid document.');
+        }
+        $receipt = ProductMutationReceipt::fromArray($payload);
+        if (!hash_equals($mutation->idempotencyKey, $receipt->idempotencyKey)) {
+            throw new \UnexpectedValueException('Mutation receipt key does not match.');
+        }
+    }
+
+    /** @return list<ProductMutation> */
+    private function readProductOutbox(): array
+    {
+        $path = self::productOutboxPath();
+        if (!is_file($path)) {
+            return [];
+        }
+        if (is_link($path) || filesize($path) > 65_536) {
+            throw new \RuntimeException('Desktop product outbox is unsafe or too large.');
+        }
+        $contents = file_get_contents($path, false, null, 0, 65_537);
+        if (!is_string($contents) || strlen($contents) > 65_536) {
+            throw new \RuntimeException('Desktop product outbox could not be read safely.');
+        }
+        $payload = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($payload) || ($payload['versionCode'] ?? null) !== 1 || !is_array($payload['mutations'] ?? null)
+            || count($payload['mutations']) > 32) {
+            throw new \UnexpectedValueException('Desktop product outbox is incompatible.');
+        }
+        return array_map(
+            static function (mixed $item): ProductMutation {
+                if (!is_array($item)) {
+                    throw new \UnexpectedValueException('Desktop product outbox entry is invalid.');
+                }
+                return ProductMutation::fromArray($item);
+            },
+            array_values($payload['mutations']),
+        );
+    }
+
+    /** @param list<ProductMutation> $mutations */
+    private function writeProductOutbox(array $mutations): void
+    {
+        if (count($mutations) > 32) {
+            throw new \OverflowException('Desktop product outbox is full.');
+        }
+        $path = self::productOutboxPath();
+        if (is_link($path)) {
+            throw new \RuntimeException('Desktop product outbox cannot be a symbolic link.');
+        }
+        $encoded = json_encode([
+            'versionCode' => 1,
+            'mutations' => array_map(static fn (ProductMutation $item): array => $item->toArray(), $mutations),
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        if (strlen($encoded) > 65_536) {
+            throw new \OverflowException('Desktop product outbox exceeds 64 KiB.');
+        }
+
+        self::writeProductStorageDocument($path, $encoded, 'outbox');
+    }
+
+    /** @return list<array{observedAtUnixMs: int, latencyMs: int, stateCode: int}> */
+    private function readProductTelemetryHistory(): array
+    {
+        $path = self::productTelemetryPath();
+        if (!is_file($path)) {
+            return [];
+        }
+        if (is_link($path) || filesize($path) > 16_384) {
+            throw new \RuntimeException('Desktop product telemetry history is unsafe or too large.');
+        }
+        $contents = file_get_contents($path, false, null, 0, 16_385);
+        if (!is_string($contents) || strlen($contents) > 16_384) {
+            throw new \RuntimeException('Desktop product telemetry history could not be read safely.');
+        }
+        $payload = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($payload) || array_keys($payload) !== ['versionCode', 'samples']
+            || ($payload['versionCode'] ?? null) !== 1 || !is_array($payload['samples'] ?? null)
+            || count($payload['samples']) > 24) {
+            throw new \UnexpectedValueException('Desktop product telemetry history is incompatible.');
+        }
+        $previousTimestamp = 0;
+        foreach ($payload['samples'] as $sample) {
+            if (!is_array($sample) || array_keys($sample) !== ['observedAtUnixMs', 'latencyMs', 'stateCode']
+                || !is_int($sample['observedAtUnixMs']) || $sample['observedAtUnixMs'] < $previousTimestamp
+                || !is_int($sample['latencyMs']) || $sample['latencyMs'] < 0 || $sample['latencyMs'] > 30_000
+                || !is_int($sample['stateCode']) || ReadinessState::tryFrom($sample['stateCode']) === null) {
+                throw new \UnexpectedValueException('Desktop product telemetry sample is incompatible.');
+            }
+            $previousTimestamp = $sample['observedAtUnixMs'];
+        }
+        return array_values($payload['samples']);
+    }
+
+    private function appendProductTelemetrySample(int $stateCode, int $latencyMs): void
+    {
+        if (ReadinessState::tryFrom($stateCode) === null || $latencyMs < 0 || $latencyMs > 30_000) {
+            throw new \UnexpectedValueException('Desktop product telemetry sample is out of bounds.');
+        }
+        $samples = $this->readProductTelemetryHistory();
+        $samples[] = [
+            'observedAtUnixMs' => (int) floor(microtime(true) * 1_000),
+            'latencyMs' => $latencyMs,
+            'stateCode' => $stateCode,
+        ];
+        $samples = array_slice($samples, -24);
+        $encoded = json_encode([
+            'versionCode' => 1,
+            'samples' => $samples,
+        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+        if (strlen($encoded) > 16_384) {
+            throw new \OverflowException('Desktop product telemetry history exceeds 16 KiB.');
+        }
+        self::writeProductStorageDocument(self::productTelemetryPath(), $encoded, 'telemetry history');
+    }
+
+    private function recordProductTelemetrySample(int $stateCode, int $latencyMs): void
+    {
+        try {
+            $this->appendProductTelemetrySample($stateCode, $latencyMs);
+        } catch (\Throwable $error) {
+            error_log('PAM Product telemetry sample was not persisted: '.$error->getMessage());
+        }
+    }
+
+    private static function elapsedProductMilliseconds(int $startedAt): int
+    {
+        return min(30_000, max(0, (int) floor((hrtime(true) - $startedAt) / 1_000_000)));
+    }
+
+    private static function writeProductStorageDocument(string $path, string $encoded, string $label): void
+    {
+        if (is_link($path)) {
+            throw new \RuntimeException("Desktop product {$label} cannot be a symbolic link.");
+        }
+        $temporary = $path.'.'.bin2hex(random_bytes(8)).'.tmp';
+        $handle = fopen($temporary, 'x+b');
+        if ($handle === false) {
+            throw new \RuntimeException("Desktop product {$label} temporary file could not be created.");
+        }
+        try {
+            $written = 0;
+            while ($written < strlen($encoded)) {
+                $bytes = fwrite($handle, substr($encoded, $written));
+                if (!is_int($bytes) || $bytes <= 0) {
+                    throw new \RuntimeException("Desktop product {$label} could not be persisted.");
+                }
+                $written += $bytes;
+            }
+            if (!fflush($handle)) {
+                throw new \RuntimeException("Desktop product {$label} could not be persisted.");
+            }
+            if (function_exists('fsync') && !fsync($handle)) {
+                throw new \RuntimeException("Desktop product {$label} could not be synchronized.");
+            }
+            @chmod($temporary, 0600);
+            fclose($handle);
+            $handle = null;
+            if (!rename($temporary, $path)) {
+                throw new \RuntimeException("Desktop product {$label} could not be committed atomically.");
+            }
+        } finally {
+            if (is_resource($handle)) {
+                fclose($handle);
+            }
+            if (is_file($temporary)) {
+                @unlink($temporary);
+            }
+        }
+    }
+
+    private static function productOutboxPath(): string
+    {
+        $directory = realpath(__DIR__.'/storage');
+        if (!is_string($directory) || is_link(__DIR__.'/storage')) {
+            throw new \RuntimeException('Desktop product storage is unavailable or unsafe.');
+        }
+        return $directory.DIRECTORY_SEPARATOR.'product-outbox-v1.json';
+    }
+
+    private static function productTelemetryPath(): string
+    {
+        $directory = realpath(__DIR__.'/storage');
+        if (!is_string($directory) || is_link(__DIR__.'/storage')) {
+            throw new \RuntimeException('Desktop product storage is unavailable or unsafe.');
+        }
+        return $directory.DIRECTORY_SEPARATOR.'product-telemetry-v1.json';
+    }
+
+    private static function productEndpoint(string $variable, string $fallback): string
+    {
+        $endpoint = getenv($variable) ?: $fallback;
+        $parts = parse_url($endpoint);
+        $scheme = is_array($parts) && is_string($parts['scheme'] ?? null)
+            ? strtolower($parts['scheme'])
+            : null;
+        $host = is_array($parts) ? ($parts['host'] ?? null) : null;
+        $loopback = is_string($host) && in_array(strtolower($host), ['127.0.0.1', 'localhost', '::1'], true);
+        if (!is_string($host) || ($scheme !== 'https' && !($scheme === 'http' && $loopback))) {
+            throw new \RuntimeException("{$variable} must use HTTPS or loopback HTTP.");
+        }
+        return $endpoint;
+    }
 }
 
 HelloApp::run();"#,
@@ -1224,19 +2566,89 @@ HelloApp::run();"#,
     replace_generated_once(
         &desktop.join("resources/index.html"),
         "            <section class=\"runtime-strip\" aria-label=\"Componentes da aplicação\">",
-        r#"            <section class="product-signal" aria-labelledby="product-signal-title">
-                <div>
-                    <span class="eyebrow">SHARED CONTRACT · SURFACE 3</span>
-                    <h2 id="product-signal-title">Um domínio.<br><strong>Três superfícies.</strong></h2>
-                    <p id="product-headline">Consultando o contrato PHP compartilhado…</p>
-                </div>
-                <dl aria-label="Estado do produto">
-                    <div><dt>surface code</dt><dd id="product-surface-code">—</dd></div>
-                    <div><dt>state code</dt><dd id="product-state-code">—</dd></div>
-                </dl>
-                <div>
-                    <button id="product-refresh" type="button">Verificar contrato</button>
-                    <p id="product-status" role="status" aria-live="polite">Aguardando o worker PHP.</p>
+        r#"            <section class="product-console" aria-labelledby="product-console-title">
+                <header class="product-console__header">
+                    <div>
+                        <span class="eyebrow">PRODUCT CONTROL CENTER · LIVE CONTRACT</span>
+                        <h2 id="product-console-title">Um domínio.<br><strong>Três superfícies.</strong></h2>
+                        <p id="product-headline">Consultando o contrato PHP compartilhado…</p>
+                    </div>
+                    <div class="product-console__actions">
+                        <button id="product-refresh" type="button">Atualizar sinais</button>
+                        <span id="product-sample-time">Nenhuma amostra concluída</span>
+                    </div>
+                </header>
+
+                <div class="product-console__grid">
+                    <section class="product-panel product-panel--surfaces" aria-labelledby="product-surfaces-title">
+                        <div class="product-panel__heading">
+                            <div>
+                                <span>ECOSSISTEMA</span>
+                                <h3 id="product-surfaces-title">Superfícies</h3>
+                            </div>
+                            <span class="product-summary" id="product-summary">0 de 3 confirmadas</span>
+                        </div>
+                        <ul class="surface-list" aria-label="Disponibilidade por superfície">
+                            <li id="surface-server" data-state="checking">
+                                <span class="surface-state" aria-hidden="true"></span>
+                                <span><strong>Server</strong><small id="surface-server-detail">Verificando endpoint…</small></span>
+                                <span class="surface-code">01</span>
+                            </li>
+                            <li id="surface-native" data-state="unknown">
+                                <span class="surface-state" aria-hidden="true"></span>
+                                <span><strong>Native</strong><small>Não monitorado nesta sessão Desktop</small></span>
+                                <span class="surface-code">02</span>
+                            </li>
+                            <li id="surface-desktop" data-state="checking">
+                                <span class="surface-state" aria-hidden="true"></span>
+                                <span><strong>Desktop</strong><small id="surface-desktop-detail">Aguardando worker PHP…</small></span>
+                                <span class="surface-code">03</span>
+                            </li>
+                        </ul>
+                    </section>
+
+                    <section class="product-panel product-panel--contract" aria-labelledby="product-contract-title">
+                        <div class="product-panel__heading">
+                            <div><span>COMPATIBILIDADE</span><h3 id="product-contract-title">Contrato</h3></div>
+                            <span class="product-badge" id="product-contract-badge">verificando</span>
+                        </div>
+                        <dl class="product-metrics">
+                            <div><dt>Versão</dt><dd id="product-version-code">—</dd></div>
+                            <div><dt>Origem</dt><dd id="product-surface-code">—</dd></div>
+                            <div><dt>Estado</dt><dd id="product-state-code">—</dd></div>
+                            <div><dt>Latência</dt><dd><span id="product-latency">—</span><small> ms</small></dd></div>
+                        </dl>
+                        <p id="product-status" class="product-feedback" role="status" aria-live="polite">Aguardando o worker PHP.</p>
+                    </section>
+
+                    <section class="product-panel product-panel--outbox" aria-labelledby="product-outbox-title">
+                        <div class="product-panel__heading">
+                            <div><span>OFFLINE FIRST</span><h3 id="product-outbox-title">Outbox Desktop</h3></div>
+                            <strong><span id="product-outbox-count">—</span><small> / 32</small></strong>
+                        </div>
+                        <meter id="product-outbox-meter" min="0" max="32" value="0" aria-labelledby="product-outbox-title" aria-describedby="product-outbox-status">0 de 32 operações</meter>
+                        <p id="product-outbox-status" class="product-feedback" role="status" aria-live="polite">Carregando operações preservadas…</p>
+                        <button id="product-check-in" class="secondary-action" type="button">Criar check-in resiliente</button>
+                        <p class="product-privacy">Persistência privada e limitada; não armazene tokens, credenciais ou dados pessoais.</p>
+                    </section>
+
+                    <section class="product-panel product-panel--history" aria-labelledby="product-history-title">
+                        <div class="product-panel__heading">
+                            <div><span>ÚLTIMAS 24 AMOSTRAS</span><h3 id="product-history-title">Latência e disponibilidade</h3></div>
+                            <span class="product-badge">local</span>
+                        </div>
+                        <p id="product-history-summary" class="product-history-summary" role="status" aria-live="polite">
+                            Faça uma consulta para iniciar o histórico local.
+                        </p>
+                        <ol id="product-history-chart" class="product-history-chart" aria-label="Histórico cronológico de consultas ao Server">
+                            <li class="product-history-empty">Nenhuma amostra disponível.</li>
+                        </ol>
+                        <div class="product-history-legend" aria-label="Legenda dos estados">
+                            <span data-state="ready">Operacional</span>
+                            <span data-state="degraded">Degradado</span>
+                            <span data-state="offline">Offline</span>
+                        </div>
+                    </section>
                 </div>
             </section>
 
@@ -1250,33 +2662,94 @@ HelloApp::run();"#,
         &(desktop_css
             + r##"
 
-.product-signal {
-    display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(220px, .8fr) minmax(220px, .8fr);
-    gap: 24px;
-    align-items: center;
+.product-console {
     margin: 0 0 32px;
-    padding: 28px;
-    border: 1px solid var(--line-strong);
-    border-radius: 18px;
-    background: linear-gradient(125deg, rgba(104, 222, 210, .08), rgba(166, 154, 255, .06));
+    padding: clamp(20px, 3vw, 36px);
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    background: linear-gradient(145deg, var(--surface-raised), var(--ink));
+    box-shadow: var(--shadow);
 }
 
-.product-signal h2 { margin: 8px 0 10px; font-size: clamp(26px, 3vw, 42px); line-height: 1; }
-.product-signal h2 strong { color: var(--cyan); font-family: Georgia, serif; font-weight: 500; }
-.product-signal p { margin: 0; color: var(--text-soft); }
-.product-signal dl { display: grid; grid-template-columns: repeat(2, 1fr); margin: 0; }
-.product-signal dl div { padding: 14px; border-left: 1px solid var(--line); }
-.product-signal dt { color: var(--text-faint); font: 600 9px/1.2 "JetBrains Mono", monospace; letter-spacing: .1em; text-transform: uppercase; }
-.product-signal dd { margin: 8px 0 0; font-size: 28px; font-variant-numeric: tabular-nums; }
-.product-signal button { min-height: 48px; padding: 0 18px; color: var(--run-ink); background: var(--run); border: 0; border-radius: 9px; font-weight: 700; cursor: pointer; }
-.product-signal button:disabled { cursor: wait; opacity: .6; }
-.product-signal button:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
-.product-signal #product-status { margin-top: 9px; font-size: 12px; }
+.product-console__header { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 28px; }
+.product-console__header h2 { margin: 8px 0 12px; font-size: clamp(30px, 4vw, 54px); line-height: .98; letter-spacing: -.04em; }
+.product-console__header h2 strong { color: var(--cyan); font-family: Georgia, serif; font-weight: 500; }
+.product-console__header p { max-width: 60ch; margin: 0; color: var(--text-soft); line-height: 1.55; }
+.product-console__actions { display: grid; flex: 0 0 auto; gap: 10px; justify-items: end; }
+.product-console button { min-height: 48px; padding: 0 18px; color: var(--run-ink); background: var(--run); border: 1px solid transparent; border-radius: 10px; font-weight: 700; cursor: pointer; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease; }
+.product-console button:hover { background: #91efbd; }
+.product-console button:active { background: #53ce8e; }
+.product-console button:disabled { cursor: wait; opacity: .55; }
+.product-console button:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
+#product-sample-time { color: var(--text-faint); font: 500 11px/1.4 "JetBrains Mono", monospace; }
+.product-console__grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr); gap: 16px; }
+.product-panel { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--ink-soft); }
+.product-panel--surfaces { grid-row: span 2; }
+.product-panel__heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.product-panel__heading span, .product-panel__heading small { color: var(--text-faint); font: 600 10px/1.3 "JetBrains Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
+.product-panel__heading h3 { margin: 4px 0 0; font-size: 20px; letter-spacing: -.02em; }
+.product-summary, .product-badge { padding: 7px 9px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
+.product-badge[data-state="ready"] { color: var(--run); border-color: rgba(103, 232, 165, .35); }
+.product-badge[data-state="error"] { color: var(--coral); border-color: rgba(255, 146, 121, .4); }
+.surface-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.surface-list li { min-height: 72px; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); }
+.surface-list strong, .surface-list small { display: block; }
+.surface-list small { margin-top: 4px; color: var(--text-soft); line-height: 1.4; }
+.surface-state { width: 9px; height: 9px; border: 2px solid var(--text-faint); border-radius: 50%; }
+.surface-list li[data-state="ready"] .surface-state { border-color: var(--run); background: var(--run); box-shadow: 0 0 0 4px rgba(103, 232, 165, .1); }
+.surface-list li[data-state="degraded"] .surface-state { border-color: #f6b85f; background: #f6b85f; }
+.surface-list li[data-state="offline"] .surface-state { border-color: var(--coral); background: var(--coral); }
+.surface-code { color: var(--text-faint); font: 600 12px/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+.product-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
+.product-metrics div { padding: 4px 12px; border-left: 1px solid var(--line); }
+.product-metrics div:first-child { padding-left: 0; border-left: 0; }
+.product-metrics dt { color: var(--text-faint); font-size: 11px; }
+.product-metrics dd { margin: 7px 0 0; font: 600 26px/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+.product-metrics dd small { font-size: 10px; color: var(--text-faint); }
+.product-feedback { min-height: 38px; margin: 18px 0 0; color: var(--text-soft); font-size: 12px; line-height: 1.5; }
+.product-panel--outbox meter { width: 100%; height: 12px; accent-color: var(--run); }
+.product-panel--outbox .secondary-action { width: 100%; margin-top: 14px; color: var(--text); border-color: var(--line-strong); background: transparent; }
+.product-panel--outbox .secondary-action:hover { border-color: var(--cyan); background: rgba(104, 222, 210, .07); }
+.product-privacy { margin: 12px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
+.product-panel--history { grid-column: 1 / -1; }
+.product-history-summary { margin: -4px 0 18px; color: var(--text-soft); line-height: 1.5; }
+.product-history-chart { min-height: 180px; display: flex; align-items: end; gap: clamp(4px, .8vw, 10px); margin: 0; padding: 20px 4px 0; border-bottom: 1px solid var(--line-strong); list-style: none; }
+.product-history-chart li:not(.product-history-empty) { min-width: 0; flex: 1 1 0; display: grid; grid-template-rows: 120px auto auto; gap: 7px; align-items: end; justify-items: center; }
+.product-history-bar { width: min(100%, 20px); min-height: 4px; height: var(--sample-height); border: 1px solid currentColor; border-radius: 4px 4px 1px 1px; background: currentColor; opacity: .88; }
+.product-history-chart li[data-state="ready"] { color: var(--run); }
+.product-history-chart li[data-state="degraded"] { color: #f6b85f; }
+.product-history-chart li[data-state="offline"] { color: var(--coral); }
+.product-history-value { color: var(--text); font: 600 10px/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
+.product-history-chart time { color: var(--text-faint); font: 500 9px/1 "JetBrains Mono", monospace; }
+.product-history-empty { align-self: center; width: 100%; color: var(--text-faint); text-align: center; }
+.product-history-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; color: var(--text-soft); font-size: 11px; }
+.product-history-legend span::before { width: 8px; height: 8px; display: inline-block; margin-right: 7px; border-radius: 2px; background: var(--text-faint); content: ""; }
+.product-history-legend span[data-state="ready"]::before { background: var(--run); }
+.product-history-legend span[data-state="degraded"]::before { background: #f6b85f; }
+.product-history-legend span[data-state="offline"]::before { background: var(--coral); }
+.product-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 
 @media (max-width: 880px) {
-    .product-signal { grid-template-columns: 1fr; }
-    .product-signal dl div:first-child { border-left: 0; }
+    .product-console__header { align-items: stretch; flex-direction: column; }
+    .product-console__actions { justify-items: stretch; }
+    .product-console__grid { grid-template-columns: 1fr; }
+    .product-panel--surfaces { grid-row: auto; }
+}
+
+@media (max-width: 520px) {
+    .product-console { padding: 18px; border-radius: 18px; }
+    .product-panel { padding: 18px; }
+    .product-metrics { grid-template-columns: repeat(2, 1fr); gap: 16px 0; }
+    .product-metrics div:nth-child(3) { padding-left: 0; border-left: 0; }
+    .product-panel__heading { align-items: stretch; flex-direction: column; }
+    .product-summary, .product-badge { align-self: start; }
+    .product-history-chart { gap: 3px; }
+    .product-history-chart li:not(.product-history-empty) { grid-template-rows: 96px auto; }
+    .product-history-chart time { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .product-console button { transition: none; }
 }
 "##),
     )?;
@@ -1291,37 +2764,234 @@ HelloApp::run();"#,
     "use strict";
     const button = document.querySelector("#product-refresh");
     const headline = document.querySelector("#product-headline");
+    const versionCode = document.querySelector("#product-version-code");
     const surfaceCode = document.querySelector("#product-surface-code");
     const stateCode = document.querySelector("#product-state-code");
+    const latency = document.querySelector("#product-latency");
     const status = document.querySelector("#product-status");
-    if (!window.pam || !button || !headline || !surfaceCode || !stateCode || !status) return;
+    const sampleTime = document.querySelector("#product-sample-time");
+    const contractBadge = document.querySelector("#product-contract-badge");
+    const summary = document.querySelector("#product-summary");
+    const serverSurface = document.querySelector("#surface-server");
+    const serverDetail = document.querySelector("#surface-server-detail");
+    const desktopSurface = document.querySelector("#surface-desktop");
+    const desktopDetail = document.querySelector("#surface-desktop-detail");
+    const checkInButton = document.querySelector("#product-check-in");
+    const outboxStatus = document.querySelector("#product-outbox-status");
+    const outboxCount = document.querySelector("#product-outbox-count");
+    const outboxMeter = document.querySelector("#product-outbox-meter");
+    const historySummary = document.querySelector("#product-history-summary");
+    const historyChart = document.querySelector("#product-history-chart");
+    if (!window.pam || !button || !headline || !versionCode || !surfaceCode || !stateCode || !latency
+        || !status || !sampleTime || !contractBadge || !summary || !serverSurface || !serverDetail
+        || !desktopSurface || !desktopDetail || !checkInButton || !outboxStatus || !outboxCount
+        || !outboxMeter || !historySummary || !historyChart) return;
+
+    const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
+    const themeRoles = ["background", "surface", "surfaceRaised", "foreground", "mutedForeground",
+        "border", "primary", "onPrimary", "success", "warning", "danger", "focus"];
+    const cssRoles = {
+        background: ["--ink", "--ink-soft"],
+        surface: ["--surface"],
+        surfaceRaised: ["--surface-raised"],
+        foreground: ["--text"],
+        mutedForeground: ["--text-soft", "--text-faint"],
+        border: ["--line", "--line-strong"],
+        primary: ["--run"],
+        onPrimary: ["--run-ink"],
+        success: ["--success"],
+        warning: ["--warning"],
+        danger: ["--coral"],
+        focus: ["--cyan"],
+    };
+    let themeRevision = 0;
+    const applyProductTheme = async () => {
+        const revision = ++themeRevision;
+        const modeCode = themeQuery.matches ? 2 : 1;
+        const theme = await window.pam.invoke("product.theme", { modeCode }, { timeout: 2_000 });
+        if (revision !== themeRevision) return;
+        if (!theme || typeof theme !== "object" || Array.isArray(theme)
+            || Object.keys(theme).join(",") !== "modeCode,name,colors"
+            || theme.modeCode !== modeCode || theme.name !== (modeCode === 1 ? "light" : "dark")
+            || !theme.colors || typeof theme.colors !== "object" || Array.isArray(theme.colors)
+            || Object.keys(theme.colors).join(",") !== themeRoles.join(",")) {
+            throw new Error("O contrato visual do Product é incompatível.");
+        }
+        for (const role of themeRoles) {
+            const value = theme.colors[role];
+            if (typeof value !== "string" || !/^#[0-9a-f]{6}$/.test(value)) {
+                throw new Error("O contrato visual contém uma cor inválida.");
+            }
+            for (const property of cssRoles[role]) {
+                document.documentElement.style.setProperty(property, value);
+            }
+        }
+        document.documentElement.style.colorScheme = theme.name;
+    };
+    themeQuery.addEventListener("change", () => {
+        void applyProductTheme().catch(() => {});
+    });
+    void applyProductTheme().catch(() => {});
+
+    const stateName = (code) => ({ 1: "operacional", 2: "degradado", 3: "offline" })[code];
+    const renderSummary = () => {
+        const confirmed = [serverSurface, desktopSurface]
+            .filter((surface) => surface.dataset.state === "ready").length;
+        summary.textContent = `${confirmed} de 3 confirmadas`;
+    };
+
+    const renderOutbox = (result) => {
+        if (!Number.isInteger(result.deliveryStateCode) || result.deliveryStateCode < 1 || result.deliveryStateCode > 2
+            || !Number.isInteger(result.pendingCount) || result.pendingCount < 0 || result.pendingCount > 32) {
+            throw new Error("O worker devolveu um estado de outbox incompatível.");
+        }
+        outboxCount.textContent = String(result.pendingCount);
+        outboxMeter.value = result.pendingCount;
+        outboxMeter.textContent = `${result.pendingCount} de 32 operações`;
+        outboxStatus.textContent = result.deliveryStateCode === 1
+            ? "Entregue · nenhuma operação pendente."
+            : `Offline · ${result.pendingCount} operação(ões) preservada(s).`;
+    };
+
+    const renderHistory = (result) => {
+        if (!result || typeof result !== "object" || Array.isArray(result)
+            || Object.keys(result).length !== 2 || result.versionCode !== 1
+            || !Array.isArray(result.samples) || result.samples.length > 24) {
+            throw new Error("O histórico local é incompatível.");
+        }
+        let previousTimestamp = 0;
+        for (const sample of result.samples) {
+            if (!sample || typeof sample !== "object" || Array.isArray(sample)
+                || Object.keys(sample).length !== 3
+                || !Number.isSafeInteger(sample.observedAtUnixMs) || sample.observedAtUnixMs < previousTimestamp
+                || !Number.isInteger(sample.latencyMs) || sample.latencyMs < 0 || sample.latencyMs > 30_000
+                || !Number.isInteger(sample.stateCode) || sample.stateCode < 1 || sample.stateCode > 3) {
+                throw new Error("Uma amostra do histórico local é incompatível.");
+            }
+            previousTimestamp = sample.observedAtUnixMs;
+        }
+
+        historyChart.replaceChildren();
+        if (result.samples.length === 0) {
+            const empty = document.createElement("li");
+            empty.className = "product-history-empty";
+            empty.textContent = "Nenhuma amostra disponível.";
+            historyChart.append(empty);
+            historySummary.textContent = "Faça uma consulta para iniciar o histórico local.";
+            latency.textContent = "—";
+            return;
+        }
+
+        const maximum = Math.max(1, ...result.samples.map((sample) => sample.latencyMs));
+        const operational = result.samples.filter((sample) => sample.stateCode === 1).length;
+        const orderedLatency = result.samples.map((sample) => sample.latencyMs).sort((left, right) => left - right);
+        const median = orderedLatency[Math.floor((orderedLatency.length - 1) / 2)];
+        const timeFormatter = new Intl.DateTimeFormat(undefined, {
+            hour: "2-digit", minute: "2-digit"
+        });
+        for (const sample of result.samples) {
+            const item = document.createElement("li");
+            item.dataset.state = sample.stateCode === 1 ? "ready" : sample.stateCode === 2 ? "degraded" : "offline";
+            const bar = document.createElement("span");
+            bar.className = "product-history-bar";
+            bar.setAttribute("aria-hidden", "true");
+            bar.style.setProperty("--sample-height", `${Math.max(4, Math.round(sample.latencyMs / maximum * 100))}%`);
+            const value = document.createElement("span");
+            value.className = "product-history-value";
+            value.textContent = `${sample.latencyMs} ms`;
+            const time = document.createElement("time");
+            const observedAt = new Date(sample.observedAtUnixMs);
+            time.dateTime = observedAt.toISOString();
+            time.textContent = timeFormatter.format(observedAt);
+            const state = document.createElement("span");
+            state.className = "product-visually-hidden";
+            state.textContent = `Estado ${stateName(sample.stateCode)}`;
+            item.append(bar, value, time, state);
+            historyChart.append(item);
+        }
+        const availability = Math.round(operational / result.samples.length * 100);
+        historySummary.textContent = `${availability}% operacional · mediana ${median} ms · ${result.samples.length} amostra(s)`;
+        latency.textContent = String(result.samples[result.samples.length - 1].latencyMs);
+    };
+
+    const loadHistory = async () => {
+        try {
+            renderHistory(await window.pam.invoke("product.telemetry-history", null, { timeout: 2_000 }));
+        } catch (error) {
+            historySummary.textContent = error instanceof Error
+                ? `Histórico indisponível: ${error.message}`
+                : "Histórico local indisponível.";
+        }
+    };
 
     const refresh = async () => {
         button.disabled = true;
         button.setAttribute("aria-busy", "true");
+        contractBadge.dataset.state = "checking";
+        contractBadge.textContent = "verificando";
+        serverSurface.dataset.state = "checking";
+        desktopSurface.dataset.state = "checking";
         status.textContent = "Verificando no worker PHP…";
         try {
-            const snapshot = await window.pam.invoke("product.status", null, { timeout: 3_000 });
-            if (!Number.isInteger(snapshot.surfaceCode) || snapshot.surfaceCode !== 3
+            const snapshot = await window.pam.invoke("product.server-status", null, { timeout: 7_000 });
+            if (!Number.isInteger(snapshot.versionCode) || snapshot.versionCode !== 1
+                || !Number.isInteger(snapshot.surfaceCode) || snapshot.surfaceCode !== 1
                 || !Number.isInteger(snapshot.stateCode) || snapshot.stateCode < 1 || snapshot.stateCode > 3
                 || typeof snapshot.headline !== "string" || snapshot.headline.length > 120) {
                 throw new Error("O worker devolveu um contrato incompatível.");
             }
             headline.textContent = snapshot.headline;
+            versionCode.textContent = String(snapshot.versionCode);
             surfaceCode.textContent = String(snapshot.surfaceCode);
             stateCode.textContent = String(snapshot.stateCode);
+            sampleTime.textContent = `Amostra ${new Intl.DateTimeFormat(undefined, {
+                hour: "2-digit", minute: "2-digit", second: "2-digit"
+            }).format(new Date())}`;
+            contractBadge.dataset.state = "ready";
+            contractBadge.textContent = "compatível";
+            desktopSurface.dataset.state = "ready";
+            desktopDetail.textContent = "Worker PHP autenticado e responsivo";
+            serverSurface.dataset.state = snapshot.stateCode === 1
+                ? "ready" : snapshot.stateCode === 2 ? "degraded" : "offline";
+            serverDetail.textContent = `Contrato compatível · ${stateName(snapshot.stateCode)}`;
             status.textContent = snapshot.stateCode === 1
-                ? "✓ Contrato operacional e compatível."
-                : `! Estado ${snapshot.stateCode}; consulte o Server.`;
+                ? "Contrato operacional e compatível."
+                : `Server ${stateName(snapshot.stateCode)}; consulte os diagnósticos do runtime.`;
         } catch (error) {
-            status.textContent = error instanceof Error ? `! ${error.message}` : "! Falha ao verificar o contrato.";
+            latency.textContent = "—";
+            sampleTime.textContent = "Última tentativa falhou";
+            contractBadge.dataset.state = "error";
+            contractBadge.textContent = "indisponível";
+            desktopSurface.dataset.state = "ready";
+            desktopDetail.textContent = "Worker PHP respondeu com erro recuperável";
+            serverSurface.dataset.state = "offline";
+            serverDetail.textContent = "Sem amostra válida do endpoint";
+            status.textContent = error instanceof Error ? error.message : "Falha ao verificar o contrato.";
         } finally {
+            await loadHistory();
+            renderSummary();
             button.disabled = false;
             button.removeAttribute("aria-busy");
         }
     };
     button.addEventListener("click", () => void refresh());
+    checkInButton.addEventListener("click", async () => {
+        checkInButton.disabled = true;
+        checkInButton.setAttribute("aria-busy", "true");
+        outboxStatus.textContent = "Persistindo antes de transmitir…";
+        try {
+            renderOutbox(await window.pam.invoke("product.check-in", null, { timeout: 7_000 }));
+        } catch (error) {
+            outboxStatus.textContent = error instanceof Error ? error.message : "Falha no check-in.";
+        } finally {
+            checkInButton.disabled = false;
+            checkInButton.removeAttribute("aria-busy");
+        }
+    });
     void refresh();
+    void window.pam.invoke("product.outbox.replay", null, { timeout: 7_000 })
+        .then(renderOutbox)
+        .catch(() => { outboxStatus.textContent = "Offline · o worker preservará operações pendentes."; });
 })();
 "##),
     )?;
@@ -1334,12 +3004,35 @@ One typed PHP domain across Server, Native, and Desktop.
 
 ## First vertical flow
 
-- Server exposes `GET /api/status` with integer `surfaceCode` and `stateCode`.
-- Native renders the same `ProductSnapshot` through real platform controls.
-- Desktop exposes `product.status` through its authenticated local bridge.
+- Server exposes `GET /api/status` with integer `versionCode`, `surfaceCode`, and `stateCode`.
+- Native fetches `GET /api/status` through OkHttp/URLSession, caps the response
+  at 64 KiB, then validates it through `ProductSnapshot::fromArray()` before
+  updating native controls.
+- Desktop asks its authenticated PHP worker to fetch and validate the same
+  Server endpoint; the renderer never receives ambient network authority.
+- Desktop renders a responsive Product Control Center from verified data only:
+  Server readiness, local worker availability, contract version, request
+  latency, sample time, and bounded outbox occupancy. Native is explicitly
+  marked as unmonitored until a trustworthy telemetry channel is connected.
+- The PHP worker records at most 24 Server observations in a versioned 16 KiB
+  local history using atomic replacement writes. It stores only integer state,
+  latency, and observation time; the renderer receives the bounded history
+  through an authenticated command and provides exact text alongside its chart.
+- Desktop persists a 32-item, 64 KiB outbox with private temporary files and
+  replacement writes under its capability-scoped `storage` root. The worker
+  replays it on launch; the renderer receives only delivery codes and counts.
+- Native check-ins use the SDK's bounded `OfflineMutationQueue`, persist before
+  transport, deduplicate by idempotency key, retry with capped exponential
+  backoff, cap the product outbox at 32 entries to remain below native Storage's
+  256 KiB value limit, and prune only after a validated Server receipt.
+  This example stores only integer codes and opaque idempotency keys; credentials,
+  tokens, personal data, and mutation bodies that contain secrets do not belong
+  in this general-purpose app storage.
 
 The meanings live in backed enums under `packages/contracts`; transports never
-send string status or surface discriminators.
+send string status or surface discriminators. `ProductSnapshot::fromArray()`
+rejects unknown versions, codes, and field types before application code uses a
+remote payload.
 
 ## Run
 
@@ -1350,13 +3043,46 @@ cd apps/desktop && pam desktop dev
 php packages/contracts/tests/contract.php
 ```
 
+Native defaults to `http://127.0.0.1:3000/api/status`. Override it when the
+Server uses another origin (Android Emulator commonly reaches the development
+host through `http://10.0.2.2:3000/api/status`):
+
+```bash
+PAM_PRODUCT_SERVER_URL=https://api.example.com/api/status pam dev
+PAM_PRODUCT_MUTATION_URL=https://api.example.com/api/check-ins pam dev
+```
+
+Production Native builds enforce HTTPS at the host boundary.
+Desktop also rejects cleartext remote origins, redirects, invalid contracts,
+and responses larger than 64 KiB. Loopback HTTP remains available for local
+development.
+
+## Release
+
+Build each application in its own directory, then generate the deterministic
+cross-surface index from this workspace root:
+
+```bash
+cd apps/server && pam package
+cd ../native && pam package
+cd ../desktop && pam package
+cd ../.. && pam package
+```
+
+The root command requires distributables for surface codes `1`, `2`, and `3`,
+rejects symlinks and changing files, and writes `dist/product-release.json`
+plus its SHA-256 sidecar with create-new semantics.
+
+`pam release --check` from the root runs Doctor, lint, and tests inside every
+application before executing `packages/contracts/tests/contract.php`.
+
 Generated caches, native builds, Composer vendors, and desktop targets remain
 inside their owning application and are removable with `pam clean`.
 "#,
     )?;
     write_new(
         &directory.join(".gitignore"),
-        "/.pam/\n/apps/*/.pam/\n/apps/*/vendor/\n/apps/*/target/\n/apps/native/android/.gradle/\n/apps/native/android/**/build/\n",
+        "/.pam/\n/dist/\n/apps/*/.pam/\n/apps/*/vendor/\n/apps/*/target/\n/apps/native/android/.gradle/\n/apps/native/android/**/build/\n",
     )
 }
 
@@ -2236,7 +3962,7 @@ HelloApp::run();
             <section class="runtime-strip" aria-label="Componentes da aplicação">
                 <article>
                     <span>renderer</span>
-                    <strong>Servo 0.4</strong>
+                    <strong>Servo LTS</strong>
                     <small>HTML, CSS e JavaScript</small>
                 </article>
                 <article>
@@ -4404,6 +6130,7 @@ struct HttpEndpoint {
     host: String,
     port: u16,
     target: String,
+    bearer: Option<Arc<admin_auth::AdminCredential>>,
 }
 
 impl HttpEndpoint {
@@ -4428,7 +6155,13 @@ impl HttpEndpoint {
             host,
             port,
             target: format!("/{target}"),
+            bearer: None,
         })
+    }
+
+    fn with_optional_bearer_from_environment(mut self) -> Result<Self, String> {
+        self.bearer = admin_auth::load()?.map(Arc::new);
+        Ok(self)
     }
 
     fn request(&self) -> Result<u16, String> {
@@ -4448,6 +6181,27 @@ impl HttpEndpoint {
 
     fn response_body(&self) -> Result<String, String> {
         let response = self.response()?;
+        let first_line = response
+            .split(|byte| *byte == b'\n')
+            .next()
+            .and_then(|line| std::str::from_utf8(line).ok())
+            .ok_or("invalid HTTP response")?;
+        let mut status = first_line.split_whitespace();
+        let _version = status.next();
+        let code = status
+            .next()
+            .ok_or("HTTP status is missing")?
+            .parse::<u16>()
+            .map_err(|_| "invalid HTTP status".to_owned())?;
+        if !(200..300).contains(&code) {
+            let reason = status.collect::<Vec<_>>().join(" ");
+            let suffix = if reason.is_empty() {
+                String::new()
+            } else {
+                format!(" {reason}")
+            };
+            return Err(format!("control plane returned HTTP {code}{suffix}"));
+        }
         let boundary = response
             .windows(4)
             .position(|window| window == b"\r\n\r\n")
@@ -4462,20 +6216,99 @@ impl HttpEndpoint {
         stream
             .set_read_timeout(Some(std::time::Duration::from_secs(10)))
             .map_err(|error| error.to_string())?;
+        let authorization = self.authorization_header();
         write!(
             stream,
-            "GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            "GET {} HTTP/1.1\r\nHost: {}\r\n{authorization}Connection: close\r\n\r\n",
             self.target, self.host
         )
         .map_err(|error| error.to_string())?;
         let mut response = Vec::new();
         stream
+            .take(8 * 1024 * 1024 + 1)
             .read_to_end(&mut response)
             .map_err(|error| error.to_string())?;
+        if response.len() > 8 * 1024 * 1024 {
+            return Err("HTTP response exceeds the 8 MiB safety limit".to_owned());
+        }
         Ok(response)
+    }
+
+    fn authorization_header(&self) -> String {
+        self.bearer
+            .as_ref()
+            .map(|credential| format!("Authorization: Bearer {}\r\n", credential.as_str()))
+            .unwrap_or_default()
     }
 }
 
 pub fn default_script(target: Option<OsString>) -> PathBuf {
     PathBuf::from(target.unwrap_or_else(|| OsString::from("index.php")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        HttpEndpoint, current_worker_lag_seconds, parse_control_plane_diagnostics,
+        visible_top_metric,
+    };
+
+    #[test]
+    fn classifies_only_finite_current_worker_lag_samples() {
+        assert_eq!(
+            current_worker_lag_seconds(
+                "pam_worker_event_loop_lag_seconds{worker=\"2\",pid=\"42\"} 0.012500"
+            ),
+            Some(0.0125)
+        );
+        assert_eq!(
+            current_worker_lag_seconds(
+                "pam_worker_event_loop_lag_max_seconds{worker=\"2\"} 1.500000"
+            ),
+            None
+        );
+        assert!(visible_top_metric(
+            "pam_worker_event_loop_lag_seconds{worker=\"2\"} 0.012500"
+        ));
+        assert!(visible_top_metric(
+            "pam_pool_event_loop_lag_average_seconds{pool=\"web\"} 0.001000"
+        ));
+        assert!(!visible_top_metric("process_cpu_seconds 1"));
+        assert_eq!(
+            current_worker_lag_seconds("pam_worker_event_loop_lag_seconds{worker=\"2\"} NaN"),
+            None
+        );
+        assert_eq!(
+            current_worker_lag_seconds("pam_worker_event_loop_lag_seconds{worker=\"2\"} -0.1"),
+            None
+        );
+    }
+
+    #[test]
+    fn validates_control_plane_diagnostics_before_streaming() {
+        let valid = r#"{"schemaVersion":1,"surfaceCode":1,"resultCode":1,"generation":2,"desiredWorkers":1,"readyWorkers":1,"workers":[{"workerId":3,"generation":2,"pid":42,"pool":"web","lifecycleCode":2,"resultCode":1,"currentLagMicros":1000,"maxLagMicros":2000,"averageLagMicros":1500,"lagSampleCount":2}]}"#;
+        let diagnostics = parse_control_plane_diagnostics(valid).unwrap();
+        assert_eq!(diagnostics.workers[0].worker_id, 3);
+
+        for invalid in [
+            valid.replace("\"schemaVersion\":1", "\"schemaVersion\":2"),
+            valid.replace("\"lifecycleCode\":2", "\"lifecycleCode\":9"),
+            valid.replace("\"pid\":42", "\"pid\":42,\"unknown\":1"),
+        ] {
+            assert!(parse_control_plane_diagnostics(&invalid).is_err());
+        }
+    }
+
+    #[test]
+    fn scopes_admin_bearer_to_an_explicit_endpoint_request() {
+        let mut endpoint = HttpEndpoint::parse("http://127.0.0.1:3010/diagnostics").unwrap();
+        assert!(endpoint.authorization_header().is_empty());
+        endpoint.bearer = Some(std::sync::Arc::new(
+            crate::admin_auth::validate("0123456789abcdef0123456789abcdef".to_owned()).unwrap(),
+        ));
+        assert_eq!(
+            endpoint.authorization_header(),
+            "Authorization: Bearer 0123456789abcdef0123456789abcdef\r\n"
+        );
+    }
 }

@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pam.dev/schemas/product-release-v1.json",
+  "title": "PAM Product Release Manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersionCode", "name", "version", "artifacts"],
+  "properties": {
+    "schemaVersionCode": {"type": "integer", "const": 1},
+    "name": {"type": "string", "minLength": 1},
+    "version": {"type": "string", "minLength": 1},
+    "artifacts": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 64,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["surfaceCode", "path", "sizeBytes", "sha256"],
+        "properties": {
+          "surfaceCode": {"type": "integer", "enum": [1, 2, 3]},
+          "path": {"type": "string", "pattern": "^apps/(server|native|desktop)/dist/[A-Za-z0-9][A-Za-z0-9._-]{0,199}$"},
+          "sizeBytes": {"type": "integer", "minimum": 0},
+          "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+        }
+      }
+    },
+    "visualEvidence": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "prefixItems": [
+        {"$ref": "#/$defs/visualModeLight"},
+        {"$ref": "#/$defs/visualModeDark"}
+      ],
+      "items": false
+    }
+  },
+  "$defs": {
+    "evidenceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sizeBytes", "sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^artifacts/[A-Za-z0-9][A-Za-z0-9._/-]{0,240}\\.(json|png)$"},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "captureNative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surfaceCode", "path", "sizeBytes", "sha256"],
+      "properties": {
+        "surfaceCode": {"type": "integer", "const": 2},
+        "path": {"type": "string", "pattern": "^apps/native/artifacts/screenshots/[A-Za-z0-9][A-Za-z0-9._-]{0,200}\\.png$"},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "captureDesktop": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["surfaceCode", "path", "sizeBytes", "sha256"],
+      "properties": {
+        "surfaceCode": {"type": "integer", "const": 3},
+        "path": {"type": "string", "pattern": "^apps/desktop/artifacts/screenshots/[A-Za-z0-9][A-Za-z0-9._-]{0,200}\\.png$"},
+        "sizeBytes": {"type": "integer", "minimum": 1, "maximum": 16777216},
+        "sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "visualModeBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["modeCode", "tokenSha256", "report", "captures"],
+      "properties": {
+        "modeCode": {"type": "integer"},
+        "tokenSha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+        "report": {"$ref": "#/$defs/evidenceFile"},
+        "captures": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "prefixItems": [
+            {"$ref": "#/$defs/captureNative"},
+            {"$ref": "#/$defs/captureDesktop"}
+          ],
+          "items": false
+        }
+      }
+    },
+    "visualModeLight": {
+      "allOf": [
+        {"$ref": "#/$defs/visualModeBase"},
+        {"properties": {"modeCode": {"const": 1}}}
+      ]
+    },
+    "visualModeDark": {
+      "allOf": [
+        {"$ref": "#/$defs/visualModeBase"},
+        {"properties": {"modeCode": {"const": 2}}}
+      ]
+    }
+  }
+}

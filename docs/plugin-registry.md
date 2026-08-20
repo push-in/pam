@@ -133,6 +133,19 @@ checks the catalog SHA-256 and then executes `--version` to require the exact
 `.pam/desktop-host/<sha256>/pam-desktop`, records the registry, root generation,
 catalog sequence, package, version and digest in
 `.pam/desktop-host.artifact.json`, and removes superseded host directories.
+Downloads remain HTTPS-only across redirects, have bounded connect/total
+deadlines and are limited to 512 MiB. PAM verifies the signed SHA-256 and exact
+`pam-desktop <version>` identity, flushes the verified file to durable storage,
+then atomically activates it and syncs the containing directory. A failed
+activation restores the previous host before returning an error.
+The identity subprocess has a five-second deadline and a 4 KiB ceiling on each
+output stream. PAM terminates stalled or noisy host process groups before
+activation and uses the same bounded probe for unauthenticated Doctor
+diagnostics. Authenticated Doctor diagnostics never execute the host unless its
+bytes first match the SHA-256 from the signed catalog. Host hashing rejects
+empty files, directories, symlinks, named pipes and files above 512 MiB; Unix
+opens also refuse symlink following and blocking special files if a path is
+replaced concurrently.
 The project sequence advances only after a valid executable and provenance are
 durable. Without `pam-registry.json`, the existing sibling, `PATH` and
 `PAM_DESKTOP_BINARY` development lookup remains unchanged.

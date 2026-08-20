@@ -37,7 +37,9 @@ wrk -t4 -c1000 -d30s --latency http://127.0.0.1:31310/api/ping
 
 Record requests/second, average latency, p50/p95/p99, errors, worker RSS,
 event-loop lag and CPU utilization. Repeat at multiple concurrency levels; the
-best throughput number is not useful if tail latency or errors collapse.
+lag evidence should retain current, maximum, and sample-weighted average values
+per worker and pool so one stalled process cannot disappear inside an aggregate.
+The best throughput number is not useful if tail latency or errors collapse.
 
 ## Memory stability
 

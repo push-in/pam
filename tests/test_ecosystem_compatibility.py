@@ -248,6 +248,139 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must certify every publication tag", result.stderr)
 
+    def test_checkout_contract_rejects_a_commented_out_publication_gate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/publication-compatibility.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "on:\n  push:\n    # tags: ['v*']\njobs:\n  fake:\n"
+                "    # uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main\n",
+                encoding="utf-8",
+            )
+            manifest = {
+                "name": "pushinbr/pam-native-auth",
+                "require": {"php": "^8.4", "pushinbr/pam-native": "^0.6.1"},
+                "scripts": {"test": "php tests/run.php"},
+            }
+            (root / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = self.run_script("verify", directory, "pam-native-auth")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must call the ecosystem gate", result.stderr)
+
+    def test_checkout_contract_rejects_gate_text_inside_a_run_script(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            workflow = root / ".github/workflows/publication-compatibility.yml"
+            workflow.parent.mkdir(parents=True)
+            workflow.write_text(
+                "on:\n  workflow_dispatch:\njobs:\n  fake:\n    runs-on: ubuntu-latest\n"
+                "    steps:\n      - run: |\n          tags:\n"
+                "          uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main\n",
+                encoding="utf-8",
+            )
+            manifest = {
+                "name": "pushinbr/pam-native-auth",
+                "require": {"php": "^8.4", "pushinbr/pam-native": "^0.6.1"},
+                "scripts": {"test": "php tests/run.php"},
+            }
+            (root / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = self.run_script("verify", directory, "pam-native-auth")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("must call the ecosystem gate", result.stderr)
+
+    def test_checkout_contract_rejects_a_symlinked_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            outside = root / "outside.json"
+            outside.write_text("{}", encoding="utf-8")
+            package = root / "package"
+            package.mkdir()
+            (package / "composer.json").symlink_to(outside)
+            result = self.run_script("verify", str(package), "pam-native-auth")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("composer.json must be a regular file", result.stderr)
+
+    def test_local_audit_fails_closed_with_exact_missing_checkouts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory, "local.json")
+            result = self.run_script("local", directory, str(output))
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("missing local ecosystem checkouts", result.stderr)
+        self.assertIn("pam-native-php", result.stderr)
+
+    def test_local_audit_resolves_the_native_repository_checkout_alias(self) -> None:
+        source = SCRIPT.read_text(encoding="utf-8")
+        self.assertIn(
+            'LOCAL_CHECKOUT_ALIASES = {"pam-native-php": "pam-native/packages/native"}',
+            source,
+        )
+
+    def test_local_audit_fingerprints_every_contract(self) -> None:
+        matrix = json.loads(self.run_script("matrix").stdout)
+        gate = "push-in/pam/.github/workflows/ecosystem-compatibility.yml@main"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for package in matrix:
+                checkout = root / "ecosystem" / package["repository"]
+                workflows = checkout / ".github" / "workflows"
+                workflows.mkdir(parents=True)
+                requires = {"php": "^8.4"}
+                if package["requiresNative"]:
+                    requires["pushinbr/pam-native"] = "^0.6.1"
+                manifest = {
+                    "name": package["composerName"],
+                    "require": requires,
+                    "scripts": {"test": "php tests/run.php"},
+                }
+                (checkout / "composer.json").write_text(
+                    json.dumps(manifest), encoding="utf-8"
+                )
+                (workflows / "publication-compatibility.yml").write_text(
+                    f"on:\n  push:\n    tags: ['v*']\njobs:\n  gate:\n    uses: {gate}\n",
+                    encoding="utf-8",
+                )
+            output = root / "local.json"
+            result = self.run_script("local", directory, str(output))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            report = json.loads(output.read_text(encoding="utf-8"))
+            verified = self.run_script("local-verify", directory, str(output))
+            self.assertEqual(verified.returncode, 0, verified.stderr)
+
+            tampered = dict(report)
+            tampered["packageCount"] = 26
+            output.write_text(json.dumps(tampered), encoding="utf-8")
+            rejected = self.run_script("local-verify", directory, str(output))
+            self.assertNotEqual(rejected.returncode, 0)
+            self.assertIn("stale or does not match", rejected.stderr)
+
+            output.write_text(json.dumps(report), encoding="utf-8")
+            symlink = root / "linked-evidence.json"
+            symlink.symlink_to(output)
+            rejected_symlink = self.run_script("local-verify", directory, str(symlink))
+            self.assertNotEqual(rejected_symlink.returncode, 0)
+            self.assertIn("must be a regular file", rejected_symlink.stderr)
+
+            protected = root / "protected.json"
+            protected.write_text("do-not-overwrite", encoding="utf-8")
+            output_symlink = root / "output-symlink.json"
+            output_symlink.symlink_to(protected)
+            rejected_output = self.run_script("local", directory, str(output_symlink))
+            self.assertNotEqual(rejected_output.returncode, 0)
+            self.assertIn("output must be a regular path", rejected_output.stderr)
+            self.assertEqual(protected.read_text(encoding="utf-8"), "do-not-overwrite")
+        self.assertEqual(report["schemaVersion"], 1)
+        self.assertEqual(report["resultCode"], 1)
+        self.assertEqual(report["packageCount"], 27)
+        self.assertEqual(len(report["results"]), 27)
+        self.assertEqual(
+            [item["repository"] for item in report["results"]],
+            sorted(item["repository"] for item in matrix),
+        )
+        self.assertTrue(
+            all(len(item["manifestSha256"]) == 64 for item in report["results"])
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

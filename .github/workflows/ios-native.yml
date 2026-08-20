@@ -264,8 +264,12 @@ jobs:
           launch=$(xcrun simctl launch --terminate-running-process "${simulator}" app.pam.hello)
           pid=${launch##*: }
           sleep 5
-          xcrun simctl io "${simulator}" screenshot \
-            "${RUNNER_TEMP}/pam-ios-fixture/simulator.png" || true
+          target/debug/pam mobile ios:screenshot "${PAM_IOS_FIXTURE}" \
+            --output artifacts/screenshots/ios-simulator.png
+          test -s "${PAM_IOS_FIXTURE}/artifacts/screenshots/ios-simulator.png"
+          shasum -a 256 \
+            "${PAM_IOS_FIXTURE}/artifacts/screenshots/ios-simulator.png" \
+            >"${PAM_IOS_FIXTURE}/artifacts/screenshots/ios-simulator.png.sha256"
           xcrun simctl spawn "${simulator}" log show \
             --style compact --debug --last 5m \
             --predicate 'process == "PAM App" OR eventMessage CONTAINS[c] "app.pam.hello"' \
@@ -304,7 +308,8 @@ jobs:
           path: |
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/PamNativeApp.xcodeproj
             ${{ runner.temp }}/pam-ios-fixture/.pam-native/ios/App/DerivedData/Logs
-            ${{ runner.temp }}/pam-ios-fixture/simulator.png
+            ${{ runner.temp }}/pam-ios-fixture/artifacts/screenshots/ios-simulator.png
+            ${{ runner.temp }}/pam-ios-fixture/artifacts/screenshots/ios-simulator.png.sha256
             ${{ runner.temp }}/pam-ios-fixture/simulator.log
             ${{ runner.temp }}/pam-ios-fixture/native-release-audit.json
             ${{ runner.temp }}/pam-ios-fixture/lldb.log

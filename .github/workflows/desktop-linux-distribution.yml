@@ -1,0 +1,308 @@
+name: PAM Desktop Linux host distribution evidence
+
+on:
+  workflow_call:
+    inputs:
+      desktop_current_ref:
+        required: true
+        type: string
+      desktop_current_tag:
+        required: true
+        type: string
+      desktop_baseline_ref:
+        required: true
+        type: string
+      desktop_baseline_tag:
+        required: true
+        type: string
+      evidence_key_identity:
+        required: true
+        type: string
+    secrets:
+      evidence_key:
+        required: true
+  workflow_dispatch:
+    inputs:
+      desktop_current_ref:
+        description: Immutable PAM Desktop tag or commit
+        required: true
+        type: string
+      desktop_current_tag:
+        description: Canonical PAM Desktop vMAJOR.MINOR.PATCH tag
+        required: true
+        type: string
+      desktop_baseline_ref:
+        description: Immutable previous PAM Desktop tag or commit
+        required: true
+        type: string
+      desktop_baseline_tag:
+        description: Canonical previous PAM Desktop vMAJOR.MINOR.PATCH tag
+        required: true
+        type: string
+      evidence_key_identity:
+        description: Independently published evidence-key SHA-256
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: pam-desktop-linux-distribution-${{ inputs.desktop_current_tag }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  certify-linux-host:
+    name: Portable Linux x86-64 host on clean Ubuntu 22.04
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    env:
+      PAM_DESKTOP_REPOSITORY: push-in/pam-desktop
+      PAM_CURRENT_REF: ${{ inputs.desktop_current_ref }}
+      PAM_CURRENT_TAG: ${{ inputs.desktop_current_tag }}
+      PAM_BASELINE_REF: ${{ inputs.desktop_baseline_ref }}
+      PAM_BASELINE_TAG: ${{ inputs.desktop_baseline_tag }}
+      PAM_EXPECTED_EVIDENCE_IDENTITY: ${{ inputs.evidence_key_identity }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-desktop
+          ref: ${{ inputs.desktop_current_ref }}
+          path: desktop-current-source
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-desktop
+          ref: ${{ inputs.desktop_baseline_ref }}
+          path: desktop-baseline-source
+          persist-credentials: false
+      - name: Validate immutable release identities
+        run: |
+          printf '%s' "${PAM_CURRENT_TAG}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          printf '%s' "${PAM_BASELINE_TAG}" | grep -Eq '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          test "${PAM_CURRENT_TAG}" != "${PAM_BASELINE_TAG}"
+          test "$(printf '%s\n%s\n' "${PAM_BASELINE_TAG}" "${PAM_CURRENT_TAG}" | sort -V | tail -n 1)" = "${PAM_CURRENT_TAG}"
+          test "$(git -C desktop-current-source describe --tags --exact-match)" = "${PAM_CURRENT_TAG}"
+          test "$(git -C desktop-baseline-source describe --tags --exact-match)" = "${PAM_BASELINE_TAG}"
+          current_revision=$(git -C desktop-current-source rev-parse HEAD)
+          baseline_revision=$(git -C desktop-baseline-source rev-parse HEAD)
+          test -n "${current_revision}"
+          test -n "${baseline_revision}"
+          printf 'PAM_CURRENT_REVISION=%s\n' "${current_revision}" >>"${GITHUB_ENV}"
+          printf 'PAM_BASELINE_REVISION=%s\n' "${baseline_revision}" >>"${GITHUB_ENV}"
+      - name: Download immutable candidate and baseline host archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p candidate baseline certification/files certification/attestations/candidate certification/attestations/baseline
+          current_version=${PAM_CURRENT_TAG#v}
+          baseline_version=${PAM_BASELINE_TAG#v}
+          gh release download "${PAM_CURRENT_TAG}" --repo "${PAM_DESKTOP_REPOSITORY}" \
+            --pattern "pam-desktop-${current_version}-x86_64-unknown-linux-gnu.tar.gz" --dir candidate
+          gh release download "${PAM_CURRENT_TAG}" --repo "${PAM_DESKTOP_REPOSITORY}" \
+            --pattern "pam-desktop-${current_version}-x86_64-unknown-linux-gnu.tar.gz.sha256" --dir candidate
+          gh release download "${PAM_BASELINE_TAG}" --repo "${PAM_DESKTOP_REPOSITORY}" \
+            --pattern "pam-desktop-${baseline_version}-x86_64-unknown-linux-gnu.tar.gz" --dir baseline
+          gh release download "${PAM_BASELINE_TAG}" --repo "${PAM_DESKTOP_REPOSITORY}" \
+            --pattern "pam-desktop-${baseline_version}-x86_64-unknown-linux-gnu.tar.gz.sha256" --dir baseline
+          candidate_archive=$(find candidate -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
+          baseline_archive=$(find baseline -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
+          test -n "${candidate_archive}"
+          test -n "${baseline_archive}"
+          test -f "${candidate_archive}.sha256"
+          test -f "${baseline_archive}.sha256"
+          desktop-current-source/scripts/test-host-archive.sh "${candidate_archive}"
+          desktop-baseline-source/scripts/test-host-archive.sh "${baseline_archive}"
+          cp "${candidate_archive}" certification/files/candidate.tar.gz
+          cp "${baseline_archive}" certification/files/baseline.tar.gz
+          cp "${candidate_archive}.sha256" certification/attestations/candidate-release.sha256
+          cp "${baseline_archive}.sha256" certification/attestations/baseline-release.sha256
+      - name: Verify and retain GitHub artifact attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          started=$(date +%s%3N)
+          for role in candidate baseline; do
+            if test "${role}" = candidate; then
+              archive=certification/files/candidate.tar.gz
+              source_ref="refs/tags/${PAM_CURRENT_TAG}"
+              source_digest=${PAM_CURRENT_REVISION}
+            else
+              archive=certification/files/baseline.tar.gz
+              source_ref="refs/tags/${PAM_BASELINE_TAG}"
+              source_digest=${PAM_BASELINE_REVISION}
+            fi
+            gh attestation verify "${archive}" \
+              --repo "${PAM_DESKTOP_REPOSITORY}" \
+              --signer-workflow "${PAM_DESKTOP_REPOSITORY}/.github/workflows/release.yml" \
+              --source-ref "${source_ref}" --source-digest "${source_digest}" \
+              --deny-self-hosted-runners --format json \
+              >"certification/attestations/${role}-verification.json"
+            (
+              cd "certification/attestations/${role}"
+              gh attestation download "${GITHUB_WORKSPACE}/${archive}" \
+                --repo "${PAM_DESKTOP_REPOSITORY}"
+              downloaded=$(find . -maxdepth 1 -type f -print -quit)
+              test -n "${downloaded}"
+              mv "${downloaded}" bundle.jsonl
+            )
+          done
+          gh attestation trusted-root >certification/attestations/trusted_root.jsonl
+          test -s certification/attestations/trusted_root.jsonl
+          elapsed=$(( $(date +%s%3N) - started ))
+          test "${elapsed}" -gt 0 || elapsed=1
+          printf 'PAM_SIGNATURE_MILLIS=%s\n' "${elapsed}" >>"${GITHUB_ENV}"
+      - name: Resolve the clean-host image before disabling network
+        run: |
+          docker pull ubuntu:22.04
+          image_id=$(docker image inspect ubuntu:22.04 --format '{{.Id}}')
+          image_digest=$(docker image inspect ubuntu:22.04 --format '{{index .RepoDigests 0}}')
+          test -n "${image_id}"
+          test -n "${image_digest}"
+          printf 'PAM_HOST_IMAGE=%s|%s\n' "${image_digest}" "${image_id}" >>"${GITHUB_ENV}"
+      - name: Exercise install, launch, upgrade, and rollback without network
+        run: |
+          docker run --rm --network none \
+            -e PAM_CURRENT_TAG -e PAM_BASELINE_TAG \
+            -v "${GITHUB_WORKSPACE}/certification:/evidence" \
+            ubuntu:22.04 bash --noprofile --norc -euo pipefail -c '
+              test "$(uname -m)" = x86_64
+              mkdir -p /work/candidate /work/baseline /work/xdg-data /work/xdg-bin
+              tar -xzf /evidence/files/candidate.tar.gz -C /work/candidate
+              tar -xzf /evidence/files/baseline.tar.gz -C /work/baseline
+              candidate_root=$(find /work/candidate -mindepth 1 -maxdepth 1 -type d -print -quit)
+              baseline_root=$(find /work/baseline -mindepth 1 -maxdepth 1 -type d -print -quit)
+              test -n "${candidate_root}"
+              test -n "${baseline_root}"
+              export XDG_DATA_HOME=/work/xdg-data XDG_BIN_HOME=/work/xdg-bin
+              started=$(date +%s%3N)
+              "${baseline_root}/install.sh" >/work/install.log
+              install_millis=$(( $(date +%s%3N) - started )); test "${install_millis}" -gt 0 || install_millis=1
+              baseline_identity=$("${XDG_BIN_HOME}/pam-desktop" --version)
+              started=$(date +%s%3N)
+              candidate_identity=$("${candidate_root}/bin/pam-desktop" --version)
+              launch_millis=$(( $(date +%s%3N) - started )); test "${launch_millis}" -gt 0 || launch_millis=1
+              test "${candidate_identity}" = "pam-desktop ${PAM_CURRENT_TAG#v}"
+              first_success_millis=${launch_millis}
+              started=$(date +%s%3N)
+              "${candidate_root}/install.sh" >/work/upgrade.log
+              test "$("${XDG_BIN_HOME}/pam-desktop" --version)" = "${candidate_identity}"
+              upgrade_millis=$(( $(date +%s%3N) - started )); test "${upgrade_millis}" -gt 0 || upgrade_millis=1
+              baseline_target=$(readlink "${XDG_DATA_HOME}/pam-desktop/${PAM_BASELINE_TAG#v}/bin/pam-desktop" 2>/dev/null || true)
+              test -z "${baseline_target}"
+              started=$(date +%s%3N)
+              rollback_link="${XDG_BIN_HOME}/.pam-desktop-rollback"
+              ln -s "${XDG_DATA_HOME}/pam-desktop/${PAM_BASELINE_TAG#v}/bin/pam-desktop" "${rollback_link}"
+              mv -Tf "${rollback_link}" "${XDG_BIN_HOME}/pam-desktop"
+              test "$("${XDG_BIN_HOME}/pam-desktop" --version)" = "${baseline_identity}"
+              rollback_millis=$(( $(date +%s%3N) - started )); test "${rollback_millis}" -gt 0 || rollback_millis=1
+              installed_bytes=$(du -sb "${XDG_DATA_HOME}/pam-desktop/${PAM_CURRENT_TAG#v}" | cut -f1)
+              dependency_inventory=/evidence/files/dependency-inventory.txt
+              {
+                printf "schemaVersion=1\n"
+                printf "target=x86_64-unknown-linux-gnu\n"
+                printf "executableSha256=%s\n" "$(sha256sum "${candidate_root}/bin/pam-desktop" | cut -d " " -f 1)"
+                ldd "${candidate_root}/bin/pam-desktop" \
+                  | sed -E "s/[[:space:]]+\(0x[0-9a-fA-F]+\)$//" \
+                  | LC_ALL=C sort
+              } >"${dependency_inventory}"
+              test -s "${dependency_inventory}"
+              test "$(wc -c <"${dependency_inventory}")" -le 16777216
+              ! grep -F "not found" "${dependency_inventory}"
+              {
+                printf "PAM_INSTALL_MILLIS=%s\n" "${install_millis}"
+                printf "PAM_LAUNCH_MILLIS=%s\n" "${launch_millis}"
+                printf "PAM_FIRST_SUCCESS_MILLIS=%s\n" "${first_success_millis}"
+                printf "PAM_UPGRADE_MILLIS=%s\n" "${upgrade_millis}"
+                printf "PAM_ROLLBACK_MILLIS=%s\n" "${rollback_millis}"
+                printf "PAM_INSTALLED_BYTES=%s\n" "${installed_bytes}"
+              } > /evidence/measurements.env
+            '
+          sed -n -E '/^PAM_[A-Z_]+=[0-9]+$/p' certification/measurements.env >certification/validated.env
+          test "$(wc -l < certification/validated.env)" -eq 6
+          cat certification/validated.env >>"${GITHUB_ENV}"
+      - name: Build the offline PAM evidence signer
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y libphp8.4-embed php8.4-dev
+          cargo build --locked
+      - name: Sign and independently verify Desktop host certification
+        env:
+          PAM_EVIDENCE_KEY: ${{ secrets.evidence_key }}
+        run: |
+          test -n "${PAM_EVIDENCE_KEY}"
+          printf '%s' "${PAM_EXPECTED_EVIDENCE_IDENTITY}" | grep -Eq '^[0-9a-f]{64}$'
+          umask 077
+          key_file=${RUNNER_TEMP}/pam-desktop-evidence.key
+          printf '%s' "${PAM_EVIDENCE_KEY}" >"${key_file}"
+          trap 'shred -u -- "${key_file}"' EXIT
+          (
+            cd certification
+            find attestations -type f -print0 | sort -z | xargs -0 sha256sum
+          ) >certification/files/provenance-inventory.sha256
+          candidate_sha=$(sha256sum certification/files/candidate.tar.gz | cut -d' ' -f1)
+          baseline_sha=$(sha256sum certification/files/baseline.tar.gz | cut -d' ' -f1)
+          dependency_sha=$(sha256sum certification/files/dependency-inventory.txt | cut -d' ' -f1)
+          provenance_sha=$(sha256sum certification/files/provenance-inventory.sha256 | cut -d' ' -f1)
+          jq -n \
+            --arg releaseVersion "${PAM_CURRENT_TAG}" \
+            --arg revision "${PAM_CURRENT_REVISION}" \
+            --arg baselineRevision "${PAM_BASELINE_REVISION}" \
+            --arg hostImage "${PAM_HOST_IMAGE}" \
+            --arg candidateSha "${candidate_sha}" --arg baselineSha "${baseline_sha}" \
+            --arg dependencySha "${dependency_sha}" --arg provenanceSha "${provenance_sha}" \
+            --argjson candidateBytes "$(stat -c %s certification/files/candidate.tar.gz)" \
+            --argjson baselineBytes "$(stat -c %s certification/files/baseline.tar.gz)" \
+            --argjson dependencyBytes "$(stat -c %s certification/files/dependency-inventory.txt)" \
+            --argjson provenanceBytes "$(stat -c %s certification/files/provenance-inventory.sha256)" \
+            --argjson generatedAtUnixMs "$(date +%s%3N)" \
+            --argjson installedBytes "${PAM_INSTALLED_BYTES}" \
+            --argjson launchMillis "${PAM_LAUNCH_MILLIS}" \
+            --argjson firstSuccessMillis "${PAM_FIRST_SUCCESS_MILLIS}" \
+            --argjson installMillis "${PAM_INSTALL_MILLIS}" \
+            --argjson upgradeMillis "${PAM_UPGRADE_MILLIS}" \
+            --argjson rollbackMillis "${PAM_ROLLBACK_MILLIS}" \
+            --argjson signatureMillis "${PAM_SIGNATURE_MILLIS}" \
+            '{schemaVersion: 1, releaseVersion: $releaseVersion, surfaceCode: 3,
+              platformCode: 1, architectureCode: 1, packageCode: 1,
+              revision: $revision, baselineRevision: $baselineRevision,
+              hostImage: $hostImage, generatedAtUnixMs: $generatedAtUnixMs,
+              artifact: {path: "files/candidate.tar.gz", sha256: $candidateSha, bytes: $candidateBytes},
+              baselineArtifact: {path: "files/baseline.tar.gz", sha256: $baselineSha, bytes: $baselineBytes},
+              dependencyInventory: {path: "files/dependency-inventory.txt", sha256: $dependencySha, bytes: $dependencyBytes},
+              provenanceInventory: {path: "files/provenance-inventory.sha256", sha256: $provenanceSha, bytes: $provenanceBytes},
+              installedBytes: $installedBytes, launchMillis: $launchMillis,
+              firstSuccessMillis: $firstSuccessMillis,
+              checks: [
+                {checkCode: 1, resultCode: 1, durationMillis: $installMillis},
+                {checkCode: 2, resultCode: 1, durationMillis: $launchMillis},
+                {checkCode: 3, resultCode: 1, durationMillis: $firstSuccessMillis},
+                {checkCode: 4, resultCode: 1, durationMillis: $upgradeMillis},
+                {checkCode: 5, resultCode: 1, durationMillis: $rollbackMillis},
+                {checkCode: 6, resultCode: 1, durationMillis: $signatureMillis},
+                {checkCode: 7, resultCode: 1, durationMillis: 1}
+              ]}' >certification/draft.json
+          target/debug/pam distribution:sign certification/draft.json \
+            --key "${key_file}" --output certification/distribution.json
+          target/debug/pam distribution:verify certification/distribution.json --json \
+            >certification/verification.json
+          test "$(jq -r '.resultCode' certification/verification.json)" = 1
+          test "$(jq -r '.surfaceCode' certification/verification.json)" = 3
+          test "$(jq -r '.packageCode' certification/verification.json)" = 1
+          test "$(jq -r '.platformVerificationSha256' certification/verification.json)" = null
+          test "$(jq -r '.signingIdentitySha256' certification/verification.json)" = "${PAM_EXPECTED_EVIDENCE_IDENTITY}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pam-desktop-linux-host-distribution-${{ inputs.desktop_current_tag }}-${{ github.sha }}
+          path: certification/
+          if-no-files-found: error
+          retention-days: 30

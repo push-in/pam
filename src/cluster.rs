@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
+use crate::admin_auth::{self, ADMIN_TOKEN_ENV, ADMIN_TOKEN_FILE_ENV};
 use crate::control_plane::{ClusterSnapshot, ControlPlane, SharedClusterSnapshot};
 use crate::ingress::{Ingress, Route as IngressRoute};
 use crate::worker_state::{
@@ -35,6 +36,7 @@ pub struct StartOptions {
     pub restart_backoff: Duration,
     pub watchdog_grace: Duration,
     pub admin_address: Option<SocketAddr>,
+    pub admin_token_digest: Option<[u8; 32]>,
     pub state_file: Option<PathBuf>,
     pub ingress_address: Option<SocketAddr>,
     pub pools: Vec<PoolSpec>,
@@ -141,6 +143,18 @@ impl StartOptions {
             }
             workers = total;
         }
+        let admin_token_digest = if admin_address.is_some() {
+            admin_auth::load()?.map(|credential| credential.digest())
+        } else {
+            None
+        };
+        if admin_address.is_some_and(|address| !address.ip().is_loopback())
+            && admin_token_digest.is_none()
+        {
+            return Err(format!(
+                "non-loopback --admin-address requires {ADMIN_TOKEN_ENV} or {ADMIN_TOKEN_FILE_ENV} with a 32 to 256 character ASCII token"
+            ));
+        }
 
         Ok(Self {
             script,
@@ -152,6 +166,7 @@ impl StartOptions {
             restart_backoff,
             watchdog_grace,
             admin_address,
+            admin_token_digest,
             state_file,
             ingress_address,
             pools,
@@ -313,7 +328,7 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
     }));
     let control_plane = options
         .admin_address
-        .map(|address| ControlPlane::start(address, snapshot.clone()))
+        .map(|address| ControlPlane::start(address, snapshot.clone(), options.admin_token_digest))
         .transpose()?;
     if let Some(control_plane) = &control_plane {
         eprintln!(
@@ -583,6 +598,8 @@ fn spawn_worker(
         .env("PAM_WORKER_ID", id.to_string())
         .env("PAM_WORKER_GENERATION", generation.to_string())
         .env("PAM_MAX_REQUESTS", max_requests.to_string())
+        .env_remove(ADMIN_TOKEN_ENV)
+        .env_remove(ADMIN_TOKEN_FILE_ENV)
         .env(
             "PAM_CACHE_INVALIDATION_LOG",
             runtime_directory.join("cache-invalidations.log"),

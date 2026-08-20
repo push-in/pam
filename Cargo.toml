@@ -22,6 +22,7 @@ hyper = { version = "1.11.0", features = ["client", "http1", "http2"] }
 hyper-rustls = { version = "0.27.9", default-features = false, features = ["aws-lc-rs", "http1", "http2", "tls12", "webpki-tokio"] }
 hyper-util = { version = "0.1.20", features = ["client-legacy", "http1", "http2", "tokio"] }
 http = "1.4.2"
+libc = "=0.2.189"
 quinn = { version = "0.11.11", default-features = false, features = ["runtime-tokio", "rustls-aws-lc-rs"] }
 rustls-pki-types = { version = "1.15.0", features = ["std"] }
 semver = "1.0.28"

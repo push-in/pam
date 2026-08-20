@@ -66,6 +66,15 @@ $metadata = [
         'server_cpuset' => getenv('PAM_BENCH_SERVER_CPUSET') ?: null,
         'load_cpuset' => getenv('PAM_BENCH_LOAD_CPUSET') ?: null,
         'runtime_order' => preg_split('/\s+/', trim(getenv('PAM_BENCH_RUNTIME_ORDER') ?: '')) ?: [],
+        'overload_concurrency' => getenv('PAM_OVERLOAD_CONCURRENCY') === false
+            ? null
+            : (int) getenv('PAM_OVERLOAD_CONCURRENCY'),
+        'php_queue_capacity' => getenv('PAM_OVERLOAD_QUEUE_CAPACITY') === false
+            ? null
+            : (int) getenv('PAM_OVERLOAD_QUEUE_CAPACITY'),
+        'soak_rss_growth_limit_bytes' => getenv('PAM_SOAK_MAX_RSS_GROWTH_BYTES') === false
+            ? null
+            : (int) getenv('PAM_SOAK_MAX_RSS_GROWTH_BYTES'),
     ],
 ];
 

@@ -54,6 +54,10 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam package` — Create a distributable package.
 - `pam sign` — Validate native release signing.
 - `pam release` — Validate and publish a release candidate.
+- `pam release:verify` — Verify a Product release offline.
+- `pam distribution:verify` — Verify signed clean-host distribution evidence.
+- `pam distribution:sign` — Sign verified clean-host distribution evidence.
+- `pam distribution:desktop-report` — Bind native Desktop trust proofs to an installer.
 ## Runtime
 
 - `pam start` — Run a supervised server cluster.
@@ -71,9 +75,10 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam top` — Stream live runtime metrics.
 ## Advanced
 
+- `pam catalog` — Discover the versioned CLI contract.
 - `pam mobile` — Use explicit PAM Native commands.
 - `pam desktop` — Use explicit PAM Desktop commands.
 - `pam completion` — Generate shell completion.
 - `pam editor:install` — Install PAM language support in an editor.
-- `pam self-update` — Install a verified PAM release.
+- `pam self-update` — Install a cryptographically authorized PAM release.
 - `pam docs:generate` — Generate the CLI reference.

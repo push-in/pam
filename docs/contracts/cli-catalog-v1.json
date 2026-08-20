@@ -1,0 +1,432 @@
+{
+  "commands": [
+    {
+      "groupCode": 1,
+      "groupLabel": "Project",
+      "name": "new",
+      "summary": "Create a project interactively",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 1,
+      "groupLabel": "Project",
+      "name": "init",
+      "summary": "Create a project from a preset",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 1,
+      "groupLabel": "Project",
+      "name": "info",
+      "summary": "Describe the active project",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 1,
+      "groupLabel": "Project",
+      "name": "doctor",
+      "summary": "Validate or repair the active project",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 1,
+      "groupLabel": "Project",
+      "name": "support",
+      "summary": "Create a bounded redacted support report",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 1,
+      "groupLabel": "Project",
+      "name": "clean",
+      "summary": "Remove bounded project development artifacts",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "dev",
+      "summary": "Start the contextual development session",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "run",
+      "summary": "Build and launch the active application",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "logs",
+      "summary": "Stream logs from the active application",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "devices",
+      "summary": "List connected development targets",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "devtools",
+      "summary": "Toggle contextual development tools",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "console",
+      "summary": "Open the application console",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "commands",
+      "summary": "List application and package commands",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:screen",
+      "summary": "Generate a native screen",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:component",
+      "summary": "Generate a native component",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:native-view",
+      "summary": "Generate a native view bridge",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:model",
+      "summary": "Generate a Laravel model",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:controller",
+      "summary": "Generate a Laravel controller",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:request",
+      "summary": "Generate a Laravel form request",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:resource",
+      "summary": "Generate a Laravel API resource",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:migration",
+      "summary": "Generate a Laravel migration",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:test",
+      "summary": "Generate a Laravel test",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:command",
+      "summary": "Generate a Laravel console command",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 3,
+      "groupLabel": "Generate",
+      "name": "make:job",
+      "summary": "Generate a Laravel job",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 4,
+      "groupLabel": "Ecosystem",
+      "name": "packages",
+      "summary": "List official PAM capabilities",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 4,
+      "groupLabel": "Ecosystem",
+      "name": "registry",
+      "summary": "Verify signed plugin metadata and compatibility",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 4,
+      "groupLabel": "Ecosystem",
+      "name": "add",
+      "summary": "Install an official capability",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 4,
+      "groupLabel": "Ecosystem",
+      "name": "remove",
+      "summary": "Remove an official capability",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 4,
+      "groupLabel": "Ecosystem",
+      "name": "outdated",
+      "summary": "Inspect available dependency updates",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 4,
+      "groupLabel": "Ecosystem",
+      "name": "composer",
+      "summary": "Run Composer inside PAM",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 4,
+      "groupLabel": "Ecosystem",
+      "name": "artisan",
+      "summary": "Run Laravel Artisan inside PAM",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 5,
+      "groupLabel": "Quality",
+      "name": "format",
+      "summary": "Format project source",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 5,
+      "groupLabel": "Quality",
+      "name": "lint",
+      "summary": "Run formatting and static-analysis gates",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 5,
+      "groupLabel": "Quality",
+      "name": "test",
+      "summary": "Run Pest or PHPUnit inside PAM",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 5,
+      "groupLabel": "Quality",
+      "name": "benchmark",
+      "summary": "Run the contextual benchmark",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 5,
+      "groupLabel": "Quality",
+      "name": "profile",
+      "summary": "Capture contextual performance data",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "build",
+      "summary": "Create a release build",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "package",
+      "summary": "Create a distributable package",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "sign",
+      "summary": "Validate native release signing",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "release",
+      "summary": "Validate and publish a release candidate",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "release:verify",
+      "summary": "Verify a Product release offline",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "distribution:verify",
+      "summary": "Verify signed clean-host distribution evidence",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "distribution:sign",
+      "summary": "Sign verified clean-host distribution evidence",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "start",
+      "summary": "Run a supervised server cluster",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "octane:start",
+      "summary": "Start Laravel Octane on the PAM runtime",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "octane:status",
+      "summary": "Inspect the PAM Octane master",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "octane:reload",
+      "summary": "Reload PAM Octane without downtime",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "octane:stop",
+      "summary": "Gracefully stop PAM Octane",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "exec",
+      "summary": "Execute a PHP script explicitly",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "inspect",
+      "summary": "Inspect runtime capabilities",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "routes",
+      "summary": "List application routes",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "diagnostics",
+      "summary": "Capture runtime diagnostics",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "timeline",
+      "summary": "Export a bounded performance timeline",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "top",
+      "summary": "Stream live runtime metrics",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 9,
+      "groupLabel": "Advanced",
+      "name": "catalog",
+      "summary": "Discover the versioned CLI contract",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 9,
+      "groupLabel": "Advanced",
+      "name": "mobile",
+      "summary": "Use explicit PAM Native commands",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 9,
+      "groupLabel": "Advanced",
+      "name": "desktop",
+      "summary": "Use explicit PAM Desktop commands",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 9,
+      "groupLabel": "Advanced",
+      "name": "completion",
+      "summary": "Generate shell completion",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 9,
+      "groupLabel": "Advanced",
+      "name": "editor:install",
+      "summary": "Install PAM language support in an editor",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 9,
+      "groupLabel": "Advanced",
+      "name": "self-update",
+      "summary": "Install a verified PAM release",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 9,
+      "groupLabel": "Advanced",
+      "name": "docs:generate",
+      "summary": "Generate the CLI reference",
+      "supportsJson": false
+    }
+  ],
+  "schemaVersion": 1
+}

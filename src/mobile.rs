@@ -663,6 +663,11 @@ struct MobileOptions {
     abis: Vec<AndroidAbi>,
 }
 
+struct NativeDiagnosticsOptions {
+    project: PathBuf,
+    device: Option<String>,
+}
+
 pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut arguments = arguments.into_iter();
     let Some(command) = arguments.next() else {
@@ -756,8 +761,10 @@ pub fn run(arguments: Vec<OsString>) -> Result<u8, String> {
         "benchmark" => benchmark(parse_project_only(arguments)?),
         "profile" => baseline_profile(parse_project_only(arguments)?),
         "devtools" => toggle_devtools(parse_project_only(arguments)?),
-        "diagnostics" => capture_native_diagnostics(parse_project_only(arguments)?),
-        "android:diagnostics" => capture_android_diagnostics(parse_project_only(arguments)?),
+        "diagnostics" => capture_native_diagnostics(parse_native_diagnostics_options(arguments)?),
+        "android:diagnostics" => {
+            capture_android_diagnostics(parse_native_diagnostics_options(arguments)?)
+        }
         "ios:diagnostics" => capture_ios_diagnostics(parse_project_only(arguments)?),
         "logs" => logs(parse_project_only(arguments)?),
         "devices" => devices(parse_project_only(arguments)?),
@@ -941,6 +948,50 @@ fn parse_project_only(mut arguments: impl Iterator<Item = OsString>) -> Result<P
         ));
     }
     Ok(PathBuf::from(project))
+}
+
+fn parse_native_diagnostics_options(
+    mut arguments: impl Iterator<Item = OsString>,
+) -> Result<NativeDiagnosticsOptions, String> {
+    let mut project = PathBuf::from(".");
+    let mut positional = false;
+    let mut device = None;
+    while let Some(argument) = arguments.next() {
+        match argument.to_str() {
+            Some("--device") if device.is_none() => {
+                let serial = arguments
+                    .next()
+                    .ok_or_else(|| "--device requires an Android device serial".to_owned())?
+                    .into_string()
+                    .map_err(|_| "Android device serial must be valid UTF-8".to_owned())?;
+                if !valid_android_device_serial(&serial) {
+                    return Err(
+                        "Android device serial must contain 1 to 128 ASCII letters, digits, dots, colons, underscores, or hyphens"
+                            .to_owned(),
+                    );
+                }
+                device = Some(serial);
+            }
+            Some(value) if !value.starts_with('-') && !positional => {
+                project = PathBuf::from(value);
+                positional = true;
+            }
+            _ => {
+                return Err(
+                    "usage: pam mobile diagnostics [project] [--device ANDROID_SERIAL]".to_owned(),
+                );
+            }
+        }
+    }
+    Ok(NativeDiagnosticsOptions { project, device })
+}
+
+fn valid_android_device_serial(serial: &str) -> bool {
+    !serial.is_empty()
+        && serial.len() <= 128
+        && serial
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b':' | b'_' | b'-'))
 }
 
 fn parse_mobile_audit_options(
@@ -3558,60 +3609,87 @@ fn dev_ios(project_path: PathBuf) -> Result<u8, String> {
     let simulator = booted_ios_simulator()?;
     let app = build_ios(project.root.clone(), false)?;
     install_and_launch_ios(&project, &simulator, &app)?;
-    let mut fingerprint = project_fingerprint(&project.root)?;
     println!(
-        "Watching {} for iOS changes. Press Ctrl+C to stop.",
-        project.root.display()
+        "Pam Native iOS hot reload listening on 127.0.0.1:{DEFAULT_PORT}. Press Ctrl+C to stop."
     );
+    let workspace = project.root.join(".pam-native/ios/HotReloadBundle");
+    let mut version = String::new();
+    let mut bundle = Vec::new();
+    refresh_ios_dev_bundle(&project, &workspace, &mut version, &mut bundle)?;
     crate::dev_event::emit(
         crate::dev_event::EventCode::SessionReady,
         crate::dev_event::SurfaceCode::Ios,
         &project.root,
-        serde_json::json!({"deviceId": simulator}),
+        serde_json::json!({"deviceId": simulator, "port": DEFAULT_PORT, "bundleVersion": version}),
     );
+    let listener = TcpListener::bind(("127.0.0.1", DEFAULT_PORT))
+        .map_err(|error| format!("cannot bind iOS hot reload server: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let mut fingerprint = project_fingerprint(&project.root)?;
     loop {
-        std::thread::sleep(Duration::from_millis(350));
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = respond_hot_reload(&mut stream, &version, &bundle);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(error) => return Err(format!("iOS hot reload server failed: {error}")),
+        }
         let next = project_fingerprint(&project.root)?;
-        if next == fingerprint {
-            continue;
-        }
-        fingerprint = next;
-        crate::dev_event::emit(
-            crate::dev_event::EventCode::ChangeDetected,
-            crate::dev_event::SurfaceCode::Ios,
-            &project.root,
-            serde_json::json!({}),
-        );
-        println!("Change detected; rebuilding {}…", project.manifest.name);
-        crate::dev_event::emit(
-            crate::dev_event::EventCode::ReloadStarted,
-            crate::dev_event::SurfaceCode::Ios,
-            &project.root,
-            serde_json::json!({}),
-        );
-        match build_ios(project.root.clone(), false)
-            .and_then(|app| install_and_launch_ios(&project, &simulator, &app))
-        {
-            Ok(()) => {
-                println!("Reloaded {}.", project.manifest.name);
-                crate::dev_event::emit(
-                    crate::dev_event::EventCode::ReloadSucceeded,
-                    crate::dev_event::SurfaceCode::Ios,
-                    &project.root,
-                    serde_json::json!({}),
-                );
-            }
-            Err(error) => {
-                crate::dev_event::emit(
-                    crate::dev_event::EventCode::ReloadFailed,
-                    crate::dev_event::SurfaceCode::Ios,
-                    &project.root,
-                    serde_json::json!({"message": error}),
-                );
-                eprintln!("iOS rebuild failed: {error}");
+        if next != fingerprint {
+            fingerprint = next;
+            crate::dev_event::emit(
+                crate::dev_event::EventCode::ChangeDetected,
+                crate::dev_event::SurfaceCode::Ios,
+                &project.root,
+                serde_json::json!({}),
+            );
+            crate::dev_event::emit(
+                crate::dev_event::EventCode::ReloadStarted,
+                crate::dev_event::SurfaceCode::Ios,
+                &project.root,
+                serde_json::json!({}),
+            );
+            match refresh_ios_dev_bundle(&project, &workspace, &mut version, &mut bundle) {
+                Ok(()) => {
+                    println!("iOS reload ready · {}", &version[..16]);
+                    crate::dev_event::emit(
+                        crate::dev_event::EventCode::ReloadSucceeded,
+                        crate::dev_event::SurfaceCode::Ios,
+                        &project.root,
+                        serde_json::json!({"bundleVersion": version}),
+                    );
+                }
+                Err(error) => {
+                    crate::dev_event::emit(
+                        crate::dev_event::EventCode::ReloadFailed,
+                        crate::dev_event::SurfaceCode::Ios,
+                        &project.root,
+                        serde_json::json!({"message": error}),
+                    );
+                    eprintln!("iOS hot reload failed: {error}");
+                }
             }
         }
+        std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+fn refresh_ios_dev_bundle(
+    project: &Project,
+    workspace: &Path,
+    version: &mut String,
+    bundle: &mut Vec<u8>,
+) -> Result<(), String> {
+    stage_project_at(project, workspace)?;
+    let next = encode_dev_bundle(workspace)?;
+    if next.len() > MAX_DEV_BUNDLE_BYTES {
+        return Err("iOS hot reload bundle exceeds 16 MiB; reduce development assets".to_owned());
+    }
+    *version = format!("{:x}", Sha256::digest(&next));
+    *bundle = next;
+    Ok(())
 }
 
 fn clean_android_dev_artifacts(project_path: &Path) -> Result<(), String> {
@@ -3631,7 +3709,10 @@ fn clean_android_dev_artifacts(project_path: &Path) -> Result<(), String> {
 fn clean_ios_dev_artifacts(project_root: &Path) -> Result<(), String> {
     clean_dev_paths(
         project_root,
-        &[project_root.join(".pam-native/ios/App/DerivedData")],
+        &[
+            project_root.join(".pam-native/ios/App/DerivedData"),
+            project_root.join(".pam-native/ios/HotReloadBundle"),
+        ],
     )
 }
 
@@ -5763,13 +5844,21 @@ fn toggle_devtools(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
-fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
+fn adb_for(device: Option<&str>) -> Command {
+    let mut command = Command::new("adb");
+    if let Some(serial) = device {
+        command.args(["-s", serial]);
+    }
+    command
+}
+
+fn capture_android_diagnostics(options: NativeDiagnosticsOptions) -> Result<u8, String> {
     const MAX_SNAPSHOT_BYTES: usize = 64 * 1024;
     const ATTEMPTS: usize = 30;
 
-    let (root, manifest) = load_project_manifest(&project_path)?;
+    let (root, manifest) = load_project_manifest(&options.project)?;
     let application_id = debug_application_id_for(&root, &manifest);
-    let running = Command::new("adb")
+    let running = adb_for(options.device.as_deref())
         .args(["shell", "pidof", &application_id])
         .output()
         .map_err(|error| format!("cannot query Android device: {error}"))?;
@@ -5780,9 +5869,8 @@ fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
     }
     let request_id = diagnostic_request_id(&root);
     let file = format!("cache/pam-diagnostics-{request_id}.json");
-    command_status(
-        "adb",
-        &[
+    let broadcast = adb_for(options.device.as_deref())
+        .args([
             "shell",
             "am",
             "broadcast",
@@ -5793,12 +5881,16 @@ fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
             "--es",
             "requestId",
             &request_id,
-        ],
-    )?;
+        ])
+        .status()
+        .map_err(|error| format!("cannot request Native diagnostics through adb: {error}"))?;
+    if !broadcast.success() {
+        return Err("adb could not request Native diagnostics from the selected device".to_owned());
+    }
 
     let mut snapshot = None;
     for _ in 0..ATTEMPTS {
-        let output = Command::new("adb")
+        let output = adb_for(options.device.as_deref())
             .args(["exec-out", "run-as", &application_id, "cat", &file])
             .output()
             .map_err(|error| format!("cannot read Native diagnostics through adb: {error}"))?;
@@ -5808,7 +5900,7 @@ fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let _ = Command::new("adb")
+    let _ = adb_for(options.device.as_deref())
         .args(["shell", "run-as", &application_id, "rm", "-f", &file])
         .status();
     let snapshot = snapshot.ok_or_else(|| {
@@ -5828,15 +5920,18 @@ fn capture_android_diagnostics(project_path: PathBuf) -> Result<u8, String> {
     Ok(0)
 }
 
-fn capture_native_diagnostics(project_path: PathBuf) -> Result<u8, String> {
-    let (root, manifest) = load_project_manifest(&project_path)?;
+fn capture_native_diagnostics(options: NativeDiagnosticsOptions) -> Result<u8, String> {
+    let (root, manifest) = load_project_manifest(&options.project)?;
     let application_id = debug_application_id_for(&root, &manifest);
-    let android_running = Command::new("adb")
+    let android_running = adb_for(options.device.as_deref())
         .args(["shell", "pidof", &application_id])
         .output()
         .is_ok_and(|output| output.status.success() && !output.stdout.is_empty());
-    if android_running || !cfg!(target_os = "macos") {
-        capture_android_diagnostics(root)
+    if options.device.is_some() || android_running || !cfg!(target_os = "macos") {
+        capture_android_diagnostics(NativeDiagnosticsOptions {
+            project: root,
+            device: options.device,
+        })
     } else {
         capture_ios_diagnostics(root)
     }
@@ -6550,17 +6645,31 @@ fn refresh_dev_bundle(
 
 fn encode_dev_bundle(root: &Path) -> Result<Vec<u8>, String> {
     let files = files_in(root)?;
+    if files.is_empty() || files.len() > MAX_PROJECT_FILES {
+        return Err("hot reload bundle must contain between 1 and 10,000 files".to_owned());
+    }
+    if !root.join("index.php").is_file() {
+        return Err("hot reload bundle must contain index.php".to_owned());
+    }
     let count = u32::try_from(files.len()).map_err(|_| "too many hot reload files".to_owned())?;
     let mut bytes = Vec::new();
     bytes.extend_from_slice(b"PNA1");
     bytes.extend_from_slice(&count.to_le_bytes());
     for file in files {
-        let relative = file
-            .strip_prefix(root)
-            .map_err(|error| error.to_string())?
-            .to_string_lossy()
-            .replace('\\', "/");
+        let relative = file.strip_prefix(root).map_err(|error| error.to_string())?;
+        let relative = dev_bundle_path(relative)?;
         let path = relative.as_bytes();
+        let metadata = fs::symlink_metadata(&file)
+            .map_err(|error| format!("cannot inspect {}: {error}", file.display()))?;
+        if !metadata.file_type().is_file() {
+            return Err(format!(
+                "hot reload input must be a regular file: {}",
+                file.display()
+            ));
+        }
+        if metadata.len() > MAX_FILE_BYTES {
+            return Err(format!("hot reload file exceeds 8 MiB: {}", file.display()));
+        }
         let contents =
             fs::read(&file).map_err(|error| format!("cannot read {}: {error}", file.display()))?;
         let path_length =
@@ -6571,8 +6680,38 @@ fn encode_dev_bundle(root: &Path) -> Result<Vec<u8>, String> {
         bytes.extend_from_slice(path);
         bytes.extend_from_slice(&content_length.to_le_bytes());
         bytes.extend_from_slice(&contents);
+        if bytes.len() > MAX_DEV_BUNDLE_BYTES {
+            return Err("hot reload bundle exceeds 16 MiB; reduce development assets".to_owned());
+        }
     }
     Ok(bytes)
+}
+
+fn dev_bundle_path(path: &Path) -> Result<String, String> {
+    validate_relative_path(path)?;
+    let mut parts = Vec::new();
+    for component in path.components() {
+        let Component::Normal(value) = component else {
+            return Err(format!("unsafe hot reload path {}", path.display()));
+        };
+        let value = value
+            .to_str()
+            .ok_or_else(|| format!("hot reload path is not UTF-8: {}", path.display()))?;
+        if value.is_empty()
+            || value.len() > 255
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+        {
+            return Err(format!("unsafe hot reload path {}", path.display()));
+        }
+        parts.push(value);
+    }
+    let relative = parts.join("/");
+    if relative.len() > u16::MAX as usize {
+        return Err("hot reload path is too long".to_owned());
+    }
+    Ok(relative)
 }
 
 fn respond_hot_reload(stream: &mut TcpStream, version: &str, bundle: &[u8]) -> Result<(), String> {
@@ -6584,25 +6723,70 @@ fn respond_hot_reload(stream: &mut TcpStream, version: &str, bundle: &[u8]) -> R
         .read(&mut request)
         .map_err(|error| error.to_string())?;
     let request = String::from_utf8_lossy(&request[..read]);
-    let path = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/");
-    if path.starts_with("/status") {
-        http_response(stream, "text/plain", version.as_bytes())
-    } else if path.starts_with("/bundle") {
-        http_response(stream, "application/octet-stream", bundle)
-    } else {
-        stream
-            .write_all(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
-            .map_err(|error| error.to_string())
+    match hot_reload_route(&request, version) {
+        HotReloadRoute::Status => http_response(stream, "text/plain", version.as_bytes()),
+        HotReloadRoute::Bundle => http_response(stream, "application/octet-stream", bundle),
+        HotReloadRoute::MethodNotAllowed => http_empty_response(stream, "405 Method Not Allowed"),
+        HotReloadRoute::NotFound => http_empty_response(stream, "404 Not Found"),
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum HotReloadRoute {
+    Status,
+    Bundle,
+    MethodNotAllowed,
+    NotFound,
+}
+
+fn hot_reload_route(request: &str, version: &str) -> HotReloadRoute {
+    let Some(line) = request.lines().next() else {
+        return HotReloadRoute::NotFound;
+    };
+    let mut fields = line.split_ascii_whitespace();
+    let method = fields.next().unwrap_or_default();
+    let target = fields.next().unwrap_or_default();
+    let protocol = fields.next().unwrap_or_default();
+    if fields.next().is_some() || !matches!(protocol, "HTTP/1.0" | "HTTP/1.1") {
+        return HotReloadRoute::NotFound;
+    }
+    if method != "GET" {
+        return HotReloadRoute::MethodNotAllowed;
+    }
+    let (path, query) = target.split_once('?').unwrap_or((target, ""));
+    match path {
+        "/status" => HotReloadRoute::Status,
+        "/bundle" if exact_hot_reload_version(query, version) => HotReloadRoute::Bundle,
+        _ => HotReloadRoute::NotFound,
+    }
+}
+
+fn exact_hot_reload_version(query: &str, expected: &str) -> bool {
+    let mut pairs = query.split('&');
+    let Some((name, value)) = pairs.next().and_then(|pair| pair.split_once('=')) else {
+        return false;
+    };
+    name == "version"
+        && value == expected
+        && !value.is_empty()
+        && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+        && pairs.next().is_none()
+}
+
+fn http_empty_response(stream: &mut TcpStream, status: &str) -> Result<(), String> {
+    stream
+        .write_all(
+            format!(
+                "HTTP/1.1 {status}\r\nContent-Length: 0\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn http_response(stream: &mut TcpStream, content_type: &str, body: &[u8]) -> Result<(), String> {
     let headers = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n",
         body.len()
     );
     stream
@@ -6678,6 +6862,98 @@ mod tests {
     use super::*;
 
     #[test]
+    fn hot_reload_bundle_matches_the_bounded_native_contract() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-hot-reload-bundle-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(root.join("src")).expect("bundle source");
+        fs::write(root.join("index.php"), b"<?php").expect("entry");
+        fs::write(root.join("src/App.php"), b"<?php class App {}").expect("component");
+
+        let first = encode_dev_bundle(&root).expect("first bundle");
+        let second = encode_dev_bundle(&root).expect("second bundle");
+        assert_eq!(first, second);
+        assert!(first.starts_with(b"PNA1"));
+        assert!(first.len() <= MAX_DEV_BUNDLE_BYTES);
+
+        fs::write(root.join("inválido.php"), b"<?php").expect("unsafe path fixture");
+        assert!(
+            encode_dev_bundle(&root)
+                .unwrap_err()
+                .contains("unsafe hot reload path")
+        );
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn hot_reload_bundle_rejects_oversized_and_non_regular_inputs() {
+        let root = std::env::temp_dir().join(format!(
+            "pam-hot-reload-limits-{}",
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .expect("clock")
+                .as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("bundle source");
+        fs::write(root.join("index.php"), b"<?php").expect("entry");
+        let oversized = fs::File::create(root.join("large.bin")).expect("large fixture");
+        oversized
+            .set_len(MAX_FILE_BYTES + 1)
+            .expect("sparse large fixture");
+        assert!(
+            encode_dev_bundle(&root)
+                .unwrap_err()
+                .contains("exceeds 8 MiB")
+        );
+        fs::remove_file(root.join("large.bin")).expect("remove large fixture");
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(root.join("index.php"), root.join("linked.php"))
+                .expect("symlink fixture");
+            assert!(
+                encode_dev_bundle(&root)
+                    .unwrap_err()
+                    .contains("must be a regular file")
+            );
+        }
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn hot_reload_http_requires_exact_routes_method_and_bundle_version() {
+        let version = "ab".repeat(32);
+        assert_eq!(
+            hot_reload_route("GET /status?version=null HTTP/1.1\r\n\r\n", &version),
+            HotReloadRoute::Status
+        );
+        assert_eq!(
+            hot_reload_route(
+                &format!("GET /bundle?version={version} HTTP/1.1\r\n\r\n"),
+                &version,
+            ),
+            HotReloadRoute::Bundle
+        );
+        for request in [
+            "POST /status HTTP/1.1\r\n\r\n".to_owned(),
+            "GET /status-extra HTTP/1.1\r\n\r\n".to_owned(),
+            "GET /bundle HTTP/1.1\r\n\r\n".to_owned(),
+            "GET /bundle?version=wrong HTTP/1.1\r\n\r\n".to_owned(),
+            format!("GET /bundle?version={version}&version={version} HTTP/1.1\r\n\r\n"),
+        ] {
+            assert_ne!(hot_reload_route(&request, &version), HotReloadRoute::Bundle);
+        }
+        assert_eq!(
+            hot_reload_route("POST /status HTTP/1.1\r\n\r\n", &version),
+            HotReloadRoute::MethodNotAllowed
+        );
+    }
+
+    #[test]
     fn mobile_audit_uses_stable_integer_contracts() {
         assert_eq!(MobileAuditSeverity::Info as u8, 1);
         assert_eq!(MobileAuditSeverity::Warning as u8, 2);
@@ -6749,6 +7025,44 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
         );
+    }
+
+    #[test]
+    fn parses_and_scopes_android_physical_device_diagnostics() {
+        let options = parse_native_diagnostics_options(
+            [
+                OsString::from("fixture"),
+                OsString::from("--device"),
+                OsString::from("adb-R58M1234._adb-tls-connect._tcp"),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        assert_eq!(options.project, PathBuf::from("fixture"));
+        assert_eq!(
+            options.device.as_deref(),
+            Some("adb-R58M1234._adb-tls-connect._tcp")
+        );
+        let command = adb_for(options.device.as_deref());
+        assert_eq!(
+            command.get_args().collect::<Vec<_>>(),
+            [
+                OsStr::new("-s"),
+                OsStr::new("adb-R58M1234._adb-tls-connect._tcp")
+            ]
+        );
+
+        assert!(
+            parse_native_diagnostics_options([OsString::from("--device")].into_iter()).is_err()
+        );
+        assert!(
+            parse_native_diagnostics_options(
+                [OsString::from("--device"), OsString::from("serial/escape")].into_iter()
+            )
+            .is_err()
+        );
+        assert!(!valid_android_device_serial(""));
+        assert!(!valid_android_device_serial(&"a".repeat(129)));
     }
 
     #[test]
@@ -7420,7 +7734,7 @@ mod tests {
     }
 
     #[test]
-    fn ios_development_cleanup_removes_xcode_derived_data_only() {
+    fn ios_development_cleanup_removes_build_and_hot_reload_artifacts_only() {
         let root = std::env::temp_dir().join(format!(
             "pam-ios-dev-clean-{}",
             SystemTime::now()
@@ -7430,18 +7744,23 @@ mod tests {
         ));
         let derived_data = root.join(".pam-native/ios/App/DerivedData/Build/Products");
         let source = root.join(".pam-native/ios/App/Sources/AppDelegate.swift");
+        let hot_reload = root.join(".pam-native/ios/HotReloadBundle/index.php");
         let neighboring_artifact = root.join("artifacts/release-evidence.json");
         fs::create_dir_all(&derived_data).expect("derived data");
         fs::create_dir_all(source.parent().expect("source parent")).expect("sources");
+        fs::create_dir_all(hot_reload.parent().expect("hot reload parent"))
+            .expect("hot reload bundle");
         fs::create_dir_all(neighboring_artifact.parent().expect("artifact parent"))
             .expect("artifacts");
         fs::write(derived_data.join("application.bin"), [0_u8; 32]).expect("build output");
         fs::write(&source, "// generated host source\n").expect("source");
+        fs::write(&hot_reload, "<?php\n").expect("hot reload entry");
         fs::write(&neighboring_artifact, "{}\n").expect("evidence");
 
         clean_ios_dev_artifacts(&root).expect("clean iOS artifacts");
 
         assert!(!root.join(".pam-native/ios/App/DerivedData").exists());
+        assert!(!root.join(".pam-native/ios/HotReloadBundle").exists());
         assert!(source.is_file());
         assert!(neighboring_artifact.is_file());
         fs::remove_dir_all(root).expect("cleanup");

@@ -4,15 +4,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+mod admin_auth;
 mod catalog;
 mod cluster;
 mod commands;
 mod composer;
 mod control_plane;
 mod desktop;
+mod desktop_transaction;
 mod dev;
 mod dev_event;
+mod distribution;
 mod doctor;
+mod doctor_contract;
 mod ecosystem;
 mod editor;
 mod ingress;
@@ -22,6 +26,7 @@ mod otlp;
 mod php;
 mod plugin_registry;
 mod project;
+mod prometheus;
 mod protocol;
 mod quality;
 mod self_update;
@@ -51,6 +56,10 @@ fn main() -> ExitCode {
                 error
             );
             eprintln!("{}", ui.muted(format!("  Fix: {}", error.remediation())));
+            eprintln!(
+                "{}",
+                ui.muted(format!("  Verify: {}", error.verification_command()))
+            );
             ExitCode::from(error.exit_code())
         }
     }
@@ -185,6 +194,76 @@ fn run() -> Result<u8, CliError> {
         return Ok(0);
     }
 
+    if script_arg == "catalog" {
+        let arguments = raw_args.collect::<Vec<_>>();
+        if arguments.as_slice() == ["--json"] {
+            println!("{}", catalog::json());
+            return Ok(0);
+        }
+        if arguments.as_slice() == ["--schema"] {
+            print!("{}", catalog::schema());
+            return Ok(0);
+        }
+        if arguments.as_slice() == ["--compat-schema"] {
+            print!("{}", catalog::compatibility_schema());
+            return Ok(0);
+        }
+        if matches!(arguments.first(), Some(option) if option == "--validate")
+            && matches!(arguments.len(), 2 | 3)
+            && (arguments.len() == 2 || arguments[2] == "--json")
+        {
+            let path = PathBuf::from(&arguments[1]);
+            let command_count = catalog::validate_file(&path).map_err(CliError::Commands)?;
+            if arguments.len() == 3 {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "schemaVersion": 1,
+                        "valid": true,
+                        "commandCount": command_count,
+                    })
+                );
+            } else {
+                println!(
+                    "CLI catalog valid (schema 1, {command_count} commands): {}",
+                    path.display()
+                );
+            }
+            return Ok(0);
+        }
+        if matches!(arguments.first(), Some(option) if option == "--compat")
+            && matches!(arguments.len(), 3 | 4)
+            && (arguments.len() == 3 || arguments[3] == "--json")
+        {
+            let report = catalog::compare_files(
+                &PathBuf::from(&arguments[1]),
+                &PathBuf::from(&arguments[2]),
+            )
+            .map_err(CliError::Commands)?;
+            let compatible = report.compatible();
+            if arguments.len() == 4 {
+                println!("{}", report.json());
+            } else if compatible {
+                println!(
+                    "CLI catalogs compatible ({} baseline, {} candidate commands)",
+                    report.baseline_command_count, report.candidate_command_count
+                );
+            } else {
+                println!("CLI catalogs incompatible:");
+                for change in &report.changes {
+                    println!(
+                        "  changeCode={} command={}",
+                        change.change_code as u8, change.command
+                    );
+                }
+            }
+            return Ok(if compatible { 0 } else { 1 });
+        }
+        return Err(CliError::Commands(
+            "catalog requires `--json`, `--schema`, `--compat-schema`, `--validate FILE [--json]`, or `--compat BASELINE CANDIDATE [--json]`".to_owned(),
+        ));
+    }
+
     if script_arg == "editor:install" {
         return editor::install(raw_args).map_err(CliError::Commands);
     }
@@ -267,24 +346,42 @@ fn run() -> Result<u8, CliError> {
     }
 
     if script_arg == "dev" {
+        let cleanable_context = current_project().or_else(|| {
+            env::current_dir()
+                .ok()
+                .and_then(|directory| project::discover_cleanable(&directory))
+        });
+        let artifact_budget = if let Some(context) = cleanable_context.as_ref() {
+            let budget = project::dev_artifact_budget().map_err(CliError::Commands)?;
+            project::enforce_dev_artifact_budget(context, budget).map_err(CliError::Commands)?;
+            Some(budget)
+        } else {
+            None
+        };
         if let Some(context) = current_project()
             && context.kind == project::ProjectKind::Native
         {
             if project::native_platforms(&context).map_err(CliError::Commands)? == [2] {
-                let mut arguments = vec![OsString::from("ios:dev"), context.root.into_os_string()];
+                let mut arguments = vec![
+                    OsString::from("ios:dev"),
+                    context.root.clone().into_os_string(),
+                ];
                 arguments.extend(raw_args);
-                return mobile::run(arguments).map_err(CliError::Commands);
+                let outcome = mobile::run(arguments).map_err(CliError::Commands);
+                return finish_dev_with_artifact_budget(Some(&context), artifact_budget, outcome);
             }
-            let mut arguments = vec![OsString::from("dev"), context.root.into_os_string()];
+            let mut arguments = vec![OsString::from("dev"), context.root.clone().into_os_string()];
             arguments.extend(raw_args);
-            return mobile::run(arguments).map_err(CliError::Commands);
+            let outcome = mobile::run(arguments).map_err(CliError::Commands);
+            return finish_dev_with_artifact_budget(Some(&context), artifact_budget, outcome);
         }
         if let Some(context) = current_project()
             && context.kind == project::ProjectKind::Desktop
         {
-            let mut arguments = vec![OsString::from("dev"), context.root.into_os_string()];
+            let mut arguments = vec![OsString::from("dev"), context.root.clone().into_os_string()];
             arguments.extend(raw_args);
-            return desktop::run(&executable, arguments).map_err(CliError::Commands);
+            let outcome = desktop::run(&executable, arguments).map_err(CliError::Commands);
+            return finish_dev_with_artifact_budget(Some(&context), artifact_budget, outcome);
         }
         let dev_script = raw_args
             .next()
@@ -296,19 +393,37 @@ fn run() -> Result<u8, CliError> {
 
         let script = resolve_script(&dev_script)?;
         let script_args = raw_args.collect::<Vec<_>>();
-        return dev::run(&script, &script_args).map_err(CliError::Dev);
+        let outcome = dev::run(&script, &script_args).map_err(CliError::Dev);
+        return finish_dev_with_artifact_budget(
+            cleanable_context.as_ref(),
+            artifact_budget,
+            outcome,
+        );
     }
 
     if script_arg == "doctor" {
         let mut fix = false;
         let mut ci = false;
         let mut json = false;
+        let mut schema = false;
+        let mut validate = None;
         let mut target = None;
-        for argument in raw_args {
+        while let Some(argument) = raw_args.next() {
             match argument.to_string_lossy().as_ref() {
                 "--fix" => fix = true,
                 "--ci" => ci = true,
                 "--json" => json = true,
+                "--schema" => schema = true,
+                "--validate" => {
+                    if validate.is_some() {
+                        return Err(CliError::Commands(
+                            "doctor --validate accepts exactly one report path".to_owned(),
+                        ));
+                    }
+                    validate = Some(raw_args.next().ok_or_else(|| {
+                        CliError::Commands("doctor --validate requires a report path".to_owned())
+                    })?);
+                }
                 option if option.starts_with('-') => {
                     return Err(CliError::Commands(format!(
                         "unknown doctor option: {option}"
@@ -321,6 +436,35 @@ fn run() -> Result<u8, CliError> {
                     ));
                 }
             }
+        }
+        if schema {
+            if fix || ci || json || validate.is_some() || target.is_some() {
+                return Err(CliError::Commands(
+                    "doctor --schema must be used alone".to_owned(),
+                ));
+            }
+            let document: serde_json::Value =
+                serde_json::from_str(include_str!("../docs/schemas/doctor-report.schema.json"))
+                    .map_err(|error| {
+                        CliError::Commands(format!("invalid embedded doctor schema: {error}"))
+                    })?;
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&document)
+                    .map_err(|error| CliError::Commands(error.to_string()))?
+            );
+            return Ok(0);
+        }
+        if let Some(report) = validate {
+            if fix || ci || json || target.is_some() {
+                return Err(CliError::Commands(
+                    "doctor --validate must be used with exactly one report path".to_owned(),
+                ));
+            }
+            let report = PathBuf::from(report);
+            doctor_contract::validate_file(&report).map_err(CliError::Commands)?;
+            println!("Doctor report valid (schema 1): {}", report.display());
+            return Ok(0);
         }
         if ci {
             // SAFETY: command parsing occurs before any runtime worker threads exist.
@@ -396,6 +540,7 @@ fn run() -> Result<u8, CliError> {
                 "{}",
                 serde_json::to_string_pretty(&serde_json::json!({
                     "schema": 1,
+                    "schemaVersion": 1,
                     "resultCode": if healthy { 1 } else { 2 },
                     "healthy": healthy,
                     "exitCode": output.status.code().unwrap_or(1),
@@ -671,12 +816,27 @@ fn run() -> Result<u8, CliError> {
     }
 
     if script_arg == "top" {
-        let address = raw_args
-            .next()
-            .unwrap_or_else(|| OsString::from("http://127.0.0.1:3010"));
+        let mut address = OsString::from("http://127.0.0.1:3010");
+        let mut address_set = false;
         let mut iterations = 10_usize;
         let mut interval_ms = 1000_u64;
+        let mut lag_warn_ms = 10_u64;
+        let mut json = false;
         while let Some(option) = raw_args.next() {
+            if option == "--json" {
+                json = true;
+                continue;
+            }
+            if !option.to_string_lossy().starts_with('-') {
+                if address_set {
+                    return Err(CliError::Commands(
+                        "top accepts only one admin URL".to_owned(),
+                    ));
+                }
+                address = option;
+                address_set = true;
+                continue;
+            }
             let value = raw_args.next().ok_or_else(|| {
                 CliError::Commands(format!("{} requires a value", option.to_string_lossy()))
             })?;
@@ -691,6 +851,16 @@ fn run() -> Result<u8, CliError> {
                         CliError::Commands("--interval-ms requires a positive integer".to_owned())
                     })?;
                 }
+                "--lag-warn-ms" => {
+                    lag_warn_ms = value.to_string_lossy().parse().map_err(|_| {
+                        CliError::Commands("--lag-warn-ms requires a positive integer".to_owned())
+                    })?;
+                    if lag_warn_ms == 0 || lag_warn_ms > 60_000 {
+                        return Err(CliError::Commands(
+                            "--lag-warn-ms must be between 1 and 60000".to_owned(),
+                        ));
+                    }
+                }
                 unknown => {
                     return Err(CliError::Commands(format!("unknown top option: {unknown}")));
                 }
@@ -700,6 +870,8 @@ fn run() -> Result<u8, CliError> {
             &address.to_string_lossy(),
             iterations,
             std::time::Duration::from_millis(interval_ms),
+            std::time::Duration::from_millis(lag_warn_ms),
+            json,
         )
         .map_err(CliError::Commands);
     }
@@ -990,6 +1162,116 @@ fn run() -> Result<u8, CliError> {
             .map_err(CliError::Commands);
     }
 
+    if script_arg == "release:verify" {
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam release:verify` must run inside a PAM project".to_owned())
+        })?;
+        if context.kind != project::ProjectKind::Product {
+            return Err(CliError::Commands(
+                "`pam release:verify` requires a PAM Product workspace".to_owned(),
+            ));
+        }
+        let manifest = match (raw_args.next(), raw_args.next()) {
+            (None, None) => context.root.join("dist/product-release.json"),
+            (Some(path), None) => {
+                let path = PathBuf::from(path);
+                if path.is_absolute() {
+                    path
+                } else {
+                    context.root.join(path)
+                }
+            }
+            _ => {
+                return Err(CliError::Commands(
+                    "release:verify accepts at most one manifest path".to_owned(),
+                ));
+            }
+        };
+        return ship::verify_product_release(&context.root, &manifest).map_err(CliError::Commands);
+    }
+
+    if script_arg == "distribution:verify" {
+        let mut manifest = None;
+        let mut json = false;
+        for argument in raw_args {
+            if argument == "--json" {
+                json = true;
+            } else if argument.to_string_lossy().starts_with('-') {
+                return Err(CliError::Commands(format!(
+                    "unknown distribution:verify option: {}",
+                    argument.to_string_lossy()
+                )));
+            } else if manifest.replace(PathBuf::from(argument)).is_some() {
+                return Err(CliError::Commands(
+                    "distribution:verify accepts exactly one manifest path".to_owned(),
+                ));
+            }
+        }
+        let manifest = manifest.ok_or_else(|| {
+            CliError::Commands("distribution:verify requires a manifest path".to_owned())
+        })?;
+        let result = distribution::verify(&manifest).map_err(CliError::Commands)?;
+        if json {
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&result)
+                    .map_err(|error| CliError::Commands(error.to_string()))?
+            );
+        } else {
+            println!(
+                "Distribution evidence valid (surface {}, platform {}, package {}): {}",
+                result["surfaceCode"],
+                result["platformCode"],
+                result["packageCode"],
+                manifest.display()
+            );
+        }
+        return Ok(0);
+    }
+
+    if script_arg == "distribution:sign" {
+        let draft = raw_args.next().ok_or_else(|| {
+            CliError::Commands("distribution:sign requires a draft manifest".to_owned())
+        })?;
+        let mut key = None;
+        let mut output = None;
+        while let Some(option) = raw_args.next() {
+            let destination = match option.to_string_lossy().as_ref() {
+                "--key" => &mut key,
+                "--output" => &mut output,
+                unknown => {
+                    return Err(CliError::Commands(format!(
+                        "unknown distribution:sign option: {unknown}"
+                    )));
+                }
+            };
+            if destination.is_some() {
+                return Err(CliError::Commands(format!(
+                    "{} may be provided only once",
+                    option.to_string_lossy()
+                )));
+            }
+            *destination = Some(PathBuf::from(raw_args.next().ok_or_else(|| {
+                CliError::Commands(format!("{} requires a path", option.to_string_lossy()))
+            })?));
+        }
+        let key = key.ok_or_else(|| {
+            CliError::Commands("distribution:sign requires --key <private-key>".to_owned())
+        })?;
+        let output = output.ok_or_else(|| {
+            CliError::Commands("distribution:sign requires --output <manifest>".to_owned())
+        })?;
+        distribution::sign(Path::new(&draft), &key, &output).map_err(CliError::Commands)?;
+        println!("Signed distribution evidence: {}", output.display());
+        return Ok(0);
+    }
+
+    if script_arg == "distribution:desktop-report" {
+        let output = distribution::desktop_report(raw_args).map_err(CliError::Commands)?;
+        println!("Desktop platform verification: {}", output.display());
+        return Ok(0);
+    }
+
     if script_arg == "package" {
         let context = current_project().ok_or_else(|| {
             CliError::Commands("`pam package` must run inside a PAM project".to_owned())
@@ -998,6 +1280,9 @@ fn run() -> Result<u8, CliError> {
             let mut arguments = vec![OsString::from("build"), context.root.into_os_string()];
             arguments.extend(raw_args);
             return desktop::run(&executable, arguments).map_err(CliError::Commands);
+        }
+        if context.kind == project::ProjectKind::Product {
+            return ship::package_product(&context.root, raw_args).map_err(CliError::Commands);
         }
         if context.kind != project::ProjectKind::Native {
             return ship::package_server(&context.root, context.kind, raw_args)
@@ -1327,6 +1612,26 @@ fn benchmark_options(
     Ok((requests, concurrency))
 }
 
+fn finish_dev_with_artifact_budget(
+    context: Option<&project::ProjectContext>,
+    budget: Option<u64>,
+    outcome: Result<u8, CliError>,
+) -> Result<u8, CliError> {
+    let cleanup = match (context, budget) {
+        (Some(context), Some(budget)) => project::enforce_dev_artifact_budget(context, budget),
+        _ => Ok(None),
+    };
+    match (outcome, cleanup) {
+        (Err(error), Err(cleanup_error)) => {
+            eprintln!("PAM could not complete the post-dev artifact check: {cleanup_error}");
+            Err(error)
+        }
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(_), Err(error)) => Err(CliError::Commands(error)),
+        (Ok(code), Ok(_)) => Ok(code),
+    }
+}
+
 fn print_usage(executable: &OsStr) {
     terminal::print_help(executable);
 }
@@ -1407,12 +1712,24 @@ impl CliError {
         }
     }
 
+    fn verification_command(&self) -> &'static str {
+        match self {
+            Self::ScriptUnavailable { .. } | Self::NotAFile(_) => "pam doctor",
+            Self::Dev(_) | Self::Cluster(_) | Self::Doctor(_) | Self::Runtime(_) => {
+                "pam doctor --json"
+            }
+            Self::Commands(_) => "pam --help",
+            Self::Server(_) => "pam doctor --json",
+        }
+    }
+
     fn json(&self) -> String {
         serde_json::to_string_pretty(&serde_json::json!({
             "schema": 1,
             "errorCode": self.code() as u8,
             "message": self.to_string(),
             "remediation": self.remediation(),
+            "verificationCommand": self.verification_command(),
             "exitCode": self.exit_code(),
         }))
         .expect("CLI error envelope is serializable")
@@ -1433,5 +1750,39 @@ impl std::fmt::Display for CliError {
             Self::Runtime(error) => formatter.write_str(error),
             Self::Server(error) => error.fmt(formatter),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn post_dev_budget_removes_outputs_created_during_the_session() {
+        let root =
+            std::env::temp_dir().join(format!("pam-post-dev-budget-{}", std::process::id(),));
+        let artifact = root.join("target/debug/deps/session.bin");
+        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        let file = fs::File::create(&artifact).unwrap();
+        file.set_len(project::DEFAULT_DEV_ARTIFACT_BUDGET_BYTES + 1)
+            .unwrap();
+        let context = project::ProjectContext {
+            root: root.clone(),
+            kind: project::ProjectKind::Raw,
+        };
+
+        assert_eq!(
+            finish_dev_with_artifact_budget(
+                Some(&context),
+                Some(project::DEFAULT_DEV_ARTIFACT_BUDGET_BYTES),
+                Ok(0),
+            )
+            .unwrap(),
+            0,
+        );
+        assert!(!root.join("target").exists());
+        assert!(root.join("Cargo.toml").is_file());
+        fs::remove_dir_all(root).unwrap();
     }
 }

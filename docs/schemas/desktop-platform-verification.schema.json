@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pamphp.dev/schemas/desktop-platform-verification.schema.json",
+  "title": "PAM Desktop platform trust verification",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "surfaceCode", "platformCode", "packageCode",
+    "signatureKindCode", "signatureResultCode", "notarizationResultCode",
+    "sandboxResultCode", "updateRecoveryResultCode",
+    "publisherIdentitySha256", "publisherCertificate", "artifactSha256", "verifiedAtUnix",
+    "signatureProof", "sandboxProof", "updateRecoveryProof"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "surfaceCode": { "const": 3, "description": "3 Desktop." },
+    "platformCode": { "type": "integer", "enum": [1, 2, 3], "description": "1 Linux, 2 macOS, 3 Windows." },
+    "packageCode": { "type": "integer", "enum": [2, 3, 4, 5, 6, 7, 8], "description": "2 deb, 3 rpm, 4 AppImage, 5 dmg, 6 pkg, 7 msi, 8 nsis." },
+    "signatureKindCode": { "type": "integer", "enum": [1, 2, 3], "description": "1 Apple Developer ID, 2 Windows Authenticode, 3 Linux package/repository signature." },
+    "signatureResultCode": { "const": 1, "description": "1 passed." },
+    "notarizationResultCode": { "type": "integer", "enum": [1, 2], "description": "1 passed, 2 not applicable." },
+    "sandboxResultCode": { "const": 1, "description": "1 passed." },
+    "updateRecoveryResultCode": { "const": 1, "description": "1 passed." },
+    "publisherIdentitySha256": { "$ref": "#/$defs/sha256" },
+    "publisherCertificate": { "$ref": "#/$defs/proof" },
+    "artifactSha256": { "$ref": "#/$defs/sha256" },
+    "verifiedAtUnix": { "type": "integer", "minimum": 1 },
+    "signatureProof": { "$ref": "#/$defs/proof" },
+    "notarizationProof": { "$ref": "#/$defs/proof" },
+    "sandboxProof": { "$ref": "#/$defs/proof" },
+    "updateRecoveryProof": { "$ref": "#/$defs/proof" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "platformCode": { "const": 1 } } },
+      "then": {
+        "not": { "required": ["notarizationProof"] },
+        "properties": {
+          "packageCode": { "enum": [2, 3, 4] },
+          "signatureKindCode": { "const": 3 },
+          "notarizationResultCode": { "const": 2 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "platformCode": { "const": 2 } } },
+      "then": {
+        "required": ["notarizationProof"],
+        "properties": {
+          "packageCode": { "enum": [5, 6] },
+          "signatureKindCode": { "const": 1 },
+          "notarizationResultCode": { "const": 1 }
+        }
+      }
+    },
+    {
+      "if": { "properties": { "platformCode": { "const": 3 } } },
+      "then": {
+        "not": { "required": ["notarizationProof"] },
+        "properties": {
+          "packageCode": { "enum": [7, 8] },
+          "signatureKindCode": { "const": 2 },
+          "notarizationResultCode": { "const": 2 }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "path": { "type": "string", "minLength": 1, "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]+$" },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": { "$ref": "#/$defs/path" },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "bytes": { "type": "integer", "minimum": 1, "maximum": 16777216 }
+      }
+    }
+  }
+}

@@ -46,6 +46,14 @@ pam mobile screenshot . --output artifacts/screenshots/home.png
 e entrega hot reload. Para escolher explicitamente a ABI use `--abi
 arm64-v8a` ou `--abi x86_64`.
 
+O servidor de desenvolvimento liga apenas em `127.0.0.1` e o ADB encaminha a
+porta ao aplicativo. O produtor `PNA1` ordena arquivos deterministicamente,
+exige `index.php`, recusa symlinks e nomes incompatíveis, limita cada arquivo a
+8 MiB, o conjunto a 10.000 entradas e o bundle a 16 MiB. A rota de download só
+aceita `GET /bundle` com o SHA-256 exato anunciado por `/status`; prefixos,
+métodos diferentes, parâmetros duplicados ou versões antigas recebem erro sem
+expor o bundle.
+
 `diagnostics` captura o snapshot vivo e redigido do host Android em JSON. A
 timeline omite mensagens e rótulos da aplicação, é limitada a oito eventos e o
 arquivo privado intermediário é apagado após a leitura.

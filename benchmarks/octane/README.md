@@ -32,6 +32,11 @@ hash, pinned container digest, host CPU/kernel/governor, load and every workload
 parameter. Results from a dirty tree are useful during development but are not
 publishable release evidence.
 
+The soak runner records the measured duration, worker/thread/connection counts,
+binary hash, runtime order, and RSS-growth limit before it creates the evidence
+manifest. This keeps a passing memory result attributable to the exact Linux
+binary and workload that produced it.
+
 The report deliberately separates two claims:
 
 - `uncached`, `blade`, `database` and `large-json`: every request executes the
@@ -60,7 +65,18 @@ php benchmarks/octane/evidence-manifest.php \
   benchmarks/octane/results 1 --verify
 ```
 
-Suite IDs are `1` for a comparison, `2` for a worker matrix, and `3` for a soak.
+Suite IDs are `1` for a comparison, `2` for a worker matrix, `3` for a soak,
+and `4` for controlled overload.
+
+The overload suite proves bounded failure behavior independently from happy-path
+throughput. It fixes PAM at one worker and a queue capacity of one, sends one
+concurrent burst to the 50 ms fixture, and passes only when useful work returns
+`200`, excess work returns `503` with `Retry-After`, no other status appears,
+and a subsequent health request returns `200`:
+
+```bash
+PAM_OVERLOAD_CONCURRENCY=32 benchmarks/octane/overload.sh
+```
 
 The `Performance evidence` GitHub Actions workflow runs suite 1 weekly and lets
 maintainers dispatch any suite by its integer ID. It builds the exact checked-out

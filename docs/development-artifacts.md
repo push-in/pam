@@ -14,14 +14,42 @@ iOS hosts plus the Cargo target. The older `developmentArtifacts` field remains
 available for consumers that specifically measure `.pam-native`. Human
 `pam info` output uses the complete footprint, so Runtime and Desktop projects
 do not report zero while their Cargo build output is consuming disk.
+The adjacent `artifactBudget` object reports `limitBytes`, the exact cleanup
+command and an integer `stateCode`: `1` within budget, `2` exceeded, and `3`
+incomplete scan. These values are backed by the Runtime's
+`ArtifactBudgetState` enum rather than string statuses.
 
 Contextual Native development also performs bounded cleanup before rebuilding.
 Android removes only app/root build outputs and its project-local Gradle caches;
 iOS removes Xcode's actual `.pam-native/ios/App/DerivedData` directory. Both
 paths preserve generated host sources, screenshots and release evidence.
 
+Every contextual `pam dev` session enforces an 8 GiB project-local ceiling both
+before launch and after the dev process exits. If the complete regenerable
+footprint exceeds the ceiling, PAM reports the measured size and performs the
+same scoped complete cleanup as `pam clean --all`. The post-flight check runs
+after successful and failed Runtime, Native and Desktop sessions; an original
+dev failure remains the reported failure even if cleanup also cannot run. This
+prevents a large build from being left behind merely because the session ended
+between two launches. The ceiling can only be reduced—not expanded—by setting
+`PAM_DEV_ARTIFACT_BUDGET_BYTES` to an integer from 256 MiB through 8 GiB. An
+incomplete scan, symlink or unexpected non-directory fails closed instead of
+deleting an uncertain path.
+
+Cleanup never removes `.pam` as a whole. It targets only known cache children,
+preserving plugin-registry trust state, Desktop host provenance, Firebase
+configuration and other project authority stored beside those caches.
+
 The default cleanup removes only regenerable build outputs and caches from the
-generated Android/iOS hosts plus Cargo incremental directories. It does not
+generated Android/iOS hosts, `.pam/cache`, `.pam/phpunit-cache`, plus Cargo
+incremental directories. For framework source workspaces it also covers fixed,
+project-relative Android Gradle/Kotlin caches and module builds, SwiftPM's
+root `.build` or PAM Native's `ios/.build`, Python bytecode directories used by
+repository verification, and the root caches of pytest, mypy and Ruff. It
+never recursively guesses cache names. PAM Product applies the same
+root-tooling allowlist in addition to its three application-specific targets,
+so monorepo verification cannot escape the shared footprint or budget. Cleanup
+does not
 touch source code, `vendor`, application data, databases, sessions, `dist`,
 screenshots, release evidence, or user-level caches.
 
@@ -45,6 +73,19 @@ never follows a path outside the project.
 The command also accepts the root of a Rust workspace containing `Cargo.toml`.
 This keeps development of PAM Runtime, PAM Native and PAM Desktop under the same
 retention contract as applications built with them.
+
+Every existing allowlisted directory must resolve canonically to its exact
+project-relative path. A symlink at the target or in any ancestor makes the
+footprint incomplete, blocks automatic budget cleanup and makes explicit
+cleanup fail before deletion. Pointing `android`, `ios`, `scripts` or another
+ancestor at an external directory can therefore never redirect PAM's remover.
+Symlinks or unsupported entries inside an artifact directory also make its
+scan incomplete. A dry-run reports the partial measurement, while an actual
+cleanup refuses to delete it until the ambiguous entry is removed.
+Validation and measurement cover every selected target before the first
+deletion begins, preventing a later invalid target from causing a predictable
+partial cleanup. Each path is rechecked immediately before removal so a changed
+file type or symlink is rejected rather than followed.
 
 Ordinary runtime CI builds and smoke-tests the release binary on an ephemeral
 runner but does not upload that disposable binary. Versioned distribution stays
