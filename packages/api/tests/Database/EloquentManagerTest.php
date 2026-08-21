@@ -10,6 +10,9 @@ use Pam\Api\Database\DatabaseHealthCheck;
 use Pam\Api\Database\EloquentManager;
 use Pam\Api\Database\FiberConnectionResolver;
 use Pam\Api\Database\MigrationManager;
+use Pam\Api\Database\QueryBudget;
+use Pam\Api\Database\QueryBudgetViolation;
+use Pam\Api\Database\QueryMonitor;
 use Pam\Api\Health\HealthState;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -19,6 +22,8 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(EloquentManager::class)]
 #[CoversClass(FiberConnectionResolver::class)]
 #[CoversClass(MigrationManager::class)]
+#[CoversClass(QueryBudget::class)]
+#[CoversClass(QueryMonitor::class)]
 final class EloquentManagerTest extends TestCase
 {
     public function testItUsesRealEloquentWithTransactions(): void
@@ -108,6 +113,51 @@ final class EloquentManagerTest extends TestCase
         );
         self::assertFalse($manager->schema()->hasTable('community_posts'));
         $manager->releaseCurrentRequest();
+    }
+
+    public function testQueryBudgetsDetectRepeatedQueries(): void
+    {
+        $config = self::config();
+        $connections = new FiberConnectionResolver($config);
+        $manager = new EloquentManager($connections);
+        $manager->boot();
+        $monitor = new QueryMonitor($connections);
+        $monitor->begin(new QueryBudget(
+            maximumQueries: 2,
+            maximumElapsedMilliseconds: 1_000,
+            maximumDuplicateQueries: 1,
+        ));
+
+        $manager->connection()->select('SELECT 1');
+        $manager->connection()->select('SELECT 1');
+        $report = $monitor->finish();
+
+        self::assertSame(2, $report->count);
+        self::assertSame([QueryBudgetViolation::DuplicateQuery], $report->violations);
+        self::assertSame([2], array_values($report->duplicates));
+        $manager->releaseCurrentRequest();
+    }
+
+    public function testQueryBudgetsAreFiberLocal(): void
+    {
+        $connections = new FiberConnectionResolver(self::config());
+        $manager = new EloquentManager($connections);
+        $manager->boot();
+        $monitor = new QueryMonitor($connections);
+        $operation = static function () use ($manager, $monitor): void {
+            $monitor->begin(new QueryBudget());
+            $manager->connection()->select('SELECT 1');
+            \Fiber::suspend();
+            self::assertSame(1, $monitor->finish()->count);
+            $manager->releaseCurrentRequest();
+        };
+        $first = new \Fiber($operation);
+        $second = new \Fiber($operation);
+
+        $first->start();
+        $second->start();
+        $first->resume();
+        $second->resume();
     }
 
     private static function manager(): EloquentManager

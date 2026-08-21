@@ -81,7 +81,8 @@ The `feat/api-2-foundation` development line implements:
 - a reproducible router benchmark.
 
 Eloquent is the official ORM and is integrated with Fiber-local connection
-managers, events, transactions and deterministic request cleanup. Redis,
+managers, events, transactions, deterministic request cleanup and per-request
+query budgets with duplicate-query detection. Redis,
 broker, JWT and OpenTelemetry integrations remain contract-backed ecosystem
 adapters until their production implementations complete the certification
 suite.

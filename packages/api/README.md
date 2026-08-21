@@ -77,6 +77,24 @@ Laravel-compatible anonymous-class migrations work through
 migration repository on first use and supports dry-run execution, named
 connections and bounded step rollbacks.
 
+Use `QueryBudgetMiddleware` during development and in performance-sensitive
+routes to cap query count, accumulated database time and repeated SQL patterns:
+
+```php
+$app->middleware(new QueryBudgetMiddleware(
+    monitor: $app->container()->get(QueryMonitor::class),
+    budget: new QueryBudget(
+        maximumQueries: 30,
+        maximumElapsedMilliseconds: 100,
+        maximumDuplicateQueries: 3,
+    ),
+    failOnViolation: true,
+));
+```
+
+Budgets are Fiber-local. Violations use the sequential integer-backed
+`QueryBudgetViolation` enum, making them stable for CI reports and telemetry.
+
 ## Route groups
 
 ```php
