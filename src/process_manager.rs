@@ -88,6 +88,14 @@ enum ResourceAlertState {
     Unavailable = 5,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum ResourceEnforcementState {
+    Enforced = 1,
+    NotRequested = 2,
+    Unverified = 3,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApplicationRecord {
@@ -107,6 +115,10 @@ struct ApplicationRecord {
     memory_warning_bytes: Option<u64>,
     #[serde(default)]
     task_warning_count: Option<u64>,
+    #[serde(default)]
+    memory_max_bytes: Option<u64>,
+    #[serde(default)]
+    task_max_count: Option<u64>,
     created_at_millis: u64,
 }
 
@@ -181,6 +193,10 @@ struct EcosystemApplication {
     memory_warning_bytes: Option<u64>,
     #[serde(default)]
     task_warning_count: Option<u64>,
+    #[serde(default)]
+    memory_max_bytes: Option<u64>,
+    #[serde(default)]
+    task_max_count: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -192,6 +208,7 @@ enum ReconcileAction {
     Restarted = 4,
     Disabled = 5,
     PolicyUpdated = 6,
+    ResourceLimitsUpdated = 7,
 }
 
 pub fn run(
@@ -587,6 +604,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 if let Some(value) = application.task_warning_count {
                     command.args(["--task-warning-count", &value.to_string()]);
                 }
+                if let Some(value) = application.memory_max_bytes {
+                    command.args(["--memory-max-bytes", &value.to_string()]);
+                }
+                if let Some(value) = application.task_max_count {
+                    command.args(["--task-max-count", &value.to_string()]);
+                }
                 if application.kind_code == ApplicationKind::Runtime as u8 {
                     command.arg(
                         application
@@ -602,16 +625,23 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 ReconcileAction::Created
             } else {
                 let mut record = read_record(&record_path)?;
+                let limit_updated = record.memory_max_bytes != application.memory_max_bytes
+                    || record.task_max_count != application.task_max_count;
                 let policy_updated = record.memory_warning_bytes
                     != application.memory_warning_bytes
                     || record.task_warning_count != application.task_warning_count;
-                if policy_updated {
+                if policy_updated || limit_updated {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
+                    record.memory_max_bytes = application.memory_max_bytes;
+                    record.task_max_count = application.task_max_count;
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
-                if !state.as_ref().is_some_and(master_is_running) {
+                if limit_updated && state.as_ref().is_some_and(master_is_running) {
+                    restart_record(executable, &record, false, false)?;
+                    ReconcileAction::ResourceLimitsUpdated
+                } else if !state.as_ref().is_some_and(master_is_running) {
                     let mut command = Command::new(executable);
                     command.args(["restart", &name]);
                     run_reconcile_command(command, &name)?;
@@ -741,11 +771,13 @@ fn validate_ecosystem_application(
     if application.workers == 0 || application.workers > 256 {
         return Err(format!("application {name:?} workers must be 1-256"));
     }
-    if application.memory_warning_bytes == Some(0) || application.task_warning_count == Some(0) {
-        return Err(format!(
-            "application {name:?} resource warning thresholds must be positive"
-        ));
-    }
+    validate_resource_policy(
+        application.memory_warning_bytes,
+        application.task_warning_count,
+        application.memory_max_bytes,
+        application.task_max_count,
+        &format!("application {name:?}"),
+    )?;
     if application.kind_code == ApplicationKind::LaravelOctane as u8 && application.script.is_some()
     {
         return Err(format!("Laravel application {name:?} cannot set script"));
@@ -1535,6 +1567,42 @@ fn daemon_socket_path() -> Result<PathBuf, String> {
     Ok(base.join("pamd.sock"))
 }
 
+fn managed_launch_command(
+    executable: &OsStr,
+    arguments: &[OsString],
+    working_directory: &Path,
+    name: &str,
+    memory_max_bytes: Option<u64>,
+    task_max_count: Option<u64>,
+) -> Result<Command, String> {
+    if memory_max_bytes.is_none() && task_max_count.is_none() {
+        let mut command = Command::new(executable);
+        command.args(arguments).current_dir(working_directory);
+        return Ok(command);
+    }
+    let systemd_run = Path::new("/usr/bin/systemd-run");
+    if !systemd_run.is_file() {
+        return Err("cgroup limits require /usr/bin/systemd-run".to_owned());
+    }
+    let mut command = Command::new(systemd_run);
+    command
+        .current_dir(working_directory)
+        .args(["--user", "--scope", "--quiet", "--collect"])
+        .arg(format!(
+            "--unit=pam-{name}-{}-{}",
+            std::process::id(),
+            epoch_millis()
+        ));
+    if let Some(value) = memory_max_bytes {
+        command.args(["--property", &format!("MemoryMax={value}")]);
+    }
+    if let Some(value) = task_max_count {
+        command.args(["--property", &format!("TasksMax={value}")]);
+    }
+    command.arg("--").arg(executable).args(arguments);
+    Ok(command)
+}
+
 fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut name = None;
     let mut target = None;
@@ -1545,6 +1613,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut log_retain = DEFAULT_LOG_RETAIN;
     let mut memory_warning_bytes = None;
     let mut task_warning_count = None;
+    let mut memory_max_bytes = None;
+    let mut task_max_count = None;
     let mut application_arguments = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -1574,6 +1644,15 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     "--task-warning-count",
                 )?)
             }
+            "--memory-max-bytes" => {
+                memory_max_bytes = Some(required_positive_u64(
+                    arguments.next(),
+                    "--memory-max-bytes",
+                )?)
+            }
+            "--task-max-count" => {
+                task_max_count = Some(required_positive_u64(arguments.next(), "--task-max-count")?)
+            }
             "--" => {
                 application_arguments.extend(arguments);
                 break;
@@ -1585,6 +1664,13 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             _ => return Err("pam up accepts at most one application target before `--`".to_owned()),
         }
     }
+    validate_resource_policy(
+        memory_warning_bytes,
+        task_warning_count,
+        memory_max_bytes,
+        task_max_count,
+        "application",
+    )?;
 
     let cwd = fs::canonicalize(std::env::current_dir().map_err(|error| error.to_string())?)
         .map_err(|error| format!("cannot resolve application directory: {error}"))?;
@@ -1636,9 +1722,14 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         launch_arguments.push(OsString::from("--"));
         launch_arguments.extend(application_arguments);
     }
-    let mut command = Command::new(executable);
-    command.args(&launch_arguments);
-    command.current_dir(&cwd);
+    let mut command = managed_launch_command(
+        executable,
+        &launch_arguments,
+        &cwd,
+        &name,
+        memory_max_bytes,
+        task_max_count,
+    )?;
     if attach {
         command
             .stdin(Stdio::inherit())
@@ -1678,6 +1769,15 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         {
             break state;
         }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("cannot inspect application launch: {error}"))?
+        {
+            return Err(format!(
+                "application {name:?} exited before readiness with {status}; inspect {}",
+                stderr_log.display()
+            ));
+        }
         if Instant::now() >= deadline {
             return Err(format!(
                 "application {name:?} did not become ready; inspect {}",
@@ -1709,6 +1809,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         log_retain,
         memory_warning_bytes,
         task_warning_count,
+        memory_max_bytes,
+        task_max_count,
         created_at_millis: epoch_millis(),
     };
     write_record(&record_path, &record)?;
@@ -1849,13 +1951,19 @@ fn restart_record(
     rotate_log(&record.stderr_log, record.log_max_bytes, record.log_retain)?;
     let stdout = secure_append(&record.stdout_log)?;
     let stderr = secure_append(&record.stderr_log)?;
-    let mut command = Command::new(executable);
-    command
-        .args(&record.command[1..])
-        .current_dir(&record.working_directory)
-        .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr);
+    let restart_arguments = record.command[1..]
+        .iter()
+        .map(OsString::from)
+        .collect::<Vec<_>>();
+    let mut command = managed_launch_command(
+        executable,
+        &restart_arguments,
+        &record.working_directory,
+        &record.name,
+        record.memory_max_bytes,
+        record.task_max_count,
+    )?;
+    command.stdin(Stdio::null()).stdout(stdout).stderr(stderr);
     // SAFETY: see the detached launch in `up`.
     unsafe {
         command.pre_exec(|| {
@@ -1866,7 +1974,7 @@ fn restart_record(
             }
         })
     };
-    command
+    let mut child = command
         .spawn()
         .map_err(|error| format!("cannot restart {name:?}: {error}"))?;
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -1875,6 +1983,14 @@ fn restart_record(
             && master_is_running(&state)
         {
             break state;
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("cannot inspect application restart: {error}"))?
+        {
+            return Err(format!(
+                "application {name:?} exited before restart readiness with {status}"
+            ));
         }
         if Instant::now() >= deadline {
             return Err(format!(
@@ -2060,6 +2176,20 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         .map(|state| crate::resource_monitor::process_tree(state.pid))
         .unwrap_or_default();
     let resource_alert_state = resource_alert_state(record, &resources);
+    let resource_enforcement_state =
+        if record.memory_max_bytes.is_none() && record.task_max_count.is_none() {
+            ResourceEnforcementState::NotRequested
+        } else if record
+            .memory_max_bytes
+            .is_none_or(|value| resources.cgroup_memory_max_bytes == Some(value))
+            && record
+                .task_max_count
+                .is_none_or(|value| resources.cgroup_task_max_count == Some(value))
+        {
+            ResourceEnforcementState::Enforced
+        } else {
+            ResourceEnforcementState::Unverified
+        };
     serde_json::json!({
         "schemaVersion": 1,
         "name": record.name,
@@ -2075,6 +2205,9 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "resourcePolicy": {
             "memoryWarningBytes": record.memory_warning_bytes,
             "taskWarningCount": record.task_warning_count,
+            "memoryMaxBytes": record.memory_max_bytes,
+            "taskMaxCount": record.task_max_count,
+            "enforcementCode": resource_enforcement_state as u8,
         },
         "resourceAlertStateCode": resource_alert_state as u8,
     })
@@ -2331,6 +2464,31 @@ fn required_positive_u64(value: Option<OsString>, option: &str) -> Result<u64, S
         .filter(|value| *value > 0)
         .ok_or_else(|| format!("{option} requires a positive integer"))
 }
+fn validate_resource_policy(
+    memory_warning_bytes: Option<u64>,
+    task_warning_count: Option<u64>,
+    memory_max_bytes: Option<u64>,
+    task_max_count: Option<u64>,
+    label: &str,
+) -> Result<(), String> {
+    if memory_warning_bytes == Some(0)
+        || task_warning_count == Some(0)
+        || memory_max_bytes == Some(0)
+        || task_max_count == Some(0)
+    {
+        return Err(format!("{label} resource thresholds must be positive"));
+    }
+    if memory_warning_bytes
+        .zip(memory_max_bytes)
+        .is_some_and(|(warning, maximum)| warning > maximum)
+        || task_warning_count
+            .zip(task_max_count)
+            .is_some_and(|(warning, maximum)| warning > maximum)
+    {
+        return Err(format!("{label} warning cannot exceed its hard limit"));
+    }
+    Ok(())
+}
 fn parse_json_only(arguments: Vec<OsString>, command: &str) -> Result<bool, String> {
     match arguments.as_slice() {
         [] => Ok(false),
@@ -2402,8 +2560,9 @@ mod tests {
                 ReconcileAction::Restarted as u8,
                 ReconcileAction::Disabled as u8,
                 ReconcileAction::PolicyUpdated as u8,
+                ReconcileAction::ResourceLimitsUpdated as u8,
             ],
-            [1, 2, 3, 4, 5, 6]
+            [1, 2, 3, 4, 5, 6, 7]
         );
         assert_eq!(
             [
@@ -2437,6 +2596,14 @@ mod tests {
                 ResourceAlertState::Unavailable as u8,
             ],
             [1, 2, 3, 4, 5]
+        );
+        assert_eq!(
+            [
+                ResourceEnforcementState::Enforced as u8,
+                ResourceEnforcementState::NotRequested as u8,
+                ResourceEnforcementState::Unverified as u8,
+            ],
+            [1, 2, 3]
         );
     }
     #[test]
@@ -2480,6 +2647,32 @@ mod tests {
     }
 
     #[test]
+    fn hard_limits_use_a_unique_fail_closed_systemd_scope() {
+        let command = managed_launch_command(
+            OsStr::new("/opt/pam"),
+            &[OsString::from("start"), OsString::from("index.php")],
+            Path::new("/srv/api"),
+            "api",
+            Some(268_435_456),
+            Some(64),
+        )
+        .unwrap();
+        assert_eq!(command.get_program(), OsStr::new("/usr/bin/systemd-run"));
+        let arguments = command
+            .get_args()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        assert!(arguments.iter().any(|value| value == "MemoryMax=268435456"));
+        assert!(arguments.iter().any(|value| value == "TasksMax=64"));
+        assert!(
+            arguments
+                .iter()
+                .any(|value| value.starts_with("--unit=pam-api-"))
+        );
+        assert_eq!(arguments.iter().filter(|value| *value == "--").count(), 1);
+    }
+
+    #[test]
     fn ecosystem_contract_rejects_unknown_fields_and_string_kinds() {
         let unknown = r#"schema_version=1
 [applications.api]
@@ -2492,6 +2685,19 @@ surprise=true
 kind_code="runtime"
 "#;
         assert!(toml::from_str::<EcosystemConfig>(string_kind).is_err());
+        let limited = r#"schema_version=1
+[applications.api]
+kind_code=1
+memory_warning_bytes=1024
+memory_max_bytes=2048
+task_warning_count=8
+task_max_count=16
+"#;
+        let limited = toml::from_str::<EcosystemConfig>(limited).unwrap();
+        let api = &limited.applications["api"];
+        assert_eq!(api.memory_max_bytes, Some(2048));
+        assert_eq!(api.task_max_count, Some(16));
+        assert!(validate_resource_policy(Some(3), None, Some(2), None, "api").is_err());
     }
 
     #[test]

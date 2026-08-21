@@ -114,6 +114,13 @@ stable sequential alert codes. Threshold-only reconciliation is live and does
 not restart a healthy process. This establishes observed evidence; hard
 MemoryMax/TasksMax/CPU enforcement and cgroup event counters remain required.
 
+**Shipped enforcement baseline on Linux:** applications that opt into
+`memory_max_bytes` and/or `task_max_count` launch fail-closed in unique transient
+systemd user scopes. PAM reads the process's actual cgroup-v2 `memory.max` and
+`pids.max`, distinguishes verified/not-requested/unverified with sequential
+integer codes, and restarts only when a hard limit changes. CPU quotas/weights,
+OOM/event counters and non-systemd delegated cgroups remain open.
+
 ### Competitive research refresh — 2026-08-20 Windows Runtime architecture
 
 PHP's official [Embed SAPI documentation](https://github.com/php/php-src/blob/master/sapi/embed/README.md)
