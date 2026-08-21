@@ -153,6 +153,18 @@ hosted workflow retains the complete Linux evidence for 30 days.
 Gate failures remain workflow failures but no longer prevent the aggregate
 report and verifiable manifest from being retained for diagnosis.
 
+The [first passing hosted suite-7 run](https://github.com/push-in/pam/actions/runs/32507621605)
+on clean Linux commit `5a74387` recovered all 30/30 masters. For 1, 4 and 16
+workers, total p50/p95 was 165/169 ms, 223/241 ms and 539/580 ms; readiness
+p50/p95 was 91/92 ms, 144/165 ms and 450/485 ms. Detection p95 remained 1 ms,
+effective-backoff p95 was 11/12/13 ms, and daemon RSS growth was 851968,
+770048 and 946176 bytes. Every per-configuration gate and both aggregate gates
+returned code `1`. The downloaded bundle passed a second offline verification
+of all 17 artifacts with `dirty=false` and the pinned source and tool identities.
+The measured 16-worker readiness slope is now the primary optimization target;
+the gate records the current clean-runner envelope rather than treating it as
+the desired endpoint.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`
