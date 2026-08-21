@@ -128,6 +128,11 @@ PAM suppresses the final `HEAD` body after middleware and error handling while
 preserving its status and headers. An explicit `OPTIONS` or `HEAD` handler
 always takes precedence.
 
+Router configuration is bounded before the application freezes: 10,000 routes
+by default (configurable up to 100,000), 2 KiB paths, 128 segments, 32 route
+parameters and 512-byte custom constraints. Compiled patterns carry PCRE match
+and depth budgets, and oversized untrusted request paths bypass PCRE entirely.
+
 ## Container lifetimes
 
 ```php

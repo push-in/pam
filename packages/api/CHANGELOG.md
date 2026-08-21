@@ -16,6 +16,7 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - typed configuration with deterministic secret redaction;
 - automatic `HEAD`/`OPTIONS` semantics and deterministic `Allow` headers;
 - final `HEAD` body suppression with status and header preservation;
+- bounded route configuration and PCRE match/depth budgets;
 - request lifecycle observers and a bounded privacy-safe development profiler;
 - a lease-based job queue contract and bounded worker with retries, expired
   lease recovery and dead-letter transitions;
