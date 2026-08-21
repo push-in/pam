@@ -219,9 +219,18 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         ],
     );
     let listed = run_managed_pam(&root, &state, port, &["ps", "--json"]);
+    let scaled = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["scale", "managed-smoke", "2", "--json"],
+    );
     let reloaded = run_managed_pam(&root, &state, port, &["reload", "managed-smoke", "--json"]);
     let restarted = run_managed_pam(&root, &state, port, &["restart", "managed-smoke", "--json"]);
+    let saved = run_managed_pam(&root, &state, port, &["save", "--json"]);
     let stopped = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
+    let resurrected = run_managed_pam(&root, &state, port, &["resurrect", "--json"]);
+    let stopped_again = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
     let deleted = run_managed_pam(&root, &state, port, &["delete", "managed-smoke", "--json"]);
 
     assert!(
@@ -235,6 +244,11 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         String::from_utf8_lossy(&listed.stderr)
     );
     assert!(
+        scaled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scaled.stderr)
+    );
+    assert!(
         reloaded.status.success(),
         "{}",
         String::from_utf8_lossy(&reloaded.stderr)
@@ -245,10 +259,21 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         String::from_utf8_lossy(&restarted.stderr)
     );
     assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    assert!(
         stopped.status.success(),
         "{}",
         String::from_utf8_lossy(&stopped.stderr)
     );
+    assert!(
+        resurrected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resurrected.stderr)
+    );
+    assert!(stopped_again.status.success());
     assert!(
         deleted.status.success(),
         "{}",
@@ -256,10 +281,16 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     );
     let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let scaled: serde_json::Value = serde_json::from_slice(&scaled.stdout).unwrap();
     let restarted: serde_json::Value = serde_json::from_slice(&restarted.stdout).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&saved.stdout).unwrap();
+    let resurrected: serde_json::Value = serde_json::from_slice(&resurrected.stdout).unwrap();
     assert_eq!(started["kindCode"], 1);
     assert_eq!(started["stateCode"], 1);
     assert_eq!(listed["applications"][0]["name"], "managed-smoke");
+    assert_eq!(scaled["workers"], 2);
+    assert_eq!(saved["applications"][0]["desiredStateCode"], 1);
+    assert_eq!(resurrected["resurrected"][0], "managed-smoke");
     assert_ne!(started["pid"], restarted["pid"]);
     assert!(!state.join("applications/managed-smoke.json").exists());
     fs::remove_dir_all(state).unwrap();

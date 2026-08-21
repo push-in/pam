@@ -11,6 +11,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::cluster::{
@@ -79,6 +80,20 @@ struct ApplicationRecord {
     created_at_millis: u64,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedApplication {
+    name: String,
+    desired_state_code: u8,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SavedProcessList {
+    schema_version: u8,
+    applications: Vec<SavedApplication>,
+}
+
 pub fn run(
     executable: &OsStr,
     command: &str,
@@ -90,15 +105,165 @@ pub fn run(
         "status" | "describe" => inspect(command, arguments.collect()),
         "reload" => signal(arguments.collect(), RELOAD_SIGNAL, "reloading"),
         "restart" => restart(executable, arguments.collect()),
+        "scale" => scale(executable, arguments.collect()),
         "stop" => stop(arguments.collect()),
         "delete" => delete(arguments.collect()),
         "logs" => logs(arguments.collect()),
+        "save" => save(arguments.collect()),
+        "resurrect" => resurrect(executable, arguments.collect()),
+        "startup" => startup(executable, arguments.collect()),
+        "monit" => monit(arguments.collect()),
         "daemon" => daemon(executable, arguments.collect()),
-        "__pamd" => daemon_serve(),
+        "__pamd" => daemon_serve(executable),
         _ => Err(format!(
             "unsupported PAM process-manager command: {command}"
         )),
     }
+}
+
+fn scale(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut arguments = arguments.into_iter();
+    let name = required_utf8(arguments.next(), "scale application")?;
+    validate_name(&name)?;
+    let workers = required_positive(arguments.next(), "scale workers")?;
+    if workers > 256 {
+        return Err("scale workers cannot exceed 256".to_owned());
+    }
+    let json = match arguments.next() {
+        None => false,
+        Some(value) if value == "--json" && arguments.next().is_none() => true,
+        _ => return Err("scale requires NAME WORKERS and optional --json".to_owned()),
+    };
+    let paths = ManagerPaths::load()?;
+    let path = paths.application(&name);
+    let mut record = read_record(&path)?;
+    set_command_option(&mut record.command, "--workers", &workers.to_string());
+    write_record(&path, &record)?;
+    restart_record(executable, &record, json, true)?;
+    Ok(0)
+}
+
+fn save(arguments: Vec<OsString>) -> Result<u8, String> {
+    let json = parse_json_only(arguments, "save")?;
+    let paths = ManagerPaths::load()?;
+    let records = read_all_records(&paths)?;
+    let saved = SavedProcessList {
+        schema_version: 1,
+        applications: records
+            .iter()
+            .map(|record| SavedApplication {
+                name: record.name.clone(),
+                desired_state_code: if running_state(record)
+                    .as_ref()
+                    .is_some_and(master_is_running)
+                {
+                    ApplicationState::Online as u8
+                } else {
+                    ApplicationState::Stopped as u8
+                },
+            })
+            .collect(),
+    };
+    write_private_json(&paths.base.join("dump.json"), &saved)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&saved).map_err(|error| error.to_string())?
+        );
+    } else {
+        println!("Saved {} applications", saved.applications.len());
+    }
+    Ok(0)
+}
+
+fn resurrect(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let json = parse_json_only(arguments, "resurrect")?;
+    let restarted = resurrect_saved(executable)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"resurrected":restarted})
+        );
+    } else {
+        println!("Resurrected {} applications", restarted.len());
+    }
+    Ok(0)
+}
+
+fn resurrect_saved(executable: &OsStr) -> Result<Vec<String>, String> {
+    let paths = ManagerPaths::load()?;
+    let dump_path = paths.base.join("dump.json");
+    let dump: SavedProcessList = read_private_json(&dump_path)?;
+    if dump.schema_version != 1 || dump.applications.len() > MAX_APPLICATIONS {
+        return Err("unsupported or oversized saved process list".to_owned());
+    }
+    let mut restarted = Vec::new();
+    for saved in dump.applications {
+        validate_name(&saved.name)?;
+        if saved.desired_state_code != ApplicationState::Online as u8 {
+            continue;
+        }
+        let record = read_record(&paths.application(&saved.name))?;
+        if running_state(&record)
+            .as_ref()
+            .is_some_and(master_is_running)
+        {
+            continue;
+        }
+        restart_record(executable, &record, false, false)?;
+        restarted.push(saved.name);
+    }
+    Ok(restarted)
+}
+
+fn startup(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let install = match arguments.as_slice() {
+        [] => false,
+        [value] if value == "--print" => false,
+        [value] if value == "--install" => true,
+        _ => return Err("startup accepts --print or --install".to_owned()),
+    };
+    let executable = fs::canonicalize(executable)
+        .map_err(|error| format!("cannot resolve PAM executable: {error}"))?;
+    let unit = systemd_unit(&executable)?;
+    if !install {
+        print!("{unit}");
+        return Ok(0);
+    }
+    let home =
+        std::env::var_os("HOME").ok_or_else(|| "HOME is required for --install".to_owned())?;
+    let directory = PathBuf::from(home).join(".config/systemd/user");
+    ensure_directory(&directory)?;
+    let path = directory.join("pamd.service");
+    write_private_bytes(&path, unit.as_bytes())?;
+    println!("Installed {}", path.display());
+    println!("Enable with: systemctl --user enable --now pamd.service");
+    Ok(0)
+}
+
+fn monit(arguments: Vec<OsString>) -> Result<u8, String> {
+    let json = parse_json_only(arguments, "monit")?;
+    let records = read_all_records(&ManagerPaths::load()?)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"applications":records.iter().map(|record| application_json(record, running_state(record).as_ref())).collect::<Vec<_>>() })
+        );
+    } else {
+        println!("PAM MONIT\nNAME\tSTATE\tPID\tWORKERS");
+        for record in records {
+            let state = running_state(&record);
+            let online = state.as_ref().is_some_and(master_is_running);
+            println!(
+                "{}\t{}\t{}\t{}",
+                record.name,
+                if online { "online" } else { "stopped" },
+                state.as_ref().map_or(0, |value| value.pid),
+                state.as_ref().map_or(0, |value| value.workers)
+            );
+        }
+    }
+    Ok(0)
 }
 
 fn daemon(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -163,7 +328,7 @@ fn daemon(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     }
 }
 
-fn daemon_serve() -> Result<u8, String> {
+fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
     let socket = daemon_socket_path()?;
     if socket.exists() {
         if daemon_request(DaemonOperation::Ping).is_ok() {
@@ -175,6 +340,12 @@ fn daemon_serve() -> Result<u8, String> {
         .map_err(|error| format!("cannot bind daemon socket {}: {error}", socket.display()))?;
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))
         .map_err(|error| error.to_string())?;
+    let dump = ManagerPaths::load()?.base.join("dump.json");
+    if dump.exists()
+        && let Err(error) = resurrect_saved(executable)
+    {
+        eprintln!("pamd could not restore saved applications: {error}");
+    }
     let own_uid = unsafe { libc::geteuid() };
     for connection in listener.incoming() {
         let mut stream = connection.map_err(|error| error.to_string())?;
@@ -540,7 +711,17 @@ fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
 fn restart(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let (name, json) = parse_name_json(arguments, "restart")?;
     let record = record(&name)?;
-    if let Some(state) = running_state(&record)
+    restart_record(executable, &record, json, true)
+}
+
+fn restart_record(
+    executable: &OsStr,
+    record: &ApplicationRecord,
+    json: bool,
+    emit: bool,
+) -> Result<u8, String> {
+    let name = &record.name;
+    if let Some(state) = running_state(record)
         && master_is_running(&state)
     {
         signal_master(&state, STOP_SIGNAL)?;
@@ -581,7 +762,7 @@ fn restart(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         .map_err(|error| format!("cannot restart {name:?}: {error}"))?;
     let deadline = Instant::now() + Duration::from_secs(30);
     let state = loop {
-        if let Some(state) = running_state(&record)
+        if let Some(state) = running_state(record)
             && master_is_running(&state)
         {
             break state;
@@ -593,10 +774,12 @@ fn restart(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         }
         thread::sleep(Duration::from_millis(50));
     };
-    if json {
-        println!("{}", application_json(&record, Some(&state)));
-    } else {
-        println!("Restarted {name} (PID {})", state.pid);
+    if emit {
+        if json {
+            println!("{}", application_json(record, Some(&state)));
+        } else {
+            println!("Restarted {name} (PID {})", state.pid);
+        }
     }
     Ok(0)
 }
@@ -778,6 +961,7 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
 }
 
 struct ManagerPaths {
+    base: PathBuf,
     applications: PathBuf,
     runtime: PathBuf,
     logs: PathBuf,
@@ -796,6 +980,7 @@ impl ManagerPaths {
             .join(".local/state/pam")
         };
         let paths = Self {
+            base: base.clone(),
             applications: base.join("applications"),
             runtime: base.join("runtime"),
             logs: base.join("logs"),
@@ -808,6 +993,33 @@ impl ManagerPaths {
     fn application(&self, name: &str) -> PathBuf {
         self.applications.join(format!("{name}.json"))
     }
+}
+
+fn set_command_option(command: &mut Vec<String>, option: &str, value: &str) {
+    if let Some(index) = command.iter().position(|argument| argument == option) {
+        if let Some(existing) = command.get_mut(index + 1) {
+            *existing = value.to_owned();
+            return;
+        }
+    }
+    let separator = command
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(command.len());
+    command.splice(separator..separator, [option.to_owned(), value.to_owned()]);
+}
+
+fn systemd_unit(executable: &Path) -> Result<String, String> {
+    let executable = executable
+        .to_str()
+        .ok_or_else(|| "PAM executable path must be UTF-8 for systemd".to_owned())?;
+    if executable.contains(['\n', '\r']) {
+        return Err("PAM executable path cannot contain control characters".to_owned());
+    }
+    let escaped = executable.replace('%', "%%").replace(' ', "\\x20");
+    Ok(format!(
+        "[Unit]\nDescription=PAM per-user process manager\nAfter=network.target\n\n[Service]\nType=simple\nExecStart={escaped} __pamd\nExecStop={escaped} daemon stop\nRestart=on-failure\nRestartSec=1\nNoNewPrivileges=true\nPrivateTmp=true\nProtectSystem=strict\n\n[Install]\nWantedBy=default.target\n"
+    ))
 }
 
 fn secure_directory(path: &Path) -> Result<(), String> {
@@ -825,6 +1037,18 @@ fn secure_directory(path: &Path) -> Result<(), String> {
     }
     fs::set_permissions(path, fs::Permissions::from_mode(0o700)).map_err(|error| error.to_string())
 }
+fn ensure_directory(path: &Path) -> Result<(), String> {
+    fs::create_dir_all(path)
+        .map_err(|error| format!("cannot create {}: {error}", path.display()))?;
+    if fs::symlink_metadata(path)
+        .map_err(|error| error.to_string())?
+        .file_type()
+        .is_symlink()
+    {
+        return Err(format!("refusing symlink directory {}", path.display()));
+    }
+    Ok(())
+}
 fn secure_append(path: &Path) -> Result<File, String> {
     if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         return Err(format!("refusing symlink log {}", path.display()));
@@ -838,17 +1062,38 @@ fn secure_append(path: &Path) -> Result<File, String> {
 }
 fn write_record(path: &Path, record: &ApplicationRecord) -> Result<(), String> {
     let bytes = serde_json::to_vec_pretty(record).map_err(|error| error.to_string())?;
+    write_private_bytes(path, &bytes)
+}
+fn write_private_json(path: &Path, value: &impl Serialize) -> Result<(), String> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_RECORD_BYTES {
+        return Err("manager JSON exceeds 1 MiB".to_owned());
+    }
+    write_private_bytes(path, &bytes)
+}
+fn write_private_bytes(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(format!("refusing symlink file {}", path.display()));
+    }
     let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
     let mut options = OpenOptions::new();
     options.write(true).create_new(true).mode(0o600);
-    use std::io::Write;
     let mut file = options
         .open(&temporary)
         .map_err(|error| format!("cannot create manager record: {error}"))?;
-    file.write_all(&bytes)
+    file.write_all(bytes)
         .and_then(|()| file.sync_all())
         .map_err(|error| error.to_string())?;
     fs::rename(&temporary, path).map_err(|error| format!("cannot publish manager record: {error}"))
+}
+fn read_private_json<T: DeserializeOwned>(path: &Path) -> Result<T, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD_BYTES {
+        return Err(format!("invalid manager file {}", path.display()));
+    }
+    serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
+        .map_err(|error| format!("invalid manager JSON: {error}"))
 }
 fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
     let metadata = fs::symlink_metadata(path)
@@ -992,5 +1237,37 @@ mod tests {
             rotated_log_path(Path::new("api.log"), 3),
             PathBuf::from("api.log.3")
         );
+    }
+    #[test]
+    fn worker_option_is_replaced_or_inserted_before_application_arguments() {
+        let mut existing = vec![
+            "pam".to_owned(),
+            "start".to_owned(),
+            "--workers".to_owned(),
+            "1".to_owned(),
+        ];
+        set_command_option(&mut existing, "--workers", "4");
+        assert_eq!(existing, ["pam", "start", "--workers", "4"]);
+
+        let mut missing = vec![
+            "pam".to_owned(),
+            "start".to_owned(),
+            "--".to_owned(),
+            "--port=1".to_owned(),
+        ];
+        set_command_option(&mut missing, "--workers", "2");
+        assert_eq!(
+            missing,
+            ["pam", "start", "--workers", "2", "--", "--port=1"]
+        );
+    }
+
+    #[test]
+    fn systemd_unit_runs_the_daemon_in_the_foreground() {
+        let unit = systemd_unit(Path::new("/opt/PAM Runtime/pam")).unwrap();
+        assert!(unit.contains("Type=simple"));
+        assert!(unit.contains("ExecStart=/opt/PAM\\x20Runtime/pam __pamd"));
+        assert!(unit.contains("NoNewPrivileges=true"));
+        assert!(!unit.contains("ProtectHome="));
     }
 }
