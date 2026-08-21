@@ -267,6 +267,13 @@ jobs:
           fi
           ./target/debug/pam support tests/fixtures/hello.php \
             >"${PAM_DOCTOR_EVIDENCE}/support-runtime.json"
+          PAM_MANAGER_STATE_DIR="${RUNNER_TEMP}/pam-support-manager-state" \
+          PAM_MANAGER_RUNTIME_DIR="${RUNNER_TEMP}/pam-support-manager-runtime" \
+            ./target/debug/pam support tests/fixtures/hello.php --manager \
+            >"${PAM_DOCTOR_EVIDENCE}/support-manager.json"
+          PAM_MANAGER_STATE_DIR="${RUNNER_TEMP}/pam-support-manager-state" \
+          PAM_MANAGER_RUNTIME_DIR="${RUNNER_TEMP}/pam-support-manager-runtime" \
+            ./target/debug/pam daemon stop
           python3 - "${PAM_DOCTOR_EVIDENCE}" "${support_project}" "${HOME}" <<'PY'
           import hashlib
           import json
@@ -276,7 +283,7 @@ jobs:
           evidence = Path(sys.argv[1])
           secrets = [sys.argv[2], sys.argv[3], "source-file-secret-must-not-leak",
                      "environment-secret-must-not-leak", "PAM_SUPPORT_PRIVATE_VALUE"]
-          for name in ["support-product.json", "support-runtime.json"]:
+          for name in ["support-product.json", "support-runtime.json", "support-manager.json"]:
               raw = (evidence / name).read_bytes()
               assert len(raw) <= 512 * 1024
               text = raw.decode("utf-8")
@@ -285,6 +292,7 @@ jobs:
               assert set(report) == {
                   "schemaVersion", "resultCode", "surfaceCode", "generatedAtUnixMs",
                   "pamVersion", "host", "privacy", "diagnosticsSha256", "diagnostics",
+                  "managerSha256", "manager",
               }
               assert report["schemaVersion"] == 1
               assert report["resultCode"] in [1, 2]
@@ -292,12 +300,22 @@ jobs:
               assert report["privacy"] == {
                   "redactionCode": 1, "includesEnvironment": False,
                   "includesFileContents": False, "includesNetworkData": False,
+                  "includesProcessMetadata": name == "support-manager.json",
+                  "includesLogContents": False,
                   "pathToken": "$PROJECT",
               }
               canonical = json.dumps(
                   report["diagnostics"], separators=(",", ":"), ensure_ascii=False
               ).encode("utf-8")
               assert hashlib.sha256(canonical).hexdigest() == report["diagnosticsSha256"]
+              if name == "support-manager.json":
+                  manager = json.dumps(
+                      report["manager"], separators=(",", ":"), ensure_ascii=False
+                  ).encode("utf-8")
+                  assert hashlib.sha256(manager).hexdigest() == report["managerSha256"]
+              else:
+                  assert report["manager"] is None
+                  assert report["managerSha256"] is None
           assert "$PROJECT" in (evidence / "support-product.json").read_text()
           assert "cannot create new support report" in (evidence / "support-overwrite.log").read_text()
           PY
@@ -310,7 +328,7 @@ jobs:
             cd "${PAM_DOCTOR_EVIDENCE}"
             sha256sum desktop-host.json desktop-host.schema.json project.json \
               provenance.json runtime.json schema.json support-product.json \
-              support-runtime.json >SHA256SUMS
+              support-runtime.json support-manager.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
       - uses: actions/upload-artifact@v4

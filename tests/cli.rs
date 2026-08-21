@@ -2396,6 +2396,8 @@ fn creates_a_bounded_redacted_support_report_without_persisting_by_default() {
     assert_eq!(report["privacy"]["includesEnvironment"], false);
     assert_eq!(report["privacy"]["includesFileContents"], false);
     assert_eq!(report["privacy"]["includesNetworkData"], false);
+    assert_eq!(report["privacy"]["includesProcessMetadata"], false);
+    assert_eq!(report["privacy"]["includesLogContents"], false);
     assert_eq!(report["diagnostics"]["target"], "$PROJECT");
     assert!(!String::from_utf8_lossy(&support.stdout).contains(target.to_str().unwrap()));
 
@@ -2404,6 +2406,40 @@ fn creates_a_bounded_redacted_support_report_without_persisting_by_default() {
         report["diagnosticsSha256"],
         format!("{:x}", Sha256::digest(diagnostics))
     );
+
+    let manager_root = temporary_path("support-manager");
+    let manager_state = manager_root.join("state");
+    let manager_runtime = manager_root.join("runtime");
+    let manager_support = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .env("PAM_MANAGER_STATE_DIR", &manager_state)
+        .env("PAM_MANAGER_RUNTIME_DIR", &manager_runtime)
+        .args(["support", target.to_str().unwrap(), "--manager"])
+        .output()
+        .unwrap();
+    assert!(manager_support.status.success());
+    let manager_report: serde_json::Value =
+        serde_json::from_slice(&manager_support.stdout).unwrap();
+    assert_eq!(manager_report["privacy"]["includesProcessMetadata"], true);
+    assert_eq!(manager_report["privacy"]["includesLogContents"], false);
+    assert_eq!(manager_report["manager"]["schemaVersion"], 1);
+    assert_eq!(
+        manager_report["manager"]["applications"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    let manager = serde_json::to_vec(&manager_report["manager"]).unwrap();
+    assert_eq!(
+        manager_report["managerSha256"],
+        format!("{:x}", Sha256::digest(manager))
+    );
+    assert!(
+        run_manager_daemon(&manager_state, &manager_runtime, "stop")
+            .status
+            .success()
+    );
+    fs::remove_dir_all(manager_root).unwrap();
 }
 
 #[test]
