@@ -75,6 +75,20 @@ commit `c644031`. All 10 masters recovered: p50 was 626 ms, p95 and maximum were
 codes were all `1`. The downloaded four-artifact bundle passed an independent
 offline manifest verification after the workflow's own verification.
 
+Suite `6` runs the same crash-recovery protocol against PAM and the exact
+lockfile-pinned PM2 7.0.3 on one Ubuntu host: one PHP application instance, the
+same ten `SIGKILL` rounds, 10 ms configured restart delay, 10 ms polling and a
+10-second per-round deadline. It reports each system independently and uses
+topology code `1` for PAM's master/worker replacement and `2` for PM2's directly
+managed single process. Latency deltas are directional evidence, not a claim
+that those topologies perform identical work; daemon RSS is explicitly marked
+non-comparable. Both systems must recover every round, and the recursive suite-6
+manifest binds the PAM report, both raw CSV/resource pairs, tool versions,
+PM2 package integrity and shared parameters.
+The isolated benchmark lock overrides PM2's vulnerable `js-yaml` 4.3.0 with the
+compatible 4.3.1 security release, and CI rejects high-severity production-tree
+advisories before running the comparison.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`

@@ -1,0 +1,16 @@
+{
+  "name": "pam-pm2-recovery-benchmark",
+  "version": "1.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "packageManager": "npm@10.9.4",
+  "dependencies": {
+    "pm2": "7.0.3"
+  },
+  "overrides": {
+    "js-yaml": "4.3.1"
+  }
+}
