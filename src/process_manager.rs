@@ -27,6 +27,7 @@ const MAX_LOG_RETAIN: usize = 100;
 const MAX_DAEMON_MESSAGE_BYTES: usize = 16 * 1024;
 const MAX_DAEMON_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DEPLOY_HISTORY: usize = 50;
+const MAX_DASHBOARD_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[repr(u8)]
@@ -274,6 +275,7 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "resurrect" => resurrect(executable, arguments),
         "startup" => startup(executable, arguments),
         "monit" => monit(arguments),
+        "dashboard" => dashboard(arguments),
         "apply" => apply_ecosystem(executable, arguments),
         "config:check" => check_ecosystem(arguments),
         "deploy" => deploy(executable, arguments),
@@ -309,6 +311,7 @@ fn daemon_managed_command(command: &str) -> bool {
             | "save"
             | "resurrect"
             | "monit"
+            | "dashboard"
             | "deploy"
             | "deploy:history"
             | "rollback"
@@ -1150,6 +1153,85 @@ fn monit(arguments: Vec<OsString>) -> Result<u8, String> {
             );
         }
     }
+    Ok(0)
+}
+
+fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
+    let output = match arguments.as_slice() {
+        [] => PathBuf::from("pam-dashboard.html"),
+        [path] if path != "--output" => PathBuf::from(path),
+        [option, path] if option == "--output" => PathBuf::from(path),
+        _ => return Err("dashboard accepts one output path or --output FILE.html".to_owned()),
+    };
+    if output.extension() != Some(OsStr::new("html")) {
+        return Err("dashboard output must use the .html extension".to_owned());
+    }
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create dashboard directory: {error}"))?;
+    }
+    let applications = read_all_records(&ManagerPaths::load()?)?
+        .into_iter()
+        .map(|record| {
+            let state = running_state(&record);
+            let online = state.as_ref().is_some_and(master_is_running);
+            let resources = state
+                .as_ref()
+                .filter(|_| online)
+                .map(|value| crate::resource_monitor::process_tree(value.pid))
+                .unwrap_or_default();
+            let alert = resource_alert_state(&record, &resources);
+            let (alert_label, alert_class) = match alert {
+                ResourceAlertState::Healthy => ("Healthy", "healthy"),
+                ResourceAlertState::MemoryWarning => ("Memory warning", "warning"),
+                ResourceAlertState::TaskWarning => ("Task warning", "warning"),
+                ResourceAlertState::MemoryAndTaskWarning => ("Memory + task warning", "warning"),
+                ResourceAlertState::Unavailable => ("Metrics unavailable", "unavailable"),
+            };
+            crate::manager_dashboard::DashboardApplication {
+                name: record.name,
+                kind_label: if record.kind_code == ApplicationKind::LaravelOctane as u8 {
+                    "Laravel Octane"
+                } else {
+                    "PAM Runtime"
+                },
+                online,
+                workers: state.as_ref().map_or(0, |value| value.workers),
+                rss_bytes: resources.rss_bytes,
+                tasks: resources.tasks,
+                alert_label,
+                alert_class,
+                warning: matches!(
+                    alert,
+                    ResourceAlertState::MemoryWarning
+                        | ResourceAlertState::TaskWarning
+                        | ResourceAlertState::MemoryAndTaskWarning
+                ),
+            }
+        })
+        .collect::<Vec<_>>();
+    let html = crate::manager_dashboard::render(&applications);
+    if html.len() > MAX_DASHBOARD_BYTES {
+        return Err("manager dashboard exceeds the 2 MiB safety limit".to_owned());
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true).mode(0o600);
+    let mut file = options.open(&output).map_err(|error| {
+        format!(
+            "cannot create new manager dashboard {}: {error}",
+            output.display()
+        )
+    })?;
+    file.write_all(html.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("cannot persist manager dashboard: {error}"))?;
+    println!(
+        "Wrote private PAM manager dashboard to {}",
+        output.display()
+    );
     Ok(0)
 }
 

@@ -115,6 +115,13 @@ stable sequential alert codes. Threshold-only reconciliation is live and does
 not restart a healthy process. This establishes observed evidence; hard
 MemoryMax/TasksMax/CPU enforcement and cgroup event counters remain required.
 
+**Shipped private dashboard baseline on Linux:** `dashboard` turns the same live
+manager records into a bounded, owner-only, dependency-free HTML flight recorder.
+It exposes textual process and capacity signals without commands, paths,
+environment values, network data, or logs; it never overwrites prior evidence.
+A live authenticated dashboard, time-series history, and remote fleet aggregation
+remain future work and must preserve this local-first privacy boundary.
+
 **Shipped enforcement baseline on Linux:** applications that opt into
 `memory_max_bytes` and/or `task_max_count` launch fail-closed in unique transient
 systemd user scopes. PAM reads the process's actual cgroup-v2 `memory.max` and

@@ -179,6 +179,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Show managed process health and capacity",
             "Develop",
         ),
+        command(
+            "dashboard",
+            "Create a private manager health dashboard",
+            "Develop",
+        ),
         command("apply", "Reconcile applications from pam.toml", "Develop"),
         command(
             "config:check",

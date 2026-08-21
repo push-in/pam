@@ -77,6 +77,28 @@ environment secrets. It recomputes the embedded diagnostic digest, checks the
 an existing report cannot be overwritten. These reports reuse the seven-day
 Doctor evidence artifact instead of creating another retained CI bundle.
 
+## Private manager dashboard
+
+`pam dashboard [FILE.html]` creates a dependency-free, read-only HTML snapshot
+of every managed application. The default output is `pam-dashboard.html`; an
+explicit path can also be supplied with `--output FILE.html`.
+
+The snapshot includes application name and kind, textual process state, worker
+count, aggregate resident memory, task count, and resource-warning state. It
+excludes commands, paths, environment values, network data, and log contents.
+It contains no JavaScript or external assets and adapts to light, dark,
+high-contrast, reduced-motion, narrow-screen, keyboard, and screen-reader use.
+
+Dashboard files must end in `.html`, are bounded to 2 MiB, and are created with
+owner-only permissions on Unix. PAM never overwrites an existing snapshot:
+
+```bash
+pam dashboard manager-health.html
+```
+
+This is a local point-in-time flight recorder, not a network service. Review it
+before sharing and use a new filename whenever fresh evidence is needed.
+
 ## Machine interfaces
 
 These commands emit JSON without terminal decoration:
