@@ -29,6 +29,8 @@ pam rollback billing
 pam traffic:start billing-edge --listen 127.0.0.1:8080 --stable 127.0.0.1:8081 \
   --tls-cert /etc/pam/billing.pem --tls-key /etc/pam/billing.key
 pam traffic:set billing-edge --candidate 127.0.0.1:8082 --weight-bps 500
+pam traffic:evaluate billing-edge --min-candidate-requests 1000 \
+  --max-candidate-error-bps 50 --json
 pam traffic:status billing-edge --json
 pam traffic:promote billing-edge
 pam stop billing
@@ -179,6 +181,16 @@ the existing Hyper transport and WebSocket upgrades remain bidirectional.
 latency-microsecond counters for stable and candidate. Metrics are private,
 bounded, periodically persisted, and contain no URLs, cookies or client
 identifiers. Use those counters as rollout evidence before an explicit promote.
+
+Every weighted candidate starts rollout phase evaluating `2` with a bounded
+deadline (300 seconds by default, configurable with `--deadline-seconds`). Metrics
+carry the active generation and reset atomically when routing changes; late
+responses from an older generation cannot contaminate a gate. `traffic:evaluate`
+requires a minimum candidate sample and maximum error rate in basis points. Its
+persisted decision codes are pending `1`, promoted `2`, error-aborted `3`, and
+deadline-aborted `4`; terminal phase codes are promoted `3` and aborted `4`.
+Pending returns exit code 1 without discarding accumulated evidence. Promotion
+and abort remain explicit commands for operator override.
 
 The ingress accepts HTTPS with `--tls-cert FILE --tls-key FILE` while continuing
 to proxy over HTTP to explicit upstream `IP:port` addresses. PAM requires both

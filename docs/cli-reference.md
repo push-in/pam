@@ -37,6 +37,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam traffic:status` — Inspect release traffic state.
 ## Ship
 
+- `pam traffic:evaluate` — Gate a candidate using live evidence.
 - `pam traffic:stop` — Stop a release traffic ingress.
 ## Develop
 

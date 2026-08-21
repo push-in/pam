@@ -94,9 +94,10 @@ stable/candidate routing, deterministic affinity, streaming HTTP and WebSocket
 proxying, per-version evidence, explicit abort/promote, and certificate-backed
 TLS termination. Its TLS contract requires bounded regular non-symlink PEM files,
 does not disclose key paths through status, and preserves HTTP/2 externally while
-normalizing the explicit HTTP upstream hop. Remaining acceptance work is
-candidate lifecycle orchestration, persisted rollout phases/deadlines, preview
-selection, automatic evidence gates, draining, and surge accounting.
+normalizing the explicit HTTP upstream hop. Generation-scoped metrics, persisted
+phases/deadlines and automatic minimum-sample/error/deadline gates are also
+shipped. Remaining acceptance work is candidate process lifecycle orchestration,
+trusted preview selection, connection draining and surge accounting.
 
 For Linux resource governance, systemd's official
 [`pam_systemd` documentation](https://www.freedesktop.org/software/systemd/man/pam_systemd.html)

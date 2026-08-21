@@ -192,6 +192,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("traffic:promote", "Promote candidate to stable", "Ship"),
         command("traffic:abort", "Abort candidate traffic", "Ship"),
         command("traffic:status", "Inspect release traffic state", "Observe"),
+        command(
+            "traffic:evaluate",
+            "Gate a candidate using live evidence",
+            "Ship",
+        ),
         command("traffic:stop", "Stop a release traffic ingress", "Ship"),
         command("devices", "List connected development targets", "Develop"),
         command("devtools", "Toggle contextual development tools", "Develop"),

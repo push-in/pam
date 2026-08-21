@@ -704,6 +704,8 @@ fn shifts_aborts_and_promotes_weighted_release_traffic() {
     );
     assert!(status.status.success());
     let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["rolloutPhaseCode"], 2);
+    assert_eq!(status["metrics"]["generation"], status["generation"]);
     assert_eq!(
         status["metrics"]["stableRequests"].as_u64().unwrap()
             + status["metrics"]["candidateRequests"].as_u64().unwrap(),
@@ -734,21 +736,99 @@ fn shifts_aborts_and_promotes_weighted_release_traffic() {
             &candidate,
             "--weight-bps",
             "10000",
+            "--deadline-seconds",
+            "1",
             "--json",
         ],
     );
     assert!(shifted.status.success());
     thread::sleep(Duration::from_millis(300));
-    assert!(traffic_request(ingress_port, "promote").ends_with("candidate"));
+    assert!(traffic_request(ingress_port, "deadline").ends_with("candidate"));
+    thread::sleep(Duration::from_millis(900));
+    let expired = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &[
+            "traffic:evaluate",
+            "edge-smoke",
+            "--min-candidate-requests",
+            "1",
+            "--max-candidate-error-bps",
+            "0",
+            "--json",
+        ],
+    );
+    assert!(expired.status.success());
+    let expired: serde_json::Value = serde_json::from_slice(&expired.stdout).unwrap();
+    assert_eq!(expired["decisionCode"], 4);
+    let shifted = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &[
+            "traffic:set",
+            "edge-smoke",
+            "--candidate",
+            &candidate,
+            "--weight-bps",
+            "10000",
+            "--deadline-seconds",
+            "300",
+            "--json",
+        ],
+    );
+    assert!(shifted.status.success());
+    thread::sleep(Duration::from_millis(300));
+    for index in 0..10 {
+        assert!(traffic_request(ingress_port, &format!("gate-{index}")).ends_with("candidate"));
+    }
+    thread::sleep(Duration::from_millis(600));
+    let pending = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &[
+            "traffic:evaluate",
+            "edge-smoke",
+            "--min-candidate-requests",
+            "100",
+            "--max-candidate-error-bps",
+            "0",
+            "--json",
+        ],
+    );
+    assert_eq!(pending.status.code(), Some(1));
+    let pending: serde_json::Value = serde_json::from_slice(&pending.stdout).unwrap();
+    assert_eq!(pending["decisionCode"], 1);
     let promoted = run_managed_pam(
         &root,
         &state,
         ingress_port,
-        &["traffic:promote", "edge-smoke", "--json"],
+        &[
+            "traffic:evaluate",
+            "edge-smoke",
+            "--min-candidate-requests",
+            "10",
+            "--max-candidate-error-bps",
+            "0",
+            "--json",
+        ],
     );
     assert!(promoted.status.success());
+    let promoted: serde_json::Value = serde_json::from_slice(&promoted.stdout).unwrap();
+    assert_eq!(promoted["decisionCode"], 2);
     thread::sleep(Duration::from_millis(300));
     assert!(traffic_request(ingress_port, "after").ends_with("candidate"));
+    let status = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &["traffic:status", "edge-smoke", "--json"],
+    );
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(status["rolloutPhaseCode"], 3);
+    assert_eq!(status["lastRolloutDecisionCode"], 2);
 
     assert!(
         run_managed_pam(&root, &state, ingress_port, &["traffic:stop", "edge-smoke"])

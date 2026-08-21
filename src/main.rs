@@ -658,6 +658,7 @@ fn run() -> Result<u8, CliError> {
             | "traffic:promote"
             | "traffic:abort"
             | "traffic:status"
+            | "traffic:evaluate"
             | "traffic:stop"
             | "daemon"
             | "__pamd"
