@@ -1,8 +1,12 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Output};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -62,6 +66,44 @@ fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
         .join(name)
+}
+
+fn fixed_http_server(body: &'static str) -> (u16, Arc<AtomicBool>, thread::JoinHandle<()>) {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = listener.local_addr().unwrap().port();
+    listener.set_nonblocking(true).unwrap();
+    let running = Arc::new(AtomicBool::new(true));
+    let active = Arc::clone(&running);
+    let handle = thread::spawn(move || {
+        while active.load(Ordering::Relaxed) {
+            match listener.accept() {
+                Ok((mut stream, _)) => {
+                    let mut request = [0_u8; 4096];
+                    let _ = stream.read(&mut request);
+                    let response = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(response.as_bytes());
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(_) => break,
+            }
+        }
+    });
+    (port, running, handle)
+}
+
+fn traffic_request(port: u16, affinity: &str) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .write_all(format!("GET /probe HTTP/1.1\r\nHost: localhost\r\nCookie: pam_affinity={affinity}\r\nConnection: close\r\n\r\n").as_bytes())
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
 }
 
 fn css_hex(styles: &str, property: &str) -> [f64; 3] {
@@ -529,6 +571,118 @@ fn deploys_idempotently_and_rolls_back_to_a_healthy_release() {
             .success()
     );
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn shifts_aborts_and_promotes_weighted_release_traffic() {
+    let (stable_port, stable_running, stable_thread) = fixed_http_server("stable");
+    let (candidate_port, candidate_running, candidate_thread) = fixed_http_server("candidate");
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let ingress_port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let state = temporary_path("traffic-state");
+    let started = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &[
+            "traffic:start",
+            "edge-smoke",
+            "--listen",
+            &format!("127.0.0.1:{ingress_port}"),
+            "--stable",
+            &format!("127.0.0.1:{stable_port}"),
+            "--candidate",
+            &format!("127.0.0.1:{candidate_port}"),
+            "--weight-bps",
+            "5000",
+            "--json",
+        ],
+    );
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let mut stable_seen = false;
+    let mut candidate_seen = false;
+    for index in 0..100 {
+        let response = traffic_request(ingress_port, &index.to_string());
+        stable_seen |= response.ends_with("stable");
+        candidate_seen |= response.ends_with("candidate");
+    }
+    assert!(stable_seen && candidate_seen);
+    thread::sleep(Duration::from_millis(600));
+    let status = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &["traffic:status", "edge-smoke", "--json"],
+    );
+    assert!(status.status.success());
+    let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+    assert_eq!(
+        status["metrics"]["stableRequests"].as_u64().unwrap()
+            + status["metrics"]["candidateRequests"].as_u64().unwrap(),
+        100
+    );
+
+    let aborted = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &["traffic:abort", "edge-smoke", "--json"],
+    );
+    assert!(aborted.status.success());
+    thread::sleep(Duration::from_millis(300));
+    for index in 0..10 {
+        assert!(traffic_request(ingress_port, &index.to_string()).ends_with("stable"));
+    }
+
+    let candidate = format!("127.0.0.1:{candidate_port}");
+    let shifted = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &[
+            "traffic:set",
+            "edge-smoke",
+            "--candidate",
+            &candidate,
+            "--weight-bps",
+            "10000",
+            "--json",
+        ],
+    );
+    assert!(shifted.status.success());
+    thread::sleep(Duration::from_millis(300));
+    assert!(traffic_request(ingress_port, "promote").ends_with("candidate"));
+    let promoted = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &["traffic:promote", "edge-smoke", "--json"],
+    );
+    assert!(promoted.status.success());
+    thread::sleep(Duration::from_millis(300));
+    assert!(traffic_request(ingress_port, "after").ends_with("candidate"));
+
+    assert!(
+        run_managed_pam(&root, &state, ingress_port, &["traffic:stop", "edge-smoke"])
+            .status
+            .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, ingress_port, &["daemon", "stop"])
+            .status
+            .success()
+    );
+    stable_running.store(false, Ordering::Relaxed);
+    candidate_running.store(false, Ordering::Relaxed);
+    stable_thread.join().unwrap();
+    candidate_thread.join().unwrap();
+    fs::remove_dir_all(state).unwrap();
 }
 
 #[test]

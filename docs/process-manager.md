@@ -26,6 +26,10 @@ pam apply pam.toml
 pam deploy billing /srv/billing/releases/2026-08-21
 pam deploy:history billing --json
 pam rollback billing
+pam traffic:start billing-edge --listen 127.0.0.1:8080 --stable 127.0.0.1:8081
+pam traffic:set billing-edge --candidate 127.0.0.1:8082 --weight-bps 500
+pam traffic:status billing-edge --json
+pam traffic:promote billing-edge
 pam stop billing
 pam delete billing
 ```
@@ -134,6 +138,30 @@ artifacts remain operator-owned and are never silently deleted by PAM.
 
 JSON action codes are sequential: activated `1`, rolled back `2`, unchanged
 `3`. History event kinds are baseline `1`, deploy `2`, rollback `3`.
+
+## Progressive traffic delivery
+
+The version ingress runs stable and candidate upstreams side by side. Candidate
+weight uses integer basis points (`0`–`10000`) and updates atomically through a
+monotonically increasing generation. `traffic:abort` immediately restores
+stable-only routing; `traffic:promote` makes the current candidate stable and
+removes the candidate slot.
+
+Routing affinity hashes the `pam_affinity` cookie when present, otherwise
+the client IP and request path. PAM overwrites forwarding headers and removes an
+incoming `x-pam-release` before proxying; the trusted response receives
+`x-pam-release: stable|candidate`. Request bodies and responses stream through
+the existing Hyper transport and WebSocket upgrades remain bidirectional.
+
+`traffic:status --json` reports separate request, 5xx/upstream-error, and total
+latency-microsecond counters for stable and candidate. Metrics are private,
+bounded, periodically persisted, and contain no URLs, cookies or client
+identifiers. Use those counters as rollout evidence before an explicit promote.
+
+The ingress currently speaks HTTP to explicit upstream `IP:port` addresses. TLS
+should terminate at the existing PAM/edge TLS boundary until certificate-backed
+version-ingress listeners are shipped. PAM rejects self-referential listeners,
+invalid weights and weight without a candidate.
 
 Without `XDG_STATE_HOME`, PAM uses `$HOME/.local/state/pam`. Directories are
 mode `0700`; records and logs are mode `0600`. Application names are limited to
