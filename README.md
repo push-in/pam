@@ -805,6 +805,7 @@ pam up ... [--shutdown-timeout-ms N]              bound graceful stop before SIG
 pam up ... --env-file .env.production             load a private app environment
 pam up ... --health-check-url http://127.0.0.1:8080/health
            [--health-check-interval-ms N] [--health-check-timeout-ms N]
+           [--health-check-start-period-ms N]
            [--health-check-failures N]             recover live but unhealthy masters
 pam ps                                              list managed applications
 pam reload api                                      zero-downtime generational reload

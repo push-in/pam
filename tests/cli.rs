@@ -825,6 +825,8 @@ fn replaces_a_live_master_after_bounded_health_check_failures() {
             "250",
             "--health-check-timeout-ms",
             "50",
+            "--health-check-start-period-ms",
+            "1000",
             "--health-check-failures",
             "2",
             "--json",
@@ -838,7 +840,25 @@ fn replaces_a_live_master_after_bounded_health_check_failures() {
     let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
     let original_pid = started["pid"].as_u64().unwrap();
     assert_eq!(started["healthCheck"]["configured"], true);
+    assert_eq!(started["healthCheck"]["stateCode"], 5);
+    assert_eq!(started["healthCheck"]["startPeriodMillis"], 1000);
     assert!(!started.to_string().contains("/block"));
+
+    thread::sleep(Duration::from_millis(600));
+    let warming = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["status", "unhealthy-smoke", "--json"],
+    );
+    let warming: serde_json::Value = serde_json::from_slice(&warming.stdout).unwrap();
+    assert_eq!(warming["pid"].as_u64(), Some(original_pid));
+    assert_eq!(warming["healthCheck"]["stateCode"], 5);
+    assert_eq!(
+        warming["healthCheck"]["lastCheckedAtMillis"],
+        serde_json::Value::Null
+    );
+    assert_eq!(warming["healthCheck"]["totalUnhealthyRestartCount"], 0);
 
     let recovered = (0..100)
         .find_map(|_| {

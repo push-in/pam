@@ -41,6 +41,7 @@ const DEFAULT_MIN_UPTIME_MILLIS: u64 = 30_000;
 const DEFAULT_HEALTH_INTERVAL_MILLIS: u64 = 5_000;
 const DEFAULT_HEALTH_TIMEOUT_MILLIS: u64 = 1_000;
 const DEFAULT_HEALTH_FAILURE_THRESHOLD: u32 = 3;
+const MAX_HEALTH_START_PERIOD_MILLIS: u64 = 3_600_000;
 const DEFAULT_SHUTDOWN_TIMEOUT_MILLIS: u64 = 20_000;
 const MIN_SHUTDOWN_TIMEOUT_MILLIS: u64 = 100;
 const MAX_SHUTDOWN_TIMEOUT_MILLIS: u64 = 300_000;
@@ -162,6 +163,7 @@ enum HealthState {
     Healthy = 2,
     Failing = 3,
     Unhealthy = 4,
+    Starting = 5,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -199,6 +201,8 @@ struct ApplicationRecord {
     health_check_interval_millis: u64,
     #[serde(default = "default_health_timeout_millis")]
     health_check_timeout_millis: u64,
+    #[serde(default)]
+    health_check_start_period_millis: u64,
     #[serde(default = "default_health_failure_threshold")]
     health_check_failure_threshold: u32,
     #[serde(default)]
@@ -359,6 +363,8 @@ struct EcosystemApplication {
     health_check_interval_millis: u64,
     #[serde(default = "default_health_timeout_millis")]
     health_check_timeout_millis: u64,
+    #[serde(default)]
+    health_check_start_period_millis: u64,
     #[serde(default = "default_health_failure_threshold")]
     health_check_failure_threshold: u32,
     #[serde(default = "default_true")]
@@ -967,6 +973,10 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
             application.health_check_failure_threshold,
         )?;
         validate_shutdown_policy(application.shutdown_timeout_millis)?;
+        validate_health_start_period(
+            application.health_check_start_period_millis,
+            health_check.is_some(),
+        )?;
         let action = if !application.autostart {
             let record_path = paths.application(&name);
             if record_path.exists() {
@@ -995,6 +1005,8 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                         .arg(application.health_check_interval_millis.to_string())
                         .arg("--health-check-timeout-ms")
                         .arg(application.health_check_timeout_millis.to_string())
+                        .arg("--health-check-start-period-ms")
+                        .arg(application.health_check_start_period_millis.to_string())
                         .arg("--health-check-failures")
                         .arg(application.health_check_failure_threshold.to_string());
                 }
@@ -1050,6 +1062,8 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                         != application.health_check_interval_millis
                     || record.health_check_timeout_millis
                         != application.health_check_timeout_millis
+                    || record.health_check_start_period_millis
+                        != application.health_check_start_period_millis
                     || record.health_check_failure_threshold
                         != application.health_check_failure_threshold;
                 let policy_updated = record.memory_warning_bytes
@@ -1078,15 +1092,16 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     record.health_check_path = health_check.map(|(_, path)| path);
                     record.health_check_interval_millis = application.health_check_interval_millis;
                     record.health_check_timeout_millis = application.health_check_timeout_millis;
+                    record.health_check_start_period_millis =
+                        application.health_check_start_period_millis;
                     record.health_check_failure_threshold =
                         application.health_check_failure_threshold;
                     record.consecutive_health_failures = 0;
                     record.last_health_check_at_millis = None;
-                    record.health_state_code = if record.health_check_address.is_some() {
-                        HealthState::Healthy as u8
-                    } else {
-                        HealthState::Disabled as u8
-                    };
+                    record.health_state_code = initial_health_state(
+                        record.health_check_address.is_some(),
+                        record.health_check_start_period_millis,
+                    );
                     if !record.auto_restart {
                         record.recovery_state_code = RecoveryState::Disabled as u8;
                         record.next_restart_at_millis = None;
@@ -1247,6 +1262,10 @@ fn validate_ecosystem_application(
         application.min_uptime_millis,
     )?;
     validate_shutdown_policy(application.shutdown_timeout_millis)?;
+    validate_health_start_period(
+        application.health_check_start_period_millis,
+        application.health_check_url.is_some(),
+    )?;
     if let Some(path) = application.env_file.as_deref() {
         resolve_environment_file(root, path)?;
     }
@@ -1557,11 +1576,20 @@ fn reset_recovery(record: &mut ApplicationRecord) {
         RecoveryState::Disabled as u8
     };
     record.consecutive_health_failures = 0;
-    record.health_state_code = if record.health_check_address.is_some() {
-        HealthState::Healthy as u8
-    } else {
+    record.health_state_code = initial_health_state(
+        record.health_check_address.is_some(),
+        record.health_check_start_period_millis,
+    );
+}
+
+const fn initial_health_state(configured: bool, start_period_millis: u64) -> u8 {
+    if !configured {
         HealthState::Disabled as u8
-    };
+    } else if start_period_millis > 0 {
+        HealthState::Starting as u8
+    } else {
+        HealthState::Healthy as u8
+    }
 }
 
 fn health_probe(address: SocketAddr, path: &str, timeout: Duration) -> bool {
@@ -1601,6 +1629,10 @@ fn health_probe(address: SocketAddr, path: &str, timeout: Duration) -> bool {
             .is_some_and(|code| (200..300).contains(&code))
 }
 
+fn health_start_period_elapsed(state: &MasterState, start_period_millis: u64, now: u64) -> bool {
+    now.saturating_sub(state.started_at_millis) >= start_period_millis
+}
+
 fn schedule_health_probes(
     paths: &ManagerPaths,
     sender: &mpsc::Sender<HealthProbeResult>,
@@ -1620,6 +1652,7 @@ fn schedule_health_probes(
         };
         if record.desired_state_code != ApplicationState::Online as u8
             || in_flight.contains(&record.name)
+            || !health_start_period_elapsed(&state, record.health_check_start_period_millis, now)
             || record.last_health_check_at_millis.is_some_and(|checked| {
                 now.saturating_sub(checked) < record.health_check_interval_millis
             })
@@ -3110,6 +3143,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut health_check_url = None;
     let mut health_check_interval_millis = DEFAULT_HEALTH_INTERVAL_MILLIS;
     let mut health_check_timeout_millis = DEFAULT_HEALTH_TIMEOUT_MILLIS;
+    let mut health_check_start_period_millis = 0;
     let mut health_check_failure_threshold = DEFAULT_HEALTH_FAILURE_THRESHOLD;
     let mut auto_restart = true;
     let mut restart_delay_millis = DEFAULT_RESTART_DELAY_MILLIS;
@@ -3145,6 +3179,10 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             "--health-check-timeout-ms" => {
                 health_check_timeout_millis =
                     required_positive_u64(arguments.next(), "--health-check-timeout-ms")?
+            }
+            "--health-check-start-period-ms" => {
+                health_check_start_period_millis =
+                    required_u64(arguments.next(), "--health-check-start-period-ms")?
             }
             "--health-check-failures" => {
                 health_check_failure_threshold =
@@ -3230,6 +3268,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         health_check_timeout_millis,
         health_check_failure_threshold,
     )?;
+    validate_health_start_period(health_check_start_period_millis, health_check.is_some())?;
     if health_check.is_some() && !auto_restart {
         return Err("health checks require automatic restart".to_owned());
     }
@@ -3384,15 +3423,15 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         health_check_path: health_check.map(|(_, path)| path),
         health_check_interval_millis,
         health_check_timeout_millis,
+        health_check_start_period_millis,
         health_check_failure_threshold,
         consecutive_health_failures: 0,
         last_health_check_at_millis: None,
         last_health_success_at_millis: None,
-        health_state_code: if health_check_url.is_some() {
-            HealthState::Healthy as u8
-        } else {
-            HealthState::Disabled as u8
-        },
+        health_state_code: initial_health_state(
+            health_check_url.is_some(),
+            health_check_start_period_millis,
+        ),
         total_unhealthy_restart_count: 0,
         desired_state_code: ApplicationState::Online as u8,
         auto_restart,
@@ -3951,6 +3990,7 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
             "stateCode": record.health_state_code,
             "intervalMillis": record.health_check_interval_millis,
             "timeoutMillis": record.health_check_timeout_millis,
+            "startPeriodMillis": record.health_check_start_period_millis,
             "failureThreshold": record.health_check_failure_threshold,
             "consecutiveFailures": record.consecutive_health_failures,
             "lastCheckedAtMillis": record.last_health_check_at_millis,
@@ -4202,7 +4242,7 @@ fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
     }
     if !matches!(record.desired_state_code, 1 | 2)
         || !(1..=5).contains(&record.recovery_state_code)
-        || !(1..=4).contains(&record.health_state_code)
+        || !(1..=5).contains(&record.health_state_code)
     {
         return Err("invalid application recovery state".to_owned());
     }
@@ -4225,6 +4265,10 @@ fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
             record.health_check_path.as_deref().unwrap_or("/")
         )
     });
+    validate_health_start_period(
+        record.health_check_start_period_millis,
+        health_url.is_some(),
+    )?;
     validate_health_policy(
         health_url.as_deref(),
         record.health_check_interval_millis,
@@ -4294,6 +4338,11 @@ fn required_positive_u64(value: Option<OsString>, option: &str) -> Result<u64, S
         .filter(|value| *value > 0)
         .ok_or_else(|| format!("{option} requires a positive integer"))
 }
+fn required_u64(value: Option<OsString>, option: &str) -> Result<u64, String> {
+    required_utf8(value, option)?
+        .parse::<u64>()
+        .map_err(|_| format!("{option} requires a non-negative integer"))
+}
 fn validate_resource_policy(
     memory_warning_bytes: Option<u64>,
     task_warning_count: Option<u64>,
@@ -4325,6 +4374,21 @@ fn validate_shutdown_policy(timeout_millis: u64) -> Result<(), String> {
         return Err(format!(
             "shutdown timeout must be between {MIN_SHUTDOWN_TIMEOUT_MILLIS} and {MAX_SHUTDOWN_TIMEOUT_MILLIS} milliseconds"
         ));
+    }
+    Ok(())
+}
+
+fn validate_health_start_period(
+    start_period_millis: u64,
+    health_check_configured: bool,
+) -> Result<(), String> {
+    if start_period_millis > MAX_HEALTH_START_PERIOD_MILLIS {
+        return Err(format!(
+            "health check start period must be 0-{MAX_HEALTH_START_PERIOD_MILLIS} milliseconds"
+        ));
+    }
+    if start_period_millis > 0 && !health_check_configured {
+        return Err("health check start period requires a health check URL".to_owned());
     }
     Ok(())
 }
@@ -4509,8 +4573,9 @@ mod tests {
                 HealthState::Healthy as u8,
                 HealthState::Failing as u8,
                 HealthState::Unhealthy as u8,
+                HealthState::Starting as u8,
             ],
-            [1, 2, 3, 4]
+            [1, 2, 3, 4, 5]
         );
     }
 
@@ -4537,6 +4602,7 @@ mod tests {
             health_check_path: None,
             health_check_interval_millis: DEFAULT_HEALTH_INTERVAL_MILLIS,
             health_check_timeout_millis: DEFAULT_HEALTH_TIMEOUT_MILLIS,
+            health_check_start_period_millis: 0,
             health_check_failure_threshold: DEFAULT_HEALTH_FAILURE_THRESHOLD,
             consecutive_health_failures: 0,
             last_health_check_at_millis: None,
@@ -4592,6 +4658,25 @@ mod tests {
         assert!(validate_shutdown_policy(MAX_SHUTDOWN_TIMEOUT_MILLIS).is_ok());
         assert!(validate_shutdown_policy(MIN_SHUTDOWN_TIMEOUT_MILLIS - 1).is_err());
         assert!(validate_shutdown_policy(MAX_SHUTDOWN_TIMEOUT_MILLIS + 1).is_err());
+    }
+
+    #[test]
+    fn health_start_period_suppresses_liveness_until_elapsed() {
+        let state = MasterState {
+            version: 1,
+            pid: 1,
+            process_start: None,
+            workers: 1,
+            admin_address: None,
+            started_at_millis: 10_000,
+        };
+        assert!(!health_start_period_elapsed(&state, 30_000, 39_999));
+        assert!(health_start_period_elapsed(&state, 30_000, 40_000));
+        assert!(health_start_period_elapsed(&state, 0, 10_000));
+        assert!(!health_start_period_elapsed(&state, 30_000, 9_000));
+        assert!(validate_health_start_period(3_600_000, true).is_ok());
+        assert!(validate_health_start_period(3_600_001, true).is_err());
+        assert!(validate_health_start_period(1, false).is_err());
     }
 
     #[test]
@@ -4728,6 +4813,7 @@ env_file=".env.production"
 health_check_url="http://127.0.0.1:8080/health"
 health_check_interval_millis=5000
 health_check_timeout_millis=1000
+health_check_start_period_millis=30000
 health_check_failure_threshold=3
 "#;
         let limited = toml::from_str::<EcosystemConfig>(limited).unwrap();
@@ -4736,6 +4822,7 @@ health_check_failure_threshold=3
         assert_eq!(api.task_max_count, Some(16));
         assert_eq!(api.env_file, Some(PathBuf::from(".env.production")));
         assert_eq!(api.health_check_failure_threshold, 3);
+        assert_eq!(api.health_check_start_period_millis, 30_000);
         assert!(validate_resource_policy(Some(3), None, Some(2), None, "api").is_err());
     }
 
