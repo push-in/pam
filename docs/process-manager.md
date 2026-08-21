@@ -64,7 +64,9 @@ SHA-256 and detects later modification. The `Performance evidence` workflow
 accepts manual suite ID `5`, builds the measured release binary on Ubuntu 24.04,
 runs ten recovery rounds, verifies the manifest before upload, and retains the
 clean-host artifact for 30 days. Its default gates require 100% recovery,
-p95 at most 2000 ms, and daemon RSS growth at most 16 MiB.
+p95 at most 2000 ms, and daemon RSS growth at most 16 MiB. A launch failure
+keeps the workflow red but retains at most 64 KiB of CLI diagnostics and 1 MiB
+of application stderr so clean-host failures remain actionable after cleanup.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the

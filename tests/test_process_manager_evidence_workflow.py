@@ -27,6 +27,13 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn("retention-days: 30", workflow)
         self.assertNotIn("continue-on-error", workflow)
 
+        harness = (ROOT / "benchmarks/process-manager/run.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('tail -c 65536 >"${results}/launch-error.log"', harness)
+        self.assertIn('tail -c 1048576 "${application_error}"', harness)
+        self.assertIn("launch_status", harness)
+
 
 if __name__ == "__main__":
     unittest.main()

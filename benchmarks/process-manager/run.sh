@@ -20,7 +20,7 @@ for value in "${maximum_p95_millis}" "${maximum_rss_growth_bytes}"; do
 done
 [[ ! -L ${results} ]] || { printf 'refusing symlink results directory\n' >&2; exit 1; }
 mkdir -p "${results}"
-for artifact in recovery.csv resources.json metadata.json recovery-report.json evidence-manifest.json; do
+for artifact in recovery.csv resources.json metadata.json recovery-report.json evidence-manifest.json launch-error.log application-error.log; do
     [[ ! -e ${results}/${artifact} ]] || {
         printf 'refusing to overwrite recovery artifact: %s\n' "${results}/${artifact}" >&2
         exit 1
@@ -50,12 +50,25 @@ rss_bytes() {
     awk '/^VmRSS:/ {print $2 * 1024}' "/proc/${daemon_pid}/status"
 }
 rss_before=$(rss_bytes)
-(
+set +e
+launch_output=$(
     cd "${root}"
     "${pam_binary}" up tests/fixtures/server.php --name "${name}" --workers 1 \
         --restart-delay-ms 10 --restart-backoff-max-ms 100 \
-        --max-unstable-restarts 100 --min-uptime-ms 1000 >/dev/null
+        --max-unstable-restarts 100 --min-uptime-ms 1000 2>&1
 )
+launch_status=$?
+set -e
+if (( launch_status != 0 )); then
+    printf '%s\n' "${launch_output}" | tail -c 65536 >"${results}/launch-error.log"
+    application_error="${PAM_MANAGER_STATE_DIR}/logs/${name}.error.log"
+    if [[ -f ${application_error} && ! -L ${application_error} ]]; then
+        tail -c 1048576 "${application_error}" >"${results}/application-error.log"
+    fi
+    printf 'managed application failed to launch; diagnostics retained in %s\n' \
+        "${results}" >&2
+    exit "${launch_status}"
+fi
 
 printf 'round,recovery_millis,success\n' >"${results}/recovery.csv"
 for (( round = 1; round <= rounds; round++ )); do
