@@ -152,6 +152,7 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("dev", "Start the contextual development session", "Develop"),
         command("run", "Build and launch the active application", "Develop"),
         command("logs", "Stream logs from the active application", "Develop"),
+        command("daemon", "Manage the per-user PAM supervisor", "Develop"),
         command("devices", "List connected development targets", "Develop"),
         command("devtools", "Toggle contextual development tools", "Develop"),
         command("console", "Open the application console", "Develop"),

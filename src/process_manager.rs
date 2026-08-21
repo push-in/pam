@@ -1,7 +1,10 @@
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::net::Shutdown;
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -16,6 +19,33 @@ use crate::cluster::{
 
 const MAX_RECORD_BYTES: u64 = 1_048_576;
 const MAX_APPLICATIONS: usize = 1_024;
+const DEFAULT_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
+const DEFAULT_LOG_RETAIN: usize = 5;
+const MAX_LOG_RETAIN: usize = 100;
+const MAX_DAEMON_MESSAGE_BYTES: usize = 16 * 1024;
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[repr(u8)]
+enum DaemonOperation {
+    Ping = 1,
+    Stop = 2,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonRequest {
+    schema_version: u8,
+    operation_code: u8,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DaemonResponse {
+    schema_version: u8,
+    ok: bool,
+    pid: u32,
+    message: String,
+}
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[repr(u8)]
@@ -42,6 +72,10 @@ struct ApplicationRecord {
     master_state_file: PathBuf,
     stdout_log: PathBuf,
     stderr_log: PathBuf,
+    #[serde(default = "default_log_max_bytes")]
+    log_max_bytes: u64,
+    #[serde(default = "default_log_retain")]
+    log_retain: usize,
     created_at_millis: u64,
 }
 
@@ -59,10 +93,182 @@ pub fn run(
         "stop" => stop(arguments.collect()),
         "delete" => delete(arguments.collect()),
         "logs" => logs(arguments.collect()),
+        "daemon" => daemon(executable, arguments.collect()),
+        "__pamd" => daemon_serve(),
         _ => Err(format!(
             "unsupported PAM process-manager command: {command}"
         )),
     }
+}
+
+fn daemon(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let action = match arguments.as_slice() {
+        [action] => action.to_string_lossy(),
+        _ => return Err("daemon requires one of: start, status, stop".to_owned()),
+    };
+    match action.as_ref() {
+        "start" => {
+            if daemon_request(DaemonOperation::Ping).is_ok() {
+                println!("pamd is already online");
+                return Ok(0);
+            }
+            let paths = ManagerPaths::load()?;
+            let stderr = secure_append(&paths.logs.join("pamd.error.log"))?;
+            let stdout = secure_append(&paths.logs.join("pamd.out.log"))?;
+            let mut command = Command::new(executable);
+            command
+                .arg("__pamd")
+                .stdin(Stdio::null())
+                .stdout(stdout)
+                .stderr(stderr);
+            // SAFETY: the child is single-threaded between fork and exec.
+            unsafe {
+                command.pre_exec(|| {
+                    if libc::setsid() < 0 {
+                        Err(std::io::Error::last_os_error())
+                    } else {
+                        Ok(())
+                    }
+                })
+            };
+            command
+                .spawn()
+                .map_err(|error| format!("cannot start pamd: {error}"))?;
+            let deadline = Instant::now() + Duration::from_secs(5);
+            while Instant::now() < deadline {
+                if let Ok(response) = daemon_request(DaemonOperation::Ping) {
+                    println!("pamd is online (PID {})", response.pid);
+                    return Ok(0);
+                }
+                thread::sleep(Duration::from_millis(50));
+            }
+            Err("pamd did not become ready; inspect pamd.error.log".to_owned())
+        }
+        "status" => match daemon_request(DaemonOperation::Ping) {
+            Ok(response) => {
+                println!("pamd is online (PID {})", response.pid);
+                Ok(0)
+            }
+            Err(_) => {
+                println!("pamd is stopped");
+                Ok(1)
+            }
+        },
+        "stop" => {
+            let response = daemon_request(DaemonOperation::Stop)?;
+            println!("pamd stopped (PID {})", response.pid);
+            Ok(0)
+        }
+        _ => Err("daemon requires one of: start, status, stop".to_owned()),
+    }
+}
+
+fn daemon_serve() -> Result<u8, String> {
+    let socket = daemon_socket_path()?;
+    if socket.exists() {
+        if daemon_request(DaemonOperation::Ping).is_ok() {
+            return Err("pamd is already running".to_owned());
+        }
+        fs::remove_file(&socket).map_err(|error| format!("cannot remove stale socket: {error}"))?;
+    }
+    let listener = UnixListener::bind(&socket)
+        .map_err(|error| format!("cannot bind daemon socket {}: {error}", socket.display()))?;
+    fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))
+        .map_err(|error| error.to_string())?;
+    let own_uid = unsafe { libc::geteuid() };
+    for connection in listener.incoming() {
+        let mut stream = connection.map_err(|error| error.to_string())?;
+        if peer_uid(&stream)? != own_uid {
+            continue;
+        }
+        let request = read_daemon_request(&mut stream)?;
+        let operation = request.operation_code;
+        let stop = operation == DaemonOperation::Stop as u8;
+        let valid = request.schema_version == 1
+            && matches!(operation, value if value == DaemonOperation::Ping as u8 || value == DaemonOperation::Stop as u8);
+        let response = DaemonResponse {
+            schema_version: 1,
+            ok: valid,
+            pid: std::process::id(),
+            message: if valid { "ok" } else { "unsupported request" }.to_owned(),
+        };
+        serde_json::to_writer(&mut stream, &response).map_err(|error| error.to_string())?;
+        stream.write_all(b"\n").map_err(|error| error.to_string())?;
+        if valid && stop {
+            break;
+        }
+    }
+    fs::remove_file(&socket).map_err(|error| format!("cannot remove daemon socket: {error}"))?;
+    Ok(0)
+}
+
+fn daemon_request(operation: DaemonOperation) -> Result<DaemonResponse, String> {
+    let mut stream = UnixStream::connect(daemon_socket_path()?)
+        .map_err(|error| format!("cannot connect to pamd: {error}"))?;
+    serde_json::to_writer(
+        &mut stream,
+        &DaemonRequest {
+            schema_version: 1,
+            operation_code: operation as u8,
+        },
+    )
+    .map_err(|error| error.to_string())?;
+    stream.write_all(b"\n").map_err(|error| error.to_string())?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| error.to_string())?;
+    let response: DaemonResponse =
+        serde_json::from_reader(stream).map_err(|error| error.to_string())?;
+    if response.schema_version != 1 || !response.ok {
+        return Err(response.message);
+    }
+    Ok(response)
+}
+
+fn read_daemon_request(stream: &mut UnixStream) -> Result<DaemonRequest, String> {
+    let mut bytes = Vec::new();
+    stream
+        .take((MAX_DAEMON_MESSAGE_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() > MAX_DAEMON_MESSAGE_BYTES {
+        return Err("daemon request exceeds size limit".to_owned());
+    }
+    serde_json::from_slice(&bytes).map_err(|error| format!("invalid daemon request: {error}"))
+}
+
+fn peer_uid(stream: &UnixStream) -> Result<libc::uid_t, String> {
+    let mut credentials = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let result = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            (&raw mut credentials).cast(),
+            &raw mut length,
+        )
+    };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(credentials.uid)
+}
+
+fn daemon_socket_path() -> Result<PathBuf, String> {
+    let base = if let Some(path) = std::env::var_os("PAM_MANAGER_RUNTIME_DIR") {
+        PathBuf::from(path)
+    } else if let Some(path) = std::env::var_os("XDG_RUNTIME_DIR") {
+        PathBuf::from(path).join("pam")
+    } else {
+        ManagerPaths::load()?.runtime.join("daemon")
+    };
+    secure_directory(&base)?;
+    Ok(base.join("pamd.sock"))
 }
 
 fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -71,6 +277,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut workers = None;
     let mut attach = false;
     let mut json = false;
+    let mut log_max_bytes = DEFAULT_LOG_MAX_BYTES;
+    let mut log_retain = DEFAULT_LOG_RETAIN;
     let mut application_arguments = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -79,6 +287,15 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             "--workers" => workers = Some(required_positive(arguments.next(), "--workers")?),
             "--attach" => attach = true,
             "--json" => json = true,
+            "--log-max-bytes" => {
+                log_max_bytes = required_positive_u64(arguments.next(), "--log-max-bytes")?
+            }
+            "--log-retain" => {
+                log_retain = required_positive(arguments.next(), "--log-retain")?;
+                if log_retain > MAX_LOG_RETAIN {
+                    return Err(format!("--log-retain cannot exceed {MAX_LOG_RETAIN}"));
+                }
+            }
             "--" => {
                 application_arguments.extend(arguments);
                 break;
@@ -119,8 +336,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let master_state_file = paths.runtime.join(format!("{name}.master.json"));
     let stdout_log = paths.logs.join(format!("{name}.out.log"));
     let stderr_log = paths.logs.join(format!("{name}.error.log"));
-    let stdout = secure_append(&stdout_log)?;
-    let stderr = secure_append(&stderr_log)?;
+    rotate_log(&stdout_log, log_max_bytes, log_retain)?;
+    rotate_log(&stderr_log, log_max_bytes, log_retain)?;
     let mut launch_arguments = Vec::<OsString>::new();
     if laravel {
         launch_arguments.push(OsString::from("octane:start"));
@@ -143,11 +360,18 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     }
     let mut command = Command::new(executable);
     command.args(&launch_arguments);
-    command
-        .current_dir(&cwd)
-        .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr);
+    command.current_dir(&cwd);
+    if attach {
+        command
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit());
+    } else {
+        command
+            .stdin(Stdio::null())
+            .stdout(secure_append(&stdout_log)?)
+            .stderr(secure_append(&stderr_log)?);
+    }
     if !attach {
         // SAFETY: this runs in the child after fork and before exec. setsid has no
         // memory allocation requirement and detaches the supervisor from the shell.
@@ -161,7 +385,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             })
         };
     }
-    let child = command
+    let mut child = command
         .spawn()
         .map_err(|error| format!("cannot start {name:?}: {error}"))?;
     let effective_state = if laravel {
@@ -203,6 +427,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         master_state_file: effective_state,
         stdout_log,
         stderr_log,
+        log_max_bytes,
+        log_retain,
         created_at_millis: epoch_millis(),
     };
     write_record(&record_path, &record)?;
@@ -215,10 +441,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         );
     }
     if attach {
-        let status = child
-            .wait_with_output()
-            .map_err(|error| error.to_string())?
-            .status;
+        let status = child.wait().map_err(|error| error.to_string())?;
         return Ok(status.code().unwrap_or(1).try_into().unwrap_or(1));
     }
     Ok(0)
@@ -332,6 +555,8 @@ fn restart(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     if record.command.len() < 2 {
         return Err(format!("application {name:?} has no restart command"));
     }
+    rotate_log(&record.stdout_log, record.log_max_bytes, record.log_retain)?;
+    rotate_log(&record.stderr_log, record.log_max_bytes, record.log_retain)?;
     let stdout = secure_append(&record.stdout_log)?;
     let stderr = secure_append(&record.stderr_log)?;
     let mut command = Command::new(executable);
@@ -403,11 +628,15 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut name = None;
     let mut lines = 100_usize;
     let mut errors = false;
+    let mut both = false;
+    let mut follow = false;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.to_string_lossy().as_ref() {
             "--lines" => lines = required_positive(arguments.next(), "--lines")?,
             "--errors" => errors = true,
+            "--both" => both = true,
+            "--follow" | "-f" => follow = true,
             option if option.starts_with('-') => {
                 return Err(format!("unknown logs option: {option}"));
             }
@@ -418,15 +647,101 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
     let name = name.ok_or_else(|| "logs requires an application name".to_owned())?;
     validate_name(&name)?;
     let record = record(&name)?;
-    print_tail(
-        if errors {
-            &record.stderr_log
-        } else {
-            &record.stdout_log
-        },
-        lines.min(100_000),
-    )?;
+    if errors && both {
+        return Err("logs accepts either --errors or --both, not both".to_owned());
+    }
+    let paths = if both {
+        vec![record.stdout_log, record.stderr_log]
+    } else if errors {
+        vec![record.stderr_log]
+    } else {
+        vec![record.stdout_log]
+    };
+    for path in &paths {
+        print_tail(path, lines.min(100_000))?;
+    }
+    if follow {
+        follow_logs(&paths)?;
+    }
     Ok(0)
+}
+
+fn follow_logs(paths: &[PathBuf]) -> Result<(), String> {
+    let mut offsets = paths
+        .iter()
+        .map(|path| {
+            fs::metadata(path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0)
+        })
+        .collect::<Vec<_>>();
+    loop {
+        for (index, path) in paths.iter().enumerate() {
+            let length = fs::metadata(path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0);
+            if length < offsets[index] {
+                offsets[index] = 0;
+            }
+            if length > offsets[index] {
+                let mut file = File::open(path)
+                    .map_err(|error| format!("cannot follow log {}: {error}", path.display()))?;
+                file.seek(SeekFrom::Start(offsets[index]))
+                    .map_err(|error| error.to_string())?;
+                let mut bytes = Vec::new();
+                file.read_to_end(&mut bytes)
+                    .map_err(|error| error.to_string())?;
+                std::io::stdout()
+                    .write_all(&bytes)
+                    .map_err(|error| error.to_string())?;
+                std::io::stdout()
+                    .flush()
+                    .map_err(|error| error.to_string())?;
+                offsets[index] = length;
+            }
+        }
+        thread::sleep(Duration::from_millis(200));
+    }
+}
+
+fn rotate_log(path: &Path, max_bytes: u64, retain: usize) -> Result<(), String> {
+    let Ok(metadata) = fs::symlink_metadata(path) else {
+        return Ok(());
+    };
+    if metadata.file_type().is_symlink() {
+        return Err(format!("refusing symlink log {}", path.display()));
+    }
+    if metadata.len() < max_bytes {
+        return Ok(());
+    }
+    for index in (1..=retain).rev() {
+        let source = if index == 1 {
+            path.to_path_buf()
+        } else {
+            rotated_log_path(path, index - 1)
+        };
+        let destination = rotated_log_path(path, index);
+        if source.exists() {
+            if destination.exists() {
+                fs::remove_file(&destination).map_err(|error| error.to_string())?;
+            }
+            fs::rename(&source, &destination)
+                .map_err(|error| format!("cannot rotate log {}: {error}", path.display()))?;
+        }
+    }
+    Ok(())
+}
+
+fn rotated_log_path(path: &Path, index: usize) -> PathBuf {
+    PathBuf::from(format!("{}.{}", path.display(), index))
+}
+
+const fn default_log_max_bytes() -> u64 {
+    DEFAULT_LOG_MAX_BYTES
+}
+
+const fn default_log_retain() -> usize {
+    DEFAULT_LOG_RETAIN
 }
 
 fn print_tail(path: &Path, lines: usize) -> Result<(), String> {
@@ -601,6 +916,13 @@ fn required_positive(value: Option<OsString>, option: &str) -> Result<usize, Str
         .filter(|value| *value > 0)
         .ok_or_else(|| format!("{option} requires a positive integer"))
 }
+fn required_positive_u64(value: Option<OsString>, option: &str) -> Result<u64, String> {
+    required_utf8(value, option)?
+        .parse::<u64>()
+        .ok()
+        .filter(|value| *value > 0)
+        .ok_or_else(|| format!("{option} requires a positive integer"))
+}
 fn parse_json_only(arguments: Vec<OsString>, command: &str) -> Result<bool, String> {
     match arguments.as_slice() {
         [] => Ok(false),
@@ -662,6 +984,13 @@ mod tests {
                 ApplicationState::Stopped as u8
             ],
             [1, 2]
+        );
+    }
+    #[test]
+    fn rotated_log_names_are_stable() {
+        assert_eq!(
+            rotated_log_path(Path::new("api.log"), 3),
+            PathBuf::from("api.log.3")
         );
     }
 }

@@ -633,7 +633,15 @@ fn run() -> Result<u8, CliError> {
             .is_some_and(|argument| !argument.to_string_lossy().starts_with('-'));
     if matches!(
         script_arg.to_string_lossy().as_ref(),
-        "up" | "ps" | "status" | "describe" | "reload" | "restart" | "stop" | "delete"
+        "up" | "ps"
+            | "status"
+            | "describe"
+            | "reload"
+            | "restart"
+            | "stop"
+            | "delete"
+            | "daemon"
+            | "__pamd"
     ) || managed_logs
     {
         let command = script_arg.to_string_lossy();

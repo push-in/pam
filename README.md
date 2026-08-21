@@ -799,6 +799,8 @@ pam up [index.php] --name api --workers N          start and detach a managed ap
 pam ps                                              list managed applications
 pam reload api                                      zero-downtime generational reload
 pam logs api --errors --lines 200                   inspect retained manager logs
+pam logs api --both --follow                        follow stdout and stderr across rotation
+pam daemon start|status|stop                        control the private per-user supervisor
 pam test [directory] [--pest|--phpunit]            test inside the Embed SAPI
 pam routes [index.php]                              inspect registered routes
 pam inspect [index.php]                             inspect PHP, INI, ABI, and extensions
