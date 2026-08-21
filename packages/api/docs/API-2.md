@@ -81,7 +81,8 @@ The `feat/api-2-foundation` development line implements:
 - deterministic request lifecycle observers with failure-aware reverse cleanup;
 - a bounded opt-in development profiler that never retains headers or payloads;
 - transactions, events, lease-based at-least-once jobs with retry/dead-letter
-  transitions, retry and circuit-breaker primitives;
+  transitions and allowlisted bounded JSON serialization, retry and
+  circuit-breaker primitives;
 - strict CORS, trusted-proxy IP resolution and cooperative deadlines;
 - composable health checks and container-scope diagnostics;
 - an in-memory test client with fluent response assertions;

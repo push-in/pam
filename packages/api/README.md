@@ -280,6 +280,11 @@ exceptions and explicit retry outcomes release the job with a bounded delay,
 and exhausted jobs enter the dead-letter set. Only failure class names are
 retained, never exception messages that may contain application data.
 
+Cross-process adapters should encode only `SerializableJob` implementations
+through `JobCodec`. The codec uses an explicit name-to-class allowlist, a
+versioned JSON envelope, a 64 KiB size limit and a depth limit. It never accepts
+PHP serialized objects or client-supplied class names.
+
 ## Request lifecycle observers
 
 Register a `RequestLifecycleObserver` with `$app->observe()` to build profilers,
