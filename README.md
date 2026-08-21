@@ -805,6 +805,8 @@ pam scale api 8                                     persist and apply a new work
 pam save && pam resurrect                           save and restore the desired process list
 pam startup --print|--install                       configure the systemd user service
 pam monit [--json]                                  inspect process health and capacity
+pam config:check [pam.toml] [--json]                validate declarative multi-service config
+pam apply [pam.toml] [--json]                       reconcile all declared applications
 pam test [directory] [--pest|--phpunit]            test inside the Embed SAPI
 pam routes [index.php]                              inspect registered routes
 pam inspect [index.php]                             inspect PHP, INI, ABI, and extensions

@@ -333,6 +333,75 @@ fn manages_a_private_per_user_daemon() {
 }
 
 #[test]
+fn validates_and_reconciles_a_multi_application_pam_toml() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let state = temporary_path("ecosystem-state");
+    let config = root.join(format!("pam-test-{}.toml", std::process::id()));
+    fs::write(
+        &config,
+        r#"schema_version = 1
+
+[applications.ecosystem-smoke]
+kind_code = 1
+script = "tests/fixtures/server.php"
+workers = 1
+cwd = "."
+autostart = true
+"#,
+    )
+    .unwrap();
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+
+    let checked = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["config:check", config.to_str().unwrap(), "--json"],
+    );
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let applied = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["apply", config.to_str().unwrap(), "--json"],
+    );
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    let converged = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["apply", config.to_str().unwrap(), "--json"],
+    );
+    assert!(converged.status.success());
+    let applied: serde_json::Value = serde_json::from_slice(&applied.stdout).unwrap();
+    let converged: serde_json::Value = serde_json::from_slice(&converged.stdout).unwrap();
+    assert_eq!(applied["results"][0]["actionCode"], 1);
+    assert_eq!(converged["results"][0]["actionCode"], 2);
+
+    let stopped = run_managed_pam(&root, &state, port, &["stop", "ecosystem-smoke", "--json"]);
+    assert!(stopped.status.success());
+    let deleted = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["delete", "ecosystem-smoke", "--json"],
+    );
+    assert!(deleted.status.success());
+    fs::remove_file(config).unwrap();
+    fs::remove_dir_all(state).unwrap();
+}
+
+#[test]
 fn evaluates_bounded_overload_evidence() {
     let results = temporary_path("overload-evidence");
     fs::create_dir_all(&results).unwrap();

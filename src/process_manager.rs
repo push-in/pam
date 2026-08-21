@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -94,6 +95,39 @@ struct SavedProcessList {
     applications: Vec<SavedApplication>,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EcosystemConfig {
+    schema_version: u8,
+    applications: BTreeMap<String, EcosystemApplication>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EcosystemApplication {
+    kind_code: u8,
+    #[serde(default)]
+    script: Option<PathBuf>,
+    #[serde(default = "default_workers")]
+    workers: usize,
+    #[serde(default = "default_current_directory")]
+    cwd: PathBuf,
+    #[serde(default)]
+    arguments: Vec<String>,
+    #[serde(default = "default_true")]
+    autostart: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum ReconcileAction {
+    Created = 1,
+    Unchanged = 2,
+    Scaled = 3,
+    Restarted = 4,
+    Disabled = 5,
+}
+
 pub fn run(
     executable: &OsStr,
     command: &str,
@@ -113,12 +147,245 @@ pub fn run(
         "resurrect" => resurrect(executable, arguments.collect()),
         "startup" => startup(executable, arguments.collect()),
         "monit" => monit(arguments.collect()),
+        "apply" => apply_ecosystem(executable, arguments.collect()),
+        "config:check" => check_ecosystem(arguments.collect()),
         "daemon" => daemon(executable, arguments.collect()),
         "__pamd" => daemon_serve(executable),
         _ => Err(format!(
             "unsupported PAM process-manager command: {command}"
         )),
     }
+}
+
+fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let (path, json) = parse_config_arguments(arguments, "apply")?;
+    let (config, root) = load_ecosystem(&path)?;
+    let paths = ManagerPaths::load()?;
+    let mut results = Vec::new();
+    for (name, application) in config.applications {
+        validate_ecosystem_application(&root, &name, &application)?;
+        let action = if !application.autostart {
+            let record_path = paths.application(&name);
+            if record_path.exists() {
+                let record = read_record(&record_path)?;
+                if running_state(&record)
+                    .as_ref()
+                    .is_some_and(master_is_running)
+                {
+                    let mut command = Command::new(executable);
+                    command.args(["stop", &name]);
+                    run_reconcile_command(command, &name)?;
+                }
+            }
+            ReconcileAction::Disabled
+        } else {
+            let record_path = paths.application(&name);
+            if !record_path.exists() {
+                let cwd = scoped_cwd(&root, &application.cwd)?;
+                let mut command = Command::new(executable);
+                command
+                    .current_dir(cwd)
+                    .args(["up", "--name", &name, "--workers"]);
+                command.arg(application.workers.to_string());
+                if application.kind_code == ApplicationKind::Runtime as u8 {
+                    command.arg(
+                        application
+                            .script
+                            .as_deref()
+                            .unwrap_or(Path::new("index.php")),
+                    );
+                }
+                if !application.arguments.is_empty() {
+                    command.arg("--").args(&application.arguments);
+                }
+                run_reconcile_command(command, &name)?;
+                ReconcileAction::Created
+            } else {
+                let record = read_record(&record_path)?;
+                let state = running_state(&record);
+                if !state.as_ref().is_some_and(master_is_running) {
+                    let mut command = Command::new(executable);
+                    command.args(["restart", &name]);
+                    run_reconcile_command(command, &name)?;
+                    ReconcileAction::Restarted
+                } else if state
+                    .as_ref()
+                    .is_some_and(|state| state.workers != application.workers)
+                {
+                    let mut command = Command::new(executable);
+                    command.args(["scale", &name, &application.workers.to_string()]);
+                    run_reconcile_command(command, &name)?;
+                    ReconcileAction::Scaled
+                } else {
+                    ReconcileAction::Unchanged
+                }
+            }
+        };
+        results.push(serde_json::json!({"name":name,"actionCode":action as u8}));
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"results":results})
+        );
+    } else {
+        println!(
+            "Applied {} applications from {}",
+            results.len(),
+            path.display()
+        );
+        for result in results {
+            println!(
+                "{}\taction {}",
+                result["name"].as_str().unwrap_or("?"),
+                result["actionCode"]
+            );
+        }
+    }
+    Ok(0)
+}
+
+fn check_ecosystem(arguments: Vec<OsString>) -> Result<u8, String> {
+    let (path, json) = parse_config_arguments(arguments, "config:check")?;
+    let (config, root) = load_ecosystem(&path)?;
+    for (name, application) in &config.applications {
+        validate_ecosystem_application(&root, name, application)?;
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"valid":true,"applications":config.applications.len()})
+        );
+    } else {
+        println!(
+            "{} is valid ({} applications)",
+            path.display(),
+            config.applications.len()
+        );
+    }
+    Ok(0)
+}
+
+fn parse_config_arguments(
+    arguments: Vec<OsString>,
+    command: &str,
+) -> Result<(PathBuf, bool), String> {
+    let mut path = None;
+    let mut json = false;
+    for argument in arguments {
+        if argument == "--json" {
+            json = true;
+        } else if argument.to_string_lossy().starts_with('-') || path.is_some() {
+            return Err(format!(
+                "{command} accepts a pam.toml path and optional --json"
+            ));
+        } else {
+            path = Some(PathBuf::from(argument));
+        }
+    }
+    Ok((path.unwrap_or_else(|| PathBuf::from("pam.toml")), json))
+}
+
+fn load_ecosystem(path: &Path) -> Result<(EcosystemConfig, PathBuf), String> {
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(format!(
+            "refusing symlink ecosystem configuration {}",
+            path.display()
+        ));
+    }
+    let path = fs::canonicalize(path)
+        .map_err(|error| format!("cannot resolve {}: {error}", path.display()))?;
+    let metadata = fs::symlink_metadata(&path).map_err(|error| error.to_string())?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD_BYTES {
+        return Err(format!(
+            "invalid ecosystem configuration {}",
+            path.display()
+        ));
+    }
+    let text = fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let config: EcosystemConfig =
+        toml::from_str(&text).map_err(|error| format!("invalid pam.toml: {error}"))?;
+    if config.schema_version != 1
+        || config.applications.is_empty()
+        || config.applications.len() > MAX_APPLICATIONS
+    {
+        return Err("pam.toml requires schema_version = 1 and 1-1024 applications".to_owned());
+    }
+    let root = path
+        .parent()
+        .ok_or_else(|| "pam.toml has no parent directory".to_owned())?
+        .to_path_buf();
+    Ok((config, root))
+}
+
+fn validate_ecosystem_application(
+    root: &Path,
+    name: &str,
+    application: &EcosystemApplication,
+) -> Result<(), String> {
+    validate_name(name)?;
+    if !matches!(application.kind_code, 1 | 2) {
+        return Err(format!("application {name:?} kind_code must be 1 or 2"));
+    }
+    if application.workers == 0 || application.workers > 256 {
+        return Err(format!("application {name:?} workers must be 1-256"));
+    }
+    if application.kind_code == ApplicationKind::LaravelOctane as u8 && application.script.is_some()
+    {
+        return Err(format!("Laravel application {name:?} cannot set script"));
+    }
+    let cwd = scoped_cwd(root, &application.cwd)?;
+    if application.kind_code == ApplicationKind::LaravelOctane as u8
+        && !cwd.join("artisan").is_file()
+    {
+        return Err(format!(
+            "Laravel application {name:?} requires artisan in {}",
+            cwd.display()
+        ));
+    }
+    if application
+        .arguments
+        .iter()
+        .any(|value| value.contains(['\0', '\n', '\r']))
+    {
+        return Err(format!(
+            "application {name:?} contains invalid argument controls"
+        ));
+    }
+    Ok(())
+}
+
+fn scoped_cwd(root: &Path, cwd: &Path) -> Result<PathBuf, String> {
+    let cwd = fs::canonicalize(root.join(cwd))
+        .map_err(|error| format!("cannot resolve service cwd: {error}"))?;
+    if !cwd.starts_with(root) {
+        return Err("service cwd must stay beneath the pam.toml directory".to_owned());
+    }
+    Ok(cwd)
+}
+
+fn run_reconcile_command(mut command: Command, name: &str) -> Result<(), String> {
+    let output = command
+        .output()
+        .map_err(|error| format!("cannot reconcile {name:?}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot reconcile {name:?}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+const fn default_workers() -> usize {
+    1
+}
+fn default_current_directory() -> PathBuf {
+    PathBuf::from(".")
+}
+const fn default_true() -> bool {
+    true
 }
 
 fn scale(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -1225,6 +1492,16 @@ mod tests {
         );
         assert_eq!(
             [
+                ReconcileAction::Created as u8,
+                ReconcileAction::Unchanged as u8,
+                ReconcileAction::Scaled as u8,
+                ReconcileAction::Restarted as u8,
+                ReconcileAction::Disabled as u8,
+            ],
+            [1, 2, 3, 4, 5]
+        );
+        assert_eq!(
+            [
                 ApplicationState::Online as u8,
                 ApplicationState::Stopped as u8
             ],
@@ -1269,5 +1546,20 @@ mod tests {
         assert!(unit.contains("ExecStart=/opt/PAM\\x20Runtime/pam __pamd"));
         assert!(unit.contains("NoNewPrivileges=true"));
         assert!(!unit.contains("ProtectHome="));
+    }
+
+    #[test]
+    fn ecosystem_contract_rejects_unknown_fields_and_string_kinds() {
+        let unknown = r#"schema_version=1
+[applications.api]
+kind_code=1
+surprise=true
+"#;
+        assert!(toml::from_str::<EcosystemConfig>(unknown).is_err());
+        let string_kind = r#"schema_version=1
+[applications.api]
+kind_code="runtime"
+"#;
+        assert!(toml::from_str::<EcosystemConfig>(string_kind).is_err());
     }
 }
