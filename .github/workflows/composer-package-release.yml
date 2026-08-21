@@ -197,6 +197,32 @@ jobs:
             git push "${remote}" "${split_sha}:refs/heads/main"
             exit 0
           fi
+          remote_main=$(git ls-remote "${remote}" refs/heads/main |
+            awk 'NR == 1 { print $1 }')
+          if [ -n "${remote_main}" ]; then
+            git fetch --no-tags "${remote}" \
+              "+refs/heads/main:refs/remotes/pam-package/main"
+          fi
+          if [ -n "${remote_main}" ] &&
+            ! git merge-base --is-ancestor "${remote_main}" "${split_sha}"; then
+            archive_ref="refs/heads/archive/main-before-${PACKAGE_TAG#v}"
+            archived_main=$(git ls-remote "${remote}" "${archive_ref}" |
+              awk 'NR == 1 { print $1 }')
+            if [ -n "${archived_main}" ]; then
+              test "${archived_main}" = "${remote_main}" || {
+                printf 'Archive %s points to %s, expected %s\n' \
+                  "${archive_ref}" "${archived_main}" "${remote_main}" >&2
+                exit 1
+              }
+            fi
+            git push --atomic \
+              --force-with-lease="refs/heads/main:${remote_main}" \
+              "${remote}" \
+              "${remote_main}:${archive_ref}" \
+              "${split_sha}:refs/heads/main" \
+              "${split_sha}:refs/tags/${PACKAGE_TAG}"
+            exit 0
+          fi
           git push --atomic "${remote}" \
             "${split_sha}:refs/heads/main" \
             "${split_sha}:refs/tags/${PACKAGE_TAG}"
