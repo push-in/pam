@@ -9,6 +9,9 @@ pam up --name billing --workers 8
 pam up --name critical --restart-delay-ms 250 --restart-backoff-max-ms 15000 \
   --max-unstable-restarts 10 --min-uptime-ms 30000
 pam up --name production --env-file .env.production
+pam up --name api --health-check-url http://127.0.0.1:8080/health \
+  --health-check-interval-ms 5000 --health-check-timeout-ms 1000 \
+  --health-check-failures 3
 pam ps
 pam status billing
 pam describe billing
@@ -67,6 +70,16 @@ shell execution never occur. The file must be a non-symlink regular UTF-8 file
 owned by the current user, mode `0600` or stricter, at most 64 KiB and 256
 variables. Manager state-directory overrides are reserved and rejected.
 
+`--health-check-url` adds active liveness supervision for a master that remains
+present but no longer serves healthy responses. PAM accepts only an explicit
+loopback IP and port over HTTP, never follows redirects, never resolves DNS,
+bounds the response prefix to 8 KiB, and treats only status `200`–`299` as
+healthy. Probes run outside the daemon request thread with at most 64 in flight;
+stale results are discarded by PID and configuration identity. After the
+configured consecutive-failure threshold, PAM records the unhealthy event,
+kills the stuck master, and delegates restart/backoff/circuit behavior to the
+same recovery state machine. Health checks require automatic restart.
+
 Log files rotate before launch or restart when they reach 10 MiB and retain
 five generations by default. `pam up --log-max-bytes N --log-retain N` stores
 per-application limits. `pam logs NAME --follow` streams appended bytes and
@@ -97,6 +110,7 @@ All lifecycle commands accept `--json`. Public kind and state values are
 sequential integer enums: Runtime kind `1`, Laravel Octane kind `2`, online
 state `1`, and stopped state `2`. Recovery states are healthy `1`, backoff `2`,
 stabilizing `3`, circuit open `4`, and disabled `5`.
+Health states are disabled `1`, healthy `2`, failing `3`, and unhealthy `4`.
 
 ## Linux state and security
 
@@ -147,6 +161,10 @@ task_warning_count = 64
 memory_max_bytes = 805306368
 task_max_count = 96
 env_file = ".env.production"
+health_check_url = "http://127.0.0.1:8080/health"
+health_check_interval_millis = 5000
+health_check_timeout_millis = 1000
+health_check_failure_threshold = 3
 auto_restart = true
 restart_delay_millis = 250
 restart_backoff_max_millis = 15000

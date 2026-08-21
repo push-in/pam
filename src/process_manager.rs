@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -9,6 +9,7 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -37,6 +38,10 @@ const DEFAULT_RESTART_DELAY_MILLIS: u64 = 250;
 const DEFAULT_RESTART_BACKOFF_MAX_MILLIS: u64 = 15_000;
 const DEFAULT_MAX_UNSTABLE_RESTARTS: u32 = 10;
 const DEFAULT_MIN_UPTIME_MILLIS: u64 = 30_000;
+const DEFAULT_HEALTH_INTERVAL_MILLIS: u64 = 5_000;
+const DEFAULT_HEALTH_TIMEOUT_MILLIS: u64 = 1_000;
+const DEFAULT_HEALTH_FAILURE_THRESHOLD: u32 = 3;
+const MAX_CONCURRENT_HEALTH_PROBES: usize = 64;
 const MAX_ENVIRONMENT_FILE_BYTES: u64 = 64 * 1024;
 const MAX_ENVIRONMENT_VARIABLES: usize = 256;
 const MAX_DASHBOARD_REQUEST_BYTES: usize = 16 * 1024;
@@ -146,6 +151,15 @@ enum RecoveryState {
     Disabled = 5,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum HealthState {
+    Disabled = 1,
+    Healthy = 2,
+    Failing = 3,
+    Unhealthy = 4,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApplicationRecord {
@@ -171,6 +185,26 @@ struct ApplicationRecord {
     task_max_count: Option<u64>,
     #[serde(default)]
     environment_file: Option<PathBuf>,
+    #[serde(default)]
+    health_check_address: Option<SocketAddr>,
+    #[serde(default)]
+    health_check_path: Option<String>,
+    #[serde(default = "default_health_interval_millis")]
+    health_check_interval_millis: u64,
+    #[serde(default = "default_health_timeout_millis")]
+    health_check_timeout_millis: u64,
+    #[serde(default = "default_health_failure_threshold")]
+    health_check_failure_threshold: u32,
+    #[serde(default)]
+    consecutive_health_failures: u32,
+    #[serde(default)]
+    last_health_check_at_millis: Option<u64>,
+    #[serde(default)]
+    last_health_success_at_millis: Option<u64>,
+    #[serde(default = "default_disabled_health_state")]
+    health_state_code: u8,
+    #[serde(default)]
+    total_unhealthy_restart_count: u64,
     #[serde(default = "default_stopped_state")]
     desired_state_code: u8,
     #[serde(default)]
@@ -192,6 +226,16 @@ struct ApplicationRecord {
     #[serde(default = "default_disabled_recovery_state")]
     recovery_state_code: u8,
     created_at_millis: u64,
+}
+
+#[derive(Debug)]
+struct HealthProbeResult {
+    name: String,
+    pid: u32,
+    address: SocketAddr,
+    path: String,
+    checked_at_millis: u64,
+    success: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -301,6 +345,14 @@ struct EcosystemApplication {
     autostart: bool,
     #[serde(default)]
     env_file: Option<PathBuf>,
+    #[serde(default)]
+    health_check_url: Option<String>,
+    #[serde(default = "default_health_interval_millis")]
+    health_check_interval_millis: u64,
+    #[serde(default = "default_health_timeout_millis")]
+    health_check_timeout_millis: u64,
+    #[serde(default = "default_health_failure_threshold")]
+    health_check_failure_threshold: u32,
     #[serde(default = "default_true")]
     auto_restart: bool,
     #[serde(default = "default_restart_delay_millis")]
@@ -801,6 +853,54 @@ fn parse_socket(value: Option<OsString>, option: &str) -> Result<std::net::Socke
         .map_err(|_| format!("{option} requires IP:port"))
 }
 
+fn parse_health_check_url(value: &str) -> Result<(SocketAddr, String), String> {
+    let remainder = value
+        .strip_prefix("http://")
+        .ok_or_else(|| "health check URL must use http://".to_owned())?;
+    let (authority, path) = remainder
+        .split_once('/')
+        .map_or((remainder, "/".to_owned()), |(authority, path)| {
+            (authority, format!("/{path}"))
+        });
+    let address = authority
+        .parse::<SocketAddr>()
+        .map_err(|_| "health check URL requires an explicit IP address and port".to_owned())?;
+    if !address.ip().is_loopback() {
+        return Err("health check URL must target a loopback address".to_owned());
+    }
+    let lowercase_path = path.to_ascii_lowercase();
+    if path.len() > 1024
+        || !path.starts_with('/')
+        || path.contains(['\0', '\r', '\n', ' '])
+        || lowercase_path.contains("%0d")
+        || lowercase_path.contains("%0a")
+    {
+        return Err("health check path is invalid or exceeds 1024 bytes".to_owned());
+    }
+    Ok((address, path))
+}
+
+fn validate_health_policy(
+    url: Option<&str>,
+    interval_millis: u64,
+    timeout_millis: u64,
+    failure_threshold: u32,
+) -> Result<Option<(SocketAddr, String)>, String> {
+    if !(250..=3_600_000).contains(&interval_millis) {
+        return Err("health check interval must be 250-3600000 milliseconds".to_owned());
+    }
+    if !(50..=5_000).contains(&timeout_millis) || timeout_millis >= interval_millis {
+        return Err(
+            "health check timeout must be 50-5000 milliseconds and less than the interval"
+                .to_owned(),
+        );
+    }
+    if !(1..=100).contains(&failure_threshold) {
+        return Err("health check failure threshold must be 1-100".to_owned());
+    }
+    url.map(parse_health_check_url).transpose()
+}
+
 fn parse_basis_points(value: Option<OsString>) -> Result<u16, String> {
     required_utf8(value, "--weight-bps")?
         .parse::<u16>()
@@ -852,6 +952,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
             .as_deref()
             .map(|path| resolve_environment_file(&root, path))
             .transpose()?;
+        let health_check = validate_health_policy(
+            application.health_check_url.as_deref(),
+            application.health_check_interval_millis,
+            application.health_check_timeout_millis,
+            application.health_check_failure_threshold,
+        )?;
         let action = if !application.autostart {
             let record_path = paths.application(&name);
             if record_path.exists() {
@@ -871,6 +977,17 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 command.arg(application.workers.to_string());
                 if let Some(path) = environment_file.as_deref() {
                     command.arg("--env-file").arg(path);
+                }
+                if let Some(url) = application.health_check_url.as_deref() {
+                    command
+                        .arg("--health-check-url")
+                        .arg(url)
+                        .arg("--health-check-interval-ms")
+                        .arg(application.health_check_interval_millis.to_string())
+                        .arg("--health-check-timeout-ms")
+                        .arg(application.health_check_timeout_millis.to_string())
+                        .arg("--health-check-failures")
+                        .arg(application.health_check_failure_threshold.to_string());
                 }
                 if !application.auto_restart {
                     command.arg("--no-autorestart");
@@ -914,6 +1031,16 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 let limit_updated = record.memory_max_bytes != application.memory_max_bytes
                     || record.task_max_count != application.task_max_count;
                 let environment_updated = record.environment_file != environment_file;
+                let health_updated = record.health_check_address
+                    != health_check.as_ref().map(|(address, _)| *address)
+                    || record.health_check_path
+                        != health_check.as_ref().map(|(_, path)| path.clone())
+                    || record.health_check_interval_millis
+                        != application.health_check_interval_millis
+                    || record.health_check_timeout_millis
+                        != application.health_check_timeout_millis
+                    || record.health_check_failure_threshold
+                        != application.health_check_failure_threshold;
                 let policy_updated = record.memory_warning_bytes
                     != application.memory_warning_bytes
                     || record.task_warning_count != application.task_warning_count
@@ -922,7 +1049,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || record.restart_backoff_max_millis != application.restart_backoff_max_millis
                     || record.max_unstable_restarts != application.max_unstable_restarts
                     || record.min_uptime_millis != application.min_uptime_millis;
-                if policy_updated || limit_updated || environment_updated {
+                if policy_updated || limit_updated || environment_updated || health_updated {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
                     record.memory_max_bytes = application.memory_max_bytes;
@@ -933,6 +1060,20 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     record.max_unstable_restarts = application.max_unstable_restarts;
                     record.min_uptime_millis = application.min_uptime_millis;
                     record.environment_file = environment_file;
+                    record.health_check_address =
+                        health_check.as_ref().map(|(address, _)| *address);
+                    record.health_check_path = health_check.map(|(_, path)| path);
+                    record.health_check_interval_millis = application.health_check_interval_millis;
+                    record.health_check_timeout_millis = application.health_check_timeout_millis;
+                    record.health_check_failure_threshold =
+                        application.health_check_failure_threshold;
+                    record.consecutive_health_failures = 0;
+                    record.last_health_check_at_millis = None;
+                    record.health_state_code = if record.health_check_address.is_some() {
+                        HealthState::Healthy as u8
+                    } else {
+                        HealthState::Disabled as u8
+                    };
                     if !record.auto_restart {
                         record.recovery_state_code = RecoveryState::Disabled as u8;
                         record.next_restart_at_millis = None;
@@ -940,7 +1081,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
-                if (limit_updated || environment_updated)
+                if (limit_updated || environment_updated || health_updated)
                     && state.as_ref().is_some_and(master_is_running)
                 {
                     restart_record(executable, &record, false, false)?;
@@ -1094,6 +1235,17 @@ fn validate_ecosystem_application(
     )?;
     if let Some(path) = application.env_file.as_deref() {
         resolve_environment_file(root, path)?;
+    }
+    validate_health_policy(
+        application.health_check_url.as_deref(),
+        application.health_check_interval_millis,
+        application.health_check_timeout_millis,
+        application.health_check_failure_threshold,
+    )?;
+    if application.health_check_url.is_some() && !application.auto_restart {
+        return Err(format!(
+            "application {name:?} health checks require auto_restart = true"
+        ));
     }
     if application.kind_code == ApplicationKind::LaravelOctane as u8 && application.script.is_some()
     {
@@ -1274,6 +1426,18 @@ const fn default_min_uptime_millis() -> u64 {
 const fn default_disabled_recovery_state() -> u8 {
     RecoveryState::Disabled as u8
 }
+const fn default_health_interval_millis() -> u64 {
+    DEFAULT_HEALTH_INTERVAL_MILLIS
+}
+const fn default_health_timeout_millis() -> u64 {
+    DEFAULT_HEALTH_TIMEOUT_MILLIS
+}
+const fn default_health_failure_threshold() -> u32 {
+    DEFAULT_HEALTH_FAILURE_THRESHOLD
+}
+const fn default_disabled_health_state() -> u8 {
+    HealthState::Disabled as u8
+}
 
 fn scale(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut arguments = arguments.into_iter();
@@ -1375,6 +1539,137 @@ fn reset_recovery(record: &mut ApplicationRecord) {
     } else {
         RecoveryState::Disabled as u8
     };
+    record.consecutive_health_failures = 0;
+    record.health_state_code = if record.health_check_address.is_some() {
+        HealthState::Healthy as u8
+    } else {
+        HealthState::Disabled as u8
+    };
+}
+
+fn health_probe(address: SocketAddr, path: &str, timeout: Duration) -> bool {
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, timeout) else {
+        return false;
+    };
+    if stream.set_read_timeout(Some(timeout)).is_err()
+        || stream.set_write_timeout(Some(timeout)).is_err()
+        || write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let mut bytes = Vec::new();
+    if Read::by_ref(&mut stream)
+        .take(8193)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > 8192
+    {
+        return false;
+    }
+    let Some(line) = bytes.split(|byte| *byte == b'\n').next() else {
+        return false;
+    };
+    let Ok(line) = std::str::from_utf8(line) else {
+        return false;
+    };
+    let mut fields = line.strip_suffix('\r').unwrap_or(line).split_whitespace();
+    matches!(fields.next(), Some("HTTP/1.0" | "HTTP/1.1"))
+        && fields
+            .next()
+            .and_then(|code| code.parse::<u16>().ok())
+            .is_some_and(|code| (200..300).contains(&code))
+}
+
+fn schedule_health_probes(
+    paths: &ManagerPaths,
+    sender: &mpsc::Sender<HealthProbeResult>,
+    in_flight: &mut HashSet<String>,
+) -> Result<(), String> {
+    let now = epoch_millis();
+    for record in read_all_records(paths)? {
+        if in_flight.len() >= MAX_CONCURRENT_HEALTH_PROBES {
+            break;
+        }
+        let (Some(address), Some(path), Some(state)) = (
+            record.health_check_address,
+            record.health_check_path.clone(),
+            running_state(&record).filter(master_is_running),
+        ) else {
+            continue;
+        };
+        if record.desired_state_code != ApplicationState::Online as u8
+            || in_flight.contains(&record.name)
+            || record.last_health_check_at_millis.is_some_and(|checked| {
+                now.saturating_sub(checked) < record.health_check_interval_millis
+            })
+        {
+            continue;
+        }
+        in_flight.insert(record.name.clone());
+        let sender = sender.clone();
+        let name = record.name;
+        let timeout = Duration::from_millis(record.health_check_timeout_millis);
+        thread::spawn(move || {
+            let success = health_probe(address, &path, timeout);
+            let _ = sender.send(HealthProbeResult {
+                name,
+                pid: state.pid,
+                address,
+                path,
+                checked_at_millis: epoch_millis(),
+                success,
+            });
+        });
+    }
+    Ok(())
+}
+
+fn apply_health_probe_results(
+    paths: &ManagerPaths,
+    receiver: &mpsc::Receiver<HealthProbeResult>,
+    in_flight: &mut HashSet<String>,
+) -> Result<(), String> {
+    while let Ok(result) = receiver.try_recv() {
+        in_flight.remove(&result.name);
+        let path = paths.application(&result.name);
+        let Ok(mut record) = read_record(&path) else {
+            continue;
+        };
+        let state = running_state(&record);
+        if record.desired_state_code != ApplicationState::Online as u8
+            || record.health_check_address != Some(result.address)
+            || record.health_check_path.as_deref() != Some(result.path.as_str())
+            || state.as_ref().map(|state| state.pid) != Some(result.pid)
+        {
+            continue;
+        }
+        record.last_health_check_at_millis = Some(result.checked_at_millis);
+        if result.success {
+            record.consecutive_health_failures = 0;
+            record.last_health_success_at_millis = Some(result.checked_at_millis);
+            record.health_state_code = HealthState::Healthy as u8;
+        } else {
+            record.consecutive_health_failures =
+                record.consecutive_health_failures.saturating_add(1);
+            if record.consecutive_health_failures >= record.health_check_failure_threshold {
+                record.health_state_code = HealthState::Unhealthy as u8;
+                record.total_unhealthy_restart_count =
+                    record.total_unhealthy_restart_count.saturating_add(1);
+                write_record(&path, &record)?;
+                if let Some(state) = state.filter(master_is_running) {
+                    signal_master(&state, libc::SIGKILL)?;
+                }
+                continue;
+            }
+            record.health_state_code = HealthState::Failing as u8;
+        }
+        write_record(&path, &record)?;
+    }
+    Ok(())
 }
 
 fn schedule_recovery(record: &mut ApplicationRecord, now: u64) {
@@ -2488,12 +2783,24 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
     }
     let mut next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
     let mut next_supervision = Instant::now();
+    let (health_sender, health_receiver) = mpsc::channel();
+    let mut health_probes_in_flight = HashSet::new();
     let own_uid = unsafe { libc::geteuid() };
     loop {
         reap_daemon_children();
+        if let Err(error) =
+            apply_health_probe_results(&paths, &health_receiver, &mut health_probes_in_flight)
+        {
+            eprintln!("pamd health result error: {error}");
+        }
         if Instant::now() >= next_supervision {
             if let Err(error) = supervise_applications(executable, &paths) {
                 eprintln!("pamd supervision error: {error}");
+            }
+            if let Err(error) =
+                schedule_health_probes(&paths, &health_sender, &mut health_probes_in_flight)
+            {
+                eprintln!("pamd health scheduling error: {error}");
             }
             next_supervision = Instant::now() + SUPERVISION_INTERVAL;
         }
@@ -2794,6 +3101,10 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut memory_max_bytes = None;
     let mut task_max_count = None;
     let mut environment_file = None;
+    let mut health_check_url = None;
+    let mut health_check_interval_millis = DEFAULT_HEALTH_INTERVAL_MILLIS;
+    let mut health_check_timeout_millis = DEFAULT_HEALTH_TIMEOUT_MILLIS;
+    let mut health_check_failure_threshold = DEFAULT_HEALTH_FAILURE_THRESHOLD;
     let mut auto_restart = true;
     let mut restart_delay_millis = DEFAULT_RESTART_DELAY_MILLIS;
     let mut restart_backoff_max_millis = DEFAULT_RESTART_BACKOFF_MAX_MILLIS;
@@ -2813,6 +3124,23 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     arguments.next(),
                     "--env-file",
                 )?))
+            }
+            "--health-check-url" => {
+                health_check_url = Some(required_utf8(arguments.next(), "--health-check-url")?)
+            }
+            "--health-check-interval-ms" => {
+                health_check_interval_millis =
+                    required_positive_u64(arguments.next(), "--health-check-interval-ms")?
+            }
+            "--health-check-timeout-ms" => {
+                health_check_timeout_millis =
+                    required_positive_u64(arguments.next(), "--health-check-timeout-ms")?
+            }
+            "--health-check-failures" => {
+                health_check_failure_threshold =
+                    required_positive(arguments.next(), "--health-check-failures")?
+                        .try_into()
+                        .map_err(|_| "--health-check-failures is too large".to_owned())?
             }
             "--restart-delay-ms" => {
                 restart_delay_millis =
@@ -2885,6 +3213,15 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         max_unstable_restarts,
         min_uptime_millis,
     )?;
+    let health_check = validate_health_policy(
+        health_check_url.as_deref(),
+        health_check_interval_millis,
+        health_check_timeout_millis,
+        health_check_failure_threshold,
+    )?;
+    if health_check.is_some() && !auto_restart {
+        return Err("health checks require automatic restart".to_owned());
+    }
 
     let cwd = fs::canonicalize(std::env::current_dir().map_err(|error| error.to_string())?)
         .map_err(|error| format!("cannot resolve application directory: {error}"))?;
@@ -3031,6 +3368,20 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         memory_max_bytes,
         task_max_count,
         environment_file,
+        health_check_address: health_check.as_ref().map(|(address, _)| *address),
+        health_check_path: health_check.map(|(_, path)| path),
+        health_check_interval_millis,
+        health_check_timeout_millis,
+        health_check_failure_threshold,
+        consecutive_health_failures: 0,
+        last_health_check_at_millis: None,
+        last_health_success_at_millis: None,
+        health_state_code: if health_check_url.is_some() {
+            HealthState::Healthy as u8
+        } else {
+            HealthState::Disabled as u8
+        },
+        total_unhealthy_restart_count: 0,
         desired_state_code: ApplicationState::Online as u8,
         auto_restart,
         restart_delay_millis,
@@ -3135,6 +3486,8 @@ fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
     record.recovery_state_code = RecoveryState::Disabled as u8;
     record.unstable_restart_count = 0;
     record.next_restart_at_millis = None;
+    record.consecutive_health_failures = 0;
+    record.health_state_code = HealthState::Disabled as u8;
     write_record(&path, &record)?;
     let Some(state) = running_state(&record) else {
         return Ok(0);
@@ -3555,6 +3908,17 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
         "environmentFileConfigured": record.environment_file.is_some(),
+        "healthCheck": {
+            "configured": record.health_check_address.is_some(),
+            "stateCode": record.health_state_code,
+            "intervalMillis": record.health_check_interval_millis,
+            "timeoutMillis": record.health_check_timeout_millis,
+            "failureThreshold": record.health_check_failure_threshold,
+            "consecutiveFailures": record.consecutive_health_failures,
+            "lastCheckedAtMillis": record.last_health_check_at_millis,
+            "lastSuccessAtMillis": record.last_health_success_at_millis,
+            "totalUnhealthyRestartCount": record.total_unhealthy_restart_count,
+        },
         "resources": resources,
         "resourcePolicy": {
             "memoryWarningBytes": record.memory_warning_bytes,
@@ -3798,7 +4162,9 @@ fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
             RecoveryState::Disabled as u8
         };
     }
-    if !matches!(record.desired_state_code, 1 | 2) || !(1..=5).contains(&record.recovery_state_code)
+    if !matches!(record.desired_state_code, 1 | 2)
+        || !(1..=5).contains(&record.recovery_state_code)
+        || !(1..=4).contains(&record.health_state_code)
     {
         return Err("invalid application recovery state".to_owned());
     }
@@ -3808,6 +4174,27 @@ fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
         record.max_unstable_restarts,
         record.min_uptime_millis,
     )?;
+    if record.health_check_address.is_some() != record.health_check_path.is_some() {
+        return Err(
+            "application health check address and path must be configured together".to_owned(),
+        );
+    }
+    let health_url = record.health_check_address.map(|address| {
+        format!(
+            "http://{}{}",
+            address,
+            record.health_check_path.as_deref().unwrap_or("/")
+        )
+    });
+    validate_health_policy(
+        health_url.as_deref(),
+        record.health_check_interval_millis,
+        record.health_check_timeout_millis,
+        record.health_check_failure_threshold,
+    )?;
+    if health_url.is_some() && !record.auto_restart {
+        return Err("application health checks require automatic restart".to_owned());
+    }
     Ok(record)
 }
 fn read_all_records(paths: &ManagerPaths) -> Result<Vec<ApplicationRecord>, String> {
@@ -4068,6 +4455,15 @@ mod tests {
             ],
             [1, 2, 3, 4, 5]
         );
+        assert_eq!(
+            [
+                HealthState::Disabled as u8,
+                HealthState::Healthy as u8,
+                HealthState::Failing as u8,
+                HealthState::Unhealthy as u8,
+            ],
+            [1, 2, 3, 4]
+        );
     }
 
     #[test]
@@ -4088,6 +4484,16 @@ mod tests {
             memory_max_bytes: None,
             task_max_count: None,
             environment_file: None,
+            health_check_address: None,
+            health_check_path: None,
+            health_check_interval_millis: DEFAULT_HEALTH_INTERVAL_MILLIS,
+            health_check_timeout_millis: DEFAULT_HEALTH_TIMEOUT_MILLIS,
+            health_check_failure_threshold: DEFAULT_HEALTH_FAILURE_THRESHOLD,
+            consecutive_health_failures: 0,
+            last_health_check_at_millis: None,
+            last_health_success_at_millis: None,
+            health_state_code: HealthState::Disabled as u8,
+            total_unhealthy_restart_count: 0,
             desired_state_code: ApplicationState::Online as u8,
             auto_restart: true,
             restart_delay_millis: 100,
@@ -4137,6 +4543,22 @@ mod tests {
                 .contains("reserved")
         );
         fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn health_checks_are_loopback_bounded_and_do_not_accept_header_injection() {
+        let (address, path) =
+            parse_health_check_url("http://127.0.0.1:8080/health?full=1").unwrap();
+        assert!(address.ip().is_loopback());
+        assert_eq!(path, "/health?full=1");
+        for rejected in [
+            "https://127.0.0.1:8080/health",
+            "http://example.com:8080/health",
+            "http://192.0.2.1:8080/health",
+            "http://127.0.0.1:8080/health%0d%0aHost:evil",
+            "http://127.0.0.1/health",
+        ] {
+            assert!(parse_health_check_url(rejected).is_err(), "{rejected}");
+        }
     }
     #[test]
     fn rotated_log_names_are_stable() {
@@ -4225,12 +4647,17 @@ memory_max_bytes=2048
 task_warning_count=8
 task_max_count=16
 env_file=".env.production"
+health_check_url="http://127.0.0.1:8080/health"
+health_check_interval_millis=5000
+health_check_timeout_millis=1000
+health_check_failure_threshold=3
 "#;
         let limited = toml::from_str::<EcosystemConfig>(limited).unwrap();
         let api = &limited.applications["api"];
         assert_eq!(api.memory_max_bytes, Some(2048));
         assert_eq!(api.task_max_count, Some(16));
         assert_eq!(api.env_file, Some(PathBuf::from(".env.production")));
+        assert_eq!(api.health_check_failure_threshold, 3);
         assert!(validate_resource_policy(Some(3), None, Some(2), None, "api").is_err());
     }
 

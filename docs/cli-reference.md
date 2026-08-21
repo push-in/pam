@@ -100,7 +100,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Runtime
 
 - `pam start` — Run a supervised server cluster.
-- `pam up` — Start a managed application with optional private environment.
+- `pam up` — Start an environment-aware, health-supervised application.
 - `pam ps` — List managed PAM applications.
 - `pam status` — Inspect managed application health.
 - `pam describe` — Describe a managed application.
