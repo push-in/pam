@@ -1,0 +1,110 @@
+name: Product cross-surface visual certification
+
+on:
+  schedule:
+    - cron: '41 4 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pam-product-visual-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  android:
+    name: Capture PAM Native Product
+    uses: ./.github/workflows/android-visual.yml
+
+  desktop:
+    name: Capture PAM Desktop Product
+    uses: ./.github/workflows/desktop-visual.yml
+
+  certify:
+    name: Certify shared semantic tokens across Native and Desktop
+    needs: [android, desktop]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: pam-product-android-visual-${{ github.sha }}
+          path: visual/android
+      - uses: actions/download-artifact@v4
+        with:
+          name: pam-product-desktop-visual-${{ github.sha }}
+          path: visual/desktop
+      - name: Prove both captures use identical design tokens
+        run: |
+          cmp \
+            visual/android/packages/contracts/design-tokens.json \
+            visual/desktop/packages/contracts/design-tokens.json
+      - name: Build the canonical evidence workspace
+        run: |
+          evidence=product-visual-evidence
+          install -D -m 0644 \
+            visual/android/packages/contracts/design-tokens.json \
+            "${evidence}/packages/contracts/design-tokens.json"
+          for mode in light dark; do
+            install -D -m 0644 \
+              "visual/android/apps/native/artifacts/screenshots/product-native-${mode}.png" \
+              "${evidence}/apps/native/artifacts/screenshots/product-native-${mode}.png"
+            install -D -m 0644 \
+              "visual/desktop/apps/desktop/artifacts/screenshots/product-desktop-${mode}.png" \
+              "${evidence}/apps/desktop/artifacts/screenshots/product-desktop-${mode}.png"
+          done
+      - name: Verify semantic parity in light and dark modes
+        run: |
+          evidence=product-visual-evidence
+          python3 scripts/product-visual-evidence.py \
+            --tokens "${evidence}/packages/contracts/design-tokens.json" \
+            --native "${evidence}/apps/native/artifacts/screenshots/product-native-light.png" \
+            --desktop "${evidence}/apps/desktop/artifacts/screenshots/product-desktop-light.png" \
+            --mode-code 1 \
+            --output "${evidence}/artifacts/product-visual-light.json"
+          python3 scripts/product-visual-evidence.py \
+            --tokens "${evidence}/packages/contracts/design-tokens.json" \
+            --native "${evidence}/apps/native/artifacts/screenshots/product-native-dark.png" \
+            --desktop "${evidence}/apps/desktop/artifacts/screenshots/product-desktop-dark.png" \
+            --mode-code 2 \
+            --output "${evidence}/artifacts/product-visual-dark.json"
+      - name: Seal and verify the portable evidence bundle
+        env:
+          PAM_NATIVE_COMMIT: 26a768c9a7e0137bda9fa7de23f46c9308de2839
+          PAM_DESKTOP_COMMIT: c89ea15a78eb3509a8611e42302c867c3c09bbbf
+        run: |
+          evidence=product-visual-evidence
+          jq -n \
+            --arg revision "${GITHUB_SHA}" \
+            --arg nativeCommit "${PAM_NATIVE_COMMIT}" \
+            --arg desktopCommit "${PAM_DESKTOP_COMMIT}" \
+            --arg runUrl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{
+              schemaVersion: 1,
+              resultCode: 1,
+              revision: $revision,
+              nativeCommit: $nativeCommit,
+              desktopCommit: $desktopCommit,
+              runUrl: $runUrl,
+              modes: [
+                {modeCode: 1, report: "artifacts/product-visual-light.json"},
+                {modeCode: 2, report: "artifacts/product-visual-dark.json"}
+              ]
+            }' >"${evidence}/certification.json"
+          (
+            cd "${evidence}"
+            find . -type f ! -name SHA256SUMS -print0 \
+              | sort -z \
+              | xargs -0 sha256sum >SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pam-product-visual-certified-${{ github.sha }}
+          path: product-visual-evidence/
+          if-no-files-found: error
+          retention-days: 30

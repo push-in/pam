@@ -1,5 +1,6 @@
 use std::ffi::{OsStr, OsString, c_char, c_int};
 use std::marker::PhantomData;
+#[cfg(unix)]
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::ptr;
@@ -682,7 +683,13 @@ fn normalize_exit_status(status: c_int) -> u8 {
 }
 
 fn to_c_buffer(value: &OsStr) -> Result<Vec<u8>, String> {
+    #[cfg(unix)]
     let bytes = value.as_bytes();
+    #[cfg(windows)]
+    let bytes = value
+        .to_str()
+        .ok_or("Windows PHP Embed arguments must be valid UTF-8")?
+        .as_bytes();
     if bytes.contains(&0) {
         return Err("arguments cannot contain a NUL byte".to_owned());
     }

@@ -35,6 +35,7 @@ Com um simulador inicializado:
 ```bash
 pam devices
 pam run
+pam dev
 pam logs
 pam devtools
 pam diagnostics
@@ -44,11 +45,24 @@ pam mobile ios:screenshot . --output artifacts/screenshots/home-ios.png
 `ios:run` prepara o host, compila, instala e inicia o bundle ID declarado em
 `pam-native.json`.
 
+`dev` faz a compilação e instalação inicial uma vez e abre o servidor local de
+hot reload em `127.0.0.1:39100`. Cada mudança gera um bundle `PNA1` determinístico
+de no máximo 16 MiB; o host debug valida a resposta durante o download, recusa
+redirects, ativa a nova árvore PHP de forma transacional em
+`Library/Caches/pam/dev` e preserva a versão ativa se a atualização falhar. O
+cache do simulador mantém apenas a versão ativa. No projeto, o próximo `dev`
+remove tanto `DerivedData` quanto o bundle temporário anterior antes de compilar,
+evitando o acúmulo de builds antigos.
+
 `devtools` alterna a overlay UIKit no host debug gerado, com FPS, custos de
 decode/mount, p95 do engine, commits e timeline de capacidades.
 
 `diagnostics` captura um snapshot schema 1 do simulador em execução, com
 métricas agregadas, timeline limitada e sem mensagens ou labels da aplicação.
+O bloco `hotReload` inclui a janela limitada a 64 amostras, p95 do aceite da
+versão até o primeiro frame, falhas e o orçamento de 1.000 ms. Ele pode ser
+validado offline com `pam-native/scripts/check-hot-reload-evidence.php` usando o
+mesmo contrato aceito para Android e iOS.
 O host debug grava em seu cache privado fora da main thread; a CLI impõe limite
 de 64 KiB e remove o arquivo imediatamente após a leitura. A forma explícita é
 `pam mobile ios:diagnostics .`.

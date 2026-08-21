@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Barrier};
@@ -982,6 +982,14 @@ fn serves_rest_and_websocket_events_on_the_same_port() {
         "{response}"
     );
     assert!(
+        response.contains("pam_event_loop_lag_max_seconds"),
+        "{response}"
+    );
+    assert!(
+        response.contains("pam_event_loop_lag_average_seconds"),
+        "{response}"
+    );
+    assert!(
         response.contains("pam_process_resident_memory_bytes"),
         "{response}"
     );
@@ -1190,4 +1198,41 @@ fn serves_rest_and_websocket_events_on_the_same_port() {
             .starts_with("HTTP/1.1 429 Too Many Requests")
     });
     assert!(saw_rate_limit, "rate limiter did not reject a request");
+}
+
+#[test]
+fn cancels_suspended_php_when_the_http_client_disconnects() {
+    let server = ServerProcess::start();
+    let mut client = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    client
+        .write_all(
+            b"GET /disconnect-cancel HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap();
+    thread::sleep(Duration::from_millis(50));
+    client.shutdown(Shutdown::Both).unwrap();
+    drop(client);
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    let cancellations = loop {
+        let metrics = server
+            .http_request("GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+        let value = metrics.lines().find_map(|line| {
+            line.strip_prefix("pam_http_client_disconnect_cancellations_total ")
+                .and_then(|value| value.parse::<u64>().ok())
+        });
+        if value.is_some_and(|value| value >= 1) {
+            break value.unwrap();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "disconnect cancellation was not observed:\n{metrics}"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert_eq!(cancellations, 1);
+
+    let recovered =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(recovered.starts_with("HTTP/1.1 200 OK"), "{recovered}");
 }

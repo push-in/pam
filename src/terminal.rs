@@ -280,7 +280,10 @@ pub fn print_help(executable: &OsStr) {
                 "Inspect one diagnostics subsystem",
             ),
             ("profile | trace", "Capture profiling or trace diagnostics"),
-            ("top [admin-url]", "Stream live runtime metrics"),
+            (
+                "top [admin-url] [--json]",
+                "Stream live runtime metrics or NDJSON diagnostics",
+            ),
             ("benchmark <url>", "Measure throughput and latency"),
         ],
     );
@@ -316,6 +319,14 @@ pub fn print_help(executable: &OsStr) {
             ("package", "Create a signed platform distributable"),
             ("sign", "Validate release-signing configuration"),
             ("release [--check]", "Run every local release gate"),
+            (
+                "distribution:verify <manifest>",
+                "Verify signed clean-host evidence offline",
+            ),
+            (
+                "distribution:sign <draft>",
+                "Sign validated clean-host evidence",
+            ),
             (
                 "desktop <command>",
                 "Develop and diagnose a Pam Desktop app",
@@ -382,6 +393,14 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 (
                     "--admin-address IP:PORT",
                     "Expose health and metrics control plane",
+                ),
+                (
+                    "PAM_ADMIN_TOKEN",
+                    "Required Bearer token for non-loopback control planes",
+                ),
+                (
+                    "PAM_ADMIN_TOKEN_FILE",
+                    "Read the Bearer from a bounded regular secret file",
                 ),
                 ("--graceful-timeout MS", "Worker shutdown deadline"),
                 ("--startup-timeout MS", "Worker readiness deadline"),
@@ -493,12 +512,45 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("--fix", "Apply safe repairs after dependency preflight"),
                 ("--ci", "Disable interactive/color output for automation"),
                 ("--json", "Emit a stable structured diagnostic envelope"),
+                ("--schema", "Print the embedded JSON Schema contract"),
+                ("--validate FILE", "Validate a saved report offline"),
             ],
             &[
                 "doctor",
                 "doctor --fix",
                 "doctor ./my-project --ci",
                 "doctor --json",
+                "doctor --schema",
+                "doctor --validate doctor-report.json",
+            ],
+        ),
+        "distribution:verify" => (
+            "Verify signed clean-host distribution evidence without network access.",
+            "distribution:verify <manifest.json> [--json]",
+            &[(
+                "--json",
+                "Emit a stable machine-readable verification result",
+            )],
+            &[
+                "distribution:verify evidence/distribution.json",
+                "distribution:verify evidence/distribution.json --json",
+            ],
+        ),
+        "distribution:sign" => (
+            "Validate and sign clean-host evidence with a protected Ed25519 key.",
+            "distribution:sign <draft.json> --key <private-key> --output <manifest.json>",
+            &[
+                (
+                    "--key FILE",
+                    "Canonical base64 Ed25519 seed in a private file",
+                ),
+                (
+                    "--output FILE",
+                    "Create a new signed manifest without overwriting",
+                ),
+            ],
+            &[
+                "distribution:sign evidence/draft.json --key evidence.key --output evidence/distribution.json",
             ],
         ),
         "support" => (
@@ -523,14 +575,49 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &["clean --dry-run", "clean . --json", "clean . --all"],
         ),
+        "catalog" => (
+            "Discover the same versioned command authority used by help, completions, and generated documentation.",
+            "catalog <--json|--schema|--compat-schema|--validate FILE [--json]|--compat BASELINE CANDIDATE [--json]>",
+            &[
+                ("--json", "Emit the machine-readable CLI catalog"),
+                ("--schema", "Print its embedded Draft 2020-12 JSON Schema"),
+                (
+                    "--compat-schema",
+                    "Print the strict compatibility-report JSON Schema",
+                ),
+                (
+                    "--validate FILE",
+                    "Validate a bounded saved catalog offline",
+                ),
+                (
+                    "--compat BASELINE CANDIDATE",
+                    "Reject breaking command catalog changes",
+                ),
+            ],
+            &[
+                "catalog --json",
+                "catalog --schema",
+                "catalog --compat-schema",
+                "catalog --validate catalog.json --json",
+                "catalog --compat previous.json candidate.json --json",
+            ],
+        ),
         "top" => (
             "Display live metrics from a Pam cluster control plane.",
             "top [admin-url] [options]",
             &[
                 ("--iterations N", "Number of samples; default: 10"),
                 ("--interval-ms N", "Delay between samples; default: 1000"),
+                (
+                    "--lag-warn-ms N",
+                    "Highlight current worker lag at or above N; default: 10",
+                ),
+                ("--json", "Stream one versioned NDJSON object per sample"),
             ],
-            &["top", "top http://127.0.0.1:3010 --iterations 60"],
+            &[
+                "top",
+                "top http://127.0.0.1:3010 --iterations 60 --lag-warn-ms 10",
+            ],
         ),
         "timeline" => (
             "Normalize a redacted DevTools snapshot into Chrome Trace Event JSON.",
@@ -585,13 +672,20 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &["editor:install vscode", "editor:install neovim"],
         ),
         "self-update" => (
-            "Install a release through PAM's HTTPS and SHA-256 verified channel.",
+            "Install a release authorized by PAM's pinned distribution identity.",
             "self-update [vMAJOR.MINOR.PATCH] [options]",
-            &[(
-                "--check",
-                "Report whether the requested/latest release differs",
-            )],
-            &["self-update --check", "self-update v1.0.0"],
+            &[
+                ("--check", "Verify and report an authorized newer release"),
+                (
+                    "--allow-downgrade",
+                    "Authorize one explicit version older than the installed PAM",
+                ),
+            ],
+            &[
+                "self-update --check",
+                "self-update v2.0.0",
+                "self-update v1.0.0 --allow-downgrade",
+            ],
         ),
         "mobile" => (
             "Build native Android and iOS applications powered by PHP.",
@@ -631,7 +725,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "Measure performance or create a baseline profile",
                 ),
                 ("devtools", "Toggle the live performance overlay"),
-                ("diagnostics", "Capture a redacted live Native snapshot"),
+                (
+                    "diagnostics [--device SERIAL]",
+                    "Capture a redacted snapshot from one explicit target",
+                ),
                 ("logs | devices", "Inspect app logs and connected targets"),
                 ("plugin:list | plugin:doctor", "Inspect native plugins"),
                 (
@@ -654,6 +751,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "mobile dev .",
                 "mobile devtools .",
                 "mobile diagnostics .",
+                "mobile android:diagnostics . --device R58M1234",
                 "mobile ios:diagnostics .",
                 "mobile ios:devtools .",
                 "mobile screenshot . --output artifacts/home.png",
@@ -662,6 +760,32 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "mobile make:screen Dashboard .",
                 "mobile ios:doctor .",
                 "mobile ios:run .",
+            ],
+        ),
+        "desktop" => (
+            "Build and inspect cross-platform Desktop applications powered by PHP.",
+            "desktop <command> [project] [options]",
+            &[
+                ("doctor", "Validate the PAM Desktop host and project"),
+                (
+                    "host:doctor [--json]",
+                    "Verify signed host provenance, digest, and identity offline",
+                ),
+                (
+                    "dev | build | run",
+                    "Develop, package, or launch the application",
+                ),
+                (
+                    "visual accept | verify",
+                    "Manage exact project-scoped visual regression evidence",
+                ),
+                ("diagnostics", "Capture bounded Desktop diagnostics"),
+            ],
+            &[
+                "desktop dev .",
+                "desktop visual verify . --name product.dark --actual artifacts/screenshots/product-desktop-dark.png",
+                "desktop doctor .",
+                "desktop host:doctor . --json",
             ],
         ),
         _ => {

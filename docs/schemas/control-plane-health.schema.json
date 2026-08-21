@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pam.dev/schemas/control-plane-health.schema.json",
+  "title": "PAM control-plane health",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "surfaceCode", "resultCode", "healthy", "generation", "desiredWorkers", "readyWorkers", "workers"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "surfaceCode": { "const": 1 },
+    "resultCode": { "type": "integer", "enum": [1, 2], "description": "1 healthy, 2 unhealthy" },
+    "healthy": { "type": "boolean" },
+    "generation": { "type": "integer", "minimum": 0 },
+    "desiredWorkers": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "readyWorkers": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "workers": {
+      "type": "array",
+      "maxItems": 4096,
+      "items": { "$ref": "#/$defs/worker" }
+    }
+  },
+  "$defs": {
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "generation", "pid", "pool", "state"],
+      "properties": {
+        "id": { "type": "integer", "minimum": 0 },
+        "generation": { "type": "integer", "minimum": 0 },
+        "pid": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "pool": { "type": ["string", "null"], "maxLength": 128 },
+        "state": { "type": "integer", "enum": [1, 2, 3, 4], "description": "1 starting, 2 ready, 3 busy, 4 draining" }
+      }
+    }
+  }
+}

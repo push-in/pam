@@ -1,0 +1,600 @@
+name: Runtime clean-host distribution certification
+
+on:
+  workflow_call:
+    inputs:
+      current_ref:
+        required: true
+        type: string
+      current_tag:
+        required: true
+        type: string
+      evidence_key_identity:
+        required: true
+        type: string
+    secrets:
+      evidence_key:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  certify-linux:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x86_64
+            architecture_code: 1
+            machine: x86_64
+          - runner: ubuntu-24.04-arm
+            target: linux-aarch64
+            architecture_code: 2
+            machine: aarch64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.current_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: pam-${{ matrix.target }}
+          path: candidate
+      - name: Resolve and download the previous immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAM_CURRENT_TAG: ${{ inputs.current_tag }}
+        run: |
+          current_revision=$(git rev-parse HEAD)
+          tagged_revision=$(git rev-parse "refs/tags/${PAM_CURRENT_TAG}^{commit}")
+          test "${current_revision}" = "${tagged_revision}"
+          printf 'PAM_CURRENT_REVISION=%s\n' "${current_revision}" >>"${GITHUB_ENV}"
+          printf 'PAM_CURRENT_SOURCE_REF=refs/tags/%s\n' "${PAM_CURRENT_TAG}" >>"${GITHUB_ENV}"
+          releases_file=${RUNNER_TEMP}/pam-runtime-releases.json
+          gh release list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --exclude-drafts \
+            --exclude-pre-releases \
+            --limit 100 \
+            --json tagName >"${releases_file}"
+          baseline_tag=$(python3 scripts/select-release-baseline.py \
+            "${releases_file}" "${PAM_CURRENT_TAG}")
+          printf 'PAM_BASELINE_TAG=%s\n' "${baseline_tag}" >>"${GITHUB_ENV}"
+          mkdir -p baseline
+          gh release download "${baseline_tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "pam-${baseline_tag}-${{ matrix.target }}.tar.gz" \
+            --dir baseline
+          baseline_revision=$(git rev-list -n 1 "${baseline_tag}")
+          test -n "${baseline_revision}"
+          printf 'PAM_BASELINE_REVISION=%s\n' "${baseline_revision}" >>"${GITHUB_ENV}"
+      - name: Verify candidate and baseline GitHub attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "${{ github.event.repository.visibility }}" = public
+          candidate_archive=$(find candidate -maxdepth 1 -name '*.tar.gz' -print -quit)
+          baseline_archive=$(find baseline -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "${candidate_archive}"
+          test -n "${baseline_archive}"
+          candidate_archive=$(realpath "${candidate_archive}")
+          baseline_archive=$(realpath "${baseline_archive}")
+          mkdir -p \
+            certification/attestations/candidate \
+            certification/attestations/baseline
+          started=$(date +%s%3N)
+          gh attestation verify "${candidate_archive}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref "${PAM_CURRENT_SOURCE_REF}" \
+            --source-digest "${PAM_CURRENT_REVISION}" \
+            --deny-self-hosted-runners \
+            --format json \
+            >certification/attestations/candidate-verification.json
+          gh attestation verify "${baseline_archive}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref "refs/tags/${PAM_BASELINE_TAG}" \
+            --source-digest "${PAM_BASELINE_REVISION}" \
+            --deny-self-hosted-runners \
+            --format json \
+            >certification/attestations/baseline-verification.json
+          (
+            cd certification/attestations/candidate
+            gh attestation download "${candidate_archive}" --repo "${GITHUB_REPOSITORY}"
+            downloaded=$(find . -maxdepth 1 -type f -print -quit)
+            test -n "${downloaded}"
+            mv "${downloaded}" bundle.jsonl
+          )
+          (
+            cd certification/attestations/baseline
+            gh attestation download "${baseline_archive}" --repo "${GITHUB_REPOSITORY}"
+            downloaded=$(find . -maxdepth 1 -type f -print -quit)
+            test -n "${downloaded}"
+            mv "${downloaded}" bundle.jsonl
+          )
+          gh attestation trusted-root \
+            >certification/attestations/trusted_root.jsonl
+          test -s certification/attestations/trusted_root.jsonl
+          (
+            cd certification
+            find attestations -type f -print0 \
+              | sort -z \
+              | xargs -0 sha256sum
+          ) >certification/provenance-inventory.sha256
+          test -s certification/provenance-inventory.sha256
+          elapsed=$(( $(date +%s%3N) - started ))
+          test "${elapsed}" -gt 0 || elapsed=1
+          printf 'PAM_SIGNATURE_MILLIS=%s\n' "${elapsed}" >>"${GITHUB_ENV}"
+      - name: Exercise install, launch, upgrade, and rollback in clean Ubuntu
+        env:
+          PAM_EXPECTED_MACHINE: ${{ matrix.machine }}
+        run: |
+          docker pull ubuntu:22.04
+          repository_digest=$(docker image inspect \
+            --format '{{index .RepoDigests 0}}' ubuntu:22.04)
+          image_id=$(docker image inspect --format '{{.Id}}' ubuntu:22.04)
+          machine=$(docker run --rm --network none ubuntu:22.04 uname -m)
+          test "${machine}" = "${PAM_EXPECTED_MACHINE}"
+          host_image="${repository_digest};image=${image_id};machine=${machine}"
+          test -n "${repository_digest}"
+          test -n "${image_id}"
+          printf 'PAM_HOST_IMAGE=%s\n' "${host_image}" >>"${GITHUB_ENV}"
+          docker run --rm \
+            --network none \
+            --volume "${PWD}:/work" \
+            --workdir /work \
+            ubuntu:22.04 \
+            bash --noprofile --norc -euo pipefail -c '
+              candidate_archive=$(find candidate -maxdepth 1 -name "*.tar.gz" -print -quit)
+              baseline_archive=$(find baseline -maxdepth 1 -name "*.tar.gz" -print -quit)
+              mkdir -p clean-host/candidate clean-host/baseline clean-host/install
+              started=$(date +%s%3N)
+              tar -xzf "${baseline_archive}" -C clean-host/baseline
+              tar -xzf "${candidate_archive}" -C clean-host/candidate
+              install_millis=$(( $(date +%s%3N) - started ))
+              test "${install_millis}" -gt 0 || install_millis=1
+              candidate_root=$(find clean-host/candidate -mindepth 1 -maxdepth 1 -type d -print -quit)
+              baseline_root=$(find clean-host/baseline -mindepth 1 -maxdepth 1 -type d -print -quit)
+              test -x "${candidate_root}/bin/pam-run"
+              test -x "${baseline_root}/bin/pam-run"
+              installed_bytes=$(du -sb "${candidate_root}" | cut -f1)
+              started=$(date +%s%3N)
+              "${candidate_root}/bin/pam-run" --version
+              launch_millis=$(( $(date +%s%3N) - started ))
+              test "${launch_millis}" -gt 0 || launch_millis=1
+              started=$(date +%s%3N)
+              test "$("${candidate_root}/bin/pam-run" -r "echo 204;")" = 204
+              first_success_millis=$(( $(date +%s%3N) - started ))
+              test "${first_success_millis}" -gt 0 || first_success_millis=1
+              "${candidate_root}/bin/pam-run" -m \
+                >clean-host/loaded-modules.unsorted \
+                2>clean-host/module-load.stderr
+              test ! -s clean-host/module-load.stderr
+              test "$(wc -c <clean-host/loaded-modules.unsorted)" -le 1048576
+              LC_ALL=C sort -u clean-host/loaded-modules.unsorted \
+                >clean-host/loaded-modules.txt
+              test -s clean-host/loaded-modules.txt
+              ln -s "../baseline/$(basename "${baseline_root}")" clean-host/install/current
+              started=$(date +%s%3N)
+              ln -s "../candidate/$(basename "${candidate_root}")" clean-host/install/next
+              mv -Tf clean-host/install/next clean-host/install/current
+              test "$(clean-host/install/current/bin/pam-run -r "echo 204;")" = 204
+              upgrade_millis=$(( $(date +%s%3N) - started ))
+              test "${upgrade_millis}" -gt 0 || upgrade_millis=1
+              started=$(date +%s%3N)
+              ln -s "../baseline/$(basename "${baseline_root}")" clean-host/install/previous
+              mv -Tf clean-host/install/previous clean-host/install/current
+              test "$(clean-host/install/current/bin/pam-run -r "echo 204;")" = 204
+              rollback_millis=$(( $(date +%s%3N) - started ))
+              test "${rollback_millis}" -gt 0 || rollback_millis=1
+              {
+                printf "PAM_INSTALL_MILLIS=%s\n" "${install_millis}"
+                printf "PAM_INSTALLED_BYTES=%s\n" "${installed_bytes}"
+                printf "PAM_LAUNCH_MILLIS=%s\n" "${launch_millis}"
+                printf "PAM_FIRST_SUCCESS_MILLIS=%s\n" "${first_success_millis}"
+                printf "PAM_UPGRADE_MILLIS=%s\n" "${upgrade_millis}"
+                printf "PAM_ROLLBACK_MILLIS=%s\n" "${rollback_millis}"
+                printf "PAM_CANDIDATE_ROOT=%s\n" "${candidate_root}"
+              } >clean-host/metrics.env
+            '
+          sed -n '/^PAM_[A-Z_]*=[0-9][0-9]*$/p' clean-host/metrics.env >>"${GITHUB_ENV}"
+          candidate_root=$(sed -n 's/^PAM_CANDIDATE_ROOT=//p' clean-host/metrics.env)
+          test -n "${candidate_root}"
+          printf 'PAM_CANDIDATE_ROOT=%s\n' "${candidate_root}" >>"${GITHUB_ENV}"
+      - name: Build the exact dependency inventory
+        run: |
+          started=$(date +%s%3N)
+          mkdir -p certification/files
+          candidate_archive=$(find candidate -maxdepth 1 -name '*.tar.gz' -print -quit)
+          baseline_archive=$(find baseline -maxdepth 1 -name '*.tar.gz' -print -quit)
+          cp "${candidate_archive}" certification/files/candidate.tar.gz
+          cp "${baseline_archive}" certification/files/baseline.tar.gz
+          mv certification/provenance-inventory.sha256 \
+            certification/files/provenance-inventory.sha256
+          cp clean-host/loaded-modules.txt certification/files/runtime-loaded-modules.txt
+          (
+            cd "${PAM_CANDIDATE_ROOT}"
+            find bin etc lib share/pam/runtime -type f -print0 \
+              | sort -z \
+              | xargs -0 sha256sum
+          ) >certification/files/dependency-inventory.sha256
+          printf '%s  %s\n' \
+            "$(sha256sum certification/files/runtime-loaded-modules.txt | cut -d' ' -f1)" \
+            runtime-loaded-modules.txt \
+            >>certification/files/dependency-inventory.sha256
+          test -s certification/files/dependency-inventory.sha256
+          elapsed=$(( $(date +%s%3N) - started ))
+          test "${elapsed}" -gt 0 || elapsed=1
+          printf 'PAM_INVENTORY_MILLIS=%s\n' "${elapsed}" >>"${GITHUB_ENV}"
+      - name: Sign and independently verify the portable certification
+        env:
+          PAM_EVIDENCE_KEY: ${{ secrets.evidence_key }}
+          PAM_EXPECTED_EVIDENCE_IDENTITY: ${{ inputs.evidence_key_identity }}
+        run: |
+          test -n "${PAM_EVIDENCE_KEY}"
+          umask 077
+          key_file=${RUNNER_TEMP}/pam-distribution-evidence.key
+          printf '%s' "${PAM_EVIDENCE_KEY}" >"${key_file}"
+          trap 'shred -u -- "${key_file}"' EXIT
+          candidate_sha=$(sha256sum certification/files/candidate.tar.gz | cut -d' ' -f1)
+          baseline_sha=$(sha256sum certification/files/baseline.tar.gz | cut -d' ' -f1)
+          inventory_sha=$(sha256sum certification/files/dependency-inventory.sha256 | cut -d' ' -f1)
+          provenance_inventory_sha=$(sha256sum certification/files/provenance-inventory.sha256 | cut -d' ' -f1)
+          candidate_bytes=$(stat -c %s certification/files/candidate.tar.gz)
+          baseline_bytes=$(stat -c %s certification/files/baseline.tar.gz)
+          inventory_bytes=$(stat -c %s certification/files/dependency-inventory.sha256)
+          provenance_inventory_bytes=$(stat -c %s certification/files/provenance-inventory.sha256)
+          issued_at_unix=$(date +%s)
+          expires_at_unix=$((issued_at_unix + 2678400))
+          jq -n \
+            --arg revision "${PAM_CURRENT_REVISION}" \
+            --arg baselineRevision "${PAM_BASELINE_REVISION}" \
+            --arg releaseVersion "${PAM_CURRENT_TAG}" \
+            --arg hostImage "${PAM_HOST_IMAGE}" \
+            --arg artifactSha "${candidate_sha}" \
+            --arg baselineSha "${baseline_sha}" \
+            --arg inventorySha "${inventory_sha}" \
+            --arg provenanceInventorySha "${provenance_inventory_sha}" \
+            --argjson generatedAtUnixMs "$(date +%s%3N)" \
+            --argjson issuedAtUnix "${issued_at_unix}" \
+            --argjson expiresAtUnix "${expires_at_unix}" \
+            --argjson artifactBytes "${candidate_bytes}" \
+            --argjson baselineBytes "${baseline_bytes}" \
+            --argjson inventoryBytes "${inventory_bytes}" \
+            --argjson provenanceInventoryBytes "${provenance_inventory_bytes}" \
+            --argjson installedBytes "${PAM_INSTALLED_BYTES}" \
+            --argjson launchMillis "${PAM_LAUNCH_MILLIS}" \
+            --argjson firstSuccessMillis "${PAM_FIRST_SUCCESS_MILLIS}" \
+            --argjson installMillis "${PAM_INSTALL_MILLIS}" \
+            --argjson upgradeMillis "${PAM_UPGRADE_MILLIS}" \
+            --argjson rollbackMillis "${PAM_ROLLBACK_MILLIS}" \
+            --argjson signatureMillis "${PAM_SIGNATURE_MILLIS}" \
+            --argjson inventoryMillis "${PAM_INVENTORY_MILLIS}" \
+            '{
+              schemaVersion: 1,
+              releaseVersion: $releaseVersion,
+              issuedAtUnix: $issuedAtUnix,
+              expiresAtUnix: $expiresAtUnix,
+              surfaceCode: 1,
+              platformCode: 1,
+              architectureCode: ${{ matrix.architecture_code }},
+              packageCode: 1,
+              revision: $revision,
+              baselineRevision: $baselineRevision,
+              hostImage: $hostImage,
+              generatedAtUnixMs: $generatedAtUnixMs,
+              artifact: {path: "files/candidate.tar.gz", sha256: $artifactSha, bytes: $artifactBytes},
+              baselineArtifact: {path: "files/baseline.tar.gz", sha256: $baselineSha, bytes: $baselineBytes},
+              dependencyInventory: {path: "files/dependency-inventory.sha256", sha256: $inventorySha, bytes: $inventoryBytes},
+              provenanceInventory: {path: "files/provenance-inventory.sha256", sha256: $provenanceInventorySha, bytes: $provenanceInventoryBytes},
+              installedBytes: $installedBytes,
+              launchMillis: $launchMillis,
+              firstSuccessMillis: $firstSuccessMillis,
+              checks: [
+                {checkCode: 1, resultCode: 1, durationMillis: $installMillis},
+                {checkCode: 2, resultCode: 1, durationMillis: $launchMillis},
+                {checkCode: 3, resultCode: 1, durationMillis: $firstSuccessMillis},
+                {checkCode: 4, resultCode: 1, durationMillis: $upgradeMillis},
+                {checkCode: 5, resultCode: 1, durationMillis: $rollbackMillis},
+                {checkCode: 6, resultCode: 1, durationMillis: $signatureMillis},
+                {checkCode: 7, resultCode: 1, durationMillis: $inventoryMillis}
+              ]
+            }' >certification/draft.json
+          "${PAM_CANDIDATE_ROOT}/bin/pam-run" distribution:sign \
+            certification/draft.json \
+            --key "${key_file}" \
+            --output certification/distribution.json
+          "${PAM_CANDIDATE_ROOT}/bin/pam-run" distribution:verify \
+            certification/distribution.json --json \
+            >certification/verification.json
+          test "$(jq -r '.resultCode' certification/verification.json)" = 1
+          test "${PAM_EXPECTED_EVIDENCE_IDENTITY}" = \
+            "$(jq -r '.signingIdentitySha256' certification/verification.json)"
+          rm certification/draft.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certification-runtime-distribution-${{ matrix.target }}-${{ github.sha }}
+          path: certification/
+          if-no-files-found: error
+          retention-days: 30
+
+  certify-macos:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: macos-arm64
+            architecture_code: 2
+            machine: arm64
+          - runner: macos-15-intel
+            target: macos-x86_64
+            architecture_code: 1
+            machine: x86_64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      attestations: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.current_ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: pam-${{ matrix.target }}
+          path: candidate
+      - name: Resolve and download the previous immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PAM_CURRENT_TAG: ${{ inputs.current_tag }}
+        run: |
+          current_revision=$(git rev-parse HEAD)
+          tagged_revision=$(git rev-parse "refs/tags/${PAM_CURRENT_TAG}^{commit}")
+          test "${current_revision}" = "${tagged_revision}"
+          printf 'PAM_CURRENT_REVISION=%s\n' "${current_revision}" >>"${GITHUB_ENV}"
+          printf 'PAM_CURRENT_SOURCE_REF=refs/tags/%s\n' "${PAM_CURRENT_TAG}" >>"${GITHUB_ENV}"
+          releases_file=${RUNNER_TEMP}/pam-runtime-releases.json
+          gh release list --repo "${GITHUB_REPOSITORY}" \
+            --exclude-drafts --exclude-pre-releases --limit 100 \
+            --json tagName >"${releases_file}"
+          baseline_tag=$(python3 scripts/select-release-baseline.py \
+            "${releases_file}" "${PAM_CURRENT_TAG}")
+          printf 'PAM_BASELINE_TAG=%s\n' "${baseline_tag}" >>"${GITHUB_ENV}"
+          mkdir -p baseline
+          gh release download "${baseline_tag}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --pattern "pam-${baseline_tag}-${{ matrix.target }}.tar.gz" \
+            --dir baseline
+          baseline_revision=$(git rev-list -n 1 "${baseline_tag}")
+          test -n "${baseline_revision}"
+          printf 'PAM_BASELINE_REVISION=%s\n' "${baseline_revision}" >>"${GITHUB_ENV}"
+      - name: Verify candidate and baseline GitHub attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "${{ github.event.repository.visibility }}" = public
+          candidate_archive=$(find candidate -maxdepth 1 -name '*.tar.gz' -print -quit)
+          baseline_archive=$(find baseline -maxdepth 1 -name '*.tar.gz' -print -quit)
+          test -n "${candidate_archive}"
+          test -n "${baseline_archive}"
+          candidate_archive=$(cd "$(dirname "${candidate_archive}")" && pwd)/$(basename "${candidate_archive}")
+          baseline_archive=$(cd "$(dirname "${baseline_archive}")" && pwd)/$(basename "${baseline_archive}")
+          mkdir -p certification/attestations/candidate certification/attestations/baseline
+          started=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          gh attestation verify "${candidate_archive}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref "${PAM_CURRENT_SOURCE_REF}" \
+            --source-digest "${PAM_CURRENT_REVISION}" \
+            --deny-self-hosted-runners --format json \
+            >certification/attestations/candidate-verification.json
+          gh attestation verify "${baseline_archive}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+            --source-ref "refs/tags/${PAM_BASELINE_TAG}" \
+            --source-digest "${PAM_BASELINE_REVISION}" \
+            --deny-self-hosted-runners --format json \
+            >certification/attestations/baseline-verification.json
+          (
+            cd certification/attestations/candidate
+            gh attestation download "${candidate_archive}" --repo "${GITHUB_REPOSITORY}"
+            downloaded=$(find . -maxdepth 1 -type f -print -quit)
+            test -n "${downloaded}"
+            mv "${downloaded}" bundle.jsonl
+          )
+          (
+            cd certification/attestations/baseline
+            gh attestation download "${baseline_archive}" --repo "${GITHUB_REPOSITORY}"
+            downloaded=$(find . -maxdepth 1 -type f -print -quit)
+            test -n "${downloaded}"
+            mv "${downloaded}" bundle.jsonl
+          )
+          gh attestation trusted-root >certification/attestations/trusted_root.jsonl
+          test -s certification/attestations/trusted_root.jsonl
+          (
+            cd certification
+            find attestations -type f | LC_ALL=C sort | while IFS= read -r file; do
+              shasum -a 256 "${file}"
+            done
+          ) >certification/provenance-inventory.sha256
+          test -s certification/provenance-inventory.sha256
+          finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          elapsed=$(( finished - started ))
+          test "${elapsed}" -gt 0 || elapsed=1
+          printf 'PAM_SIGNATURE_MILLIS=%s\n' "${elapsed}" >>"${GITHUB_ENV}"
+      - name: Exercise install, launch, upgrade, and rollback on ephemeral macOS
+        env:
+          PAM_EXPECTED_MACHINE: ${{ matrix.machine }}
+        run: |
+          machine=$(uname -m)
+          test "${machine}" = "${PAM_EXPECTED_MACHINE}"
+          test -n "${ImageOS:-}"
+          test -n "${ImageVersion:-}"
+          macos_version=$(sw_vers -productVersion)
+          macos_build=$(sw_vers -buildVersion)
+          host_image="runner=${ImageOS}@${ImageVersion};macos=${macos_version};build=${macos_build};machine=${machine}"
+          printf 'PAM_HOST_IMAGE=%s\n' "${host_image}" >>"${GITHUB_ENV}"
+          candidate_archive=$(find candidate -maxdepth 1 -name '*.tar.gz' -print -quit)
+          baseline_archive=$(find baseline -maxdepth 1 -name '*.tar.gz' -print -quit)
+          mkdir -p clean-host/candidate clean-host/baseline clean-host/install
+          started=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          tar -xzf "${baseline_archive}" -C clean-host/baseline
+          tar -xzf "${candidate_archive}" -C clean-host/candidate
+          finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          install_millis=$(( finished - started ))
+          test "${install_millis}" -gt 0 || install_millis=1
+          candidate_root=$(find clean-host/candidate -mindepth 1 -maxdepth 1 -type d -print -quit)
+          baseline_root=$(find clean-host/baseline -mindepth 1 -maxdepth 1 -type d -print -quit)
+          test -x "${candidate_root}/bin/pam-run"
+          test -x "${baseline_root}/bin/pam-run"
+          installed_kib=$(du -sk "${candidate_root}" | awk '{print $1}')
+          installed_bytes=$(( installed_kib * 1024 ))
+          started=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          "${candidate_root}/bin/pam-run" --version
+          finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          launch_millis=$(( finished - started ))
+          test "${launch_millis}" -gt 0 || launch_millis=1
+          started=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          test "$("${candidate_root}/bin/pam-run" -r 'echo 204;')" = 204
+          finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          first_success_millis=$(( finished - started ))
+          test "${first_success_millis}" -gt 0 || first_success_millis=1
+          "${candidate_root}/bin/pam-run" -m \
+            >clean-host/loaded-modules.unsorted \
+            2>clean-host/module-load.stderr
+          test ! -s clean-host/module-load.stderr
+          test "$(wc -c <clean-host/loaded-modules.unsorted)" -le 1048576
+          LC_ALL=C sort -u clean-host/loaded-modules.unsorted \
+            >clean-host/loaded-modules.txt
+          test -s clean-host/loaded-modules.txt
+          ln -s "../baseline/$(basename "${baseline_root}")" clean-host/install/current
+          started=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          ln -s "../candidate/$(basename "${candidate_root}")" clean-host/install/next
+          mv -fh clean-host/install/next clean-host/install/current
+          test "$(clean-host/install/current/bin/pam-run -r 'echo 204;')" = 204
+          finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          upgrade_millis=$(( finished - started ))
+          test "${upgrade_millis}" -gt 0 || upgrade_millis=1
+          started=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          ln -s "../baseline/$(basename "${baseline_root}")" clean-host/install/previous
+          mv -fh clean-host/install/previous clean-host/install/current
+          test "$(clean-host/install/current/bin/pam-run -r 'echo 204;')" = 204
+          finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          rollback_millis=$(( finished - started ))
+          test "${rollback_millis}" -gt 0 || rollback_millis=1
+          {
+            printf 'PAM_INSTALL_MILLIS=%s\n' "${install_millis}"
+            printf 'PAM_INSTALLED_BYTES=%s\n' "${installed_bytes}"
+            printf 'PAM_LAUNCH_MILLIS=%s\n' "${launch_millis}"
+            printf 'PAM_FIRST_SUCCESS_MILLIS=%s\n' "${first_success_millis}"
+            printf 'PAM_UPGRADE_MILLIS=%s\n' "${upgrade_millis}"
+            printf 'PAM_ROLLBACK_MILLIS=%s\n' "${rollback_millis}"
+            printf 'PAM_CANDIDATE_ROOT=%s\n' "${candidate_root}"
+          } >>"${GITHUB_ENV}"
+      - name: Build the exact dependency inventory
+        run: |
+          started=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          mkdir -p certification/files
+          candidate_archive=$(find candidate -maxdepth 1 -name '*.tar.gz' -print -quit)
+          baseline_archive=$(find baseline -maxdepth 1 -name '*.tar.gz' -print -quit)
+          cp "${candidate_archive}" certification/files/candidate.tar.gz
+          cp "${baseline_archive}" certification/files/baseline.tar.gz
+          mv certification/provenance-inventory.sha256 certification/files/provenance-inventory.sha256
+          cp clean-host/loaded-modules.txt certification/files/runtime-loaded-modules.txt
+          (
+            cd "${PAM_CANDIDATE_ROOT}"
+            find bin etc lib share/pam/runtime -type f | LC_ALL=C sort | while IFS= read -r file; do
+              shasum -a 256 "${file}"
+            done
+          ) >certification/files/dependency-inventory.sha256
+          printf '%s  %s\n' \
+            "$(shasum -a 256 certification/files/runtime-loaded-modules.txt | awk '{print $1}')" \
+            runtime-loaded-modules.txt \
+            >>certification/files/dependency-inventory.sha256
+          test -s certification/files/dependency-inventory.sha256
+          finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
+          elapsed=$(( finished - started ))
+          test "${elapsed}" -gt 0 || elapsed=1
+          printf 'PAM_INVENTORY_MILLIS=%s\n' "${elapsed}" >>"${GITHUB_ENV}"
+      - name: Sign and independently verify the portable certification
+        env:
+          PAM_EVIDENCE_KEY: ${{ secrets.evidence_key }}
+          PAM_EXPECTED_EVIDENCE_IDENTITY: ${{ inputs.evidence_key_identity }}
+        run: |
+          test -n "${PAM_EVIDENCE_KEY}"
+          umask 077
+          key_file=${RUNNER_TEMP}/pam-distribution-evidence.key
+          printf '%s' "${PAM_EVIDENCE_KEY}" >"${key_file}"
+          trap 'rm -f -- "${key_file}"' EXIT
+          candidate_sha=$(shasum -a 256 certification/files/candidate.tar.gz | awk '{print $1}')
+          baseline_sha=$(shasum -a 256 certification/files/baseline.tar.gz | awk '{print $1}')
+          inventory_sha=$(shasum -a 256 certification/files/dependency-inventory.sha256 | awk '{print $1}')
+          provenance_inventory_sha=$(shasum -a 256 certification/files/provenance-inventory.sha256 | awk '{print $1}')
+          candidate_bytes=$(stat -f %z certification/files/candidate.tar.gz)
+          baseline_bytes=$(stat -f %z certification/files/baseline.tar.gz)
+          inventory_bytes=$(stat -f %z certification/files/dependency-inventory.sha256)
+          provenance_inventory_bytes=$(stat -f %z certification/files/provenance-inventory.sha256)
+          issued_at_unix=$(date +%s)
+          expires_at_unix=$((issued_at_unix + 2678400))
+          jq -n \
+            --arg revision "${PAM_CURRENT_REVISION}" \
+            --arg baselineRevision "${PAM_BASELINE_REVISION}" \
+            --arg releaseVersion "${PAM_CURRENT_TAG}" \
+            --arg hostImage "${PAM_HOST_IMAGE}" \
+            --arg artifactSha "${candidate_sha}" --arg baselineSha "${baseline_sha}" \
+            --arg inventorySha "${inventory_sha}" --arg provenanceInventorySha "${provenance_inventory_sha}" \
+            --argjson generatedAtUnixMs "$(python3 -c 'import time; print(time.time_ns() // 1000000)')" \
+            --argjson issuedAtUnix "${issued_at_unix}" \
+            --argjson expiresAtUnix "${expires_at_unix}" \
+            --argjson artifactBytes "${candidate_bytes}" --argjson baselineBytes "${baseline_bytes}" \
+            --argjson inventoryBytes "${inventory_bytes}" --argjson provenanceInventoryBytes "${provenance_inventory_bytes}" \
+            --argjson installedBytes "${PAM_INSTALLED_BYTES}" --argjson launchMillis "${PAM_LAUNCH_MILLIS}" \
+            --argjson firstSuccessMillis "${PAM_FIRST_SUCCESS_MILLIS}" --argjson installMillis "${PAM_INSTALL_MILLIS}" \
+            --argjson upgradeMillis "${PAM_UPGRADE_MILLIS}" --argjson rollbackMillis "${PAM_ROLLBACK_MILLIS}" \
+            --argjson signatureMillis "${PAM_SIGNATURE_MILLIS}" --argjson inventoryMillis "${PAM_INVENTORY_MILLIS}" \
+            '{schemaVersion: 1, releaseVersion: $releaseVersion,
+              issuedAtUnix: $issuedAtUnix, expiresAtUnix: $expiresAtUnix,
+              surfaceCode: 1, platformCode: 2,
+              architectureCode: ${{ matrix.architecture_code }}, packageCode: 1,
+              revision: $revision, baselineRevision: $baselineRevision, hostImage: $hostImage,
+              generatedAtUnixMs: $generatedAtUnixMs,
+              artifact: {path: "files/candidate.tar.gz", sha256: $artifactSha, bytes: $artifactBytes},
+              baselineArtifact: {path: "files/baseline.tar.gz", sha256: $baselineSha, bytes: $baselineBytes},
+              dependencyInventory: {path: "files/dependency-inventory.sha256", sha256: $inventorySha, bytes: $inventoryBytes},
+              provenanceInventory: {path: "files/provenance-inventory.sha256", sha256: $provenanceInventorySha, bytes: $provenanceInventoryBytes},
+              installedBytes: $installedBytes, launchMillis: $launchMillis, firstSuccessMillis: $firstSuccessMillis,
+              checks: [
+                {checkCode: 1, resultCode: 1, durationMillis: $installMillis},
+                {checkCode: 2, resultCode: 1, durationMillis: $launchMillis},
+                {checkCode: 3, resultCode: 1, durationMillis: $firstSuccessMillis},
+                {checkCode: 4, resultCode: 1, durationMillis: $upgradeMillis},
+                {checkCode: 5, resultCode: 1, durationMillis: $rollbackMillis},
+                {checkCode: 6, resultCode: 1, durationMillis: $signatureMillis},
+                {checkCode: 7, resultCode: 1, durationMillis: $inventoryMillis}
+              ]}' >certification/draft.json
+          "${PAM_CANDIDATE_ROOT}/bin/pam-run" distribution:sign certification/draft.json \
+            --key "${key_file}" --output certification/distribution.json
+          "${PAM_CANDIDATE_ROOT}/bin/pam-run" distribution:verify certification/distribution.json --json \
+            >certification/verification.json
+          test "$(jq -r '.resultCode' certification/verification.json)" = 1
+          test "${PAM_EXPECTED_EVIDENCE_IDENTITY}" = \
+            "$(jq -r '.signingIdentitySha256' certification/verification.json)"
+          rm certification/draft.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: certification-runtime-distribution-${{ matrix.target }}-${{ github.sha }}
+          path: certification/
+          if-no-files-found: error
+          retention-days: 30

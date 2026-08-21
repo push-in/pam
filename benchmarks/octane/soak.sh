@@ -52,6 +52,12 @@ wait "$SAMPLER_PID" 2>/dev/null || true
 SAMPLER_PID=""
 
 php "$ROOT/benchmarks/octane/parse-wrk.php" pam-soak 1 "$RESULTS/soak.txt"
+PAM_BENCH_WORKERS="$WORKERS" PAM_BENCH_THREADS="$THREADS" \
+    PAM_BENCH_CONNECTIONS="$CONNECTIONS" PAM_BENCH_DURATION="$DURATION" \
+    PAM_BENCH_WARMUP_DURATION=5s PAM_BENCH_ROUNDS=1 \
+    PAM_BENCH_RUNTIME_ORDER=pam PAM_BENCH_BINARY="$PAM_BINARY" \
+    PAM_SOAK_MAX_RSS_GROWTH_BYTES="${PAM_SOAK_MAX_RSS_GROWTH_BYTES:-67108864}" \
+    php "$ROOT/benchmarks/octane/metadata.php" "$RESULTS"
 php "$ROOT/benchmarks/octane/soak-report.php" "$RESULTS"
 php "$ROOT/benchmarks/octane/evidence-manifest.php" "$RESULTS" 3
 php "$ROOT/benchmarks/octane/evidence-manifest.php" "$RESULTS" 3 --verify

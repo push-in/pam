@@ -957,6 +957,7 @@ dependencies = [
  "hyper",
  "hyper-rustls",
  "hyper-util",
+ "libc",
  "quinn",
  "rustls-pki-types",
  "semver",

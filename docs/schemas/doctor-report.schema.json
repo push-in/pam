@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pamphp.dev/schemas/doctor-report.schema.json",
+  "title": "PAM Doctor report",
+  "description": "Stable machine-readable output of pam doctor --json. Integer codes are append-only within schema version 1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "schemaVersion",
+    "resultCode",
+    "healthy",
+    "exitCode",
+    "target",
+    "root",
+    "projectType",
+    "project",
+    "nextActions",
+    "diagnostics",
+    "errors"
+  ],
+  "properties": {
+    "schema": { "const": 1, "deprecated": true, "description": "Compatibility alias for schemaVersion." },
+    "schemaVersion": { "const": 1 },
+    "resultCode": { "type": "integer", "enum": [1, 2], "description": "1 healthy; 2 unhealthy." },
+    "healthy": { "type": "boolean" },
+    "exitCode": { "type": "integer", "minimum": 0, "maximum": 255 },
+    "target": { "type": "string", "minLength": 1 },
+    "root": { "type": ["string", "null"] },
+    "projectType": { "type": ["integer", "null"], "enum": [1, 2, 3, 4, 5, 6, null] },
+    "project": { "oneOf": [{ "$ref": "#/$defs/project" }, { "type": "null" }] },
+    "nextActions": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 8,
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "diagnostics": { "type": "string" },
+    "errors": { "type": "string" }
+  },
+  "$defs": {
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["actionCode", "summary", "command", "arguments", "verificationCommand"],
+      "properties": {
+        "actionCode": { "type": "integer", "enum": [1, 2, 3] },
+        "summary": { "type": "string", "minLength": 1 },
+        "command": { "type": "string", "minLength": 1 },
+        "arguments": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 32,
+          "items": { "type": "string" }
+        },
+        "verificationCommand": { "type": "string", "minLength": 1 }
+      }
+    },
+    "artifactEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "kindCode", "exists", "bytes", "files", "complete"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "kindCode": { "type": "integer", "enum": [1, 2] },
+        "exists": { "type": "boolean" },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "files": { "type": "integer", "minimum": 0 },
+        "complete": { "type": "boolean" }
+      }
+    },
+    "artifactFootprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["bytes", "files", "complete", "entries"],
+      "properties": {
+        "bytes": { "type": "integer", "minimum": 0 },
+        "files": { "type": "integer", "minimum": 0 },
+        "complete": { "type": "boolean" },
+        "entries": { "type": "array", "maxItems": 64, "items": { "$ref": "#/$defs/artifactEntry" } }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "typeCode", "typeLabel", "paths", "developmentArtifacts", "nextCommands"],
+      "properties": {
+        "root": { "type": "string", "minLength": 1 },
+        "typeCode": { "type": "integer", "enum": [1, 2, 3, 4, 5, 6] },
+        "typeLabel": { "type": "string", "minLength": 1 },
+        "paths": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["manifest", "composerManifest", "nativeManifest"],
+          "properties": {
+            "manifest": { "type": "string", "minLength": 1 },
+            "composerManifest": { "type": "string", "minLength": 1 },
+            "nativeManifest": { "type": "string", "minLength": 1 }
+          }
+        },
+        "developmentArtifacts": { "$ref": "#/$defs/artifactFootprint" },
+        "nextCommands": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pam.dev/schemas/control-plane-diagnostics.schema.json",
+  "title": "PAM control-plane diagnostics",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "surfaceCode", "resultCode", "generation", "desiredWorkers", "readyWorkers", "workers"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "surfaceCode": { "const": 1 },
+    "resultCode": { "type": "integer", "enum": [1, 2], "description": "1 available, 2 unavailable" },
+    "generation": { "type": "integer", "minimum": 0 },
+    "desiredWorkers": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "readyWorkers": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "workers": { "type": "array", "maxItems": 4096, "items": { "$ref": "#/$defs/worker" } }
+  },
+  "$defs": {
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["workerId", "generation", "pid", "pool", "lifecycleCode", "resultCode", "currentLagMicros", "maxLagMicros", "averageLagMicros", "lagSampleCount"],
+      "properties": {
+        "workerId": { "type": "integer", "minimum": 0 },
+        "generation": { "type": "integer", "minimum": 0 },
+        "pid": { "type": "integer", "minimum": 1, "maximum": 4294967295 },
+        "pool": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "lifecycleCode": { "type": "integer", "enum": [1, 2, 3, 4], "description": "1 starting, 2 ready, 3 busy, 4 draining" },
+        "resultCode": { "type": "integer", "enum": [1, 2], "description": "1 operational, 2 needs attention" },
+        "currentLagMicros": { "type": "integer", "minimum": 0 },
+        "maxLagMicros": { "type": "integer", "minimum": 0 },
+        "averageLagMicros": { "type": "integer", "minimum": 0 },
+        "lagSampleCount": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

@@ -13,6 +13,13 @@ journey; open architecture and protocol references only when you need them.
 
 The practical [CLI workflow guide](cli.md) explains contextual behavior and
 machine output. Package authors can use the [CLI extension contract](extending-cli.md).
+Automation can obtain the command catalog with `pam catalog --json` and its
+offline validation contract with `pam catalog --schema`.
+Release automation can compare two validated snapshots with
+`pam catalog --compat baseline.json candidate.json --json` and reject breaking
+removals, group moves, or loss of structured JSON support.
+The report contract is embedded and available offline with
+`pam catalog --compat-schema`.
 
 ## Products
 
@@ -44,6 +51,12 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 - [Async runtime](async-runtime.md)
 - [Production operations](production.md)
 - [Cross-surface observability and OTLP certification](observability.md)
+- [Product semantic screenshot evidence](product-visual-evidence.md)
+- [Signed clean-host distribution evidence](distribution-evidence.md)
+- [Desktop host diagnostic schema](schemas/desktop-host-doctor.schema.json)
+- [Control-plane diagnostic schema](schemas/control-plane-diagnostics.schema.json)
+- [Control-plane health schema](schemas/control-plane-health.schema.json)
+- [`pam top` NDJSON sample schema](schemas/top-sample.schema.json)
 - [Delivery publication ledger](publication-ledger.md)
 - [Compatibility](compatibility.md)
 - [Server transport plugins](server-transports.md)

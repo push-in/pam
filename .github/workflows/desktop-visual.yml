@@ -1,0 +1,154 @@
+name: Desktop Product visual evidence
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pam-desktop-product-visual-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  product-visual:
+    name: Product light and dark captures on Servo/Xvfb
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    env:
+      DISPLAY: ':99'
+      PAM_DESKTOP_COMMIT: c89ea15a78eb3509a8611e42302c867c3c09bbbf
+      PAM_DESKTOP_BINARY: ${{ github.workspace }}/pam-desktop/target/debug/pam-desktop
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Check out the pinned PAM Desktop host
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-desktop
+          ref: ${{ env.PAM_DESKTOP_COMMIT }}
+          path: pam-desktop
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-product-visual
+      - name: Install pinned host and capture prerequisites
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential clang imagemagick libclang-dev libfontconfig1-dev \
+            libphp8.4-embed php8.4-dev pkg-config xdotool xvfb x11-utils
+      - name: Build PAM and the real Servo host
+        run: |
+          cargo build --locked
+          cargo build --locked --manifest-path pam-desktop/Cargo.toml \
+            -p pam-desktop
+          test "$("${PAM_DESKTOP_BINARY}" --version)" = 'pam-desktop 1.2.1'
+      - name: Generate and install a clean Product Desktop workspace
+        run: |
+          fixture=${RUNNER_TEMP}/pam-product-desktop-visual
+          target/debug/pam init "${fixture}" \
+            --template product \
+            --name 'PAM Product Visual' \
+            --application-id app.pam.productvisual \
+            --no-install --no-interaction
+          composer validate --strict "${fixture}/apps/desktop/composer.json"
+          composer config --working-dir="${fixture}/apps/desktop" \
+            repositories.pam-desktop \
+            "{\"type\":\"path\",\"url\":\"${GITHUB_WORKSPACE}/pam-desktop/packages/desktop\",\"options\":{\"symlink\":false}}"
+          composer install --working-dir="${fixture}/apps/desktop" \
+            --no-dev --no-interaction --prefer-dist --dry-run
+          composer install --working-dir="${fixture}/apps/desktop" \
+            --no-dev --no-interaction --prefer-dist
+          mkdir -p \
+            "${fixture}/apps/desktop/artifacts/screenshots" \
+            "${fixture}/artifacts"
+          printf 'PAM_DESKTOP_FIXTURE=%s\n' "${fixture}" >>"${GITHUB_ENV}"
+      - name: Start the isolated display
+        run: |
+          Xvfb "${DISPLAY}" -screen 0 1440x900x24 -nolisten tcp \
+            >"${PAM_DESKTOP_FIXTURE}/artifacts/xvfb.log" 2>&1 &
+          printf 'PAM_XVFB_PID=%s\n' "$!" >>"${GITHUB_ENV}"
+          for attempt in $(seq 1 30); do
+            xdpyinfo -display "${DISPLAY}" >/dev/null 2>&1 && exit 0
+            sleep 1
+          done
+          echo 'Xvfb did not become ready' >&2
+          exit 1
+      - name: Capture and decode both Product themes
+        run: |
+          app=${PAM_DESKTOP_FIXTURE}/apps/desktop
+          captures=${app}/artifacts/screenshots
+          capture_theme() {
+            local mode=$1
+            local php_case=$2
+            sed -i -E \
+              "s/WindowTheme::(Light|Dark)/WindowTheme::${php_case}/g" \
+              "${app}/app.php"
+            "${PAM_DESKTOP_BINARY}" run "${app}" \
+              >"${PAM_DESKTOP_FIXTURE}/artifacts/desktop-${mode}.log" 2>&1 &
+            local host_pid=$!
+            local window=''
+            for attempt in $(seq 1 90); do
+              window=$(xdotool search --onlyvisible --pid "${host_pid}" 2>/dev/null \
+                | head -n 1 || true)
+              test -n "${window}" && break
+              kill -0 "${host_pid}" 2>/dev/null || {
+                cat "${PAM_DESKTOP_FIXTURE}/artifacts/desktop-${mode}.log" >&2
+                return 1
+              }
+              sleep 1
+            done
+            test -n "${window}"
+            sleep 3
+            import -display "${DISPLAY}" -window "${window}" \
+              "${captures}/product-desktop-${mode}.png"
+            kill -TERM "${host_pid}"
+            wait "${host_pid}" || test "$?" = 143
+            test -s "${captures}/product-desktop-${mode}.png"
+            target/debug/pam desktop visual accept "${app}" \
+              --name "product.${mode}" \
+              --actual "artifacts/screenshots/product-desktop-${mode}.png"
+            target/debug/pam desktop visual verify "${app}" \
+              --name "product.${mode}" \
+              --actual "artifacts/screenshots/product-desktop-${mode}.png"
+          }
+          capture_theme light Light
+          capture_theme dark Dark
+          sha256sum "${captures}/"*.png \
+            >"${PAM_DESKTOP_FIXTURE}/artifacts/desktop-captures.sha256"
+      - name: Stop the isolated display
+        if: always()
+        run: |
+          if test -n "${PAM_XVFB_PID:-}"; then
+            kill -TERM "${PAM_XVFB_PID}" 2>/dev/null || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pam-product-desktop-visual-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/pam-product-desktop-visual/apps/desktop/artifacts/screenshots/product-desktop-light.png
+            ${{ runner.temp }}/pam-product-desktop-visual/apps/desktop/artifacts/screenshots/product-desktop-dark.png
+            ${{ runner.temp }}/pam-product-desktop-visual/apps/desktop/artifacts/visual/product.light.json
+            ${{ runner.temp }}/pam-product-desktop-visual/apps/desktop/artifacts/visual/product.dark.json
+            ${{ runner.temp }}/pam-product-desktop-visual/artifacts/desktop-captures.sha256
+            ${{ runner.temp }}/pam-product-desktop-visual/artifacts/desktop-light.log
+            ${{ runner.temp }}/pam-product-desktop-visual/artifacts/desktop-dark.log
+            ${{ runner.temp }}/pam-product-desktop-visual/artifacts/xvfb.log
+            ${{ runner.temp }}/pam-product-desktop-visual/packages/contracts/design-tokens.json
+          if-no-files-found: error
+          retention-days: 30

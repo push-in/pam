@@ -7,6 +7,7 @@ enum EvidenceSuite: int
     case Comparison = 1;
     case Matrix = 2;
     case Soak = 3;
+    case Overload = 4;
 }
 
 $directory = isset($argv[1]) ? rtrim($argv[1], '/') : '';
@@ -14,14 +15,14 @@ $suiteValue = filter_var($argv[2] ?? null, FILTER_VALIDATE_INT);
 $verify = ($argv[3] ?? '') === '--verify';
 
 if ($directory === '' || !is_dir($directory) || $suiteValue === false) {
-    fwrite(STDERR, "usage: php evidence-manifest.php <results-directory> <suite-id: 1|2|3> [--verify]\n");
+    fwrite(STDERR, "usage: php evidence-manifest.php <results-directory> <suite-id: 1|2|3|4> [--verify]\n");
     exit(64);
 }
 
 try {
     $suite = EvidenceSuite::from($suiteValue);
 } catch (ValueError) {
-    fwrite(STDERR, "evidence suite id must be 1 (comparison), 2 (matrix), or 3 (soak)\n");
+    fwrite(STDERR, "evidence suite id must be 1 (comparison), 2 (matrix), 3 (soak), or 4 (overload)\n");
     exit(64);
 }
 
@@ -104,6 +105,7 @@ $reportPath = match ($suite) {
     EvidenceSuite::Comparison => $directory.'/report.json',
     EvidenceSuite::Matrix => $directory.'/matrix-report.json',
     EvidenceSuite::Soak => $directory.'/soak-report.json',
+    EvidenceSuite::Overload => $directory.'/overload-report.json',
 };
 $report = is_file($reportPath)
     ? json_decode((string) file_get_contents($reportPath), true, flags: JSON_THROW_ON_ERROR)
@@ -123,6 +125,7 @@ $manifest = [
         ],
         EvidenceSuite::Matrix => $report['gates'] ?? null,
         EvidenceSuite::Soak => ['soak' => $report['passed'] ?? false],
+        EvidenceSuite::Overload => ['overload' => $report['passed'] ?? false],
     },
     'artifacts' => $describeArtifacts($artifactFiles($directory)),
 ];

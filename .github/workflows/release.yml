@@ -15,14 +15,44 @@ permissions:
   contents: read
 
 jobs:
+  release-preflight:
+    name: Validate release authority before expensive builds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate immutable tag and protected signing configuration
+        env:
+          PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+          PAM_EVIDENCE_KEY: ${{ secrets.PAM_DISTRIBUTION_EVIDENCE_KEY }}
+          PAM_EVIDENCE_KEY_IDENTITY: ${{ vars.PAM_DISTRIBUTION_EVIDENCE_KEY_SHA256 }}
+          PAM_NEXT_EVIDENCE_KEY_IDENTITY: ${{ vars.PAM_DISTRIBUTION_NEXT_EVIDENCE_KEY_SHA256 }}
+        run: |
+          scripts/package-release.sh validate-tag "${PAM_RELEASE_TAG}"
+          checked_out_revision=$(git rev-parse HEAD)
+          tagged_revision=$(git rev-parse "refs/tags/${PAM_RELEASE_TAG}^{commit}")
+          test "${checked_out_revision}" = "${tagged_revision}"
+          test -n "${PAM_EVIDENCE_KEY}"
+          printf '%s' "${PAM_EVIDENCE_KEY_IDENTITY}" | grep -Eq '^[0-9a-f]{64}$'
+          if test -n "${PAM_NEXT_EVIDENCE_KEY_IDENTITY}"; then
+            printf '%s' "${PAM_NEXT_EVIDENCE_KEY_IDENTITY}" | grep -Eq '^[0-9a-f]{64}$'
+            test "${PAM_NEXT_EVIDENCE_KEY_IDENTITY}" != "${PAM_EVIDENCE_KEY_IDENTITY}"
+          fi
+
   ecosystem-compatibility:
     name: Certify the complete PAM Native ecosystem
+    needs: release-preflight
     uses: ./.github/workflows/ecosystem-compatibility.yml
     with:
       pam_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
 
   android-runtime:
     name: Build verified Android runtimes and engines
+    needs: release-preflight
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -81,6 +111,7 @@ jobs:
           retention-days: 7
 
   build:
+    needs: release-preflight
     strategy:
       fail-fast: false
       matrix:
@@ -148,11 +179,21 @@ jobs:
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
           composer install --working-dir=packages/octane --no-interaction --prefer-dist
       - name: Test, analyze, and build
+        env:
+          PAM_UPDATE_SIGNING_IDENTITY_SHA256: ${{ vars.PAM_DISTRIBUTION_EVIDENCE_KEY_SHA256 }}
+          PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256: ${{ vars.PAM_DISTRIBUTION_NEXT_EVIDENCE_KEY_SHA256 }}
         run: |
+          printf '%s' "${PAM_UPDATE_SIGNING_IDENTITY_SHA256}" | grep -Eq '^[0-9a-f]{64}$'
+          if test -n "${PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256}"; then
+            printf '%s' "${PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256}" | grep -Eq '^[0-9a-f]{64}$'
+            test "${PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256}" != "${PAM_UPDATE_SIGNING_IDENTITY_SHA256}"
+          fi
           cargo fmt --all -- --check
           cargo run --locked -- docs:generate docs/cli-reference.md --check
           python3 -m json.tool docs/schemas/pam.schema.json >/dev/null
           python3 -m json.tool docs/schemas/registry-compatibility-matrix.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/distribution-evidence.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/desktop-platform-verification.schema.json >/dev/null
           python3 scripts/check-docs.py
           cargo clippy --locked --all-targets --all-features -- -D warnings
           cargo test --locked --all-targets --all-features -- --test-threads=1
@@ -190,6 +231,7 @@ jobs:
           retention-days: 7
 
   build-macos:
+    needs: release-preflight
     strategy:
       fail-fast: false
       matrix:
@@ -232,7 +274,15 @@ jobs:
           runtime-builder/ios/build.sh --php 8.4 "${PAM_RUNTIME_SLICE}"
           runtime-builder/ios/build.sh --php 8.5 "${PAM_RUNTIME_SLICE}"
       - name: Build PAM for macOS
+        env:
+          PAM_UPDATE_SIGNING_IDENTITY_SHA256: ${{ vars.PAM_DISTRIBUTION_EVIDENCE_KEY_SHA256 }}
+          PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256: ${{ vars.PAM_DISTRIBUTION_NEXT_EVIDENCE_KEY_SHA256 }}
         run: |
+          printf '%s' "${PAM_UPDATE_SIGNING_IDENTITY_SHA256}" | grep -Eq '^[0-9a-f]{64}$'
+          if test -n "${PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256}"; then
+            printf '%s' "${PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256}" | grep -Eq '^[0-9a-f]{64}$'
+            test "${PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256}" != "${PAM_UPDATE_SIGNING_IDENTITY_SHA256}"
+          fi
           php_config=$(find runtime/macos/8.5.* -type f -path '*/bin/php-config' -print -quit)
           test -n "${php_config}"
           php_sdk=$(dirname "$(dirname "${php_config}")")
@@ -272,9 +322,23 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  certify-runtime-distribution:
+    name: Certify Linux and macOS runtime distributions
+    needs: [build, build-macos]
+    permissions:
+      contents: read
+      attestations: read
+    uses: ./.github/workflows/runtime-distribution.yml
+    with:
+      current_ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+      current_tag: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+      evidence_key_identity: ${{ vars.PAM_DISTRIBUTION_EVIDENCE_KEY_SHA256 }}
+    secrets:
+      evidence_key: ${{ secrets.PAM_DISTRIBUTION_EVIDENCE_KEY }}
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))
-    needs: [ecosystem-compatibility, android-runtime, build, build-macos]
+    needs: [ecosystem-compatibility, android-runtime, build, build-macos, certify-runtime-distribution]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -290,6 +354,35 @@ jobs:
           pattern: pam-*
           path: dist
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: certification-runtime-distribution-linux-x86_64-${{ github.sha }}
+          path: runtime-distribution-certification/linux-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: certification-runtime-distribution-linux-aarch64-${{ github.sha }}
+          path: runtime-distribution-certification/linux-aarch64
+      - uses: actions/download-artifact@v4
+        with:
+          name: certification-runtime-distribution-macos-x86_64-${{ github.sha }}
+          path: runtime-distribution-certification/macos-x86_64
+      - uses: actions/download-artifact@v4
+        with:
+          name: certification-runtime-distribution-macos-arm64-${{ github.sha }}
+          path: runtime-distribution-certification/macos-arm64
+      - name: Package the signed clean-host certification
+        env:
+          PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
+        run: |
+          for target in linux-x86_64 linux-aarch64 macos-x86_64 macos-arm64; do
+            certification="runtime-distribution-certification/${target}"
+            test -f "${certification}/distribution.json"
+            cp "${certification}/distribution.json" \
+              "dist/pam-${PAM_RELEASE_TAG}-${target}.update.json"
+            archive="dist/pam-${PAM_RELEASE_TAG}-runtime-distribution-${target}.tar.gz"
+            tar -C "${certification}" -czf "${archive}" .
+            sha256sum "${archive}" >"${archive}.sha256"
+          done
       - name: Package the user-mode installer
         run: |
           cp install.sh dist/install.sh

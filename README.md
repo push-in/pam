@@ -61,7 +61,8 @@ No global PHP. No global Composer. No FPM pool. No Rust toolchain for applicatio
 developers. Install one verified runtime and create the product you want:
 
 ```console
-$ curl --proto '=https' --tlsv1.2 -fsSL \
+$ curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
     https://github.com/push-in/pam/releases/latest/download/install.sh | sh
 
 $ pam init my-api --template api
@@ -88,6 +89,15 @@ pam init my-native-app  --template mobile   # Android + iOS
 pam init my-desktop-app --template desktop  # Linux + macOS + Windows
 pam init my-product     --template product  # Server + Native + Desktop
 ```
+
+The `product` preset creates one coordinated workspace—not three unrelated
+examples. It places the PAM API in `apps/server`, the Android/iOS application
+in `apps/native`, the Desktop application in `apps/desktop`, and a versioned
+integer-backed PHP contract plus shared light/dark design tokens in
+`packages/contracts`. The generated vertical slice includes a bounded offline
+check-in queue, authenticated Desktop worker commands, cross-surface status,
+tests, cleanup rules, and a deterministic release manifest. Use `--no-install`
+to generate it without downloading dependencies.
 
 Inside every PAM project, the workflow is the same:
 
@@ -232,8 +242,10 @@ MSIX output on the corresponding native host; and keep feed signing plus updates
 behind explicit PHP policy and a pinned Ed25519 public key.
 
 > [!NOTE]
-> PAM Desktop is alpha software alongside Servo 0.4. It is ready for prototypes
-> and controlled applications, but does not claim Electron feature parity yet.
+> PAM Desktop 1.2 is alpha software and pins a Servo LTS release. It is ready
+> for prototypes and controlled applications, but does not claim Electron
+> feature parity yet. Release evidence records the exact engine revision instead
+> of presenting that moving implementation detail as the product version.
 
 **Explore Desktop:** [overview](https://push-in.github.io/pam-docs/desktop/overview/) ·
 [windows and commands](https://push-in.github.io/pam-docs/desktop/windows-and-commands/) ·
@@ -692,7 +704,12 @@ curl --fail http://127.0.0.1:3010/ready
 curl --fail http://127.0.0.1:3010/metrics
 ```
 
-Do not expose the admin listener directly to the public Internet.
+The listener is disabled unless `--admin-address` is present. Non-loopback
+addresses require a 32–256 character `PAM_ADMIN_TOKEN` or a bounded regular
+secret file selected by `PAM_ADMIN_TOKEN_FILE`; all endpoints then
+require `Authorization: Bearer`, and `pam top` forwards the token automatically.
+The master removes it from PHP worker environments. Do not expose the admin
+listener directly to the public Internet.
 
 ## TLS, HTTP/3, and security controls
 
@@ -786,6 +803,8 @@ pam heap|fibers|connections [index.php]             focused diagnostic views
 pam profile|trace [index.php]                       profiling and structured events
 pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
+pam doctor --json|--schema                          emit diagnostics or its embedded contract
+pam doctor --validate doctor-report.json            verify a saved report offline
 pam benchmark http://host/path                      built-in HTTP benchmark
 pam init [directory] --template raw|api|laravel|desktop|mobile|mobile-ui|product
                                                     scaffold and install a project
@@ -797,6 +816,8 @@ pam build [directory] --entry index.php --output dist
 `pam dev` watches PHP files, `.env`, `composer.json`, and `composer.lock`, while ignoring heavy/generated directories. A syntax error does not kill the watcher; fix the file and save again.
 
 `pam doctor` compares PHP version and ABI, ZTS mode, debug mode, integer size, loaded INI files, CLI/Embed extensions, Composer autoloading, and platform requirements. Environment drift is reported instead of hidden.
+`pam doctor --schema` prints the strict, versioned JSON Schema used by automation without requiring a network connection.
+`pam doctor --validate` applies bounded structural and semantic validation to a saved report and rejects unknown fields, inconsistent codes, oversized inputs, and symlinks.
 
 ## Performance
 

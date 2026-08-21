@@ -435,6 +435,10 @@ impl ServerState {
         WorkerMetricsSnapshot {
             requests: self.metrics.requests.load(Ordering::Relaxed),
             errors: self.metrics.errors.load(Ordering::Relaxed),
+            client_disconnect_cancellations: self
+                .metrics
+                .client_disconnect_cancellations
+                .load(Ordering::Relaxed),
             active_requests: self.metrics.active_requests.load(Ordering::Relaxed),
             request_duration_micros: self.metrics.request_duration_micros.load(Ordering::Relaxed),
             request_duration_buckets: std::array::from_fn(|index| {
@@ -454,6 +458,15 @@ impl ServerState {
             websocket_messages: self.metrics.websocket_messages.load(Ordering::Relaxed),
             websocket_backpressure: self.metrics.websocket_backpressure.load(Ordering::Relaxed),
             event_loop_lag_micros: self.metrics.event_loop_lag_micros.load(Ordering::Relaxed),
+            event_loop_lag_max_micros: self
+                .metrics
+                .event_loop_lag_max_micros
+                .load(Ordering::Relaxed),
+            event_loop_lag_total_micros: self
+                .metrics
+                .event_loop_lag_total_micros
+                .load(Ordering::Relaxed),
+            event_loop_lag_samples: self.metrics.event_loop_lag_samples.load(Ordering::Relaxed),
             resident_memory_bytes: resident_memory_bytes(),
             php_memory_bytes: runtime.memory_bytes,
             php_peak_memory_bytes: runtime.peak_memory_bytes,
@@ -785,6 +798,7 @@ impl Drop for PhpHttpDispatchGuard {
 struct Metrics {
     requests: AtomicU64,
     errors: AtomicU64,
+    client_disconnect_cancellations: AtomicU64,
     active_requests: AtomicU64,
     request_duration_micros: AtomicU64,
     request_duration_buckets: [AtomicU64; 11],
@@ -799,6 +813,9 @@ struct Metrics {
     websocket_messages: AtomicU64,
     websocket_backpressure: AtomicU64,
     event_loop_lag_micros: AtomicU64,
+    event_loop_lag_max_micros: AtomicU64,
+    event_loop_lag_total_micros: AtomicU64,
+    event_loop_lag_samples: AtomicU64,
     route_metrics_enabled: bool,
     route_metrics_max_entries: usize,
     route_metrics: StdMutex<HashMap<RouteMetricKey, RouteMetric>>,
@@ -834,6 +851,7 @@ impl Metrics {
         Self {
             requests: AtomicU64::new(0),
             errors: AtomicU64::new(0),
+            client_disconnect_cancellations: AtomicU64::new(0),
             active_requests: AtomicU64::new(0),
             request_duration_micros: AtomicU64::new(0),
             request_duration_buckets: Default::default(),
@@ -848,6 +866,9 @@ impl Metrics {
             websocket_messages: AtomicU64::new(0),
             websocket_backpressure: AtomicU64::new(0),
             event_loop_lag_micros: AtomicU64::new(0),
+            event_loop_lag_max_micros: AtomicU64::new(0),
+            event_loop_lag_total_micros: AtomicU64::new(0),
+            event_loop_lag_samples: AtomicU64::new(0),
             route_metrics_enabled,
             route_metrics_max_entries,
             route_metrics: StdMutex::new(HashMap::new()),
@@ -863,6 +884,8 @@ impl Metrics {
                 "pam_http_requests_total {}\n",
                 "# TYPE pam_http_errors_total counter\n",
                 "pam_http_errors_total {}\n",
+                "# TYPE pam_http_client_disconnect_cancellations_total counter\n",
+                "pam_http_client_disconnect_cancellations_total {}\n",
                 "# TYPE pam_http_active_requests gauge\n",
                 "pam_http_active_requests {}\n",
                 "# TYPE pam_http_request_bytes_total counter\n",
@@ -887,6 +910,10 @@ impl Metrics {
                 "pam_websocket_backpressure_total {}\n",
                 "# TYPE pam_event_loop_lag_seconds gauge\n",
                 "pam_event_loop_lag_seconds {:.6}\n",
+                "# TYPE pam_event_loop_lag_max_seconds gauge\n",
+                "pam_event_loop_lag_max_seconds {:.6}\n",
+                "# TYPE pam_event_loop_lag_average_seconds gauge\n",
+                "pam_event_loop_lag_average_seconds {:.6}\n",
                 "# TYPE pam_process_resident_memory_bytes gauge\n",
                 "pam_process_resident_memory_bytes {}\n",
                 "# TYPE pam_php_memory_bytes gauge\n",
@@ -908,6 +935,7 @@ impl Metrics {
             ),
             self.requests.load(Ordering::Relaxed),
             self.errors.load(Ordering::Relaxed),
+            self.client_disconnect_cancellations.load(Ordering::Relaxed),
             self.active_requests.load(Ordering::Relaxed),
             self.request_bytes.load(Ordering::Relaxed),
             self.response_bytes.load(Ordering::Relaxed),
@@ -920,12 +948,21 @@ impl Metrics {
             self.websocket_messages.load(Ordering::Relaxed),
             self.websocket_backpressure.load(Ordering::Relaxed),
             self.event_loop_lag_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+            self.event_loop_lag_max_micros.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+            event_loop_lag_average_micros(
+                self.event_loop_lag_total_micros.load(Ordering::Relaxed),
+                self.event_loop_lag_samples.load(Ordering::Relaxed),
+            ) / 1_000_000.0,
             resident_memory_bytes(),
             runtime.memory_bytes,
             runtime.peak_memory_bytes,
             runtime.fibers,
-            std::env::var("PAM_WORKER_ID").unwrap_or_else(|_| "standalone".to_owned()),
-            std::env::var("PAM_WORKER_GENERATION").unwrap_or_else(|_| "1".to_owned()),
+            crate::prometheus::label(
+                &std::env::var("PAM_WORKER_ID").unwrap_or_else(|_| "standalone".to_owned())
+            ),
+            crate::prometheus::label(
+                &std::env::var("PAM_WORKER_GENERATION").unwrap_or_else(|_| "1".to_owned())
+            ),
             std::process::id(),
             self.otlp.exported.load(Ordering::Relaxed),
             self.otlp.dropped.load(Ordering::Relaxed),
@@ -961,8 +998,8 @@ impl Metrics {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             for (key, metric) in routes.iter() {
-                let method = prometheus_label(&key.method);
-                let route = prometheus_label(&key.route);
+                let method = crate::prometheus::label(&key.method);
+                let route = crate::prometheus::label(&key.route);
                 let labels = format!(
                     "method=\"{method}\",route=\"{route}\",status=\"{}\"",
                     key.status,
@@ -1227,10 +1264,25 @@ fn start_php_executor(state: ServerState, mut receiver: mpsc::Receiver<PhpJob>) 
     tokio::task::spawn_local(async move {
         while let Some(job) = receiver.recv().await {
             match job {
-                PhpJob::Http { request, response } => {
+                PhpJob::Http {
+                    request,
+                    mut response,
+                } => {
                     let request_state = state.clone();
                     tokio::task::spawn_local(async move {
-                        let result = invoke_php_http_local(&request_state, &request).await;
+                        let Some(result) = await_http_response(
+                            &mut response,
+                            invoke_php_http_local(&request_state, &request),
+                        )
+                        .await
+                        else {
+                            request_state
+                                .metrics
+                                .client_disconnect_cancellations
+                                .fetch_add(1, Ordering::Relaxed);
+                            request_state.refresh_worker_metrics();
+                            return;
+                        };
                         request_state.refresh_php_metrics_on_owner_thread(false);
                         let _ = response.send(result);
                     });
@@ -1249,6 +1301,16 @@ fn start_php_executor(state: ServerState, mut receiver: mpsc::Receiver<PhpJob>) 
             }
         }
     });
+}
+
+async fn await_http_response<T>(
+    response: &mut oneshot::Sender<T>,
+    operation: impl Future<Output = T>,
+) -> Option<T> {
+    tokio::select! {
+        _ = response.closed() => None,
+        result = operation => Some(result),
+    }
 }
 
 async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
@@ -2194,13 +2256,6 @@ fn valid_route_template(route: &str) -> bool {
         && route
             .bytes()
             .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'\\' | b'"'))
-}
-
-fn prometheus_label(value: &str) -> String {
-    value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
 }
 
 fn extract_cache_tags(response: &mut Response, configured_header: &str) -> HashSet<String> {
@@ -3923,11 +3978,75 @@ fn monitor_event_loop(metrics: Arc<Metrics>) {
         loop {
             interval.tick().await;
             let now = Instant::now();
-            metrics.event_loop_lag_micros.store(
-                now.saturating_duration_since(expected).as_micros() as u64,
+            let lag_micros = now.saturating_duration_since(expected).as_micros() as u64;
+            metrics
+                .event_loop_lag_micros
+                .store(lag_micros, Ordering::Relaxed);
+            metrics
+                .event_loop_lag_max_micros
+                .fetch_max(lag_micros, Ordering::Relaxed);
+            let _ = metrics.event_loop_lag_total_micros.fetch_update(
                 Ordering::Relaxed,
+                Ordering::Relaxed,
+                |total| Some(total.saturating_add(lag_micros)),
+            );
+            let _ = metrics.event_loop_lag_samples.fetch_update(
+                Ordering::Relaxed,
+                Ordering::Relaxed,
+                |samples| Some(samples.saturating_add(1)),
             );
             expected = now + period;
         }
     });
+}
+
+fn event_loop_lag_average_micros(total_micros: u64, samples: u64) -> f64 {
+    if samples == 0 {
+        0.0
+    } else {
+        total_micros as f64 / samples as f64
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::task::{Context, Poll};
+
+    struct PendingOperation(Arc<AtomicBool>);
+
+    impl Future for PendingOperation {
+        type Output = ();
+
+        fn poll(self: Pin<&mut Self>, _context: &mut Context<'_>) -> Poll<Self::Output> {
+            Poll::Pending
+        }
+    }
+
+    impl Drop for PendingOperation {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn dropping_the_http_receiver_cancels_the_inflight_operation() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let dropped = Arc::new(AtomicBool::new(false));
+        runtime.block_on(async {
+            let (mut response, receiver) = oneshot::channel();
+            let disconnect = tokio::spawn(async move {
+                tokio::task::yield_now().await;
+                drop(receiver);
+            });
+            let result =
+                await_http_response(&mut response, PendingOperation(dropped.clone())).await;
+            disconnect.await.unwrap();
+            assert!(result.is_none());
+        });
+        assert!(dropped.load(Ordering::Relaxed));
+    }
 }

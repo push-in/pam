@@ -7,6 +7,8 @@ use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::Engine;
+use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 
 fn run_pam(arguments: &[&str]) -> Output {
@@ -116,6 +118,98 @@ fn creates_and_verifies_benchmark_evidence_manifests() {
     ]);
     assert!(!tampered.status.success());
     assert!(String::from_utf8_lossy(&tampered.stderr).contains("do not match"));
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn records_reproducible_soak_metadata() {
+    let results = temporary_path("soak-metadata");
+    fs::create_dir_all(&results).unwrap();
+    let script = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/metadata.php");
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .arg(script)
+        .arg(&results)
+        .env("PAM_BENCH_BINARY", env!("CARGO_BIN_EXE_pam"))
+        .env("PAM_BENCH_WORKERS", "4")
+        .env("PAM_BENCH_THREADS", "2")
+        .env("PAM_BENCH_CONNECTIONS", "64")
+        .env("PAM_BENCH_DURATION", "10m")
+        .env("PAM_BENCH_WARMUP_DURATION", "5s")
+        .env("PAM_BENCH_ROUNDS", "1")
+        .env("PAM_BENCH_RUNTIME_ORDER", "pam")
+        .env("PAM_SOAK_MAX_RSS_GROWTH_BYTES", "33554432")
+        .output()
+        .expect("metadata script should start");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("metadata.json")).unwrap()).unwrap();
+    assert!(
+        metadata["source"]["commit"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert!(
+        metadata["tools"]["pam_sha256"]
+            .as_str()
+            .is_some_and(|value| !value.is_empty())
+    );
+    assert_eq!(metadata["parameters"]["workers"], 4);
+    assert_eq!(metadata["parameters"]["threads"], 2);
+    assert_eq!(metadata["parameters"]["connections"], 64);
+    assert_eq!(metadata["parameters"]["duration"], "10m");
+    assert_eq!(metadata["parameters"]["runtime_order"][0], "pam");
+    assert_eq!(
+        metadata["parameters"]["soak_rss_growth_limit_bytes"],
+        33_554_432
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn evaluates_bounded_overload_evidence() {
+    let results = temporary_path("overload-evidence");
+    fs::create_dir_all(&results).unwrap();
+    let samples = results.join("samples.tsv");
+    let report = results.join("overload-report.json");
+    fs::write(&samples, "200\t\t0.051\n503\t1\t0.002\n503\t1\t0.003\n").unwrap();
+    let script =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/overload-report.php");
+
+    let accepted = run_pam(&[
+        script.to_str().unwrap(),
+        samples.to_str().unwrap(),
+        report.to_str().unwrap(),
+        "200",
+    ]);
+    assert!(
+        accepted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&accepted.stderr)
+    );
+    let evidence: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
+    assert_eq!(evidence["passed"], true);
+    assert_eq!(evidence["requests"], 3);
+    assert_eq!(evidence["status_counts"][0]["status"], 200);
+    assert_eq!(evidence["status_counts"][1]["status"], 503);
+    assert_eq!(evidence["retry_after_missing"], 0);
+    assert_eq!(evidence["recovery_status"], 200);
+
+    fs::write(&samples, "200\t\t0.051\n503\t\t0.002\n").unwrap();
+    let rejected = run_pam(&[
+        script.to_str().unwrap(),
+        samples.to_str().unwrap(),
+        report.to_str().unwrap(),
+        "200",
+    ]);
+    assert!(!rejected.status.success());
+    let evidence: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
+    assert_eq!(evidence["passed"], false);
+    assert_eq!(evidence["retry_after_missing"], 1);
     fs::remove_dir_all(results).unwrap();
 }
 
@@ -233,6 +327,12 @@ fn initializes_and_discovers_a_contextual_native_project() {
     assert_eq!(payload["artifactFootprint"]["bytes"], 0);
     assert_eq!(payload["artifactFootprint"]["files"], 0);
     assert_eq!(payload["artifactFootprint"]["complete"], true);
+    assert_eq!(payload["artifactBudget"]["limitBytes"], 8_589_934_592_u64);
+    assert_eq!(payload["artifactBudget"]["stateCode"], 1);
+    assert_eq!(
+        payload["artifactBudget"]["cleanupCommand"],
+        "pam clean --all"
+    );
     assert_eq!(
         payload["nextCommands"],
         serde_json::json!(["pam doctor", "pam dev", "pam test", "pam build"])
@@ -252,9 +352,12 @@ fn initializes_and_discovers_a_contextual_native_project() {
     assert_eq!(measured["developmentArtifacts"]["complete"], true);
     assert_eq!(measured["artifactFootprint"]["bytes"], 64);
     assert_eq!(measured["artifactFootprint"]["files"], 1);
-    assert_eq!(
-        measured["artifactFootprint"]["entries"][0]["path"],
-        ".pam-native/android"
+    assert!(
+        measured["artifactFootprint"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["path"] == ".pam-native/android")
     );
     let preview = run_pam_in(&project, &["clean", "--dry-run", "--json"]);
     assert!(preview.status.success());
@@ -274,8 +377,14 @@ fn initializes_and_discovers_a_contextual_native_project() {
     let cleaned: serde_json::Value = serde_json::from_slice(&cleaned.stdout).unwrap();
     assert_eq!(cleaned["operationCode"], 2);
     assert_eq!(cleaned["bytes"], 64);
-    assert_eq!(cleaned["entries"][0]["kindCode"], 2);
-    assert_eq!(cleaned["entries"][0]["removed"], true);
+    let android_build = cleaned["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["path"] == ".pam-native/android/app/build")
+        .unwrap();
+    assert_eq!(android_build["kindCode"], 2);
+    assert_eq!(android_build["removed"], true);
     assert!(!project.join(".pam-native/android/app/build").exists());
     assert!(project.join("index.php").is_file());
     fs::remove_dir_all(parent).unwrap();
@@ -503,7 +612,9 @@ fn reports_a_missing_script_with_ex_noinput() {
     let output = run_pam(&["tests/fixtures/missing.php"]);
 
     assert_eq!(output.status.code(), Some(66));
-    assert!(String::from_utf8_lossy(&output.stderr).contains("cannot open"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("cannot open"));
+    assert!(stderr.contains("Verify: pam doctor"));
 }
 
 #[test]
@@ -528,12 +639,173 @@ fn exposes_stable_structured_error_envelopes() {
             .unwrap()
             .contains("check that the path")
     );
+    assert_eq!(error["verificationCommand"], "pam doctor");
 
     let usage = run_pam(&["--json-errors", "benchmark"]);
     assert_eq!(usage.status.code(), Some(70));
     let usage: serde_json::Value = serde_json::from_slice(&usage.stdout).unwrap();
     assert_eq!(usage["errorCode"], 5);
     assert!(usage["remediation"].as_str().unwrap().contains("pam help"));
+    assert_eq!(usage["verificationCommand"], "pam --help");
+}
+
+#[test]
+fn exposes_the_authoritative_machine_readable_cli_catalog() {
+    let output = run_pam(&["catalog", "--json"]);
+    assert!(output.status.success());
+    let catalog: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(catalog["schemaVersion"], 1);
+    let commands = catalog["commands"].as_array().unwrap();
+    assert!(commands.len() >= 60);
+    assert!(commands.iter().any(|command| {
+        command["name"] == "doctor" && command["groupCode"] == 1 && command["supportsJson"] == true
+    }));
+    assert!(commands.iter().any(|command| {
+        command["name"] == "dev" && command["groupCode"] == 2 && command["supportsJson"] == false
+    }));
+    assert!(commands.iter().all(|command| {
+        command["groupCode"]
+            .as_u64()
+            .is_some_and(|code| (1..=9).contains(&code))
+            && command["groupLabel"]
+                .as_str()
+                .is_some_and(|label| !label.is_empty())
+    }));
+
+    let schema = run_pam(&["catalog", "--schema"]);
+    assert!(schema.status.success());
+    let schema: serde_json::Value = serde_json::from_slice(&schema.stdout).unwrap();
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
+    assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+    assert_eq!(
+        schema["$defs"]["command"]["properties"]["groupCode"]["enum"],
+        serde_json::json!([1, 2, 3, 4, 5, 6, 7, 8, 9])
+    );
+
+    let compatibility_schema = run_pam(&["catalog", "--compat-schema"]);
+    assert!(compatibility_schema.status.success());
+    let compatibility_schema: serde_json::Value =
+        serde_json::from_slice(&compatibility_schema.stdout).unwrap();
+    assert_eq!(
+        compatibility_schema["properties"]["schemaVersion"]["const"],
+        1
+    );
+    assert_eq!(
+        compatibility_schema["$defs"]["change"]["properties"]["changeCode"]["enum"],
+        serde_json::json!([1, 2, 3])
+    );
+
+    let directory = temporary_path("cli-catalog-validation");
+    fs::create_dir_all(&directory).unwrap();
+    let saved = directory.join("catalog.json");
+    fs::write(&saved, &output.stdout).unwrap();
+    let validation = run_pam(&["catalog", "--validate", saved.to_str().unwrap(), "--json"]);
+    assert!(validation.status.success());
+    let validation: serde_json::Value = serde_json::from_slice(&validation.stdout).unwrap();
+    assert_eq!(validation["valid"], true);
+    assert_eq!(validation["commandCount"], commands.len());
+
+    let compatible = run_pam(&[
+        "catalog",
+        "--compat",
+        saved.to_str().unwrap(),
+        saved.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(compatible.status.success());
+    let compatible: serde_json::Value = serde_json::from_slice(&compatible.stdout).unwrap();
+    assert_eq!(compatible["compatible"], true);
+    assert_eq!(compatible["changes"], serde_json::json!([]));
+
+    let baseline: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let mut breaking = baseline.clone();
+    breaking["commands"].as_array_mut().unwrap().remove(0);
+    breaking["commands"][0]["groupCode"] = serde_json::json!(9);
+    breaking["commands"][0]["groupLabel"] = serde_json::json!("Advanced");
+    let json_command = breaking["commands"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|command| command["supportsJson"] == true)
+        .unwrap();
+    breaking["commands"][json_command]["supportsJson"] = serde_json::json!(false);
+    let breaking_path = directory.join("breaking.json");
+    fs::write(&breaking_path, serde_json::to_vec(&breaking).unwrap()).unwrap();
+    let incompatible = run_pam(&[
+        "catalog",
+        "--compat",
+        saved.to_str().unwrap(),
+        breaking_path.to_str().unwrap(),
+        "--json",
+    ]);
+    assert_eq!(incompatible.status.code(), Some(1));
+    let incompatible: serde_json::Value = serde_json::from_slice(&incompatible.stdout).unwrap();
+    assert_eq!(incompatible["compatible"], false);
+    let codes = incompatible["changes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|change| change["changeCode"].as_u64().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(codes, vec![1, 2, 3]);
+
+    let mut additive = baseline.clone();
+    additive["commands"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "name": "future-command",
+            "summary": "Additive capability",
+            "groupCode": 9,
+            "groupLabel": "Advanced",
+            "supportsJson": true,
+        }));
+    let additive_path = directory.join("additive.json");
+    fs::write(&additive_path, serde_json::to_vec(&additive).unwrap()).unwrap();
+    let compatible = run_pam(&[
+        "catalog",
+        "--compat",
+        saved.to_str().unwrap(),
+        additive_path.to_str().unwrap(),
+    ]);
+    assert!(compatible.status.success());
+
+    let mut mismatched: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    mismatched["commands"][0]["groupLabel"] = serde_json::json!("Advanced");
+    let mismatched_path = directory.join("mismatched.json");
+    fs::write(&mismatched_path, serde_json::to_vec(&mismatched).unwrap()).unwrap();
+    let rejected = run_pam(&["catalog", "--validate", mismatched_path.to_str().unwrap()]);
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("does not match groupCode"));
+
+    let mut duplicate: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let first = duplicate["commands"][0].clone();
+    duplicate["commands"].as_array_mut().unwrap().push(first);
+    let duplicate_path = directory.join("duplicate.json");
+    fs::write(&duplicate_path, serde_json::to_vec(&duplicate).unwrap()).unwrap();
+    let rejected = run_pam(&["catalog", "--validate", duplicate_path.to_str().unwrap()]);
+    assert!(!rejected.status.success());
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("duplicate CLI command"));
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(&saved, directory.join("catalog-link.json")).unwrap();
+        let rejected = run_pam(&[
+            "catalog",
+            "--validate",
+            directory.join("catalog-link.json").to_str().unwrap(),
+        ]);
+        assert!(!rejected.status.success());
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("non-symlink"));
+    }
+
+    let invalid = run_pam(&["catalog"]);
+    assert!(!invalid.status.success());
+    assert!(String::from_utf8_lossy(&invalid.stderr).contains("catalog requires"));
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
@@ -780,7 +1052,7 @@ fn delegates_desktop_commands_and_exposes_the_pam_binary() {
     fs::create_dir(&directory).unwrap();
     fs::write(
         &desktop,
-        "#!/bin/sh\nprintf 'pam=%s\\n' \"$PAM_BINARY\"\nprintf 'args=%s|%s|%s\\n' \"$1\" \"$2\" \"$3\"\nexit 23\n",
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then printf 'pam-desktop 9.9.9\\n'; exit 0; fi\nprintf 'pam=%s\\n' \"$PAM_BINARY\"\nprintf 'args=%s|%s|%s\\n' \"$1\" \"$2\" \"$3\"\nexit 23\n",
     )
     .unwrap();
     fs::set_permissions(&desktop, fs::Permissions::from_mode(0o755)).unwrap();
@@ -833,11 +1105,124 @@ fn delegates_desktop_commands_and_exposes_the_pam_binary() {
     let package_output = String::from_utf8_lossy(&package.stdout);
     assert!(package_output.contains("args=build|"), "{package_output}");
 
+    let host_doctor = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(["desktop", "host:doctor", ".", "--json"])
+        .current_dir(&directory)
+        .env("PAM_DESKTOP_BINARY", &desktop)
+        .output()
+        .unwrap();
+    assert_eq!(host_doctor.status.code(), Some(1));
+    let report: serde_json::Value = serde_json::from_slice(&host_doctor.stdout).unwrap();
+    assert_eq!(report["schemaVersion"], 1);
+    assert_eq!(report["surfaceCode"], 3);
+    assert_eq!(report["resultCode"], 2);
+    assert_eq!(report["sourceCode"], 2);
+    assert_eq!(report["authenticated"], false);
+    assert_eq!(report["checks"][0]["checkCode"], 1);
+    assert_eq!(report["checks"][0]["resultCode"], 2);
+    assert_eq!(report["checks"][1]["checkCode"], 2);
+    assert_eq!(report["checks"][1]["resultCode"], 2);
+    assert_eq!(report["checks"][2]["checkCode"], 3);
+    assert_eq!(report["checks"][2]["resultCode"], 1);
+
     let tests = run_pam_in(&directory, &["test"]);
     assert!(tests.status.success());
     assert!(String::from_utf8_lossy(&tests.stdout).contains("No application test runner"));
 
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn rejects_a_desktop_capture_command_missing_from_protocol_six() {
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(["desktop", "screenshot", "."])
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("protocol 6"), "{stderr}");
+    assert!(stderr.contains("platform driver"), "{stderr}");
+    assert!(stderr.contains("desktop visual verify"), "{stderr}");
+}
+
+#[test]
+fn rejects_unbounded_top_lag_warning_thresholds_before_connecting() {
+    for value in ["0", "60001", "invalid"] {
+        let output = run_pam(&["top", "http://127.0.0.1:9", "--lag-warn-ms", value]);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("lag-warn-ms"), "{stderr}");
+    }
+}
+
+#[test]
+fn accepts_top_json_before_or_after_the_admin_url() {
+    for arguments in [
+        ["top", "--json", "--iterations", "0", "http://127.0.0.1:9"],
+        ["top", "http://127.0.0.1:9", "--json", "--iterations", "0"],
+    ] {
+        let output = run_pam(&arguments);
+        assert!(!output.status.success());
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("must be positive"), "{stderr}");
+        assert!(!stderr.contains("unknown top option"), "{stderr}");
+    }
+}
+
+#[test]
+fn rejects_unauthenticated_public_control_planes_before_startup() {
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args([
+            "start",
+            fixture("hello.php").to_str().unwrap(),
+            "--admin-address",
+            "0.0.0.0:3010",
+        ])
+        .env_remove("PAM_ADMIN_TOKEN")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("non-loopback"), "{stderr}");
+    assert!(stderr.contains("PAM_ADMIN_TOKEN"), "{stderr}");
+}
+
+#[test]
+fn rejects_weak_control_plane_tokens_before_startup() {
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args([
+            "start",
+            fixture("hello.php").to_str().unwrap(),
+            "--admin-address",
+            "127.0.0.1:3010",
+        ])
+        .env("PAM_ADMIN_TOKEN", "too-short")
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("32 to 256"), "{stderr}");
+}
+
+#[test]
+fn rejects_ambiguous_control_plane_token_sources() {
+    let path = temporary_path("admin-token-source");
+    fs::write(&path, "0123456789abcdef0123456789abcdef\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args([
+            "start",
+            fixture("hello.php").to_str().unwrap(),
+            "--admin-address",
+            "127.0.0.1:3010",
+        ])
+        .env("PAM_ADMIN_TOKEN", "0123456789abcdef0123456789abcdef")
+        .env("PAM_ADMIN_TOKEN_FILE", &path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("set only one"), "{stderr}");
+    fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -869,6 +1254,7 @@ fn exposes_structured_doctor_and_offline_update_checks() {
     assert!(doctor.status.success());
     let report: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
     assert_eq!(report["schema"], 1);
+    assert_eq!(report["schemaVersion"], 1);
     assert_eq!(report["resultCode"], 1);
     assert_eq!(report["healthy"], true);
     assert!(report["target"].as_str().is_some());
@@ -894,6 +1280,324 @@ fn exposes_structured_doctor_and_offline_update_checks() {
     ]);
     assert!(update.status.success());
     assert!(String::from_utf8_lossy(&update.stdout).contains("is up to date"));
+}
+
+#[test]
+fn exposes_the_exact_versioned_doctor_schema_offline() {
+    let output = run_pam(&["doctor", "--schema"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let schema: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        schema["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
+    assert_eq!(schema["properties"]["schemaVersion"]["const"], 1);
+    assert_eq!(
+        schema["properties"]["resultCode"]["enum"],
+        serde_json::json!([1, 2])
+    );
+    assert_eq!(
+        schema["$defs"]["action"]["properties"]["actionCode"]["enum"],
+        serde_json::json!([1, 2, 3])
+    );
+    assert_eq!(schema["additionalProperties"], false);
+
+    for arguments in [
+        vec!["doctor", "--schema", "--json"],
+        vec!["doctor", "--schema", "--ci"],
+        vec!["doctor", "--schema", "."],
+    ] {
+        let rejected = run_pam(&arguments);
+        assert!(!rejected.status.success());
+        assert!(
+            String::from_utf8_lossy(&rejected.stderr)
+                .contains("doctor --schema must be used alone")
+        );
+    }
+}
+
+#[test]
+fn verifies_signed_clean_host_distribution_evidence_offline() {
+    let directory = temporary_path("distribution-evidence");
+    fs::create_dir_all(directory.join("files")).unwrap();
+    let artifact = directory.join("files/pam.tar.zst");
+    let baseline_artifact = directory.join("files/pam-baseline.tar.zst");
+    let inventory = directory.join("files/sbom.spdx.json");
+    let provenance_inventory = directory.join("files/provenance.sha256");
+    let provenance_bundle = directory.join("attestations/bundle.json");
+    fs::write(&artifact, b"immutable-package").unwrap();
+    fs::write(&baseline_artifact, b"immutable-baseline").unwrap();
+    fs::write(&inventory, br#"{"spdxVersion":"SPDX-2.3"}"#).unwrap();
+    fs::create_dir_all(directory.join("attestations")).unwrap();
+    fs::write(&provenance_bundle, b"signed attestation fixture").unwrap();
+    fs::write(
+        &provenance_inventory,
+        format!(
+            "{:x}  attestations/bundle.json\n",
+            Sha256::digest(fs::read(&provenance_bundle).unwrap())
+        ),
+    )
+    .unwrap();
+    let artifact_bytes = fs::read(&artifact).unwrap();
+    let baseline_artifact_bytes = fs::read(&baseline_artifact).unwrap();
+    let inventory_bytes = fs::read(&inventory).unwrap();
+    let provenance_inventory_bytes = fs::read(&provenance_inventory).unwrap();
+    let checks = (1..=7)
+        .map(|check_code| {
+            serde_json::json!({
+                "checkCode": check_code,
+                "resultCode": 1,
+                "durationMillis": check_code * 10,
+            })
+        })
+        .collect::<Vec<_>>();
+    let signing_key = SigningKey::from_bytes(&[17_u8; 32]);
+    let public_key = signing_key.verifying_key().to_bytes();
+    let sign_manifest = |manifest: &mut serde_json::Value| {
+        manifest
+            .as_object_mut()
+            .unwrap()
+            .remove("manifestSignature");
+        let signature = signing_key.sign(&serde_json::to_vec(manifest).unwrap());
+        manifest["manifestSignature"] = serde_json::json!(
+            base64::engine::general_purpose::STANDARD.encode(signature.to_bytes())
+        );
+    };
+    let mut manifest = serde_json::json!({
+        "schemaVersion": 1,
+        "surfaceCode": 1,
+        "platformCode": 1,
+        "architectureCode": 1,
+        "packageCode": 1,
+        "revision": "0123456789abcdef0123456789abcdef01234567",
+        "baselineRevision": "89abcdef0123456789abcdef0123456789abcdef",
+        "hostImage": "ubuntu-24.04@sha256:fixture",
+        "generatedAtUnixMs": 1_800_000_000_000_u64,
+        "artifact": {
+            "path": "files/pam.tar.zst",
+            "sha256": format!("{:x}", Sha256::digest(&artifact_bytes)),
+            "bytes": artifact_bytes.len(),
+        },
+        "baselineArtifact": {
+            "path": "files/pam-baseline.tar.zst",
+            "sha256": format!("{:x}", Sha256::digest(&baseline_artifact_bytes)),
+            "bytes": baseline_artifact_bytes.len(),
+        },
+        "dependencyInventory": {
+            "path": "files/sbom.spdx.json",
+            "sha256": format!("{:x}", Sha256::digest(&inventory_bytes)),
+            "bytes": inventory_bytes.len(),
+        },
+        "provenanceInventory": {
+            "path": "files/provenance.sha256",
+            "sha256": format!("{:x}", Sha256::digest(&provenance_inventory_bytes)),
+            "bytes": provenance_inventory_bytes.len(),
+        },
+        "installedBytes": 4096,
+        "launchMillis": 30,
+        "firstSuccessMillis": 45,
+        "signingIdentitySha256": format!("{:x}", Sha256::digest(public_key)),
+        "signingPublicKey": base64::engine::general_purpose::STANDARD.encode(public_key),
+        "checks": checks,
+    });
+    sign_manifest(&mut manifest);
+    let manifest_path = directory.join("distribution.json");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    let verified = run_pam(&[
+        "distribution:verify",
+        manifest_path.to_str().unwrap(),
+        "--json",
+    ]);
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let result: serde_json::Value = serde_json::from_slice(&verified.stdout).unwrap();
+    assert_eq!(result["schemaVersion"], 1);
+    assert_eq!(result["resultCode"], 1);
+    assert_eq!(result["surfaceCode"], 1);
+    assert_eq!(result["platformCode"], 1);
+    assert_eq!(result["packageCode"], 1);
+    assert_eq!(
+        result["signingIdentitySha256"],
+        manifest["signingIdentitySha256"]
+    );
+
+    fs::write(&provenance_bundle, b"tampered attestation fixture").unwrap();
+    let tampered_provenance = run_pam(&["distribution:verify", manifest_path.to_str().unwrap()]);
+    assert!(!tampered_provenance.status.success());
+    assert!(
+        String::from_utf8_lossy(&tampered_provenance.stderr)
+            .contains("provenance entry SHA-256 mismatch")
+    );
+    fs::write(&provenance_bundle, b"signed attestation fixture").unwrap();
+
+    let mut draft = manifest.clone();
+    for field in [
+        "signingIdentitySha256",
+        "signingPublicKey",
+        "manifestSignature",
+    ] {
+        draft.as_object_mut().unwrap().remove(field);
+    }
+    let draft_path = directory.join("draft.json");
+    let key_path = directory.join("evidence.key");
+    let signed_path = directory.join("signed-by-pam.json");
+    fs::write(&draft_path, serde_json::to_vec_pretty(&draft).unwrap()).unwrap();
+    fs::write(
+        &key_path,
+        base64::engine::general_purpose::STANDARD.encode(signing_key.to_bytes()),
+    )
+    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let signed = run_pam(&[
+        "distribution:sign",
+        draft_path.to_str().unwrap(),
+        "--key",
+        key_path.to_str().unwrap(),
+        "--output",
+        signed_path.to_str().unwrap(),
+    ]);
+    assert!(
+        signed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&signed.stderr)
+    );
+    let produced = fs::read(&signed_path).unwrap();
+    assert!(
+        !produced
+            .windows(32)
+            .any(|window| window == signing_key.to_bytes())
+    );
+    let produced_document: serde_json::Value = serde_json::from_slice(&produced).unwrap();
+    assert_eq!(
+        produced_document["signingIdentitySha256"],
+        manifest["signingIdentitySha256"]
+    );
+    let produced_verification = run_pam(&["distribution:verify", signed_path.to_str().unwrap()]);
+    assert!(produced_verification.status.success());
+    let overwrite = run_pam(&[
+        "distribution:sign",
+        draft_path.to_str().unwrap(),
+        "--key",
+        key_path.to_str().unwrap(),
+        "--output",
+        signed_path.to_str().unwrap(),
+    ]);
+    assert!(!overwrite.status.success());
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o644)).unwrap();
+        let insecure = run_pam(&[
+            "distribution:sign",
+            draft_path.to_str().unwrap(),
+            "--key",
+            key_path.to_str().unwrap(),
+            "--output",
+            directory.join("insecure.json").to_str().unwrap(),
+        ]);
+        assert!(!insecure.status.success());
+        assert!(String::from_utf8_lossy(&insecure.stderr).contains("permissions"));
+    }
+
+    let signed_manifest = manifest.clone();
+    manifest["installedBytes"] = serde_json::json!(8192);
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let forged = run_pam(&["distribution:verify", manifest_path.to_str().unwrap()]);
+    assert!(!forged.status.success());
+    assert!(String::from_utf8_lossy(&forged.stderr).contains("manifestSignature did not verify"));
+    manifest = signed_manifest;
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+
+    fs::write(&artifact, b"tampered-package").unwrap();
+    let tampered = run_pam(&["distribution:verify", manifest_path.to_str().unwrap()]);
+    assert!(!tampered.status.success());
+    assert!(String::from_utf8_lossy(&tampered.stderr).contains("byte size does not match"));
+    fs::write(&artifact, &artifact_bytes).unwrap();
+
+    manifest["artifact"]["path"] = serde_json::json!("../outside.tar.zst");
+    sign_manifest(&mut manifest);
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let traversal = run_pam(&["distribution:verify", manifest_path.to_str().unwrap()]);
+    assert!(!traversal.status.success());
+    assert!(String::from_utf8_lossy(&traversal.stderr).contains("canonical relative path"));
+
+    manifest["artifact"]["path"] = serde_json::json!("files/pam.tar.zst");
+    manifest["checks"][6]["resultCode"] = serde_json::json!(2);
+    sign_manifest(&mut manifest);
+    fs::write(&manifest_path, serde_json::to_vec(&manifest).unwrap()).unwrap();
+    let failed_gate = run_pam(&["distribution:verify", manifest_path.to_str().unwrap()]);
+    assert!(!failed_gate.status.success());
+    assert!(String::from_utf8_lossy(&failed_gate.stderr).contains("did not pass"));
+
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn validates_doctor_reports_offline_and_rejects_tampering() {
+    let directory = temporary_path("doctor-contract");
+    fs::create_dir_all(&directory).unwrap();
+    let report_path = directory.join("doctor.json");
+    let doctor = run_pam(&["doctor", fixture("hello.php").to_str().unwrap(), "--json"]);
+    assert!(doctor.status.success());
+    fs::write(&report_path, &doctor.stdout).unwrap();
+
+    let valid = run_pam(&["doctor", "--validate", report_path.to_str().unwrap()]);
+    assert!(
+        valid.status.success(),
+        "{}",
+        String::from_utf8_lossy(&valid.stderr)
+    );
+
+    let mut report: serde_json::Value = serde_json::from_slice(&doctor.stdout).unwrap();
+    report["unexpected"] = serde_json::json!(true);
+    fs::write(&report_path, serde_json::to_vec(&report).unwrap()).unwrap();
+    let unknown = run_pam(&["doctor", "--validate", report_path.to_str().unwrap()]);
+    assert!(!unknown.status.success());
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("fields do not match"));
+
+    report.as_object_mut().unwrap().remove("unexpected");
+    report["healthy"] = serde_json::json!(false);
+    fs::write(&report_path, serde_json::to_vec(&report).unwrap()).unwrap();
+    let inconsistent = run_pam(&["doctor", "--validate", report_path.to_str().unwrap()]);
+    assert!(!inconsistent.status.success());
+    assert!(String::from_utf8_lossy(&inconsistent.stderr).contains("inconsistent"));
+
+    fs::write(&report_path, vec![b' '; 1024 * 1024 + 1]).unwrap();
+    let oversized = run_pam(&["doctor", "--validate", report_path.to_str().unwrap()]);
+    assert!(!oversized.status.success());
+    assert!(String::from_utf8_lossy(&oversized.stderr).contains("1048576-byte"));
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        let real = directory.join("real.json");
+        let link = directory.join("linked.json");
+        fs::write(&real, &doctor.stdout).unwrap();
+        symlink(&real, &link).unwrap();
+        let linked = run_pam(&["doctor", "--validate", link.to_str().unwrap()]);
+        assert!(!linked.status.success());
+        assert!(String::from_utf8_lossy(&linked.stderr).contains("non-symlink"));
+    }
+
+    fs::remove_dir_all(directory).unwrap();
 }
 
 #[test]
@@ -982,9 +1686,12 @@ fn doctor_reports_project_target_paths_and_reclaimable_artifacts() {
     assert_eq!(report["project"]["typeLabel"], "PAM Runtime");
     assert_eq!(report["project"]["developmentArtifacts"]["bytes"], 64);
     assert_eq!(report["project"]["developmentArtifacts"]["files"], 1);
-    assert_eq!(
-        report["project"]["developmentArtifacts"]["entries"][2]["path"],
-        "target"
+    assert!(
+        report["project"]["developmentArtifacts"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["path"] == "target")
     );
     assert!(
         report["project"]["paths"]["manifest"]
@@ -999,6 +1706,15 @@ fn doctor_reports_project_target_paths_and_reclaimable_artifacts() {
     assert_eq!(
         report["nextActions"][0]["verificationCommand"],
         "pam doctor --json"
+    );
+
+    let report_path = directory.join("doctor-report.json");
+    fs::write(&report_path, &doctor.stdout).unwrap();
+    let validated = run_pam(&["doctor", "--validate", report_path.to_str().unwrap()]);
+    assert!(
+        validated.status.success(),
+        "{}",
+        String::from_utf8_lossy(&validated.stderr)
     );
 
     fs::remove_dir_all(directory).unwrap();
@@ -1024,7 +1740,13 @@ fn info_reports_runtime_target_artifacts_without_changing_the_legacy_native_fiel
     assert_eq!(report["artifactFootprint"]["bytes"], 64);
     assert_eq!(report["artifactFootprint"]["files"], 1);
     assert_eq!(report["artifactFootprint"]["complete"], true);
-    assert_eq!(report["artifactFootprint"]["entries"][2]["path"], "target");
+    assert!(
+        report["artifactFootprint"]["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["path"] == "target")
+    );
 
     fs::remove_dir_all(directory).unwrap();
 }
@@ -1360,6 +2082,15 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
         serde_json::json!([1, 2, 3])
     );
     assert_eq!(root["workspace"]["contractPath"], "packages/contracts");
+    assert_eq!(
+        root["workspace"]["designTokenPath"],
+        "packages/contracts/design-tokens.json"
+    );
+    assert!(
+        fs::read_to_string(directory.join(".gitignore"))
+            .unwrap()
+            .contains("/dist/")
+    );
     let info = run_pam_in(&directory, &["info", "--json"]);
     assert!(info.status.success());
     let info: serde_json::Value = serde_json::from_slice(&info.stdout).unwrap();
@@ -1370,6 +2101,17 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
         fs::read_to_string(directory.join("packages/contracts/src/ProductSurface.php")).unwrap();
     let state =
         fs::read_to_string(directory.join("packages/contracts/src/ReadinessState.php")).unwrap();
+    let version =
+        fs::read_to_string(directory.join("packages/contracts/src/ContractVersion.php")).unwrap();
+    let mutation_kind =
+        fs::read_to_string(directory.join("packages/contracts/src/ProductMutationKind.php"))
+            .unwrap();
+    let mutation_state =
+        fs::read_to_string(directory.join("packages/contracts/src/MutationResultState.php"))
+            .unwrap();
+    let delivery_state =
+        fs::read_to_string(directory.join("packages/contracts/src/MutationDeliveryState.php"))
+            .unwrap();
     let snapshot =
         fs::read_to_string(directory.join("packages/contracts/src/ProductSnapshot.php")).unwrap();
     assert!(surface.contains("case Server = 1;"));
@@ -1378,8 +2120,92 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
     assert!(state.contains("case Operational = 1;"));
     assert!(state.contains("case Degraded = 2;"));
     assert!(state.contains("case Offline = 3;"));
+    assert!(version.contains("case V1 = 1;"));
+    assert!(mutation_kind.contains("case CheckIn = 1;"));
+    assert!(mutation_state.contains("case Accepted = 1;"));
+    assert!(delivery_state.contains("case Delivered = 1;"));
+    assert!(delivery_state.contains("case Queued = 2;"));
+    assert!(snapshot.contains("public static function fromArray(array $payload): self"));
+    assert!(snapshot.contains("ContractVersion::tryFrom"));
+    assert!(snapshot.contains("'versionCode' => $this->version->value"));
+    let contract_test =
+        fs::read_to_string(directory.join("packages/contracts/tests/contract.php")).unwrap();
+    assert!(contract_test.contains("function expect(bool $condition, string $message): void"));
+    assert!(!contract_test.contains("assert("));
+    let snapshot_schema: serde_json::Value = serde_json::from_slice(
+        &fs::read(directory.join("packages/contracts/schema/product-snapshot.schema.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(snapshot_schema["additionalProperties"], false);
+    assert_eq!(snapshot_schema["properties"]["versionCode"]["const"], 1);
+    assert_eq!(
+        snapshot_schema["properties"]["surfaceCode"]["enum"],
+        serde_json::json!([1, 2, 3])
+    );
+    let mutation_schema: serde_json::Value = serde_json::from_slice(
+        &fs::read(directory.join("packages/contracts/schema/product-mutation.schema.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(mutation_schema["additionalProperties"], false);
+    assert_eq!(
+        mutation_schema["properties"]["mutationKindCode"]["const"],
+        1
+    );
     assert!(snapshot.contains("'surfaceCode' => $this->surface->value"));
     assert!(snapshot.contains("'stateCode' => $this->state->value"));
+    let design_tokens: serde_json::Value = serde_json::from_slice(
+        &fs::read(directory.join("packages/contracts/design-tokens.json")).unwrap(),
+    )
+    .unwrap();
+    let design_token_schema: serde_json::Value = serde_json::from_slice(
+        &fs::read(directory.join("packages/contracts/schema/product-design-tokens.schema.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(design_token_schema["additionalProperties"], false);
+    assert_eq!(design_tokens["schemaVersion"], 1);
+    assert_eq!(design_tokens["themes"][0]["modeCode"], 1);
+    assert_eq!(design_tokens["themes"][1]["modeCode"], 2);
+    assert_eq!(design_tokens["minimumTouchTarget"], 48);
+    assert_eq!(
+        design_tokens["motionMs"],
+        serde_json::json!([150, 240, 360])
+    );
+    assert_eq!(
+        design_tokens["spacing"],
+        serde_json::json!([4, 8, 12, 16, 24, 32, 48])
+    );
+    let token_color = |theme: usize, role: &str| {
+        let value = design_tokens["themes"][theme]["colors"][role]
+            .as_str()
+            .unwrap();
+        let channel = |offset: usize| u8::from_str_radix(&value[offset..offset + 2], 16).unwrap();
+        [
+            channel(1) as f64 / 255.0,
+            channel(3) as f64 / 255.0,
+            channel(5) as f64 / 255.0,
+        ]
+    };
+    for theme in 0..2 {
+        for (foreground, background) in [
+            ("foreground", "background"),
+            ("mutedForeground", "background"),
+            ("onPrimary", "primary"),
+        ] {
+            let ratio = contrast_ratio(
+                token_color(theme, foreground),
+                token_color(theme, background),
+            );
+            assert!(
+                ratio >= 4.5,
+                "theme {theme} {foreground} on {background} has insufficient contrast: {ratio:.2}:1"
+            );
+        }
+    }
+    assert!(contract_test.contains("Theme modes must use sequential integer codes."));
+    assert!(contract_test.contains("Touch targets must remain accessible."));
     let contract = run_pam(&[directory
         .join("packages/contracts/tests/contract.php")
         .to_str()
@@ -1420,18 +2246,99 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
     assert!(
         fs::read_to_string(directory.join("apps/server/tests/ApplicationTest.php"))
             .unwrap()
-            .contains("assertJson(['surfaceCode' => 1, 'stateCode' => 1")
+            .contains("assertJson(['versionCode' => 1, 'surfaceCode' => 1, 'stateCode' => 1")
+    );
+    let server_entry = fs::read_to_string(directory.join("apps/server/index.php")).unwrap();
+    assert!(server_entry.contains("$app->post('/api/check-ins'"));
+    assert!(server_entry.contains("hash_equals($mutation->idempotencyKey, $header)"));
+    assert!(server_entry.contains("ProductMutationReceipt::accepted($mutation)"));
+    assert!(
+        fs::read_to_string(directory.join("apps/server/tests/ApplicationTest.php"))
+            .unwrap()
+            .contains("assertHeader('cache-control', 'no-store')")
     );
     assert!(
         fs::read_to_string(directory.join("apps/native/src/Hello.pam"))
             .unwrap()
             .contains("ProductSurface::Native")
     );
+    let native_component = fs::read_to_string(directory.join("apps/native/src/Hello.pam")).unwrap();
+    let native_theme =
+        fs::read_to_string(directory.join("apps/native/src/ProductTheme.php")).unwrap();
+    assert!(native_component.contains("ProductTheme::install();"));
+    assert!(native_theme.contains("final class ProductTheme"));
+    assert!(native_theme.contains("dirname(__DIR__, 3).'/packages/contracts/design-tokens.json'"));
+    assert!(native_theme.contains("file_get_contents($path, false, null, 0, 32_769)"));
+    assert!(native_theme.contains("array_keys($document) !== ['schemaVersion', 'themes', 'spacing', 'radii', 'motionMs', 'minimumTouchTarget']"));
+    assert!(native_theme.contains("$payload['modeCode'] !== $modeCode"));
+    assert!(native_theme.contains("PamUI::theme($light, $dark);"));
+    assert!(native_theme.contains("Themes::light()"));
+    assert!(native_theme.contains("Themes::dark()"));
+    assert!(native_theme.contains("ColorToken::Primary->value"));
+    assert!(native_theme.contains("ColorToken::Focus->value"));
+    assert!(native_theme.contains("Product color must use canonical lowercase hex."));
+    let native_theme_syntax = run_pam(&[directory
+        .join("apps/native/src/ProductTheme.php")
+        .to_str()
+        .unwrap()]);
+    assert!(
+        native_theme_syntax.status.success(),
+        "{}",
+        String::from_utf8_lossy(&native_theme_syntax.stderr)
+    );
+    assert!(native_component.contains("use Pam\\Native\\Http\\Http;"));
+    assert!(native_component.contains("PAM_PRODUCT_SERVER_URL"));
+    assert!(native_component.contains("strlen($response->body) > 65_536"));
+    assert!(native_component.contains("ProductSnapshot::fromArray($payload)"));
+    assert!(native_component.contains("$snapshot->surface !== ProductSurface::Server"));
+    assert!(native_component.contains("timeoutMs: 5_000"));
+    assert!(native_component.contains("Server request could not start"));
+    assert!(native_component.contains("use Pam\\Native\\Sync\\OfflineMutationQueue;"));
+    assert!(native_component.contains("private const MAX_PENDING_MUTATIONS = 32;"));
+    assert!(native_component.contains("$this->pendingMutations >= self::MAX_PENDING_MUTATIONS"));
+    assert!(native_component.contains("Storage::get('product.outbox.v1'"));
+    assert!(native_component.contains("Storage::set('product.outbox.v1'"));
+    assert!(native_component.contains("PAM_PRODUCT_MUTATION_URL"));
+    assert!(native_component.contains("ProductMutation::checkIn($key)"));
+    assert!(native_component.contains("$this->outbox->retry"));
+    assert!(native_component.contains("$this->outbox->prune()"));
     assert!(
         fs::read_to_string(directory.join("apps/desktop/app.php"))
             .unwrap()
             .contains("ProductSurface::Desktop")
     );
+    let desktop_application = fs::read_to_string(directory.join("apps/desktop/app.php")).unwrap();
+    assert!(desktop_application.contains("#[Command('product.server-status')]"));
+    assert!(desktop_application.contains("#[Command('product.theme')]"));
+    assert!(desktop_application.contains("public function productTheme(int $modeCode): array"));
+    assert!(
+        desktop_application
+            .contains("dirname(__DIR__, 2).'/packages/contracts/design-tokens.json'")
+    );
+    assert!(desktop_application.contains("file_get_contents($path, false, null, 0, 32_769)"));
+    assert!(desktop_application.contains("$theme['modeCode'] !== $modeCode"));
+    assert!(desktop_application.contains("Product theme contains an invalid color."));
+    assert!(desktop_application.contains("#[Command('product.telemetry-history')]"));
+    assert!(desktop_application.contains("count($payload['samples']) > 24"));
+    assert!(desktop_application.contains("product-telemetry-v1.json"));
+    assert!(desktop_application.contains("array_slice($samples, -24)"));
+    assert!(desktop_application.contains("Desktop product telemetry history exceeds 16 KiB"));
+    assert!(desktop_application.contains("elapsedProductMilliseconds"));
+    assert!(desktop_application.contains("['127.0.0.1', 'localhost', '::1']"));
+    assert!(desktop_application.contains("$scheme !== 'https'"));
+    assert!(desktop_application.contains("strtolower($parts['scheme'])"));
+    assert!(desktop_application.contains("'follow_location' => 0"));
+    assert!(
+        desktop_application.contains("file_get_contents($endpoint, false, $context, 0, 65_537)")
+    );
+    assert!(desktop_application.contains("ProductSnapshot::fromArray($payload)"));
+    assert!(desktop_application.contains("#[Command('product.check-in')]"));
+    assert!(desktop_application.contains("#[Command('product.outbox.replay')]"));
+    assert!(desktop_application.contains("count($outbox) >= 32"));
+    assert!(desktop_application.contains("file_get_contents($path, false, null, 0, 65_537)"));
+    assert!(desktop_application.contains("fopen($temporary, 'x+b')"));
+    assert!(desktop_application.contains("fsync($handle)"));
+    assert!(desktop_application.contains("rename($temporary, $path)"));
     let desktop_html =
         fs::read_to_string(directory.join("apps/desktop/resources/index.html")).unwrap();
     let desktop_styles =
@@ -1439,12 +2346,269 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
     let desktop_javascript =
         fs::read_to_string(directory.join("apps/desktop/resources/app.js")).unwrap();
     assert!(desktop_html.contains("id=\"product-refresh\""));
+    assert!(desktop_html.contains("id=\"product-version-code\""));
+    assert!(desktop_html.contains("id=\"product-check-in\""));
+    assert!(desktop_html.contains("id=\"product-outbox-status\""));
+    assert!(desktop_html.contains("aria-live=\"polite\""));
     assert!(desktop_html.contains("role=\"status\" aria-live=\"polite\""));
-    assert!(desktop_styles.contains(".product-signal button:focus-visible"));
+    assert!(desktop_styles.contains(".product-console button:focus-visible"));
     assert!(desktop_styles.contains("min-height: 48px"));
-    assert!(desktop_javascript.contains("window.pam.invoke(\"product.status\""));
-    assert!(desktop_javascript.contains("snapshot.surfaceCode !== 3"));
+    assert!(desktop_styles.contains("@media (prefers-reduced-motion: reduce)"));
+    assert!(desktop_styles.contains("@media (max-width: 520px)"));
+    assert!(desktop_html.contains("class=\"product-console\""));
+    assert!(desktop_html.contains("id=\"product-surfaces-title\""));
+    assert!(desktop_html.contains("id=\"product-outbox-meter\""));
+    assert!(desktop_html.contains("id=\"product-history-chart\""));
+    assert!(desktop_html.contains("aria-label=\"Histórico cronológico de consultas ao Server\""));
+    assert!(desktop_html.contains("Não monitorado nesta sessão Desktop"));
+    assert!(desktop_javascript.contains("window.pam.invoke(\"product.server-status\""));
+    assert!(desktop_javascript.contains("window.pam.invoke(\"product.theme\", { modeCode }"));
+    assert!(desktop_javascript.contains("window.matchMedia(\"(prefers-color-scheme: dark)\")"));
+    assert!(desktop_javascript.contains("themeQuery.addEventListener(\"change\""));
+    assert!(
+        desktop_javascript.contains("document.documentElement.style.setProperty(property, value)")
+    );
+    assert!(
+        desktop_javascript
+            .contains("Object.keys(theme.colors).join(\",\") !== themeRoles.join(\",\")")
+    );
+    assert!(
+        desktop_styles
+            .contains("background: linear-gradient(145deg, var(--surface-raised), var(--ink))")
+    );
+    assert!(desktop_styles.contains("background: var(--surface-raised)"));
+    assert!(desktop_javascript.contains("snapshot.versionCode !== 1"));
+    assert!(desktop_javascript.contains("snapshot.surfaceCode !== 1"));
     assert!(desktop_javascript.contains("Number.isInteger(snapshot.stateCode)"));
+    assert!(desktop_javascript.contains("window.pam.invoke(\"product.check-in\""));
+    assert!(desktop_javascript.contains("window.pam.invoke(\"product.outbox.replay\""));
+    assert!(desktop_javascript.contains("result.pendingCount > 32"));
+    assert!(desktop_javascript.contains("window.pam.invoke(\"product.telemetry-history\""));
+    assert!(desktop_javascript.contains("result.samples.length > 24"));
+    assert!(desktop_javascript.contains("Number.isSafeInteger(sample.observedAtUnixMs)"));
+    assert!(desktop_javascript.contains("historyChart.replaceChildren()"));
+    assert!(desktop_javascript.contains("availability}% operacional"));
+    assert!(desktop_javascript.contains("Intl.DateTimeFormat"));
+    assert!(desktop_javascript.contains("surface.dataset.state === \"ready\""));
+
+    for (application, artifact, contents) in [
+        ("server", "product-server.tar.gz", b"server".as_slice()),
+        ("native", "product-native.aab", b"native".as_slice()),
+        ("desktop", "product-desktop.zip", b"desktop".as_slice()),
+    ] {
+        let dist = directory.join("apps").join(application).join("dist");
+        fs::create_dir_all(&dist).unwrap();
+        fs::write(dist.join(artifact), contents).unwrap();
+        fs::write(dist.join(format!("{artifact}.sha256")), "ignored sidecar").unwrap();
+    }
+    let native_screenshots = directory.join("apps/native/artifacts/screenshots");
+    let desktop_screenshots = directory.join("apps/desktop/artifacts/screenshots");
+    fs::create_dir_all(directory.join("artifacts")).unwrap();
+    fs::create_dir_all(&native_screenshots).unwrap();
+    fs::create_dir_all(&desktop_screenshots).unwrap();
+    let token_bytes = fs::read(directory.join("packages/contracts/design-tokens.json")).unwrap();
+    let token_sha256 = format!("{:x}", Sha256::digest(&token_bytes));
+    for (mode_code, mode) in [(1_u8, "light"), (2_u8, "dark")] {
+        let mut captures = Vec::new();
+        for (surface_code, surface) in [(2_u8, "native"), (3_u8, "desktop")] {
+            let screenshots = if surface_code == 2 {
+                &native_screenshots
+            } else {
+                &desktop_screenshots
+            };
+            let path = screenshots.join(format!("product-{surface}-{mode}.png"));
+            let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+            png.extend_from_slice(&[0, 0, 0, 13]);
+            png.extend_from_slice(b"IHDR");
+            png.extend_from_slice(&1_u32.to_be_bytes());
+            png.extend_from_slice(&1_u32.to_be_bytes());
+            fs::write(&path, &png).unwrap();
+            let anchors = [
+                "background",
+                "surface",
+                "foreground",
+                "primary",
+                "focus",
+                "danger",
+            ]
+            .into_iter()
+            .map(|role| {
+                serde_json::json!({
+                    "role": role,
+                    "target": "#000000",
+                    "closestChannelDelta": 0,
+                    "matchingPixels": 1,
+                    "requiredPixels": 1,
+                    "passed": true,
+                })
+            })
+            .collect::<Vec<_>>();
+            captures.push(serde_json::json!({
+                "surfaceCode": surface_code,
+                "name": surface,
+                "width": 1,
+                "height": 1,
+                "bytes": png.len(),
+                "sha256": format!("{:x}", Sha256::digest(&png)),
+                "visiblePixels": 1,
+                "anchors": anchors,
+                "passed": true,
+            }));
+        }
+        fs::write(
+            directory.join(format!("artifacts/product-visual-{mode}.json")),
+            serde_json::to_vec_pretty(&serde_json::json!({
+                "schemaVersion": 1,
+                "modeCode": mode_code,
+                "tokenSha256": token_sha256,
+                "toleranceChannelDelta": 12,
+                "captures": captures,
+                "passed": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let package = run_pam_in(&directory, &["package"]);
+    assert!(
+        package.status.success(),
+        "{}",
+        String::from_utf8_lossy(&package.stderr)
+    );
+    let release_bytes = fs::read(directory.join("dist/product-release.json")).unwrap();
+    let release: serde_json::Value = serde_json::from_slice(&release_bytes).unwrap();
+    assert_eq!(release["schemaVersionCode"], 1);
+    assert_eq!(release["artifacts"].as_array().unwrap().len(), 3);
+    assert_eq!(release["visualEvidence"].as_array().unwrap().len(), 2);
+    assert_eq!(release["visualEvidence"][0]["modeCode"], 1);
+    assert_eq!(release["visualEvidence"][1]["modeCode"], 2);
+    assert_eq!(
+        release["visualEvidence"][0]["captures"][0]["surfaceCode"],
+        2
+    );
+    assert_eq!(
+        release["visualEvidence"][0]["captures"][1]["surfaceCode"],
+        3
+    );
+    assert_eq!(release["artifacts"][0]["surfaceCode"], 3);
+    assert_eq!(
+        release["artifacts"][0]["path"],
+        "apps/desktop/dist/product-desktop.zip"
+    );
+    assert_eq!(release["artifacts"][1]["surfaceCode"], 2);
+    assert_eq!(release["artifacts"][2]["surfaceCode"], 1);
+    for artifact in release["artifacts"].as_array().unwrap() {
+        assert_eq!(artifact["sha256"].as_str().unwrap().len(), 64);
+        assert!(artifact["sizeBytes"].as_u64().unwrap() > 0);
+        assert!(!artifact["path"].as_str().unwrap().ends_with(".sha256"));
+    }
+    let release_digest = format!("{:x}", Sha256::digest(&release_bytes));
+    assert_eq!(
+        fs::read_to_string(directory.join("dist/product-release.json.sha256")).unwrap(),
+        format!("{release_digest}  product-release.json\n")
+    );
+    let verified = run_pam_in(&directory, &["release:verify"]);
+    assert!(
+        verified.status.success(),
+        "{}",
+        String::from_utf8_lossy(&verified.stderr)
+    );
+    let verification_output = String::from_utf8_lossy(&verified.stdout);
+    assert!(verification_output.contains("Verified Product release"));
+    assert!(verification_output.contains("(3 artifacts, 2 visual modes)"));
+    let native_dark = directory.join("apps/native/artifacts/screenshots/product-native-dark.png");
+    let native_dark_bytes = fs::read(&native_dark).unwrap();
+    fs::write(&native_dark, b"tampered visual capture").unwrap();
+    let tampered_visual = run_pam_in(&directory, &["release:verify"]);
+    assert!(!tampered_visual.status.success());
+    assert!(
+        String::from_utf8_lossy(&tampered_visual.stderr).contains("visual capture digest mismatch")
+    );
+    fs::write(&native_dark, native_dark_bytes).unwrap();
+    let overwrite = run_pam_in(&directory, &["package"]);
+    assert!(!overwrite.status.success());
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("refusing to overwrite"));
+    let reproduced = run_pam_in(&directory, &["package", "--output", "dist-copy"]);
+    assert!(reproduced.status.success());
+    assert_eq!(
+        fs::read(directory.join("dist-copy/product-release.json")).unwrap(),
+        release_bytes
+    );
+    assert_eq!(
+        fs::read(directory.join("dist-copy/product-release.json.sha256")).unwrap(),
+        fs::read(directory.join("dist/product-release.json.sha256")).unwrap()
+    );
+    let copied = run_pam_in(
+        &directory,
+        &["release:verify", "dist-copy/product-release.json"],
+    );
+    assert!(copied.status.success());
+
+    let server_artifact = directory.join("apps/server/dist/product-server.tar.gz");
+    fs::write(&server_artifact, b"tampered").unwrap();
+    let tampered = run_pam_in(&directory, &["release:verify"]);
+    assert!(!tampered.status.success());
+    assert!(String::from_utf8_lossy(&tampered.stderr).contains("artifact size mismatch"));
+    fs::write(&server_artifact, b"server").unwrap();
+
+    fs::write(
+        directory.join("dist-copy/product-release.json.sha256"),
+        format!("{}  product-release.json\n", "0".repeat(64)),
+    )
+    .unwrap();
+    let invalid_sidecar = run_pam_in(
+        &directory,
+        &["release:verify", "dist-copy/product-release.json"],
+    );
+    assert!(!invalid_sidecar.status.success());
+    assert!(
+        String::from_utf8_lossy(&invalid_sidecar.stderr).contains("manifest checksum mismatch")
+    );
+
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(
+            directory.join("apps/server/dist/product-server.tar.gz"),
+            directory.join("apps/server/dist/linked-release.tar.gz"),
+        )
+        .unwrap();
+        let linked = run_pam_in(&directory, &["package", "--output", "dist-linked"]);
+        assert!(!linked.status.success());
+        assert!(String::from_utf8_lossy(&linked.stderr).contains("symbolic link"));
+        fs::remove_file(directory.join("apps/server/dist/linked-release.tar.gz")).unwrap();
+    }
+    let unsafe_name = directory.join("apps/server/dist/not portable.zip");
+    fs::write(&unsafe_name, b"unsafe").unwrap();
+    let unsafe_package = run_pam_in(&directory, &["package", "--output", "dist-unsafe"]);
+    assert!(!unsafe_package.status.success());
+    assert!(String::from_utf8_lossy(&unsafe_package.stderr).contains("not portable"));
+    fs::remove_file(unsafe_name).unwrap();
+
+    fs::remove_file(directory.join("artifacts/product-visual-dark.json")).unwrap();
+    let partial_visual = run_pam_in(&directory, &["package", "--output", "dist-partial-visual"]);
+    assert!(!partial_visual.status.success());
+    assert!(
+        String::from_utf8_lossy(&partial_visual.stderr)
+            .contains("requires both light and dark reports")
+    );
+
+    let release_schema: serde_json::Value = serde_json::from_slice(
+        &fs::read(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("docs/schemas/product-release.schema.json"),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        release_schema["properties"]["schemaVersionCode"]["const"],
+        1
+    );
+    assert_eq!(release_schema["properties"]["artifacts"]["maxItems"], 64);
+    assert_eq!(
+        release_schema["properties"]["visualEvidence"]["minItems"],
+        2
+    );
 
     let generated_cache = directory.join("apps/desktop/target/debug/incremental");
     fs::create_dir_all(&generated_cache).unwrap();
@@ -1513,6 +2677,8 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
     assert!(html.contains("runtime conectando"));
     assert!(html.contains("NATIVE AUTHORITY · API 1"));
     assert!(html.contains("SIGNED UPDATES · API 1"));
+    assert!(html.contains("<strong>Servo LTS</strong>"));
+    assert!(!html.contains("<strong>Servo 0."));
     assert!(html.contains("aria-describedby=\"name-hint\""));
     assert!(!html.contains("value=\"David\""));
     assert!(!html.contains("CAPABILITIES 0.3"));

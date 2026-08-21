@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pam.dev/schemas/top-sample.schema.json",
+  "title": "PAM top NDJSON sample",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "sampleIndex", "sampleCount", "sampledAtUnixMs", "resultCode", "lagWarningMillis", "warnedWorkerCount", "diagnostics"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "sampleIndex": { "type": "integer", "minimum": 1 },
+    "sampleCount": { "type": "integer", "minimum": 1 },
+    "sampledAtUnixMs": { "type": "integer", "minimum": 0 },
+    "resultCode": { "type": "integer", "enum": [1, 2], "description": "1 healthy, 2 warning" },
+    "lagWarningMillis": { "type": "integer", "minimum": 1, "maximum": 60000 },
+    "warnedWorkerCount": { "type": "integer", "minimum": 0, "maximum": 4096 },
+    "diagnostics": { "$ref": "control-plane-diagnostics.schema.json" }
+  }
+}

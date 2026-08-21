@@ -1,0 +1,146 @@
+name: Android Product visual evidence
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pam-android-product-visual-${{ github.ref }}
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  product-visual:
+    name: Product light and dark captures on Android API 36
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      PAM_NATIVE_COMMIT: 26a768c9a7e0137bda9fa7de23f46c9308de2839
+      PAM_PRODUCT_APPLICATION_ID: app.pam.productvisual
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Check out the pinned PAM Native SDK
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: ${{ env.PAM_NATIVE_COMMIT }}
+          path: pam-native
+          persist-credentials: false
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: x86_64-linux-android
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+          tools: composer:v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android-product-visual
+      - name: Install pinned Android and PAM build prerequisites
+        run: |
+          sudo add-apt-repository -y ppa:ondrej/php
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            libphp8.4-embed php8.4-dev
+          sdkmanager \
+            'platforms;android-36' \
+            'ndk;27.1.12297006' \
+            'cmake;3.22.1'
+      - name: Build the verified x86_64 runtime, engine, and PAM CLI
+        run: |
+          runtime-builder/android/build.sh --php 8.5 x86_64
+          toolchain="${ANDROID_HOME}/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="${toolchain}/x86_64-linux-android26-clang" \
+            cargo build --locked --release \
+              --manifest-path pam-native/Cargo.toml \
+              -p pam-native-engine --target x86_64-linux-android
+          cargo build --locked
+      - name: Generate and install a clean Product workspace
+        run: |
+          fixture=${RUNNER_TEMP}/pam-product-visual
+          target/debug/pam init "${fixture}" \
+            --template product \
+            --name 'PAM Product Visual' \
+            --application-id "${PAM_PRODUCT_APPLICATION_ID}" \
+            --no-install --no-interaction
+          composer config --working-dir="${fixture}/apps/native" \
+            repositories.pam-native \
+            "{\"type\":\"path\",\"url\":\"${GITHUB_WORKSPACE}/pam-native/packages/native\",\"options\":{\"symlink\":false}}"
+          composer install --working-dir="${fixture}/apps/native" \
+            --no-dev --no-interaction --prefer-dist --dry-run
+          composer install --working-dir="${fixture}/apps/native" \
+            --no-dev --no-interaction --prefer-dist
+          mkdir -p "${fixture}/artifacts"
+          target/debug/pam mobile audit "${fixture}/apps/native" --json \
+            >"${fixture}/artifacts/android-release-audit.json"
+          test "$(jq -r '.resultCode' "${fixture}/artifacts/android-release-audit.json")" = 1
+          printf 'PAM_PRODUCT_FIXTURE=%s\n' "${fixture}" >>"${GITHUB_ENV}"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Launch and capture the real Product app
+        # v2.38.0, pinned to the verified release commit.
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        with:
+          api-level: 36
+          arch: x86_64
+          target: google_apis
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb shell cmd uimode night no
+            target/debug/pam mobile run "${PAM_PRODUCT_FIXTURE}/apps/native" --abi x86_64
+            sleep 5
+            test -n "$(adb shell pidof "${PAM_PRODUCT_APPLICATION_ID}")"
+            target/debug/pam mobile screenshot "${PAM_PRODUCT_FIXTURE}/apps/native" \
+              --output artifacts/screenshots/product-native-light.png
+            adb shell cmd uimode night yes
+            adb shell am force-stop "${PAM_PRODUCT_APPLICATION_ID}"
+            adb shell monkey -p "${PAM_PRODUCT_APPLICATION_ID}" \
+              -c android.intent.category.LAUNCHER 1
+            sleep 5
+            test -n "$(adb shell pidof "${PAM_PRODUCT_APPLICATION_ID}")"
+            target/debug/pam mobile screenshot "${PAM_PRODUCT_FIXTURE}/apps/native" \
+              --output artifacts/screenshots/product-native-dark.png
+            sha256sum \
+              "${PAM_PRODUCT_FIXTURE}/apps/native/artifacts/screenshots/"*.png \
+              >"${PAM_PRODUCT_FIXTURE}/artifacts/android-captures.sha256"
+      - name: Capture bounded Android logs
+        if: always()
+        run: |
+          fixture=${PAM_PRODUCT_FIXTURE:-${RUNNER_TEMP}/pam-product-visual}
+          mkdir -p "${fixture}/artifacts"
+          adb logcat -d -t 2000 2>/dev/null \
+            >"${fixture}/artifacts/android-logcat.txt" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pam-product-android-visual-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/pam-product-visual/apps/native/artifacts/screenshots/product-native-light.png
+            ${{ runner.temp }}/pam-product-visual/apps/native/artifacts/screenshots/product-native-dark.png
+            ${{ runner.temp }}/pam-product-visual/artifacts/android-captures.sha256
+            ${{ runner.temp }}/pam-product-visual/artifacts/android-release-audit.json
+            ${{ runner.temp }}/pam-product-visual/artifacts/android-logcat.txt
+            ${{ runner.temp }}/pam-product-visual/packages/contracts/design-tokens.json
+          if-no-files-found: error
+          retention-days: 30

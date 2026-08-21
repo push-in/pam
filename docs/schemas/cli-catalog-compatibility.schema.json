@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://pam.dev/schemas/cli-catalog-compatibility.schema.json",
+  "title": "PAM CLI catalog compatibility report",
+  "description": "Deterministic compatibility result for a validated baseline and candidate CLI catalog. Change codes are sequential integers: 1 command removed, 2 group changed, 3 JSON support removed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "compatible",
+    "baselineCommandCount",
+    "candidateCommandCount",
+    "changes"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "compatible": {
+      "type": "boolean"
+    },
+    "baselineCommandCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "candidateCommandCount": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 128
+    },
+    "changes": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/change"
+      }
+    }
+  },
+  "$defs": {
+    "change": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["changeCode", "command"],
+      "properties": {
+        "changeCode": {
+          "type": "integer",
+          "enum": [1, 2, 3]
+        },
+        "command": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 96,
+          "pattern": "^[a-z][a-z0-9-]*(?::[a-z][a-z0-9-]*)*$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "compatible": { "const": true }
+        },
+        "required": ["compatible"]
+      },
+      "then": {
+        "properties": {
+          "changes": { "maxItems": 0 }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "compatible": { "const": false }
+        },
+        "required": ["compatible"]
+      },
+      "then": {
+        "properties": {
+          "changes": { "minItems": 1 }
+        }
+      }
+    }
+  ]
+}

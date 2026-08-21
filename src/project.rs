@@ -63,12 +63,22 @@ struct DevelopmentArtifacts {
 }
 
 const MAX_ARTIFACT_ENTRIES: u64 = 100_000;
+pub const DEFAULT_DEV_ARTIFACT_BUDGET_BYTES: u64 = 8 * 1024 * 1024 * 1024;
+const MIN_DEV_ARTIFACT_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
 
 #[derive(Clone, Copy)]
 #[repr(u8)]
 enum CleanupArtifactKind {
     Cache = 1,
     Build = 2,
+}
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+enum ArtifactBudgetState {
+    WithinBudget = 1,
+    Exceeded = 2,
+    IncompleteScan = 3,
 }
 
 #[derive(Serialize)]
@@ -135,16 +145,21 @@ pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> 
                 path.display()
             ));
         }
+        if !artifact_path_is_direct(&root, &path)? {
+            return Err(format!(
+                "refusing to clean artifact path that resolves through a symlink or outside the project: {}",
+                path.display()
+            ));
+        }
         let mut bytes = 0;
         let mut files = 0;
         let complete = measure_directory(&path, &mut bytes, &mut files)?;
-        let removed = if dry_run {
-            false
-        } else {
-            fs::remove_dir_all(&path)
-                .map_err(|error| format!("cannot clean {}: {error}", path.display()))?;
-            true
-        };
+        if !complete && !dry_run {
+            return Err(format!(
+                "refusing to clean incompletely scanned artifact {}",
+                path.display()
+            ));
+        }
         entries.push(CleanupEntry {
             path: relative.to_owned(),
             kind_code: kind as u8,
@@ -152,8 +167,27 @@ pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> 
             bytes,
             files,
             complete,
-            removed,
+            removed: false,
         });
+    }
+    if !dry_run {
+        for entry in entries.iter_mut().filter(|entry| entry.existed) {
+            let path = root.join(&entry.path);
+            let metadata = fs::symlink_metadata(&path)
+                .map_err(|error| format!("cannot reinspect {}: {error}", path.display()))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.is_dir()
+                || !artifact_path_is_direct(&root, &path)?
+            {
+                return Err(format!(
+                    "refusing to clean artifact that changed after validation: {}",
+                    path.display()
+                ));
+            }
+            fs::remove_dir_all(&path)
+                .map_err(|error| format!("cannot clean {}: {error}", path.display()))?;
+            entry.removed = true;
+        }
     }
     let bytes = entries.iter().map(|entry| entry.bytes).sum();
     let files = entries.iter().map(|entry| entry.files).sum();
@@ -208,12 +242,71 @@ pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> 
     Ok(0)
 }
 
+pub fn dev_artifact_budget() -> Result<u64, String> {
+    let Some(value) = std::env::var_os("PAM_DEV_ARTIFACT_BUDGET_BYTES") else {
+        return Ok(DEFAULT_DEV_ARTIFACT_BUDGET_BYTES);
+    };
+    let value = value
+        .to_str()
+        .ok_or_else(|| "PAM_DEV_ARTIFACT_BUDGET_BYTES must be valid UTF-8".to_owned())?
+        .parse::<u64>()
+        .map_err(|_| "PAM_DEV_ARTIFACT_BUDGET_BYTES must be an integer byte count".to_owned())?;
+    if !(MIN_DEV_ARTIFACT_BUDGET_BYTES..=DEFAULT_DEV_ARTIFACT_BUDGET_BYTES).contains(&value) {
+        return Err(format!(
+            "PAM_DEV_ARTIFACT_BUDGET_BYTES must be between {MIN_DEV_ARTIFACT_BUDGET_BYTES} and {DEFAULT_DEV_ARTIFACT_BUDGET_BYTES}"
+        ));
+    }
+    Ok(value)
+}
+
+pub fn enforce_dev_artifact_budget(
+    context: &ProjectContext,
+    budget_bytes: u64,
+) -> Result<Option<u64>, String> {
+    if !(MIN_DEV_ARTIFACT_BUDGET_BYTES..=DEFAULT_DEV_ARTIFACT_BUDGET_BYTES).contains(&budget_bytes)
+    {
+        return Err("development artifact budget is outside the supported bounds".to_owned());
+    }
+    let footprint = artifact_footprint(context)?;
+    if !footprint["complete"].as_bool().unwrap_or(false) {
+        return Err(format!(
+            "cannot enforce the development artifact budget because {} could not be scanned completely",
+            context.root.display()
+        ));
+    }
+    let bytes = footprint["bytes"].as_u64().unwrap_or(0);
+    if bytes <= budget_bytes {
+        return Ok(None);
+    }
+    eprintln!(
+        "PAM development artifacts reached {} (budget {}). Cleaning regenerable project outputs before starting dev.",
+        human_bytes(bytes),
+        human_bytes(budget_bytes)
+    );
+    clean(context, true, false, false)?;
+    Ok(Some(bytes))
+}
+
 fn cleanup_targets(kind: ProjectKind, all: bool) -> Vec<(&'static Path, CleanupArtifactKind)> {
     if kind == ProjectKind::Product {
         if all {
-            return vec![
-                (Path::new("apps/server/.pam"), CleanupArtifactKind::Cache),
-                (Path::new("apps/native/.pam"), CleanupArtifactKind::Cache),
+            let mut targets = vec![
+                (
+                    Path::new("apps/server/.pam/cache"),
+                    CleanupArtifactKind::Cache,
+                ),
+                (
+                    Path::new("apps/server/.pam/phpunit-cache"),
+                    CleanupArtifactKind::Cache,
+                ),
+                (
+                    Path::new("apps/native/.pam/cache"),
+                    CleanupArtifactKind::Cache,
+                ),
+                (
+                    Path::new("apps/native/.pam/phpunit-cache"),
+                    CleanupArtifactKind::Cache,
+                ),
                 (
                     Path::new("apps/native/.pam-native/android"),
                     CleanupArtifactKind::Build,
@@ -222,11 +315,32 @@ fn cleanup_targets(kind: ProjectKind, all: bool) -> Vec<(&'static Path, CleanupA
                     Path::new("apps/native/.pam-native/ios"),
                     CleanupArtifactKind::Build,
                 ),
-                (Path::new("apps/desktop/.pam"), CleanupArtifactKind::Cache),
+                (
+                    Path::new("apps/desktop/.pam/cache"),
+                    CleanupArtifactKind::Cache,
+                ),
                 (Path::new("apps/desktop/target"), CleanupArtifactKind::Build),
             ];
+            targets.extend(workspace_tooling_targets());
+            return targets;
         }
-        return vec![
+        let mut targets = vec![
+            (
+                Path::new("apps/server/.pam/cache"),
+                CleanupArtifactKind::Cache,
+            ),
+            (
+                Path::new("apps/server/.pam/phpunit-cache"),
+                CleanupArtifactKind::Cache,
+            ),
+            (
+                Path::new("apps/native/.pam/cache"),
+                CleanupArtifactKind::Cache,
+            ),
+            (
+                Path::new("apps/native/.pam/phpunit-cache"),
+                CleanupArtifactKind::Cache,
+            ),
             (
                 Path::new("apps/native/.pam-native/android/app/build"),
                 CleanupArtifactKind::Build,
@@ -251,16 +365,28 @@ fn cleanup_targets(kind: ProjectKind, all: bool) -> Vec<(&'static Path, CleanupA
                 Path::new("apps/desktop/target/release/incremental"),
                 CleanupArtifactKind::Cache,
             ),
+            (
+                Path::new("apps/desktop/.pam/cache"),
+                CleanupArtifactKind::Cache,
+            ),
         ];
+        targets.extend(workspace_tooling_targets());
+        return targets;
     }
     if all {
-        return vec![
+        let mut targets = vec![
+            (Path::new(".pam/cache"), CleanupArtifactKind::Cache),
+            (Path::new(".pam/phpunit-cache"), CleanupArtifactKind::Cache),
             (Path::new(".pam-native/android"), CleanupArtifactKind::Build),
             (Path::new(".pam-native/ios"), CleanupArtifactKind::Build),
             (Path::new("target"), CleanupArtifactKind::Build),
         ];
+        targets.extend(workspace_tooling_targets());
+        return targets;
     }
-    vec![
+    let mut targets = vec![
+        (Path::new(".pam/cache"), CleanupArtifactKind::Cache),
+        (Path::new(".pam/phpunit-cache"), CleanupArtifactKind::Cache),
         (
             Path::new(".pam-native/android/app/build"),
             CleanupArtifactKind::Build,
@@ -297,6 +423,40 @@ fn cleanup_targets(kind: ProjectKind, all: bool) -> Vec<(&'static Path, CleanupA
             Path::new("target/release/incremental"),
             CleanupArtifactKind::Cache,
         ),
+    ];
+    targets.extend(workspace_tooling_targets());
+    targets
+}
+
+fn workspace_tooling_targets() -> Vec<(&'static Path, CleanupArtifactKind)> {
+    vec![
+        (Path::new("android/.gradle"), CleanupArtifactKind::Cache),
+        (Path::new("android/.kotlin"), CleanupArtifactKind::Cache),
+        (Path::new("android/build"), CleanupArtifactKind::Build),
+        (Path::new("android/app/build"), CleanupArtifactKind::Build),
+        (
+            Path::new("android/plugin-api/build"),
+            CleanupArtifactKind::Build,
+        ),
+        (
+            Path::new("android/macrobenchmark/build"),
+            CleanupArtifactKind::Build,
+        ),
+        (Path::new(".build"), CleanupArtifactKind::Build),
+        (Path::new("ios/.build"), CleanupArtifactKind::Build),
+        (Path::new("scripts/__pycache__"), CleanupArtifactKind::Cache),
+        (Path::new("tests/__pycache__"), CleanupArtifactKind::Cache),
+        (
+            Path::new("benchmarks/__pycache__"),
+            CleanupArtifactKind::Cache,
+        ),
+        (
+            Path::new("benchmarks/package/__pycache__"),
+            CleanupArtifactKind::Cache,
+        ),
+        (Path::new(".pytest_cache"), CleanupArtifactKind::Cache),
+        (Path::new(".mypy_cache"), CleanupArtifactKind::Cache),
+        (Path::new(".ruff_cache"), CleanupArtifactKind::Cache),
     ]
 }
 
@@ -351,6 +511,7 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
     };
     let development = development_artifacts(context)?;
     let artifact_footprint = artifact_footprint(context)?;
+    let artifact_budget = artifact_budget_report(&artifact_footprint)?;
     let next_commands = contextual_next_commands(context.kind);
     if json {
         println!(
@@ -368,6 +529,7 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
                 "native": project_manifest.as_ref().and_then(|manifest| manifest.get("native")),
                 "developmentArtifacts": development,
                 "artifactFootprint": artifact_footprint,
+                "artifactBudget": artifact_budget,
                 "nextCommands": next_commands,
             }))
             .map_err(|error| error.to_string())?
@@ -417,6 +579,12 @@ pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
             " (partial scan)"
         }
     );
+    println!(
+        "  {}  {} · state code {}",
+        ui.heading("Dev budget"),
+        human_bytes(artifact_budget["limitBytes"].as_u64().unwrap_or(0)),
+        artifact_budget["stateCode"].as_u64().unwrap_or(0)
+    );
     println!("  {}  {}", ui.heading("Location"), context.root.display());
     println!();
     println!("{}", ui.heading("NEXT"));
@@ -443,12 +611,18 @@ pub fn diagnostic_context(context: &ProjectContext) -> Result<serde_json::Value,
 }
 
 fn artifact_footprint(context: &ProjectContext) -> Result<serde_json::Value, String> {
+    let root = fs::canonicalize(&context.root).map_err(|error| {
+        format!(
+            "cannot resolve project root {}: {error}",
+            context.root.display()
+        )
+    })?;
     let mut entries = Vec::new();
     let mut total_bytes = 0_u64;
     let mut total_files = 0_u64;
     let mut complete = true;
     for (relative, kind) in cleanup_targets(context.kind, true) {
-        let path = context.root.join(relative);
+        let path = root.join(relative);
         match fs::symlink_metadata(&path) {
             Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
             Ok(_) => {
@@ -476,6 +650,18 @@ fn artifact_footprint(context: &ProjectContext) -> Result<serde_json::Value, Str
             }
             Err(error) => return Err(format!("cannot inspect {}: {error}", path.display())),
         }
+        if !artifact_path_is_direct(&root, &path)? {
+            complete = false;
+            entries.push(serde_json::json!({
+                "path": relative,
+                "kindCode": kind as u8,
+                "exists": true,
+                "bytes": 0,
+                "files": 0,
+                "complete": false,
+            }));
+            continue;
+        }
         let mut bytes = 0;
         let mut files = 0;
         let entry_complete = measure_directory(&path, &mut bytes, &mut files)?;
@@ -496,6 +682,29 @@ fn artifact_footprint(context: &ProjectContext) -> Result<serde_json::Value, Str
         "files": total_files,
         "complete": complete,
         "entries": entries,
+    }))
+}
+
+fn artifact_path_is_direct(root: &Path, path: &Path) -> Result<bool, String> {
+    let resolved = fs::canonicalize(path)
+        .map_err(|error| format!("cannot resolve artifact path {}: {error}", path.display()))?;
+    Ok(resolved.starts_with(root) && resolved == path)
+}
+
+fn artifact_budget_report(footprint: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let limit_bytes = dev_artifact_budget()?;
+    let bytes = footprint["bytes"].as_u64().unwrap_or(0);
+    let state = if !footprint["complete"].as_bool().unwrap_or(false) {
+        ArtifactBudgetState::IncompleteScan
+    } else if bytes > limit_bytes {
+        ArtifactBudgetState::Exceeded
+    } else {
+        ArtifactBudgetState::WithinBudget
+    };
+    Ok(serde_json::json!({
+        "limitBytes": limit_bytes,
+        "stateCode": state as u8,
+        "cleanupCommand": "pam clean --all",
     }))
 }
 
@@ -541,6 +750,8 @@ fn measure_directory(root: &Path, bytes: &mut u64, files: &mut u64) -> Result<bo
             *files = files.saturating_add(1);
             *bytes =
                 bytes.saturating_add(entry.metadata().map_err(|error| error.to_string())?.len());
+        } else {
+            return Ok(false);
         }
     }
     Ok(true)
@@ -945,7 +1156,15 @@ mod tests {
         fs::create_dir_all(root.join("target/debug/incremental/session")).unwrap();
         fs::create_dir_all(root.join("target/debug/deps")).unwrap();
         fs::create_dir_all(root.join(".pam-native/android/app/build")).unwrap();
+        fs::create_dir_all(root.join(".pam/cache/packages")).unwrap();
+        fs::create_dir_all(root.join("android/.kotlin/session")).unwrap();
+        fs::create_dir_all(root.join(".build/debug")).unwrap();
+        fs::create_dir_all(root.join("ios/.build/debug")).unwrap();
+        fs::create_dir_all(root.join("scripts/__pycache__")).unwrap();
+        fs::create_dir_all(root.join("android/app/src/main")).unwrap();
         fs::write(root.join("index.php"), "<?php\n").unwrap();
+        fs::write(root.join(".pam/cache/packages/index.json"), [4_u8; 8]).unwrap();
+        fs::write(root.join(".pam/plugin-registry-state.json"), "{}\n").unwrap();
         fs::write(
             root.join("target/debug/incremental/session/cache.bin"),
             [1_u8; 32],
@@ -955,6 +1174,16 @@ mod tests {
         fs::write(
             root.join(".pam-native/android/app/build/app.apk"),
             [3_u8; 64],
+        )
+        .unwrap();
+        fs::write(root.join("android/.kotlin/session/state.bin"), [4_u8; 8]).unwrap();
+        fs::write(root.join(".build/debug/PamMobileUiTests"), [5_u8; 8]).unwrap();
+        fs::write(root.join("ios/.build/debug/PamNativeTests"), [5_u8; 8]).unwrap();
+        fs::write(root.join("scripts/__pycache__/contract.pyc"), [6_u8; 8]).unwrap();
+        fs::write(root.join("Package.swift"), "// swift-tools-version: 5.9\n").unwrap();
+        fs::write(
+            root.join("android/app/src/main/AndroidManifest.xml"),
+            "<manifest />\n",
         )
         .unwrap();
         let context = ProjectContext {
@@ -970,6 +1199,17 @@ mod tests {
         clean(&context, false, false, false).expect("cache cleanup");
         assert!(!root.join("target/debug/incremental").exists());
         assert!(!root.join(".pam-native/android/app/build").exists());
+        assert!(!root.join(".pam/cache").exists());
+        assert!(!root.join("android/.kotlin").exists());
+        assert!(!root.join(".build").exists());
+        assert!(!root.join("ios/.build").exists());
+        assert!(!root.join("scripts/__pycache__").exists());
+        assert!(root.join("Package.swift").is_file());
+        assert!(root.join(".pam/plugin-registry-state.json").is_file());
+        assert!(
+            root.join("android/app/src/main/AndroidManifest.xml")
+                .is_file()
+        );
         assert!(root.join("target/debug/deps/application").is_file());
         assert!(root.join("index.php").is_file());
 
@@ -979,7 +1219,134 @@ mod tests {
         assert!(root.join("index.php").is_file());
         assert_eq!(CleanupArtifactKind::Cache as u8, 1);
         assert_eq!(CleanupArtifactKind::Build as u8, 2);
+        assert_eq!(ArtifactBudgetState::WithinBudget as u8, 1);
+        assert_eq!(ArtifactBudgetState::Exceeded as u8, 2);
+        assert_eq!(ArtifactBudgetState::IncompleteScan as u8, 3);
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn development_budget_cleans_only_after_the_bound_is_exceeded() {
+        let root = temporary("budget");
+        fs::create_dir_all(root.join("target/debug/deps")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        let artifact = root.join("target/debug/deps/runtime.bin");
+        let file = fs::File::create(&artifact).unwrap();
+        file.set_len(MIN_DEV_ARTIFACT_BUDGET_BYTES + 1).unwrap();
+        let context = ProjectContext {
+            root: root.clone(),
+            kind: ProjectKind::Raw,
+        };
+
+        assert_eq!(
+            enforce_dev_artifact_budget(&context, MIN_DEV_ARTIFACT_BUDGET_BYTES).unwrap(),
+            Some(MIN_DEV_ARTIFACT_BUDGET_BYTES + 1)
+        );
+        assert!(!root.join("target").exists());
+        assert_eq!(
+            enforce_dev_artifact_budget(&context, MIN_DEV_ARTIFACT_BUDGET_BYTES).unwrap(),
+            None
+        );
+        assert!(enforce_dev_artifact_budget(&context, MIN_DEV_ARTIFACT_BUDGET_BYTES - 1).is_err());
+        assert!(root.join("Cargo.toml").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn product_cleanup_preserves_private_configuration_and_trust_state() {
+        let root = temporary("product-clean");
+        fs::create_dir_all(root.join("apps/server/.pam/cache")).unwrap();
+        fs::create_dir_all(root.join("apps/native/.pam")).unwrap();
+        fs::create_dir_all(root.join("apps/desktop/.pam/cache")).unwrap();
+        fs::create_dir_all(root.join("scripts/__pycache__")).unwrap();
+        fs::create_dir_all(root.join(".pytest_cache/v/cache")).unwrap();
+        fs::create_dir_all(root.join("scripts/product")).unwrap();
+        fs::write(root.join("apps/server/.pam/cache/routes.php"), "cache").unwrap();
+        fs::write(root.join("apps/native/.pam/google-services.json"), "{}\n").unwrap();
+        fs::write(
+            root.join("apps/desktop/.pam/desktop-host.artifact.json"),
+            "{}\n",
+        )
+        .unwrap();
+        fs::write(root.join("apps/desktop/.pam/cache/session.bin"), "cache").unwrap();
+        fs::write(root.join("scripts/__pycache__/evidence.pyc"), "cache").unwrap();
+        fs::write(root.join(".pytest_cache/v/cache/nodeids"), "[]\n").unwrap();
+        fs::write(root.join("scripts/product/release.py"), "# source\n").unwrap();
+        let context = ProjectContext {
+            root: root.clone(),
+            kind: ProjectKind::Product,
+        };
+
+        clean(&context, true, false, false).unwrap();
+        assert!(!root.join("apps/server/.pam/cache").exists());
+        assert!(!root.join("apps/desktop/.pam/cache").exists());
+        assert!(!root.join("scripts/__pycache__").exists());
+        assert!(!root.join(".pytest_cache").exists());
+        assert!(root.join("scripts/product/release.py").is_file());
+        assert!(root.join("apps/native/.pam/google-services.json").is_file());
+        assert!(
+            root.join("apps/desktop/.pam/desktop-host.artifact.json")
+                .is_file()
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_rejects_symlinked_ancestor_without_touching_external_data() {
+        use std::os::unix::fs::symlink;
+
+        let root = temporary("clean-ancestor-link");
+        let outside = temporary("clean-ancestor-outside");
+        fs::create_dir_all(root.join(".pam/cache")).unwrap();
+        fs::write(root.join(".pam/cache/must-survive.bin"), [6_u8; 8]).unwrap();
+        fs::create_dir_all(outside.join(".gradle")).unwrap();
+        fs::write(outside.join(".gradle/valuable.bin"), [7_u8; 16]).unwrap();
+        symlink(&outside, root.join("android")).unwrap();
+        let context = ProjectContext {
+            root: root.clone(),
+            kind: ProjectKind::Raw,
+        };
+
+        let footprint = artifact_footprint(&context).unwrap();
+        assert_eq!(footprint["complete"], false);
+        let error = clean(&context, false, false, false).unwrap_err();
+        assert!(error.contains("resolves through a symlink or outside the project"));
+        assert!(root.join(".pam/cache/must-survive.bin").is_file());
+        assert!(outside.join(".gradle/valuable.bin").is_file());
+
+        fs::remove_file(root.join("android")).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cleanup_refuses_an_incompletely_scanned_artifact() {
+        use std::os::unix::fs::symlink;
+
+        let root = temporary("clean-incomplete");
+        let outside = temporary("clean-incomplete-sentinel");
+        fs::create_dir_all(root.join(".pam/cache")).unwrap();
+        fs::write(root.join(".pam/cache/local.bin"), [8_u8; 8]).unwrap();
+        fs::write(&outside, [9_u8; 16]).unwrap();
+        symlink(&outside, root.join(".pam/cache/external.link")).unwrap();
+        let context = ProjectContext {
+            root: root.clone(),
+            kind: ProjectKind::Raw,
+        };
+
+        let footprint = artifact_footprint(&context).unwrap();
+        assert_eq!(footprint["complete"], false);
+        clean(&context, false, true, false).expect("incomplete preview");
+        let error = clean(&context, false, false, false).unwrap_err();
+        assert!(error.contains("incompletely scanned artifact"));
+        assert!(root.join(".pam/cache/local.bin").is_file());
+        assert!(outside.is_file());
+
+        fs::remove_file(root.join(".pam/cache/external.link")).unwrap();
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_file(outside).unwrap();
     }
 
     #[test]

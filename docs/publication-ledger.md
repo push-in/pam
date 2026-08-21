@@ -5,6 +5,47 @@ Pushing `main` makes reviewed source and CI workflows public; it does not create
 a tag, Composer release, signed binary, marketplace entry or support promise.
 Those artifacts continue to require the repository's release/version gates.
 
+## Pending distribution-certification publication
+
+The prepared release graph now blocks publication on four signed Runtime
+distribution certifications: Linux x86_64/arm64 and macOS x86_64/arm64. Each
+binds candidate and prior-release archives to GitHub provenance, executes a real
+launch/PHP response plus atomic upgrade and rollback, and publishes a separately
+named evidence bundle. Linux additionally runs in a network-disabled immutable
+Ubuntu image; macOS records the ephemeral runner image version, OS build and
+native machine architecture. The source and local contract checks have passed,
+but no hosted run or release asset is recorded here yet. This entry must not be
+read as proof of publication until a tag run succeeds and its immutable URLs and
+digests are appended.
+
+The repository was queried on 2026-08-20. Its latest hosted release remains
+`v1.0.3` from 2026-08-12 and contains runtime archives and checksums but none of
+the new signed distribution-certification or compact update-manifest assets.
+The protected evidence-key secret and independently published identity variable
+were also absent. A five-minute release preflight now validates the immutable
+tag plus both signing settings before the ecosystem matrix, Android runtime and
+four native Runtime builds can start; this avoids spending runner capacity on a
+release that cannot reach its mandatory signing gate. Generating the production
+key and publishing its fingerprint remain an explicit operator ceremony, not a
+CI default.
+
+The same pending tag run now publishes four compact signed update manifests,
+one for each Linux/macOS architecture. Release binaries compile the independent
+evidence-key fingerprint into `pam self-update`; the running binary verifies the
+canonical Ed25519 certification signature and exact target before passing its
+candidate digest to the atomic installer. Source tests prove wrong keys, targets,
+paths, signatures and checksum divergence fail closed. This is implemented
+release wiring, not hosted evidence: the first successful tag must still record
+the four immutable `.update.json` asset URLs and verify an update from the prior
+official release.
+
+Key rotation is now executable rather than aspirational: release builds accept
+one optional, distinct `PAM_DISTRIBUTION_NEXT_EVIDENCE_KEY_SHA256`, producing a
+bridge binary that trusts exactly the current and pre-announced successor
+identities. The workflow rejects malformed or duplicate pins. Rotation still
+requires the operational sequence documented in `distribution-evidence.md` and
+second-channel publication; configuring a variable is not itself a ceremony.
+
 ## 2026-08-18 platform batch
 
 | Repository | Source range prepared for `main` | Scope |
@@ -91,6 +132,30 @@ capability, `3` product integration and `4` tooling. The inventory job compares
 the catalog with every public `push-in/pam-native-*` repository plus the
 official `pam-mobile-ui` package, so adding or removing a package without
 updating the compatibility authority fails closed.
+
+Before publication, a complete local checkout can run
+`scripts/ecosystem-compatibility.py local . evidence/local-ecosystem.json`.
+The paired consumer
+`scripts/ecosystem-compatibility.py local-verify . evidence/local-ecosystem.json`
+rejects symlinks, empty or oversized documents, altered fields and any manifest
+or workflow drift after evidence generation. Both Composer manifests and
+publication workflows must be regular files bounded to 1 MiB and are opened
+without following symlinks. The producer writes through a same-directory
+temporary file, flushes it and atomically replaces a regular destination;
+symlink or non-file output paths fail without modifying their targets.
+The command resolves both root-level and `ecosystem/` repositories, refuses to
+produce success evidence when any catalog checkout is absent, applies the same
+package/publication contract to all 27 entries, and fingerprints every Composer
+manifest and effective tag-gating workflow. It explicitly maps the public
+`pam-native-php` repository identity to this workspace's
+`pam-native/packages/native` package while binding publication evidence to the
+parent Native release workflow. Its bounded schema 1 report is
+defined by `docs/schemas/local-ecosystem-compatibility.schema.json`; this local
+contract audit complements rather than replaces the hosted PHP 8.4/8.5 latest
+and lowest dependency executions. Workflow inspection is indentation-aware and
+only accepts an active tag trigger, a top-level reusable compatibility job and,
+for combined release workflows, a `publish` dependency on that job; matching
+words hidden in comments or shell blocks cannot satisfy the authority.
 
 For all 27 current repositories on both supported PHP series, the matrix checks
 the Composer identity, PHP contract, PAM Native constraint where applicable, metadata validity,
@@ -261,3 +326,30 @@ CI](https://github.com/push-in/pam-desktop/actions/runs/32201537939) also passed
 These runs certify source compilation; they do not claim supported installers,
 signing, notarization, clean-machine launch or production updates on macOS and
 Windows. No version tag or binary release was created.
+
+## 2026-08-19 signed Runtime clean-host release gate
+
+The Runtime release graph now contains a mandatory reusable Linux x86_64/arm64
+distribution-certification matrix between package construction and publication.
+Each native runner accepts only a workflow executing on the exact tag/commit, selects the latest
+older stable release by exact asset name, and verifies candidate and baseline
+GitHub attestations against this repository, the release workflow, source refs,
+source digests, and GitHub-hosted runners. Raw attestation bundles, policy output,
+and the contemporaneous trusted root are retained and covered by the signed
+provenance inventory.
+
+The actual install journey runs inside the resolved Ubuntu 22.04 image digest
+with networking disabled. It measures extraction, candidate launch and first PHP
+response, atomically switches from the baseline to candidate, then rolls back
+and executes the baseline. Candidate/baseline packages, runtime dependency hash
+inventory, resolved image, exact revisions, sizes, timings and all seven integer
+result gates are bound by the schema 1 Ed25519 manifest. Publication additionally
+requires the protected seed to match the independently configured repository
+fingerprint. The portable bundle is retained for 30 days and packaged as a
+GitHub Release asset.
+
+This entry records implemented machinery, not a successful run. The first
+legitimate tag after the workflow is published must produce the hosted artifact
+before either Linux architecture's clean-host distribution can be claimed.
+Other Runtime operating systems, PAM Native store packages, and PAM Desktop
+installers remain explicitly uncertified by this gate.

@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       suite_id:
-        description: 1 comparison, 2 worker matrix, 3 runtime soak
+        description: 1 comparison, 2 worker matrix, 3 runtime soak, 4 overload
         required: true
         default: '1'
         type: choice
@@ -14,6 +14,7 @@ on:
           - '1'
           - '2'
           - '3'
+          - '4'
 
 permissions:
   contents: read
@@ -76,6 +77,7 @@ jobs:
             1) benchmarks/octane/run.sh ;;
             2) benchmarks/octane/matrix.sh ;;
             3) benchmarks/octane/soak.sh ;;
+            4) benchmarks/octane/overload.sh ;;
             *) printf 'unknown evidence suite id: %s\n' "${PAM_EVIDENCE_SUITE_ID}" >&2; exit 64 ;;
           esac
       - name: Verify evidence before publication
@@ -84,6 +86,7 @@ jobs:
             1) results=benchmarks/octane/results ;;
             2) results=benchmarks/octane/results/matrix ;;
             3) results=benchmarks/octane/results/soak ;;
+            4) results=benchmarks/octane/results/overload ;;
           esac
           php benchmarks/octane/evidence-manifest.php \
             "${results}" "${PAM_EVIDENCE_SUITE_ID}" --verify

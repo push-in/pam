@@ -39,6 +39,8 @@ impl TryFrom<u8> for WorkerLifecycle {
 pub struct WorkerMetricsSnapshot {
     pub requests: u64,
     pub errors: u64,
+    #[serde(default)]
+    pub client_disconnect_cancellations: u64,
     pub active_requests: u64,
     pub request_duration_micros: u64,
     pub request_duration_buckets: [u64; 11],
@@ -53,6 +55,12 @@ pub struct WorkerMetricsSnapshot {
     pub websocket_messages: u64,
     pub websocket_backpressure: u64,
     pub event_loop_lag_micros: u64,
+    #[serde(default)]
+    pub event_loop_lag_max_micros: u64,
+    #[serde(default)]
+    pub event_loop_lag_total_micros: u64,
+    #[serde(default)]
+    pub event_loop_lag_samples: u64,
     pub resident_memory_bytes: u64,
     pub php_memory_bytes: u64,
     pub php_peak_memory_bytes: u64,
@@ -285,4 +293,52 @@ fn write_atomic(path: &Path, record: &WorkerRuntimeRecord) -> Result<(), String>
             path.display()
         )
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn older_worker_state_defaults_additive_lag_aggregates() {
+        let source = serde_json::json!({
+            "version": 1,
+            "state": 2,
+            "workerId": 1,
+            "generation": 1,
+            "pid": 42,
+            "pool": "web",
+            "startedAtMillis": 1,
+            "updatedAtMillis": 2,
+            "deadlineAtMillis": null,
+            "requestId": null,
+            "metrics": {
+                "requests": 0,
+                "errors": 0,
+                "activeRequests": 0,
+                "requestDurationMicros": 0,
+                "requestDurationBuckets": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                "requestBytes": 0,
+                "responseBytes": 0,
+                "responseCacheHits": 0,
+                "responseCacheMisses": 0,
+                "responseCacheCollapsed": 0,
+                "responseCacheStale": 0,
+                "responseCachePurges": 0,
+                "websocketConnections": 0,
+                "websocketMessages": 0,
+                "websocketBackpressure": 0,
+                "eventLoopLagMicros": 1250,
+                "residentMemoryBytes": 0,
+                "phpMemoryBytes": 0,
+                "phpPeakMemoryBytes": 0,
+                "phpFibers": 0
+            }
+        });
+        let record: WorkerRuntimeRecord = serde_json::from_value(source).unwrap();
+        assert_eq!(record.metrics.event_loop_lag_micros, 1_250);
+        assert_eq!(record.metrics.event_loop_lag_max_micros, 0);
+        assert_eq!(record.metrics.event_loop_lag_total_micros, 0);
+        assert_eq!(record.metrics.event_loop_lag_samples, 0);
+    }
 }

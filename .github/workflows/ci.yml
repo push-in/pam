@@ -10,17 +10,42 @@ permissions:
   contents: read
 
 jobs:
+  windows-desktop-contracts:
+    name: Windows Desktop transaction contracts
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Test portable Desktop host transactions
+        shell: pwsh
+        run: |
+          rustc --edition=2024 -D warnings --test src/desktop_transaction.rs `
+            -o "$env:RUNNER_TEMP/pam-desktop-transaction-tests.exe"
+          & "$env:RUNNER_TEMP/pam-desktop-transaction-tests.exe" --test-threads=1
+
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
       - name: Check out the pinned PAM Native SDK
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
           ref: 26a768c9a7e0137bda9fa7de23f46c9308de2839
           path: pam-native
+          persist-credentials: false
+      - name: Check out the pinned PAM Native plugin kit
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native-plugin-kit
+          ref: 4f00e4b4b84bd0d70f52cc97369d743b37d8ea0a
+          path: ecosystem/pam-native-plugin-kit
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
@@ -66,8 +91,33 @@ jobs:
           cargo run --locked -- docs:generate docs/cli-reference.md --check
           python3 -m json.tool docs/schemas/pam.schema.json >/dev/null
           python3 -m json.tool docs/schemas/registry-compatibility-matrix.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/product-release.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/doctor-report.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/distribution-evidence.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/desktop-platform-verification.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/cli-catalog.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/cli-catalog-compatibility.schema.json >/dev/null
+          python3 -m json.tool docs/contracts/cli-catalog-v1.json >/dev/null
+          python3 -m json.tool docs/schemas/desktop-host-doctor.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/control-plane-diagnostics.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/control-plane-health.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/top-sample.schema.json >/dev/null
+          python3 -m json.tool docs/schemas/local-ecosystem-compatibility.schema.json >/dev/null
           python3 scripts/check-docs.py
           python3 scripts/check-artifact-retention.py
+          python3 -m unittest \
+            tests.test_doctor_workflow \
+            tests.test_support_workflow \
+            tests.test_cli_catalog_contract \
+            tests.test_control_plane_diagnostics_contract \
+            tests.test_native_plugin_conformance \
+            tests.test_desktop_host_doctor_contract \
+            tests.test_desktop_distribution_workflow \
+            tests.test_distribution_contract \
+            tests.test_ecosystem_compatibility \
+            tests.test_product_visual_evidence \
+            tests.test_runtime_distribution_workflow \
+            tests.test_visual_workflows
       - name: Lint
         run: cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Rust and integration tests
@@ -75,6 +125,200 @@ jobs:
           cargo test --locked --all-targets --all-features -- --test-threads=1
           cargo test --locked --manifest-path pam-native/Cargo.toml
           php pam-native/packages/native/tests/run.php
+      - name: Produce and consume portable CLI catalog evidence
+        env:
+          PAM_CATALOG_EVIDENCE: artifacts/cli-catalog
+        run: |
+          mkdir -p "${PAM_CATALOG_EVIDENCE}"
+          ./target/debug/pam catalog --json >"${PAM_CATALOG_EVIDENCE}/catalog.json"
+          ./target/debug/pam catalog --schema >"${PAM_CATALOG_EVIDENCE}/schema.json"
+          ./target/debug/pam catalog --compat-schema \
+            >"${PAM_CATALOG_EVIDENCE}/compatibility-schema.json"
+          cp docs/contracts/cli-catalog-v1.json \
+            "${PAM_CATALOG_EVIDENCE}/baseline.json"
+          ./target/debug/pam catalog --validate \
+            "${PAM_CATALOG_EVIDENCE}/catalog.json" --json \
+            >"${PAM_CATALOG_EVIDENCE}/verification.json"
+          ./target/debug/pam catalog --compat \
+            "${PAM_CATALOG_EVIDENCE}/baseline.json" \
+            "${PAM_CATALOG_EVIDENCE}/catalog.json" --json \
+            >"${PAM_CATALOG_EVIDENCE}/compatibility.json"
+          python3 - "${PAM_CATALOG_EVIDENCE}" <<'PY'
+          import json
+          import re
+          import sys
+          from pathlib import Path
+
+          evidence = Path(sys.argv[1])
+          catalog = json.loads((evidence / "catalog.json").read_text())
+          baseline = json.loads((evidence / "baseline.json").read_text())
+          schema = json.loads((evidence / "schema.json").read_text())
+          compatibility_schema = json.loads(
+              (evidence / "compatibility-schema.json").read_text()
+          )
+          verification = json.loads((evidence / "verification.json").read_text())
+          compatibility = json.loads((evidence / "compatibility.json").read_text())
+          codes = schema["$defs"]["command"]["properties"]["groupCode"]["enum"]
+          labels = schema["$defs"]["command"]["properties"]["groupLabel"]["enum"]
+          mapping = dict(zip(codes, labels, strict=True))
+          commands = catalog["commands"]
+          assert catalog["schemaVersion"] == 1
+          assert verification == {
+              "schemaVersion": 1,
+              "valid": True,
+              "commandCount": len(commands),
+          }
+          assert compatibility == {
+              "schemaVersion": 1,
+              "compatible": True,
+              "baselineCommandCount": len(baseline["commands"]),
+              "candidateCommandCount": len(commands),
+              "changes": [],
+          }
+          assert compatibility_schema["$defs"]["change"]["properties"]["changeCode"]["enum"] == [1, 2, 3]
+          assert 1 <= len(commands) <= 128
+          assert len({command["name"] for command in commands}) == len(commands)
+          expected = {"name", "summary", "groupCode", "groupLabel", "supportsJson"}
+          for command in commands:
+              assert set(command) == expected
+              assert re.fullmatch(r"[a-z][a-z0-9-]*(?::[a-z][a-z0-9-]*)*", command["name"])
+              assert 1 <= len(command["summary"]) <= 160
+              assert mapping[command["groupCode"]] == command["groupLabel"]
+              assert isinstance(command["supportsJson"], bool)
+          PY
+          (
+            cd "${PAM_CATALOG_EVIDENCE}"
+            sha256sum baseline.json catalog.json compatibility-schema.json \
+              compatibility.json schema.json verification.json >SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pam-cli-catalog-contract-${{ github.sha }}
+          path: artifacts/cli-catalog/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Produce and validate portable Doctor evidence
+        env:
+          PAM_DOCTOR_EVIDENCE: artifacts/doctor
+        run: |
+          mkdir -p "${PAM_DOCTOR_EVIDENCE}" "${RUNNER_TEMP}/pam-doctor-project/target/debug"
+          printf '%s\n' '#!/bin/sh' \
+            'test "$1" = "--version" && printf "%s\\n" "pam-desktop 0.0.0-ci"' \
+            >"${RUNNER_TEMP}/pam-desktop"
+          chmod 0755 "${RUNNER_TEMP}/pam-desktop"
+          if PAM_DESKTOP_BINARY="${RUNNER_TEMP}/pam-desktop" \
+            ./target/debug/pam desktop host:doctor . --json \
+            >"${PAM_DOCTOR_EVIDENCE}/desktop-host.json"; then
+            echo "untrusted Desktop fallback was incorrectly authenticated" >&2
+            exit 1
+          else
+            test "$?" -eq 1
+          fi
+          cp docs/schemas/desktop-host-doctor.schema.json \
+            "${PAM_DOCTOR_EVIDENCE}/desktop-host.schema.json"
+          python3 - "${PAM_DOCTOR_EVIDENCE}/desktop-host.json" <<'PY'
+          import json
+          import sys
+
+          report = json.load(open(sys.argv[1], encoding="utf-8"))
+          assert report["schemaVersion"] == 1
+          assert report["surfaceCode"] == 3
+          assert report["resultCode"] == 2
+          assert report["sourceCode"] == 2
+          assert report["authenticated"] is False
+          assert [check["checkCode"] for check in report["checks"]] == [1, 2, 3]
+          assert [check["resultCode"] for check in report["checks"]] == [2, 2, 1]
+          PY
+          printf '%s' \
+            '{"schema":1,"type":5,"name":"ci-doctor","version":"1.0.0"}' \
+            >"${RUNNER_TEMP}/pam-doctor-project/pam.json"
+          printf '%s' 'bounded-artifact' \
+            >"${RUNNER_TEMP}/pam-doctor-project/target/debug/probe.bin"
+          ./target/debug/pam doctor tests/fixtures/hello.php --json \
+            >"${PAM_DOCTOR_EVIDENCE}/runtime.json"
+          ./target/debug/pam doctor "${RUNNER_TEMP}/pam-doctor-project" --json \
+            >"${PAM_DOCTOR_EVIDENCE}/project.json"
+          ./target/debug/pam doctor --schema \
+            >"${PAM_DOCTOR_EVIDENCE}/schema.json"
+          ./target/debug/pam doctor --validate \
+            "${PAM_DOCTOR_EVIDENCE}/runtime.json"
+          ./target/debug/pam doctor --validate \
+            "${PAM_DOCTOR_EVIDENCE}/project.json"
+          support_project="${RUNNER_TEMP}/pam-support-private-project"
+          ./target/debug/pam init "${support_project}" \
+            --template product --no-install --no-interaction
+          printf '%s' 'source-file-secret-must-not-leak' \
+            >"${support_project}/apps/server/private-source.php"
+          export PAM_SUPPORT_PRIVATE_VALUE='environment-secret-must-not-leak'
+          set +e
+          ./target/debug/pam support "${support_project}" \
+            --output "${PAM_DOCTOR_EVIDENCE}/support-product.json" \
+            >"${PAM_DOCTOR_EVIDENCE}/support-product.log" 2>&1
+          support_status=$?
+          set -e
+          test "${support_status}" -eq 0 -o "${support_status}" -eq 1
+          test "$(stat -c %a "${PAM_DOCTOR_EVIDENCE}/support-product.json")" = 600
+          if ./target/debug/pam support "${support_project}" \
+            --output "${PAM_DOCTOR_EVIDENCE}/support-product.json" \
+            >"${PAM_DOCTOR_EVIDENCE}/support-overwrite.log" 2>&1; then
+            echo "support report unexpectedly overwrote existing evidence" >&2
+            exit 1
+          fi
+          ./target/debug/pam support tests/fixtures/hello.php \
+            >"${PAM_DOCTOR_EVIDENCE}/support-runtime.json"
+          python3 - "${PAM_DOCTOR_EVIDENCE}" "${support_project}" "${HOME}" <<'PY'
+          import hashlib
+          import json
+          import sys
+          from pathlib import Path
+
+          evidence = Path(sys.argv[1])
+          secrets = [sys.argv[2], sys.argv[3], "source-file-secret-must-not-leak",
+                     "environment-secret-must-not-leak", "PAM_SUPPORT_PRIVATE_VALUE"]
+          for name in ["support-product.json", "support-runtime.json"]:
+              raw = (evidence / name).read_bytes()
+              assert len(raw) <= 512 * 1024
+              text = raw.decode("utf-8")
+              assert all(secret not in text for secret in secrets)
+              report = json.loads(text)
+              assert set(report) == {
+                  "schemaVersion", "resultCode", "surfaceCode", "generatedAtUnixMs",
+                  "pamVersion", "host", "privacy", "diagnosticsSha256", "diagnostics",
+              }
+              assert report["schemaVersion"] == 1
+              assert report["resultCode"] in [1, 2]
+              assert report["surfaceCode"] == 1
+              assert report["privacy"] == {
+                  "redactionCode": 1, "includesEnvironment": False,
+                  "includesFileContents": False, "includesNetworkData": False,
+                  "pathToken": "$PROJECT",
+              }
+              canonical = json.dumps(
+                  report["diagnostics"], separators=(",", ":"), ensure_ascii=False
+              ).encode("utf-8")
+              assert hashlib.sha256(canonical).hexdigest() == report["diagnosticsSha256"]
+          assert "$PROJECT" in (evidence / "support-product.json").read_text()
+          assert "cannot create new support report" in (evidence / "support-overwrite.log").read_text()
+          PY
+          jq -n \
+            --arg revision "${GITHUB_SHA}" \
+            --arg runUrl "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            '{schemaVersion: 1, resultCode: 1, revision: $revision, runUrl: $runUrl}' \
+            >"${PAM_DOCTOR_EVIDENCE}/provenance.json"
+          (
+            cd "${PAM_DOCTOR_EVIDENCE}"
+            sha256sum desktop-host.json desktop-host.schema.json project.json \
+              provenance.json runtime.json schema.json support-product.json \
+              support-runtime.json >SHA256SUMS
+            sha256sum --check --strict SHA256SUMS
+          )
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pam-doctor-contract-${{ github.sha }}
+          path: artifacts/doctor/
+          if-no-files-found: error
+          retention-days: 7
       - name: PHP static analysis
         run: |
           compat/composer-smoke/vendor/bin/phpstan analyse -c compat/composer-smoke/phpstan.neon --no-progress
