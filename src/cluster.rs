@@ -205,6 +205,9 @@ pub fn master_is_running(state: &MasterState) -> bool {
     if unsafe { kill(pid, 0) } != 0 {
         return false;
     }
+    if linux_process_state(state.pid) == Some('Z') {
+        return false;
+    }
     state
         .process_start
         .is_none_or(|expected| linux_process_start(state.pid) == Some(expected))
@@ -528,6 +531,11 @@ pub(crate) fn linux_process_start(pid: u32) -> Option<u64> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_command = stat.rsplit_once(") ")?.1;
     after_command.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn linux_process_state(pid: u32) -> Option<char> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    stat.rsplit_once(") ")?.1.chars().next()
 }
 
 fn spawn_generation(

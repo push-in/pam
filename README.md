@@ -799,6 +799,8 @@ pam composer [arguments...]                        run verified Composer inside 
 pam dev [index.php] [arguments...]                 recursive hot reload
 pam start [index.php] --workers N                  supervised production cluster
 pam up [index.php] --name api --workers N          start and detach a managed application
+pam up ... [--restart-delay-ms N] [--restart-backoff-max-ms N]
+           [--max-unstable-restarts N] [--min-uptime-ms N] [--no-autorestart]
 pam ps                                              list managed applications
 pam reload api                                      zero-downtime generational reload
 pam logs api --errors --lines 200                   inspect retained manager logs
