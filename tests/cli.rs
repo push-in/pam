@@ -26,6 +26,21 @@ fn run_pam_in(directory: &std::path::Path, arguments: &[&str]) -> Output {
         .expect("pam should start")
 }
 
+fn run_managed_pam(
+    directory: &std::path::Path,
+    state: &std::path::Path,
+    port: u16,
+    arguments: &[&str],
+) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pam"))
+        .current_dir(directory)
+        .env("PAM_MANAGER_STATE_DIR", state)
+        .env("PAM_TEST_PORT", port.to_string())
+        .args(arguments)
+        .output()
+        .expect("managed PAM command should start")
+}
+
 fn temporary_path(name: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -168,6 +183,77 @@ fn records_reproducible_soak_metadata() {
         33_554_432
     );
     fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn manages_a_detached_runtime_through_its_complete_lifecycle() {
+    let state = temporary_path("process-manager-state");
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = fixture("server.php");
+    let script = script.to_str().unwrap();
+
+    let started = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "up",
+            script,
+            "--name",
+            "managed-smoke",
+            "--workers",
+            "1",
+            "--json",
+        ],
+    );
+    let listed = run_managed_pam(&root, &state, port, &["ps", "--json"]);
+    let reloaded = run_managed_pam(&root, &state, port, &["reload", "managed-smoke", "--json"]);
+    let restarted = run_managed_pam(&root, &state, port, &["restart", "managed-smoke", "--json"]);
+    let stopped = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
+    let deleted = run_managed_pam(&root, &state, port, &["delete", "managed-smoke", "--json"]);
+
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(
+        reloaded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reloaded.stderr)
+    );
+    assert!(
+        restarted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restarted.stderr)
+    );
+    assert!(
+        stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+    assert!(
+        deleted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&deleted.stderr)
+    );
+    let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let restarted: serde_json::Value = serde_json::from_slice(&restarted.stdout).unwrap();
+    assert_eq!(started["kindCode"], 1);
+    assert_eq!(started["stateCode"], 1);
+    assert_eq!(listed["applications"][0]["name"], "managed-smoke");
+    assert_ne!(started["pid"], restarted["pid"]);
+    assert!(!state.join("applications/managed-smoke.json").exists());
+    fs::remove_dir_all(state).unwrap();
 }
 
 #[test]

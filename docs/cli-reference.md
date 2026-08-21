@@ -61,6 +61,14 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Runtime
 
 - `pam start` — Run a supervised server cluster.
+- `pam up` — Start and register an application in the background.
+- `pam ps` — List managed PAM applications.
+- `pam status` — Inspect managed application health.
+- `pam describe` — Describe a managed application.
+- `pam reload` — Reload a managed application without downtime.
+- `pam restart` — Restart a managed application.
+- `pam stop` — Gracefully stop a managed application.
+- `pam delete` — Remove a stopped application from PAM.
 - `pam octane:start` — Start Laravel Octane on the PAM runtime.
 - `pam octane:status` — Inspect the PAM Octane master.
 - `pam octane:reload` — Reload PAM Octane without downtime.
