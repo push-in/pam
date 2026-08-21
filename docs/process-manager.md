@@ -68,6 +68,13 @@ p95 at most 2000 ms, and daemon RSS growth at most 16 MiB. A launch failure
 keeps the workflow red but retains at most 64 KiB of CLI diagnostics and 1 MiB
 of application stderr so clean-host failures remain actionable after cleanup.
 
+The first hosted Ubuntu 24.04 suite-5 run is
+[32469172846](https://github.com/push-in/pam/actions/runs/32469172846), bound to
+commit `c644031`. All 10 masters recovered: p50 was 626 ms, p95 and maximum were
+630 ms, and daemon RSS grew by 823296 bytes. Success, latency, and resource gate
+codes were all `1`. The downloaded four-artifact bundle passed an independent
+offline manifest verification after the workflow's own verification.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`
