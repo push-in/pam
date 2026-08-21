@@ -60,7 +60,11 @@ attempt counters, total automatic restarts, and the next retry deadline.
 The reproducible `benchmarks/process-manager/run.sh` harness repeatedly kills
 an isolated managed master and records raw recovery latency, success rate and
 daemon RSS growth. Its suite-5 evidence manifest binds every artifact by
-SHA-256 and detects later modification.
+SHA-256 and detects later modification. The `Performance evidence` workflow
+accepts manual suite ID `5`, builds the measured release binary on Ubuntu 24.04,
+runs ten recovery rounds, verifies the manifest before upload, and retains the
+clean-host artifact for 30 days. Its default gates require 100% recovery,
+p95 at most 2000 ms, and daemon RSS growth at most 16 MiB.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the

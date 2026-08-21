@@ -126,6 +126,7 @@ jobs:
             tests.test_distribution_contract \
             tests.test_ecosystem_compatibility \
             tests.test_product_visual_evidence \
+            tests.test_process_manager_evidence_workflow \
             tests.test_runtime_distribution_workflow \
             tests.test_visual_workflows
       - name: Lint
