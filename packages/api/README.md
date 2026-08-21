@@ -4,6 +4,7 @@ Express-like routing. Laravel-like application structure. PAM-native execution.
 
 **[Official documentation](https://push-in.github.io/pam-docs/packages/api/) ·
 [PAM introduction](https://push-in.github.io/pam-docs/introduction/) ·
+[Upgrade guide](UPGRADE.md) · [Changelog](CHANGELOG.md) ·
 [Report an issue](https://github.com/push-in/pam-api/issues)**
 
 ```bash
@@ -307,6 +308,9 @@ Run `composer benchmark` for the standalone router benchmark.
 
 Free and open-source under the [Apache License 2.0](LICENSE). You may use,
 modify, and distribute this package for any purpose, including commercially.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute and [SECURITY.md](SECURITY.md)
+for private vulnerability reporting.
 
 
 ## Recommended PAM workflow
