@@ -103,7 +103,10 @@ The API preset targets PAM API 2.0 and generates the same source files shipped
 by `pushinbr/pam-skeleton`: a named `PingController::show` action, a readiness
 service and readonly snapshot, an integer-backed readiness enum, a JSON
 Resource, typed port configuration, security headers and an executable
-in-memory test. Run `pam composer test` immediately after creation. During the
+in-memory test. It also includes a complete Eloquent product flow with named
+`index`/`store` controller methods, Form Request validation, typed DTO, service,
+repository, migration, JSON Resource, `201 Created`, and a sequential
+integer-backed product-status enum. Run `pam composer test` immediately after creation. During the
 2.0 development line, `--no-install` may be used before the corresponding
 Packagist prerelease exists.
 

@@ -3225,6 +3225,15 @@
                             "optional": false,
                             "default": null,
                             "hasDefault": false
+                        },
+                        {
+                            "name": "status",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 200,
+                            "hasDefault": true
                         }
                     ]
                 },

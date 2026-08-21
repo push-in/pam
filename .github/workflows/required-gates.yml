@@ -66,6 +66,12 @@ jobs:
         run: composer install --no-interaction --prefer-dist
       - name: Verify PAM API including its public API baseline
         run: composer verify
+      - name: Verify the generated Eloquent starter
+        run: |
+          vendor/bin/phpstan analyse --configuration=phpstan.neon --level=9 \
+            ../skeleton/src ../skeleton/tests ../skeleton/database/migrations \
+            ../skeleton/index.php --memory-limit=1G
+          vendor/bin/phpunit --configuration=../skeleton/phpunit.xml
 
   composer_packages:
     name: Required Composer packages

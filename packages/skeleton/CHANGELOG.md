@@ -11,4 +11,7 @@ skeleton follows Semantic Versioning independently from the PAM runtime.
 - validate typed configuration before startup;
 - enable secure response headers by default;
 - use PAM API's built-in in-memory test client;
+- include a tested Eloquent product vertical slice with Form Request, typed DTO,
+  thin named controller actions, service, repository interface, JSON Resource,
+  migration, and sequential integer-backed domain enum;
 - keep the published project and `pam init --template api` byte-for-byte aligned.

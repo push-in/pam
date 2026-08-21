@@ -7,6 +7,8 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 
 ### Added
 
+- let JSON Resources select a validated HTTP response status, including clean
+  `201 Created` responses, while preserving the standard data envelope;
 - class-and-method controller handlers and structured route groups;
 - transient, singleton and Fiber-local request-scoped container lifetimes;
 - Form Requests, DTO hydration, Resources and integer enum validation;

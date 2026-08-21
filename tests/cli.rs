@@ -2478,6 +2478,27 @@ fn initializes_a_project_without_overwriting_files() {
             .is_file()
     );
     assert!(directory.join("src/Services/ReadinessStatus.php").is_file());
+    assert!(
+        directory
+            .join("src/Http/Controllers/ProductController.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Http/Requests/StoreProductRequest.php")
+            .is_file()
+    );
+    assert!(directory.join("src/Models/Product.php").is_file());
+    assert!(
+        directory
+            .join("src/Repositories/ProductRepository.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("database/migrations/2026_08_21_000000_create_products.php")
+            .is_file()
+    );
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     assert!(manifest.contains("\"pushinbr/pam-api\""));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();

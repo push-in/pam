@@ -82,7 +82,10 @@ Your application is now warm and persistent. Composer loaded once. The runtime
 stays alive. Requests execute in isolated Fibers. The generated API is already
 split into a named controller action, application service, readonly snapshot,
 JSON Resource and integer-backed readiness enum; `index.php` validates typed
-configuration and enables security headers before listening.
+configuration and enables security headers before listening. The same starter
+also contains an executable Eloquent product flow with `ProductController`
+method mapping, Form Request, typed DTO, service, repository, migration,
+integer-backed status enum, Resource collection, and `201 Created` response.
 
 Choose another target without learning another platform CLI:
 

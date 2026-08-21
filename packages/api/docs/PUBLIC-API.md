@@ -781,7 +781,7 @@ abstract readonly class Pam\Api\Http\JsonResource implements Pam\Api\Http\Respon
 
 ### Methods
 
-- `public __construct(mixed $resource): mixed`
+- `public __construct(mixed $resource, int $status = 200): mixed`
 - `public static collection(iterable $resources): Pam\Api\Http\ResourceCollection`
 - `public toArray(Pam\Http\Request $request): array`
 - `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`

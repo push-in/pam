@@ -1085,6 +1085,46 @@ const API_STARTER_FILES: &[(&str, &str)] = &[
         include_str!("../packages/skeleton/src/Http/Resources/PingResource.php"),
     ),
     (
+        "src/Http/Controllers/ProductController.php",
+        include_str!("../packages/skeleton/src/Http/Controllers/ProductController.php"),
+    ),
+    (
+        "src/Http/Requests/StoreProductRequest.php",
+        include_str!("../packages/skeleton/src/Http/Requests/StoreProductRequest.php"),
+    ),
+    (
+        "src/Http/Resources/ProductResource.php",
+        include_str!("../packages/skeleton/src/Http/Resources/ProductResource.php"),
+    ),
+    (
+        "src/Domain/Products/CreateProductData.php",
+        include_str!("../packages/skeleton/src/Domain/Products/CreateProductData.php"),
+    ),
+    (
+        "src/Domain/Products/ProductStatus.php",
+        include_str!("../packages/skeleton/src/Domain/Products/ProductStatus.php"),
+    ),
+    (
+        "src/Models/Product.php",
+        include_str!("../packages/skeleton/src/Models/Product.php"),
+    ),
+    (
+        "src/Providers/AppServiceProvider.php",
+        include_str!("../packages/skeleton/src/Providers/AppServiceProvider.php"),
+    ),
+    (
+        "src/Repositories/ProductRepository.php",
+        include_str!("../packages/skeleton/src/Repositories/ProductRepository.php"),
+    ),
+    (
+        "src/Repositories/EloquentProductRepository.php",
+        include_str!("../packages/skeleton/src/Repositories/EloquentProductRepository.php"),
+    ),
+    (
+        "src/Services/ProductService.php",
+        include_str!("../packages/skeleton/src/Services/ProductService.php"),
+    ),
+    (
         "src/Services/ReadinessService.php",
         include_str!("../packages/skeleton/src/Services/ReadinessService.php"),
     ),
@@ -1099,6 +1139,16 @@ const API_STARTER_FILES: &[(&str, &str)] = &[
     (
         "tests/ApplicationTest.php",
         include_str!("../packages/skeleton/tests/ApplicationTest.php"),
+    ),
+    (
+        "tests/bootstrap.php",
+        include_str!("../packages/skeleton/tests/bootstrap.php"),
+    ),
+    (
+        "database/migrations/2026_08_21_000000_create_products.php",
+        include_str!(
+            "../packages/skeleton/database/migrations/2026_08_21_000000_create_products.php"
+        ),
     ),
 ];
 

@@ -5,6 +5,7 @@
 
 ```bash
 pam composer install
+mkdir -p storage && touch storage/database.sqlite
 pam composer dev
 ```
 
@@ -14,6 +15,22 @@ The starter intentionally demonstrates the structured PAM API path: a named
 controller method orchestrates a service and returns a JSON Resource. Closures
 remain available for small endpoints, but application rules should live in
 services and persistence should live in repositories.
+
+It also ships an executable Eloquent vertical slice:
+
+```bash
+curl -X POST http://127.0.0.1:3000/api/products \
+  -H 'content-type: application/json' \
+  -d '{"name":"Mechanical keyboard","priceInCents":34990}'
+curl http://127.0.0.1:3000/api/products
+```
+
+`ProductController` stays thin, `StoreProductRequest` validates and hydrates a
+typed DTO, `ProductService` owns the use case, `ProductRepository` isolates
+Eloquent persistence, and `ProductResource` owns the response contract. Product
+statuses are sequential integer-backed enum values (`1` active, `2` archived).
+Creation returns `201 Created`; resources may select any valid HTTP status while
+retaining PAM API's consistent `data` envelope.
 
 Run the in-memory application test inside Pam's Embed SAPI:
 
@@ -27,18 +44,19 @@ files:
 ```text
 index.php
 src/
-├── Http/Controllers/PingController.php
-├── Http/Resources/PingResource.php
+├── Domain/Products/
+├── Http/{Controllers,Requests,Resources}/
+├── Models/Product.php
+├── Providers/AppServiceProvider.php
+├── Repositories/
 └── Services/
-    ├── ReadinessService.php
-    ├── ReadinessSnapshot.php
-    └── ReadinessStatus.php
-tests/ApplicationTest.php
+database/migrations/
+tests/{ApplicationTest.php,bootstrap.php}
 ```
 
 `index.php` validates typed configuration before listening and installs secure
-response headers. The controller only orchestrates the request, the service
-creates the application result, and the Resource owns its HTTP representation.
+response headers. It boots Eloquent from environment configuration and runs the
+starter migration before serving the first request.
 
 ## License
 
