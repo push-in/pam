@@ -28,6 +28,8 @@ const MAX_DAEMON_MESSAGE_BYTES: usize = 16 * 1024;
 const MAX_DAEMON_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DEPLOY_HISTORY: usize = 50;
 const MAX_DASHBOARD_BYTES: usize = 2 * 1024 * 1024;
+const MAX_RESOURCE_HISTORY: usize = 120;
+const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[repr(u8)]
@@ -178,6 +180,25 @@ struct DeploymentEntry {
     event_kind_code: u8,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResourceHistory {
+    schema_version: u8,
+    name: String,
+    entries: Vec<ResourceHistoryEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResourceHistoryEntry {
+    observed_at_millis: u64,
+    state_code: u8,
+    workers: usize,
+    rss_bytes: u64,
+    tasks: u64,
+    alert_state_code: u8,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum DeploymentEventKind {
@@ -275,6 +296,7 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "resurrect" => resurrect(executable, arguments),
         "startup" => startup(executable, arguments),
         "monit" => monit(arguments),
+        "monit:history" => resource_history(arguments),
         "dashboard" => dashboard(arguments),
         "apply" => apply_ecosystem(executable, arguments),
         "config:check" => check_ecosystem(arguments),
@@ -311,6 +333,7 @@ fn daemon_managed_command(command: &str) -> bool {
             | "save"
             | "resurrect"
             | "monit"
+            | "monit:history"
             | "dashboard"
             | "deploy"
             | "deploy:history"
@@ -1156,6 +1179,146 @@ fn monit(arguments: Vec<OsString>) -> Result<u8, String> {
     Ok(0)
 }
 
+fn resource_history(arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut name = None;
+    let mut json = false;
+    let mut record = false;
+    let mut limit = MAX_RESOURCE_HISTORY;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--json" => json = true,
+            "--record" => record = true,
+            "--limit" => {
+                limit = required_positive(arguments.next(), "--limit")?;
+                if limit > MAX_RESOURCE_HISTORY {
+                    return Err(format!("--limit cannot exceed {MAX_RESOURCE_HISTORY}"));
+                }
+            }
+            option if option.starts_with('-') => {
+                return Err(format!("unknown monit:history option: {option}"));
+            }
+            _ if name.is_none() => name = Some(argument.to_string_lossy().into_owned()),
+            _ => return Err("monit:history accepts at most one application name".to_owned()),
+        }
+    }
+    if let Some(name) = name.as_deref() {
+        validate_name(name)?;
+    }
+    let paths = ManagerPaths::load()?;
+    if record {
+        record_resource_history(&paths)?;
+    }
+    let records = read_all_records(&paths)?;
+    let histories = records
+        .iter()
+        .filter(|application| name.as_deref().is_none_or(|name| name == application.name))
+        .map(|application| {
+            let mut history = read_resource_history(&paths, &application.name)?;
+            if history.entries.len() > limit {
+                history.entries.drain(..history.entries.len() - limit);
+            }
+            Ok(history)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if name.is_some() && histories.is_empty() {
+        return Err(format!("unknown managed application {:?}", name.unwrap()));
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"sampleIntervalSeconds":RESOURCE_SAMPLE_INTERVAL.as_secs(),"retentionLimit":MAX_RESOURCE_HISTORY,"applications":histories})
+        );
+    } else {
+        println!(
+            "PAM RESOURCE HISTORY (latest {limit} samples)\nNAME\tOBSERVED_AT_MS\tSTATE\tWORKERS\tRSS_BYTES\tTASKS\tALERT"
+        );
+        for history in histories {
+            for entry in history.entries {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    history.name,
+                    entry.observed_at_millis,
+                    entry.state_code,
+                    entry.workers,
+                    entry.rss_bytes,
+                    entry.tasks,
+                    entry.alert_state_code
+                );
+            }
+        }
+    }
+    Ok(0)
+}
+
+fn record_resource_history(paths: &ManagerPaths) -> Result<(), String> {
+    let observed_at_millis = epoch_millis();
+    for record in read_all_records(paths)? {
+        let state = running_state(&record);
+        let online = state.as_ref().is_some_and(master_is_running);
+        let resources = state
+            .as_ref()
+            .filter(|_| online)
+            .map(|value| crate::resource_monitor::process_tree(value.pid))
+            .unwrap_or_default();
+        let mut history = read_resource_history(paths, &record.name)?;
+        append_resource_entry(
+            &mut history,
+            ResourceHistoryEntry {
+                observed_at_millis,
+                state_code: if online {
+                    ApplicationState::Online as u8
+                } else {
+                    ApplicationState::Stopped as u8
+                },
+                workers: state.as_ref().map_or(0, |value| value.workers),
+                rss_bytes: resources.rss_bytes,
+                tasks: resources.tasks,
+                alert_state_code: resource_alert_state(&record, &resources) as u8,
+            },
+        );
+        write_private_json(&paths.resource_history(&record.name), &history)?;
+    }
+    Ok(())
+}
+
+fn append_resource_entry(history: &mut ResourceHistory, entry: ResourceHistoryEntry) {
+    history.entries.push(entry);
+    if history.entries.len() > MAX_RESOURCE_HISTORY {
+        history
+            .entries
+            .drain(..history.entries.len() - MAX_RESOURCE_HISTORY);
+    }
+}
+
+fn read_resource_history(paths: &ManagerPaths, name: &str) -> Result<ResourceHistory, String> {
+    let path = paths.resource_history(name);
+    if !path.exists() {
+        return Ok(ResourceHistory {
+            schema_version: 1,
+            name: name.to_owned(),
+            entries: Vec::new(),
+        });
+    }
+    let history: ResourceHistory = read_private_json(&path)?;
+    if history.schema_version != 1
+        || history.name != name
+        || history.entries.len() > MAX_RESOURCE_HISTORY
+        || history.entries.iter().any(|entry| {
+            !matches!(entry.state_code, 1 | 2)
+                || !matches!(entry.alert_state_code, 1..=5)
+                || entry.workers > 256
+        })
+        || history
+            .entries
+            .windows(2)
+            .any(|entries| entries[0].observed_at_millis > entries[1].observed_at_millis)
+    {
+        return Err("invalid resource history contract".to_owned());
+    }
+    Ok(history)
+}
+
 fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
     let output = match arguments.as_slice() {
         [] => PathBuf::from("pam-dashboard.html"),
@@ -1173,7 +1336,8 @@ fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
         fs::create_dir_all(parent)
             .map_err(|error| format!("cannot create dashboard directory: {error}"))?;
     }
-    let applications = read_all_records(&ManagerPaths::load()?)?
+    let paths = ManagerPaths::load()?;
+    let applications = read_all_records(&paths)?
         .into_iter()
         .map(|record| {
             let state = running_state(&record);
@@ -1184,6 +1348,15 @@ fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
                 .map(|value| crate::resource_monitor::process_tree(value.pid))
                 .unwrap_or_default();
             let alert = resource_alert_state(&record, &resources);
+            let history = read_resource_history(&paths, &record.name)?;
+            let first_rss = history.entries.first().map(|entry| entry.rss_bytes);
+            let latest_rss = history.entries.last().map(|entry| entry.rss_bytes);
+            let peak_rss_bytes = history
+                .entries
+                .iter()
+                .map(|entry| entry.rss_bytes)
+                .max()
+                .unwrap_or(0);
             let (alert_label, alert_class) = match alert {
                 ResourceAlertState::Healthy => ("Healthy", "healthy"),
                 ResourceAlertState::MemoryWarning => ("Memory warning", "warning"),
@@ -1191,7 +1364,7 @@ fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
                 ResourceAlertState::MemoryAndTaskWarning => ("Memory + task warning", "warning"),
                 ResourceAlertState::Unavailable => ("Metrics unavailable", "unavailable"),
             };
-            crate::manager_dashboard::DashboardApplication {
+            Ok(crate::manager_dashboard::DashboardApplication {
                 name: record.name,
                 kind_label: if record.kind_code == ApplicationKind::LaravelOctane as u8 {
                     "Laravel Octane"
@@ -1210,9 +1383,14 @@ fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
                         | ResourceAlertState::TaskWarning
                         | ResourceAlertState::MemoryAndTaskWarning
                 ),
-            }
+                history_samples: history.entries.len(),
+                peak_rss_bytes,
+                rss_delta_bytes: (history.entries.len() >= 2).then(|| {
+                    i128::from(latest_rss.unwrap_or(0)) - i128::from(first_rss.unwrap_or(0))
+                }),
+            })
         })
-        .collect::<Vec<_>>();
+        .collect::<Result<Vec<_>, String>>()?;
     let html = crate::manager_dashboard::render(&applications);
     if html.len() > MAX_DASHBOARD_BYTES {
         return Err("manager dashboard exceeds the 2 MiB safety limit".to_owned());
@@ -1567,16 +1745,34 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
         .map_err(|error| format!("cannot bind daemon socket {}: {error}", socket.display()))?;
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))
         .map_err(|error| error.to_string())?;
-    let dump = ManagerPaths::load()?.base.join("dump.json");
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("cannot configure daemon socket: {error}"))?;
+    let paths = ManagerPaths::load()?;
+    let dump = paths.base.join("dump.json");
     if dump.exists()
         && let Err(error) = resurrect_saved(executable)
     {
         eprintln!("pamd could not restore saved applications: {error}");
     }
+    if let Err(error) = record_resource_history(&paths) {
+        eprintln!("pamd could not record initial resource history: {error}");
+    }
+    let mut next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
     let own_uid = unsafe { libc::geteuid() };
-    for connection in listener.incoming() {
-        let mut stream = match connection {
-            Ok(stream) => stream,
+    loop {
+        if Instant::now() >= next_sample {
+            if let Err(error) = record_resource_history(&paths) {
+                eprintln!("pamd could not record resource history: {error}");
+            }
+            next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
+        }
+        let mut stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(25));
+                continue;
+            }
             Err(error) => {
                 eprintln!("pamd accept error: {error}");
                 continue;
@@ -2267,6 +2463,11 @@ fn delete(arguments: Vec<OsString>) -> Result<u8, String> {
         return Err(format!("application {name:?} is online; stop it first"));
     }
     fs::remove_file(&path).map_err(|error| format!("cannot delete application record: {error}"))?;
+    let history = paths.resource_history(&name);
+    if history.exists() {
+        fs::remove_file(&history)
+            .map_err(|error| format!("cannot delete application resource history: {error}"))?;
+    }
     if json {
         println!(
             "{}",
@@ -2577,6 +2778,7 @@ struct ManagerPaths {
     logs: PathBuf,
     deployments: PathBuf,
     traffic: PathBuf,
+    history: PathBuf,
 }
 impl ManagerPaths {
     fn load() -> Result<Self, String> {
@@ -2598,6 +2800,7 @@ impl ManagerPaths {
             logs: base.join("logs"),
             deployments: base.join("deployments"),
             traffic: base.join("traffic"),
+            history: base.join("history"),
         };
         for path in [
             &paths.applications,
@@ -2605,6 +2808,7 @@ impl ManagerPaths {
             &paths.logs,
             &paths.deployments,
             &paths.traffic,
+            &paths.history,
         ] {
             secure_directory(path)?;
         }
@@ -2624,6 +2828,9 @@ impl ManagerPaths {
     }
     fn traffic_metrics(&self, name: &str) -> PathBuf {
         self.traffic.join(format!("{name}.metrics.json"))
+    }
+    fn resource_history(&self, name: &str) -> PathBuf {
+        self.history.join(format!("{name}.json"))
     }
 }
 
@@ -3080,5 +3287,29 @@ task_max_count=16
         }
         assert_eq!(history.entries.len(), MAX_DEPLOY_HISTORY);
         assert_eq!(history.entries[0].release_directory, PathBuf::from("1"));
+    }
+
+    #[test]
+    fn resource_history_retention_is_bounded() {
+        let mut history = ResourceHistory {
+            schema_version: 1,
+            name: "api".to_owned(),
+            entries: Vec::new(),
+        };
+        for index in 0..=MAX_RESOURCE_HISTORY {
+            append_resource_entry(
+                &mut history,
+                ResourceHistoryEntry {
+                    observed_at_millis: index as u64,
+                    state_code: ApplicationState::Online as u8,
+                    workers: 1,
+                    rss_bytes: index as u64,
+                    tasks: 1,
+                    alert_state_code: ResourceAlertState::Healthy as u8,
+                },
+            );
+        }
+        assert_eq!(history.entries.len(), MAX_RESOURCE_HISTORY);
+        assert_eq!(history.entries[0].observed_at_millis, 1);
     }
 }

@@ -119,8 +119,16 @@ MemoryMax/TasksMax/CPU enforcement and cgroup event counters remain required.
 manager records into a bounded, owner-only, dependency-free HTML flight recorder.
 It exposes textual process and capacity signals without commands, paths,
 environment values, network data, or logs; it never overwrites prior evidence.
-A live authenticated dashboard, time-series history, and remote fleet aggregation
-remain future work and must preserve this local-first privacy boundary.
+A live authenticated dashboard and remote fleet aggregation remain future work
+and must preserve this local-first privacy boundary.
+
+**Shipped bounded history baseline on Linux:** `pamd` now samples each managed
+application once per minute into independent owner-only 120-entry records.
+`monit:history` exposes exact versioned evidence and explicit incident capture;
+the static dashboard adds peak and textual trend summaries. Records exclude
+commands, paths, environment, network data, and logs, and application deletion
+removes its history. Longer retention, downsampling, and fleet aggregation remain
+future opt-in layers rather than unbounded defaults.
 
 **Shipped enforcement baseline on Linux:** applications that opt into
 `memory_max_bytes` and/or `task_max_count` launch fail-closed in unique transient

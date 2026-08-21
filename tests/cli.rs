@@ -306,6 +306,29 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     );
     let reloaded = run_managed_pam(&root, &state, port, &["reload", "managed-smoke", "--json"]);
     let restarted = run_managed_pam(&root, &state, port, &["restart", "managed-smoke", "--json"]);
+    let daemon_recycled = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
+    assert!(daemon_recycled.status.success());
+    let daemon_restarted = run_managed_pam(&root, &state, port, &["daemon", "start"]);
+    assert!(daemon_restarted.status.success());
+    let automatic_history = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["monit:history", "managed-smoke", "--json"],
+    );
+    assert!(automatic_history.status.success());
+    let automatic_history: serde_json::Value =
+        serde_json::from_slice(&automatic_history.stdout).unwrap();
+    assert_eq!(
+        automatic_history["applications"][0]["entries"][0]["stateCode"],
+        1
+    );
+    let history_recorded = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["monit:history", "managed-smoke", "--record", "--json"],
+    );
     let dashboard = state.join("managed-dashboard.html");
     let dashboard_created = run_managed_pam(
         &root,
@@ -319,6 +342,13 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         port,
         &["dashboard", "--output", dashboard.to_str().unwrap()],
     );
+    let history_path = state.join("history/managed-smoke.json");
+    let history_bytes = fs::read(&history_path).unwrap();
+    #[cfg(unix)]
+    let history_mode = {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(&history_path).unwrap().permissions().mode() & 0o777
+    };
     let saved = run_managed_pam(&root, &state, port, &["save", "--json"]);
     let stopped = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
     let resurrected = run_managed_pam(&root, &state, port, &["resurrect", "--json"]);
@@ -354,6 +384,29 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&restarted.stderr)
     );
+    assert!(history_recorded.status.success());
+    let resource_history: serde_json::Value =
+        serde_json::from_slice(&history_recorded.stdout).unwrap();
+    assert_eq!(resource_history["schemaVersion"], 1);
+    assert_eq!(resource_history["sampleIntervalSeconds"], 60);
+    assert_eq!(resource_history["retentionLimit"], 120);
+    assert_eq!(resource_history["applications"][0]["name"], "managed-smoke");
+    assert_eq!(
+        resource_history["applications"][0]["entries"][0]["stateCode"],
+        1
+    );
+    assert!(
+        resource_history["applications"][0]["entries"][0]["rssBytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(history_bytes.len() < 1024 * 1024);
+    let history_text = String::from_utf8(history_bytes).unwrap();
+    assert!(!history_text.contains(script));
+    assert!(!history_text.contains("needle-new-output"));
+    #[cfg(unix)]
+    assert_eq!(history_mode, 0o600);
     assert!(
         dashboard_created.status.success(),
         "{}",
@@ -372,6 +425,8 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     assert!(!dashboard_html.contains("<script"));
     assert!(!dashboard_html.contains(script));
     assert!(!dashboard_html.contains("needle-new-output"));
+    assert!(dashboard_html.contains("Peak RSS"));
+    assert!(dashboard_html.contains("Stable"));
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -415,6 +470,7 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     assert_eq!(resurrected["resurrected"][0], "managed-smoke");
     assert_ne!(started["pid"], restarted["pid"]);
     assert!(!state.join("applications/managed-smoke.json").exists());
+    assert!(!state.join("history/managed-smoke.json").exists());
     let daemon_stopped = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
     assert!(daemon_stopped.status.success());
     fs::remove_dir_all(state).unwrap();

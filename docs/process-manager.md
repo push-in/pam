@@ -152,6 +152,24 @@ codes are verified `1`, not requested `2`, unverified/mismatched `3`. A hard-lim
 change restarts the application and returns reconcile action `7`; warning-only
 changes remain action `6`. Warnings must not exceed their corresponding maximum.
 
+## Bounded resource history
+
+The private per-user daemon records one resource sample per managed application
+at startup and every 60 seconds. `pam monit:history [NAME] [--limit N]` reads the
+latest entries; add `--json` for schema-versioned automation or `--record` to
+capture an immediate incident sample. Limits range from 1 to 120.
+
+Every application has an independent owner-only history capped at 120 entries.
+Entries contain only observation time, sequential integer process/alert states,
+worker count, aggregate RSS, and task count. Commands, paths, environment,
+network details, and logs are excluded. `pam delete` removes the corresponding
+history, while stopped applications remain explicitly sampled with state code
+`2` and unavailable alert code `5` until deletion.
+
+`pam dashboard` summarizes the bounded window as exact sample count, peak RSS,
+and textual RSS direction. This supplements the current snapshot; the JSON
+history remains the authoritative lossless local evidence.
+
 ## Transactional releases
 
 `pam deploy NAME RELEASE_DIRECTORY` activates an already-built release without
