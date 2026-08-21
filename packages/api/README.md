@@ -40,6 +40,38 @@ final readonly class LoginController
 }
 ```
 
+## Eloquent ORM (default)
+
+PAM API ships with Laravel's Eloquent as its official ORM. The integration
+keeps a separate connection manager per request Fiber, so connections,
+transactions and mutable database state cannot leak between persistent-worker
+requests.
+
+```php
+use Pam\Api\Database\DatabaseConfig;
+use Pam\Api\Database\EloquentServiceProvider;
+
+$app->provider(new EloquentServiceProvider(DatabaseConfig::fromEnvironment()));
+```
+
+Configure `DB_CONNECTION` (`pgsql`, `mysql`, `sqlite` or `sqlsrv`) and the
+usual `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`
+variables. PostgreSQL is the production default; SQLite is convenient for
+tests. Models are ordinary `Illuminate\Database\Eloquent\Model` classes.
+
+```php
+final class User extends \Illuminate\Database\Eloquent\Model
+{
+    protected $fillable = ['name', 'email'];
+}
+```
+
+Resolve `EloquentManager` when a service needs an explicit connection, schema
+builder or transaction. Request cleanup automatically rolls back unfinished
+transactions and disconnects every configured connection. Register
+`DatabaseHealthCheck` in a `HealthRegistry` for readiness checks; its result
+reports latency and failure class without exposing credentials.
+
 ## Route groups
 
 ```php

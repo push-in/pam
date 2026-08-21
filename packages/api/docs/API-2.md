@@ -80,6 +80,8 @@ The `feat/api-2-foundation` development line implements:
 - an in-memory test client with fluent response assertions;
 - a reproducible router benchmark.
 
-Redis, database, queue, JWT and OpenTelemetry adapters intentionally remain
-application/ecosystem integrations. The core defines their contracts and ships
-bounded memory implementations only where safe for development and tests.
+Eloquent is the official ORM and is integrated with Fiber-local connection
+managers, events, transactions and deterministic request cleanup. Redis,
+broker, JWT and OpenTelemetry integrations remain contract-backed ecosystem
+adapters until their production implementations complete the certification
+suite.

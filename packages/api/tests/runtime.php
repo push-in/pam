@@ -2,6 +2,53 @@
 
 declare(strict_types=1);
 
+namespace Pam\Contracts\Transport {
+    enum TransportCapability: int
+    {
+        case Publish = 1;
+        case Consume = 2;
+        case DelayedRetry = 3;
+        case DeadLetter = 4;
+        case OrderedDelivery = 5;
+    }
+
+    final readonly class TransportDescriptor
+    {
+        /** @param list<TransportCapability> $capabilities */
+        public function __construct(public string $id, private array $capabilities)
+        {
+        }
+
+        public function supports(TransportCapability $capability): bool
+        {
+            return in_array($capability, $this->capabilities, true);
+        }
+    }
+
+    interface TransportProviderInterface
+    {
+        public function descriptor(): TransportDescriptor;
+    }
+
+    interface TransportApplicationInterface extends \Pam\Contracts\Http\ApplicationInterface
+    {
+        public function transport(TransportProviderInterface $provider): self;
+
+        /** @return array<string, TransportProviderInterface> */
+        public function transports(): array;
+    }
+}
+
+namespace Pam\Observability {
+    final class Telemetry
+    {
+        /** @param array<string, mixed> $context */
+        public static function log(string $level, string $message, array $context = []): void
+        {
+        }
+    }
+}
+
 namespace Pam\Http {
     final class Request
     {

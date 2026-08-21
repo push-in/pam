@@ -22,6 +22,10 @@
     },
     "require": {
         "php": "^8.4",
+        "illuminate/database": "^13.0",
+        "illuminate/events": "^13.0",
+        "illuminate/filesystem": "^13.0",
+        "illuminate/pagination": "^13.0",
         "pushinbr/pam-core-api": "^1.0"
     },
     "suggest": {
