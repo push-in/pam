@@ -241,6 +241,22 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         ),
         command("start", "Run a supervised server cluster", "Runtime"),
         command(
+            "up",
+            "Start and register an application in the background",
+            "Runtime",
+        ),
+        command("ps", "List managed PAM applications", "Runtime"),
+        command("status", "Inspect managed application health", "Runtime"),
+        command("describe", "Describe a managed application", "Runtime"),
+        command(
+            "reload",
+            "Reload a managed application without downtime",
+            "Runtime",
+        ),
+        command("restart", "Restart a managed application", "Runtime"),
+        command("stop", "Gracefully stop a managed application", "Runtime"),
+        command("delete", "Remove a stopped application from PAM", "Runtime"),
+        command(
             "octane:start",
             "Start Laravel Octane on the PAM runtime",
             "Runtime",

@@ -795,6 +795,10 @@ pam exec index.php [arguments...]                  explicitly run a PHP script
 pam composer [arguments...]                        run verified Composer inside Pam
 pam dev [index.php] [arguments...]                 recursive hot reload
 pam start [index.php] --workers N                  supervised production cluster
+pam up [index.php] --name api --workers N          start and detach a managed application
+pam ps                                              list managed applications
+pam reload api                                      zero-downtime generational reload
+pam logs api --errors --lines 200                   inspect retained manager logs
 pam test [directory] [--pest|--phpunit]            test inside the Embed SAPI
 pam routes [index.php]                              inspect registered routes
 pam inspect [index.php]                             inspect PHP, INI, ABI, and extensions
