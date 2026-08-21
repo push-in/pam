@@ -258,6 +258,26 @@ infrastructure:
 Shared production state belongs in atomic Redis/database/broker adapters. The
 included memory stores are bounded and intended for development and tests.
 
+`JobQueue` defines reservation leases, acknowledgement, delayed release and
+dead-letter transitions for durable adapters. The bounded memory implementation
+and `JobWorker` exercise the same at-least-once lifecycle in tests:
+
+```php
+$queue = new MemoryJobDispatcher();
+$queue->dispatch(new SendInvoice($invoiceId), maximumAttempts: 3);
+
+$worker = new JobWorker(
+    $queue,
+    static fn (object $job): JobOutcome => JobOutcome::Complete,
+);
+$worker->runOne();
+```
+
+Attempts increment when a lease is reserved. Expired leases can be reclaimed;
+exceptions and explicit retry outcomes release the job with a bounded delay,
+and exhausted jobs enter the dead-letter set. Only failure class names are
+retained, never exception messages that may contain application data.
+
 ## Request lifecycle observers
 
 Register a `RequestLifecycleObserver` with `$app->observe()` to build profilers,

@@ -16,6 +16,8 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - typed configuration with deterministic secret redaction;
 - automatic `HEAD`/`OPTIONS` semantics and deterministic `Allow` headers;
 - request lifecycle observers and a bounded privacy-safe development profiler;
+- a lease-based job queue contract and bounded worker with retries, expired
+  lease recovery and dead-letter transitions;
 - OpenAPI 3.1, compatibility checks and generated clients;
 - production primitives for auth, rate limiting, idempotency, caching,
   resilience, tenancy, events, jobs, health and observability.
@@ -32,4 +34,3 @@ matrix and exact comparison against the latest stable 1.x tag.
 ## 1.0.2 - 2026-08-20
 
 - Published the initial standalone PAM API package.
-
