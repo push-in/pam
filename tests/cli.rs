@@ -803,6 +803,87 @@ fn manages_a_private_per_user_daemon() {
 }
 
 #[test]
+fn replaces_a_live_master_after_bounded_health_check_failures() {
+    let state = temporary_path("manager-health-check");
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let health_url = format!("http://127.0.0.1:{port}/block");
+    let started = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "up",
+            fixture("server.php").to_str().unwrap(),
+            "--name",
+            "unhealthy-smoke",
+            "--health-check-url",
+            &health_url,
+            "--health-check-interval-ms",
+            "250",
+            "--health-check-timeout-ms",
+            "50",
+            "--health-check-failures",
+            "2",
+            "--json",
+        ],
+    );
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let original_pid = started["pid"].as_u64().unwrap();
+    assert_eq!(started["healthCheck"]["configured"], true);
+    assert!(!started.to_string().contains("/block"));
+
+    let recovered = (0..100)
+        .find_map(|_| {
+            thread::sleep(Duration::from_millis(100));
+            let status = run_managed_pam(
+                &root,
+                &state,
+                port,
+                &["status", "unhealthy-smoke", "--json"],
+            );
+            let snapshot: serde_json::Value = serde_json::from_slice(&status.stdout).ok()?;
+            (status.status.success()
+                && snapshot["pid"].as_u64() != Some(original_pid)
+                && snapshot["healthCheck"]["totalUnhealthyRestartCount"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    >= 1
+                && snapshot["recovery"]["totalAutoRestartCount"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    >= 1)
+                .then_some(snapshot)
+        })
+        .expect("pamd should replace a live but unhealthy master");
+    assert_eq!(recovered["desiredStateCode"], 1);
+
+    assert!(
+        run_managed_pam(&root, &state, port, &["stop", "unhealthy-smoke"])
+            .status
+            .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, port, &["delete", "unhealthy-smoke"])
+            .status
+            .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, port, &["daemon", "stop"])
+            .status
+            .success()
+    );
+    fs::remove_dir_all(state).unwrap();
+}
+
+#[test]
 fn validates_and_reconciles_a_multi_application_pam_toml() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let state = temporary_path("ecosystem-state");
