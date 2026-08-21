@@ -39,6 +39,7 @@ fn run_managed_pam(
     Command::new(env!("CARGO_BIN_EXE_pam"))
         .current_dir(directory)
         .env("PAM_MANAGER_STATE_DIR", state)
+        .env("PAM_MANAGER_RUNTIME_DIR", state.join("runtime"))
         .env("PAM_TEST_PORT", port.to_string())
         .args(arguments)
         .output()
@@ -260,6 +261,11 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "--json",
         ],
     );
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
     fs::write(
         state.join("logs/managed-smoke.out.log.1"),
         "needle-old-output\n",
@@ -300,17 +306,25 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     );
     let reloaded = run_managed_pam(&root, &state, port, &["reload", "managed-smoke", "--json"]);
     let restarted = run_managed_pam(&root, &state, port, &["restart", "managed-smoke", "--json"]);
+    let dashboard = state.join("managed-dashboard.html");
+    let dashboard_created = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["dashboard", "--output", dashboard.to_str().unwrap()],
+    );
+    let dashboard_overwrite = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["dashboard", "--output", dashboard.to_str().unwrap()],
+    );
     let saved = run_managed_pam(&root, &state, port, &["save", "--json"]);
     let stopped = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
     let resurrected = run_managed_pam(&root, &state, port, &["resurrect", "--json"]);
     let stopped_again = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
     let deleted = run_managed_pam(&root, &state, port, &["delete", "managed-smoke", "--json"]);
 
-    assert!(
-        started.status.success(),
-        "{}",
-        String::from_utf8_lossy(&started.stderr)
-    );
     assert!(queried_logs.status.success());
     let queried_logs: serde_json::Value = serde_json::from_slice(&queried_logs.stdout).unwrap();
     assert_eq!(queried_logs["schemaVersion"], 1);
@@ -340,6 +354,32 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&restarted.stderr)
     );
+    assert!(
+        dashboard_created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dashboard_created.stderr)
+    );
+    assert!(!dashboard_overwrite.status.success());
+    assert!(
+        String::from_utf8_lossy(&dashboard_overwrite.stderr)
+            .contains("cannot create new manager dashboard")
+    );
+    let dashboard_html = fs::read_to_string(&dashboard).unwrap();
+    assert!(dashboard_html.len() < 2 * 1024 * 1024);
+    assert!(dashboard_html.contains("managed-smoke"));
+    assert!(dashboard_html.contains("Online"));
+    assert!(dashboard_html.contains("Resident memory"));
+    assert!(!dashboard_html.contains("<script"));
+    assert!(!dashboard_html.contains(script));
+    assert!(!dashboard_html.contains("needle-new-output"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&dashboard).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
     assert!(
         saved.status.success(),
         "{}",

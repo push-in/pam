@@ -20,6 +20,7 @@ mod doctor_contract;
 mod ecosystem;
 mod editor;
 mod ingress;
+mod manager_dashboard;
 mod mobile;
 mod octane;
 mod otlp;
@@ -647,6 +648,7 @@ fn run() -> Result<u8, CliError> {
             | "resurrect"
             | "startup"
             | "monit"
+            | "dashboard"
             | "apply"
             | "config:check"
             | "deploy"

@@ -21,6 +21,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam resurrect` — Restore the saved managed process list.
 - `pam startup` — Generate or install the Linux user service.
 - `pam monit` — Show managed process health and capacity.
+- `pam dashboard` — Create a private manager health dashboard.
 - `pam apply` — Reconcile applications from pam.toml.
 - `pam config:check` — Validate a pam.toml ecosystem contract.
 ## Ship
