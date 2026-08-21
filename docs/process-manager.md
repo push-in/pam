@@ -23,6 +23,9 @@ pam startup --print
 pam startup --install
 pam config:check pam.toml
 pam apply pam.toml
+pam deploy billing /srv/billing/releases/2026-08-21
+pam deploy:history billing --json
+pam rollback billing
 pam stop billing
 pam delete billing
 ```
@@ -113,6 +116,24 @@ configuration directory, worker counts are bounded to 1–256, unknown fields
 fail validation, and configuration files are limited to regular non-symlink
 files of at most 1 MiB. Use `pam config:check --json` in CI and `pam apply
 --json` for a stable action-coded reconciliation report.
+
+## Transactional releases
+
+`pam deploy NAME RELEASE_DIRECTORY` activates an already-built release without
+copying it into PAM state. PAM stops the previous generation, changes the
+recorded working directory atomically, starts the candidate, and confirms its
+normal readiness gate. If readiness fails, PAM restores the previous record and
+reactivates the last release; a failed recovery is reported separately.
+
+Deploying the active canonical directory is idempotent. Successful transitions
+are recorded in a private, schema-versioned history capped at 50 entries.
+`pam rollback NAME [--steps N]` selects an earlier distinct healthy release and
+uses the same transactional activation. Release arguments and script layout
+remain identical across releases. Symlink release roots are rejected; release
+artifacts remain operator-owned and are never silently deleted by PAM.
+
+JSON action codes are sequential: activated `1`, rolled back `2`, unchanged
+`3`. History event kinds are baseline `1`, deploy `2`, rollback `3`.
 
 Without `XDG_STATE_HOME`, PAM uses `$HOME/.local/state/pam`. Directories are
 mode `0700`; records and logs are mode `0600`. Application names are limited to

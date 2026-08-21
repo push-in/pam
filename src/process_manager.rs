@@ -26,6 +26,7 @@ const DEFAULT_LOG_RETAIN: usize = 5;
 const MAX_LOG_RETAIN: usize = 100;
 const MAX_DAEMON_MESSAGE_BYTES: usize = 16 * 1024;
 const MAX_DAEMON_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_DEPLOY_HISTORY: usize = 50;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[repr(u8)]
@@ -109,6 +110,38 @@ struct SavedProcessList {
     applications: Vec<SavedApplication>,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentHistory {
+    schema_version: u8,
+    name: String,
+    entries: Vec<DeploymentEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DeploymentEntry {
+    release_directory: PathBuf,
+    activated_at_millis: u64,
+    event_kind_code: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum DeploymentEventKind {
+    Baseline = 1,
+    Deploy = 2,
+    Rollback = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum DeploymentAction {
+    Activated = 1,
+    RolledBack = 2,
+    Unchanged = 3,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct EcosystemConfig {
@@ -182,6 +215,9 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "monit" => monit(arguments),
         "apply" => apply_ecosystem(executable, arguments),
         "config:check" => check_ecosystem(arguments),
+        "deploy" => deploy(executable, arguments),
+        "deploy:history" => deployment_history(arguments),
+        "rollback" => rollback(executable, arguments),
         "daemon" => daemon(executable, arguments),
         "__pamd" => daemon_serve(executable),
         _ => Err(format!(
@@ -204,6 +240,9 @@ fn daemon_managed_command(command: &str) -> bool {
             | "save"
             | "resurrect"
             | "monit"
+            | "deploy"
+            | "deploy:history"
+            | "rollback"
     )
 }
 
@@ -581,6 +620,252 @@ fn monit(arguments: Vec<OsString>) -> Result<u8, String> {
         }
     }
     Ok(0)
+}
+
+fn deploy(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let (name, release, json) = parse_deploy_arguments(arguments)?;
+    let release = validate_release_directory(&release)?;
+    let paths = ManagerPaths::load()?;
+    let record = read_record(&paths.application(&name))?;
+    if record.working_directory == release {
+        print_deployment_result(&name, &release, DeploymentAction::Unchanged, json);
+        return Ok(0);
+    }
+    let mut history = read_deployment_history(&paths, &name)?;
+    if history.entries.is_empty() {
+        history.entries.push(DeploymentEntry {
+            release_directory: record.working_directory.clone(),
+            activated_at_millis: record.created_at_millis,
+            event_kind_code: DeploymentEventKind::Baseline as u8,
+        });
+    }
+    activate_release(executable, &paths, &record, &release)?;
+    append_deployment_entry(
+        &mut history,
+        DeploymentEntry {
+            release_directory: release.clone(),
+            activated_at_millis: epoch_millis(),
+            event_kind_code: DeploymentEventKind::Deploy as u8,
+        },
+    );
+    write_private_json(&paths.deployment(&name), &history)?;
+    print_deployment_result(&name, &release, DeploymentAction::Activated, json);
+    Ok(0)
+}
+
+fn rollback(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let (name, steps, json) = parse_rollback_arguments(arguments)?;
+    let paths = ManagerPaths::load()?;
+    let record = read_record(&paths.application(&name))?;
+    let mut history = read_deployment_history(&paths, &name)?;
+    let target = history
+        .entries
+        .iter()
+        .rev()
+        .filter(|entry| entry.release_directory != record.working_directory)
+        .nth(steps - 1)
+        .map(|entry| entry.release_directory.clone())
+        .ok_or_else(|| {
+            format!("application {name:?} has no rollback target for {steps} step(s)")
+        })?;
+    let target = validate_release_directory(&target)?;
+    activate_release(executable, &paths, &record, &target)?;
+    append_deployment_entry(
+        &mut history,
+        DeploymentEntry {
+            release_directory: target.clone(),
+            activated_at_millis: epoch_millis(),
+            event_kind_code: DeploymentEventKind::Rollback as u8,
+        },
+    );
+    write_private_json(&paths.deployment(&name), &history)?;
+    print_deployment_result(&name, &target, DeploymentAction::RolledBack, json);
+    Ok(0)
+}
+
+fn deployment_history(arguments: Vec<OsString>) -> Result<u8, String> {
+    let (name, json) = parse_name_json(arguments, "deploy:history")?;
+    let history = read_deployment_history(&ManagerPaths::load()?, &name)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&history).map_err(|error| error.to_string())?
+        );
+    } else if history.entries.is_empty() {
+        println!("No deployment history for {name}.");
+    } else {
+        println!("RELEASE\tEVENT\tACTIVATED_AT_MS");
+        for entry in history.entries {
+            println!(
+                "{}\t{}\t{}",
+                entry.release_directory.display(),
+                entry.event_kind_code,
+                entry.activated_at_millis
+            );
+        }
+    }
+    Ok(0)
+}
+
+fn activate_release(
+    executable: &OsStr,
+    paths: &ManagerPaths,
+    previous: &ApplicationRecord,
+    release: &Path,
+) -> Result<(), String> {
+    stop_record(previous)?;
+    let mut candidate = previous.clone();
+    candidate.working_directory = release.to_path_buf();
+    if candidate.kind_code == ApplicationKind::LaravelOctane as u8 {
+        candidate.master_state_file = release.join(".pam/octane.json");
+    }
+    let record_path = paths.application(&candidate.name);
+    write_record(&record_path, &candidate)?;
+    if let Err(error) = restart_record(executable, &candidate, false, false) {
+        write_record(&record_path, previous)?;
+        let recovery = restart_record(executable, previous, false, false);
+        return match recovery {
+            Ok(_) => Err(format!(
+                "release failed readiness and previous release was restored: {error}"
+            )),
+            Err(recovery_error) => Err(format!(
+                "release failed ({error}); previous release recovery also failed ({recovery_error})"
+            )),
+        };
+    }
+    Ok(())
+}
+
+fn stop_record(record: &ApplicationRecord) -> Result<(), String> {
+    let Some(state) = running_state(record) else {
+        return Ok(());
+    };
+    if master_is_running(&state) {
+        signal_master(&state, STOP_SIGNAL)?;
+    }
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while master_is_running(&state) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(50));
+    }
+    if master_is_running(&state) {
+        return Err(format!(
+            "application {:?} did not stop before release activation",
+            record.name
+        ));
+    }
+    Ok(())
+}
+
+fn read_deployment_history(paths: &ManagerPaths, name: &str) -> Result<DeploymentHistory, String> {
+    validate_name(name)?;
+    let path = paths.deployment(name);
+    if !path.exists() {
+        return Ok(DeploymentHistory {
+            schema_version: 1,
+            name: name.to_owned(),
+            entries: Vec::new(),
+        });
+    }
+    let history: DeploymentHistory = read_private_json(&path)?;
+    if history.schema_version != 1
+        || history.name != name
+        || history.entries.len() > MAX_DEPLOY_HISTORY
+    {
+        return Err("invalid deployment history contract".to_owned());
+    }
+    if history
+        .entries
+        .iter()
+        .any(|entry| !matches!(entry.event_kind_code, 1..=3))
+    {
+        return Err("invalid deployment event kind".to_owned());
+    }
+    Ok(history)
+}
+
+fn append_deployment_entry(history: &mut DeploymentHistory, entry: DeploymentEntry) {
+    history.entries.push(entry);
+    if history.entries.len() > MAX_DEPLOY_HISTORY {
+        let excess = history.entries.len() - MAX_DEPLOY_HISTORY;
+        history.entries.drain(..excess);
+    }
+}
+
+fn validate_release_directory(path: &Path) -> Result<PathBuf, String> {
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(format!(
+            "refusing symlink release directory {}",
+            path.display()
+        ));
+    }
+    let path = fs::canonicalize(path)
+        .map_err(|error| format!("cannot resolve release directory: {error}"))?;
+    if !path.is_dir() {
+        return Err("release target must be a directory".to_owned());
+    }
+    Ok(path)
+}
+
+fn parse_deploy_arguments(arguments: Vec<OsString>) -> Result<(String, PathBuf, bool), String> {
+    let mut values = Vec::new();
+    let mut json = false;
+    for argument in arguments {
+        if argument == "--json" {
+            json = true;
+        } else {
+            values.push(argument);
+        }
+    }
+    if values.len() != 2 {
+        return Err("deploy requires NAME RELEASE_DIRECTORY and optional --json".to_owned());
+    }
+    let name = required_utf8(Some(values.remove(0)), "deploy name")?;
+    validate_name(&name)?;
+    Ok((name, PathBuf::from(values.remove(0)), json))
+}
+
+fn parse_rollback_arguments(arguments: Vec<OsString>) -> Result<(String, usize, bool), String> {
+    let mut name = None;
+    let mut steps = 1;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--steps" => steps = required_positive(arguments.next(), "--steps")?,
+            "--json" => json = true,
+            option if option.starts_with('-') => {
+                return Err(format!("unknown rollback option: {option}"));
+            }
+            _ if name.is_none() => name = Some(argument.to_string_lossy().into_owned()),
+            _ => return Err("rollback accepts one application name".to_owned()),
+        }
+    }
+    let name = name.ok_or_else(|| "rollback requires an application name".to_owned())?;
+    validate_name(&name)?;
+    if steps > MAX_DEPLOY_HISTORY {
+        return Err(format!("--steps cannot exceed {MAX_DEPLOY_HISTORY}"));
+    }
+    Ok((name, steps, json))
+}
+
+fn print_deployment_result(name: &str, release: &Path, action: DeploymentAction, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"name":name,"actionCode":action as u8,"releaseDirectory":release})
+        );
+    } else {
+        println!(
+            "{} {} -> {}",
+            match action {
+                DeploymentAction::Activated => "Deployed",
+                DeploymentAction::RolledBack => "Rolled back",
+                DeploymentAction::Unchanged => "Unchanged",
+            },
+            name,
+            release.display()
+        );
+    }
 }
 
 fn daemon(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -1438,6 +1723,7 @@ struct ManagerPaths {
     applications: PathBuf,
     runtime: PathBuf,
     logs: PathBuf,
+    deployments: PathBuf,
 }
 impl ManagerPaths {
     fn load() -> Result<Self, String> {
@@ -1457,14 +1743,23 @@ impl ManagerPaths {
             applications: base.join("applications"),
             runtime: base.join("runtime"),
             logs: base.join("logs"),
+            deployments: base.join("deployments"),
         };
-        for path in [&paths.applications, &paths.runtime, &paths.logs] {
+        for path in [
+            &paths.applications,
+            &paths.runtime,
+            &paths.logs,
+            &paths.deployments,
+        ] {
             secure_directory(path)?;
         }
         Ok(paths)
     }
     fn application(&self, name: &str) -> PathBuf {
         self.applications.join(format!("{name}.json"))
+    }
+    fn deployment(&self, name: &str) -> PathBuf {
+        self.deployments.join(format!("{name}.json"))
     }
 }
 
@@ -1716,6 +2011,22 @@ mod tests {
         );
         assert_eq!(
             [
+                DeploymentEventKind::Baseline as u8,
+                DeploymentEventKind::Deploy as u8,
+                DeploymentEventKind::Rollback as u8,
+            ],
+            [1, 2, 3]
+        );
+        assert_eq!(
+            [
+                DeploymentAction::Activated as u8,
+                DeploymentAction::RolledBack as u8,
+                DeploymentAction::Unchanged as u8,
+            ],
+            [1, 2, 3]
+        );
+        assert_eq!(
+            [
                 ApplicationState::Online as u8,
                 ApplicationState::Stopped as u8
             ],
@@ -1775,5 +2086,26 @@ surprise=true
 kind_code="runtime"
 "#;
         assert!(toml::from_str::<EcosystemConfig>(string_kind).is_err());
+    }
+
+    #[test]
+    fn deployment_history_retention_is_bounded() {
+        let mut history = DeploymentHistory {
+            schema_version: 1,
+            name: "api".to_owned(),
+            entries: Vec::new(),
+        };
+        for index in 0..=MAX_DEPLOY_HISTORY {
+            append_deployment_entry(
+                &mut history,
+                DeploymentEntry {
+                    release_directory: PathBuf::from(index.to_string()),
+                    activated_at_millis: index as u64,
+                    event_kind_code: DeploymentEventKind::Deploy as u8,
+                },
+            );
+        }
+        assert_eq!(history.entries.len(), MAX_DEPLOY_HISTORY);
+        assert_eq!(history.entries[0].release_directory, PathBuf::from("1"));
     }
 }
