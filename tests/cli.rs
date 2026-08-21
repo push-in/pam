@@ -1578,7 +1578,7 @@ script = "tests/fixtures/server.php"
 workers = 2
 cwd = "."
 autostart = true
-php_extensions = ["iconv"]
+php_extensions = ["iconv", "pdo"]
 memory_warning_bytes = 1099511627776
 task_warning_count = 1000000
 "#,
