@@ -67,7 +67,7 @@ p95 latency, and daemon RSS growth.
 
 ```bash
 PAM_RECOVERY_ROUNDS=10 \
-PAM_RECOVERY_MAX_P95_MILLIS=2000 \
+PAM_RECOVERY_MAX_P95_MILLIS=300 \
 PAM_RECOVERY_MAX_RSS_GROWTH_BYTES=16777216 \
 benchmarks/process-manager/run.sh
 ```

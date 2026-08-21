@@ -43,7 +43,7 @@ jobs:
       PAM_BENCH_WORKER_MATRIX: 1 4 8
       PAM_SOAK_DURATION: 30m
       PAM_RECOVERY_ROUNDS: '10'
-      PAM_RECOVERY_MAX_P95_MILLIS: '2000'
+      PAM_RECOVERY_MAX_P95_MILLIS: '300'
       PAM_RECOVERY_MAX_RSS_GROWTH_BYTES: '16777216'
     steps:
       - uses: actions/checkout@v5
