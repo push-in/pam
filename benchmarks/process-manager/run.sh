@@ -83,6 +83,8 @@ fi
 printf 'round,recovery_millis,success\n' >"${results}/recovery.csv"
 printf 'round,detection_millis,backoff_millis,readiness_millis,accounted_millis,success\n' \
     >"${results}/recovery-phases.csv"
+printf 'round,workers,spawn_spread_millis,spawn_to_ready_p95_millis,spawn_to_ready_maximum_millis,success\n' \
+    >"${results}/worker-startup.csv"
 for (( round = 1; round <= rounds; round++ )); do
     "${pam_binary}" restart "${name}" >/dev/null
     original_pid=$("${pam_binary}" status "${name}" --json | php -r '$value = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR); echo $value["pid"];')
@@ -120,8 +122,25 @@ for (( round = 1; round <= rounds; round++ )); do
             exit 1
         }
         printf '%s\n' "${phase_row}" >>"${results}/recovery-phases.csv"
+        startup_row=$(php -r '
+            $value = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR);
+            $startup = $value["workerStartup"] ?? null;
+            $workers = $value["workers"] ?? null;
+            $spread = $startup["spawnSpreadMillis"] ?? null;
+            $p95 = $startup["spawnToReadyP95Millis"] ?? null;
+            $maximum = $startup["spawnToReadyMaximumMillis"] ?? null;
+            if (!is_array($startup) || !is_int($workers) || $workers !== (int) $argv[2]
+                || !is_int($spread) || !is_int($p95) || !is_int($maximum)
+                || $spread < 0 || $p95 < 0 || $maximum < $p95) { exit(1); }
+            printf("%d,%d,%d,%d,%d,1", (int) $argv[1], $workers, $spread, $p95, $maximum);
+        ' "${round}" "${workers}" <<<"${snapshot}") || {
+            printf 'worker startup diagnostics are missing or invalid in round %d\n' "${round}" >&2
+            exit 1
+        }
+        printf '%s\n' "${startup_row}" >>"${results}/worker-startup.csv"
     else
         printf '%d,0,0,0,0,0\n' "${round}" >>"${results}/recovery-phases.csv"
+        printf '%d,%d,0,0,0,0\n' "${round}" "${workers}" >>"${results}/worker-startup.csv"
     fi
 done
 rss_after=$(rss_bytes)

@@ -165,6 +165,16 @@ The measured 16-worker readiness slope is now the primary optimization target;
 the gate records the current clean-runner envelope rather than treating it as
 the desired endpoint.
 
+`status`, `describe` and `ps --json` expose additive `workerStartup`
+diagnostics for each ready generation: the time between spawning the first and
+last worker, plus p95 and maximum spawn-to-ready latency across every worker.
+The recovery harness records the same values per round in
+`worker-startup.csv`, and suite 7 aggregates them per worker count. This keeps
+the complete-generation readiness contract while separating process-launch
+serialization from PHP/application bootstrap cost. The master checks worker
+state every 5 ms during startup, down from 20 ms, without changing the 10 ms
+accept-loop safety delay inside each worker.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`

@@ -794,6 +794,7 @@ mod tests {
             generation: 1,
             pid: 1_000 + id as u32,
             pool: Some(pool.to_owned()),
+            spawned_at_millis: 1,
             started_at_millis: 1,
             updated_at_millis: 2,
             deadline_at_millis: None,

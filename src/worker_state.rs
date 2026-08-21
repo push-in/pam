@@ -77,6 +77,8 @@ pub struct WorkerRuntimeRecord {
     pub pid: u32,
     #[serde(default)]
     pub pool: Option<String>,
+    #[serde(default)]
+    pub spawned_at_millis: u64,
     pub started_at_millis: u64,
     pub updated_at_millis: u64,
     pub deadline_at_millis: Option<u64>,
@@ -111,6 +113,7 @@ struct ReporterInner {
     worker_id: usize,
     generation: u64,
     pool: Option<String>,
+    spawned_at_millis: u64,
     started_at_millis: u64,
     pending: Mutex<PendingRecord>,
     background_writer: AtomicBool,
@@ -141,6 +144,10 @@ impl WorkerStateReporter {
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(1),
             pool: std::env::var("PAM_WORKER_POOL").ok(),
+            spawned_at_millis: std::env::var("PAM_WORKER_SPAWNED_AT_MILLIS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(epoch_millis),
             started_at_millis: epoch_millis(),
             pending: Mutex::new(PendingRecord::default()),
             background_writer: AtomicBool::new(false),
@@ -227,6 +234,7 @@ impl ReporterInner {
             generation: self.generation,
             pid: std::process::id(),
             pool: self.pool.clone(),
+            spawned_at_millis: self.spawned_at_millis,
             started_at_millis: self.started_at_millis,
             updated_at_millis: epoch_millis(),
             deadline_at_millis: pending.deadline_at_millis,
@@ -336,6 +344,7 @@ mod tests {
             }
         });
         let record: WorkerRuntimeRecord = serde_json::from_value(source).unwrap();
+        assert_eq!(record.spawned_at_millis, 0);
         assert_eq!(record.metrics.event_loop_lag_micros, 1_250);
         assert_eq!(record.metrics.event_loop_lag_max_micros, 0);
         assert_eq!(record.metrics.event_loop_lag_total_micros, 0);

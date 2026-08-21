@@ -183,6 +183,12 @@ pub struct MasterState {
     pub workers: usize,
     pub admin_address: Option<String>,
     pub started_at_millis: u64,
+    #[serde(default)]
+    pub worker_spawn_spread_millis: Option<u64>,
+    #[serde(default)]
+    pub worker_startup_p95_millis: Option<u64>,
+    #[serde(default)]
+    pub worker_startup_max_millis: Option<u64>,
 }
 
 pub fn read_master_state(path: &Path) -> Result<MasterState, String> {
@@ -237,6 +243,7 @@ struct Worker {
     generation: u64,
     child: Child,
     state_path: PathBuf,
+    spawned_at_millis: u64,
     started: Instant,
     consecutive_failures: u32,
     pool: Option<RuntimePool>,
@@ -356,7 +363,7 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
     let _state_file = options
         .state_file
         .as_deref()
-        .map(|path| MasterStateFile::create(path, &options, control_plane.as_ref()))
+        .map(|path| MasterStateFile::create(path, &options, control_plane.as_ref(), &workers))
         .transpose()?;
     let mut checks = tokio::time::interval(Duration::from_millis(200));
     checks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -472,6 +479,7 @@ impl MasterStateFile {
         path: &Path,
         options: &StartOptions,
         control_plane: Option<&ControlPlane>,
+        workers: &[Worker],
     ) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
@@ -493,6 +501,8 @@ impl MasterStateFile {
                 path.display()
             ));
         }
+        let (worker_spawn_spread_millis, worker_startup_p95_millis, worker_startup_max_millis) =
+            generation_startup_summary(workers);
         let state = MasterState {
             version: 1,
             pid: std::process::id(),
@@ -500,6 +510,9 @@ impl MasterStateFile {
             workers: options.workers,
             admin_address: control_plane.map(|control| control.address().to_string()),
             started_at_millis: epoch_millis(),
+            worker_spawn_spread_millis,
+            worker_startup_p95_millis,
+            worker_startup_max_millis,
         };
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
         let bytes = serde_json::to_vec_pretty(&state)
@@ -598,6 +611,7 @@ fn spawn_worker(
         ));
     }
     let max_requests = staggered_max_requests(options, id);
+    let spawned_at_millis = epoch_millis();
     let mut command = Command::new(executable);
     command
         .arg("__worker")
@@ -606,6 +620,10 @@ fn spawn_worker(
         .env("PAM_WORKER_ID", id.to_string())
         .env("PAM_WORKER_GENERATION", generation.to_string())
         .env("PAM_MAX_REQUESTS", max_requests.to_string())
+        .env(
+            "PAM_WORKER_SPAWNED_AT_MILLIS",
+            spawned_at_millis.to_string(),
+        )
         .env_remove(ADMIN_TOKEN_ENV)
         .env_remove(ADMIN_TOKEN_FILE_ENV)
         .env(
@@ -629,6 +647,7 @@ fn spawn_worker(
         generation,
         child,
         state_path,
+        spawned_at_millis,
         started: Instant::now(),
         consecutive_failures,
         pool,
@@ -699,8 +718,39 @@ async fn wait_generation_ready(workers: &mut [Worker], timeout: Duration) -> Res
                 timeout.as_millis()
             ));
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
     }
+}
+
+fn generation_startup_summary(workers: &[Worker]) -> (Option<u64>, Option<u64>, Option<u64>) {
+    let timings = workers
+        .iter()
+        .filter_map(|worker| {
+            worker_record(worker).map(|record| (worker.spawned_at_millis, record.updated_at_millis))
+        })
+        .collect::<Vec<_>>();
+    if timings.len() != workers.len() {
+        return (None, None, None);
+    }
+    summarize_startup_timings(&timings)
+}
+
+fn summarize_startup_timings(timings: &[(u64, u64)]) -> (Option<u64>, Option<u64>, Option<u64>) {
+    if timings.is_empty() {
+        return (None, None, None);
+    }
+    let mut startup = timings
+        .iter()
+        .map(|(spawned, ready)| ready.saturating_sub(*spawned))
+        .collect::<Vec<_>>();
+    startup.sort_unstable();
+    let first_spawn = timings.iter().map(|(spawned, _)| *spawned).min();
+    let last_spawn = timings.iter().map(|(spawned, _)| *spawned).max();
+    let spread = first_spawn
+        .zip(last_spawn)
+        .map(|(first, last)| last.saturating_sub(first));
+    let p95_index = (startup.len() * 95).div_ceil(100).saturating_sub(1);
+    (spread, Some(startup[p95_index]), startup.last().copied())
 }
 
 fn worker_record(worker: &Worker) -> Option<WorkerRuntimeRecord> {
@@ -853,12 +903,42 @@ mod tests {
     }
 
     #[test]
+    fn older_master_state_defaults_additive_startup_diagnostics() {
+        let state: MasterState = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "pid": 42,
+            "processStart": null,
+            "workers": 4,
+            "adminAddress": null,
+            "startedAtMillis": 1
+        }))
+        .unwrap();
+
+        assert_eq!(state.worker_spawn_spread_millis, None);
+        assert_eq!(state.worker_startup_p95_millis, None);
+        assert_eq!(state.worker_startup_max_millis, None);
+    }
+
+    #[test]
     fn large_recycle_limits_are_staggered_across_workers() {
         let mut options = StartOptions::parse(std::iter::empty()).unwrap();
         options.workers = 4;
 
         assert_eq!(staggered_max_requests(&options, 1), 10_000_000);
         assert_eq!(staggered_max_requests(&options, 4), 12_500_000);
+    }
+
+    #[test]
+    fn startup_summary_separates_spawn_spread_from_worker_bootstrap() {
+        let timings = (0_u64..20)
+            .map(|index| (1_000 + index * 2, 1_100 + index * 3))
+            .collect::<Vec<_>>();
+        let (spread, p95, maximum) = summarize_startup_timings(&timings);
+
+        assert_eq!(spread, Some(38));
+        assert_eq!(p95, Some(118));
+        assert_eq!(maximum, Some(119));
+        assert_eq!(summarize_startup_timings(&[]), (None, None, None));
     }
 
     #[test]
