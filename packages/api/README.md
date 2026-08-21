@@ -257,6 +257,15 @@ infrastructure:
 Shared production state belongs in atomic Redis/database/broker adapters. The
 included memory stores are bounded and intended for development and tests.
 
+## Request lifecycle observers
+
+Register a `RequestLifecycleObserver` with `$app->observe()` to build profilers,
+traces and leak diagnostics around the complete request pipeline. Observers
+start in registration order and finish in reverse order, receive the handled
+failure when one occurred, and execute before the request scope is destroyed.
+An observer cleanup failure is logged and cannot prevent later observers or
+container cleanup from running.
+
 ## OpenAPI and generated clients
 
 ```php

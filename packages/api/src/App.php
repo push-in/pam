@@ -21,6 +21,7 @@ use Pam\Api\Router;
 use Pam\Api\RoutingResultType;
 use Pam\Api\RouteRegistrar;
 use Pam\Api\OpenApi\OpenApiGenerator;
+use Pam\Api\Lifecycle\RequestLifecycleObserver;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Http\Server as HttpServer;
@@ -53,6 +54,9 @@ final class App implements ApplicationInterface, TransportApplicationInterface
     private \Closure $errorHandler;
 
     private bool $frozen = false;
+
+    /** @var list<RequestLifecycleObserver> */
+    private array $observers = [];
 
     public function __construct(bool $discoverPackages = true, ?Container $container = null)
     {
@@ -219,6 +223,13 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         return $this;
     }
 
+    public function observe(RequestLifecycleObserver $observer): self
+    {
+        $this->assertMutable();
+        $this->observers[] = $observer;
+        return $this;
+    }
+
     /** @param array<string, mixed> $options */
     public function listen(int $port, string $host = '127.0.0.1', array $options = []): void
     {
@@ -243,10 +254,17 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         $this->container->beginScope();
         $this->container->scopedInstance(Request::class, $request);
         $this->container->scopedInstance(Response::class, $response);
+        $failure = null;
+        $startedObservers = [];
         try {
+            foreach ($this->observers as $observer) {
+                $observer->starting($request);
+                $startedObservers[] = $observer;
+            }
             return $this->pipeline?->handle($request, $response)
                 ?? throw new \LogicException('Pam API pipeline was not compiled.');
         } catch (\Throwable $error) {
+            $failure = $error;
             if ($error instanceof HttpException) {
                 return $response->json([
                     'type' => 'https://pam.dev/problems/' . $error->problemCode->value,
@@ -263,6 +281,17 @@ final class App implements ApplicationInterface, TransportApplicationInterface
             }
             return $result;
         } finally {
+            foreach (array_reverse($startedObservers) as $observer) {
+                try {
+                    $observer->finished($request, $response, $failure);
+                } catch (\Throwable $observerError) {
+                    \Pam\Observability\Telemetry::log('error', 'PAM request observer failed during cleanup', [
+                        'observer' => $observer::class,
+                        'exception' => $observerError::class,
+                        'message' => $observerError->getMessage(),
+                    ]);
+                }
+            }
             $this->container->endScope();
         }
     }
