@@ -64,6 +64,16 @@ gate is to feed this generated production profile into hosted suite 8 and bind
 the reviewable profile report into release evidence while retaining compatible
 mode as the default.
 
+That evidence gate now passes in the
+[clean hosted Composer-derived suite-8 run](https://github.com/push-in/pam/actions/runs/32520171084):
+the locked profile selected `iconv`, both 16-worker profiles recovered 10/10,
+and total/readiness/PHP-engine p95 improved by 42.47%/50.37%/83.96%. Every gate
+returned code `1`, and the downloaded 15-artifact bundle verified independently
+against clean commit `bdcab86`. The next process-manager target is a declarative
+profile reference that pins these manifest/lock hashes and fails reconciliation
+closed when dependencies drift, without silently changing the compatible
+default.
+
 ### Competitive research refresh — 2026-08-21 progressive delivery
 
 The official [Kubernetes Deployment contract](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)

@@ -269,6 +269,16 @@ improvements of 19.57%, 33.61% and 83.05%. All gates passed, the recursive
 manifest verified 15 artifacts including the exact profile decision, and no
 fixture process remained after the campaign.
 
+The [passing hosted Composer-derived run](https://github.com/push-in/pam/actions/runs/32520171084)
+on clean Linux commit `bdcab86` independently confirmed the complete path.
+The verified profile selected `iconv` from the exact manifest SHA-256, lock
+SHA-256 and Composer content hash. Compatible versus isolated p95 was 485/279
+ms total, 407/202 ms readiness and 293/47 ms PHP engine, improvements of
+42.47%, 50.37% and 83.96%. Detection p95 was 9/6 ms, effective backoff was
+18/14 ms, RSS growth remained below 1 MiB and both profiles recovered 10/10.
+All per-profile and aggregate gates returned code `1`; the downloaded bundle
+passed independent verification of all 15 artifacts with `dirty=false`.
+
 Linux workers now install `PR_SET_PDEATHSIG` before `exec` and verify that the
 master did not exit during the fork/exec window. An unexpected master
 `SIGKILL` therefore kills its workers at the kernel boundary instead of leaking
