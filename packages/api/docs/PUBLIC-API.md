@@ -802,12 +802,14 @@ final enum Pam\Api\Http\ProblemCode implements BackedEnum, UnitEnum: int
 - `RateLimited = 6`
 - `Timeout = 7`
 - `InternalError = 8`
+- `MethodNotAllowed = 9`
 
 ### Constants
 
 - `Conflict = 5`
 - `Forbidden = 3`
 - `InternalError = 8`
+- `MethodNotAllowed = 9`
 - `NotFound = 4`
 - `RateLimited = 6`
 - `Timeout = 7`

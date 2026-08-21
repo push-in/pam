@@ -32,6 +32,8 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - OpenAPI 3.1, compatibility checks and generated clients;
 - production primitives for auth, rate limiting, idempotency, caching,
   resilience, tenancy, events, jobs, health and observability.
+- consistent Problem Details for routing, operational and unexpected failures,
+  with protected reserved fields and a sequential method-not-allowed code.
 
 ### Changed
 

@@ -3307,6 +3307,7 @@
                 "Conflict": 5,
                 "Forbidden": 3,
                 "InternalError": 8,
+                "MethodNotAllowed": 9,
                 "NotFound": 4,
                 "RateLimited": 6,
                 "Timeout": 7,
@@ -3380,7 +3381,8 @@
                 "Conflict": 5,
                 "RateLimited": 6,
                 "Timeout": 7,
-                "InternalError": 8
+                "InternalError": 8,
+                "MethodNotAllowed": 9
             }
         },
         "Pam\\Api\\Http\\ResourceCollection": {

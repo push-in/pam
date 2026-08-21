@@ -72,7 +72,12 @@ final class App implements ApplicationInterface, TransportApplicationInterface
                 'file' => $error->getFile(),
                 'line' => $error->getLine(),
             ]);
-            return $response->json(['error' => 'Internal Server Error'], 500);
+            return self::problemResponse(
+                $response,
+                500,
+                \Pam\Api\Http\ProblemCode::InternalError,
+                'Internal Server Error',
+            );
         };
 
         if ($discoverPackages) {
@@ -267,13 +272,13 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         } catch (\Throwable $error) {
             $failure = $error;
             if ($error instanceof HttpException) {
-                return $this->finalizeResponse($request, $response->json([
-                    'type' => 'https://pam.dev/problems/' . $error->problemCode->value,
-                    'title' => $error->getMessage(),
-                    'status' => $error->status,
-                    'code' => $error->problemCode->value,
-                    ...$error->details,
-                ], $error->status));
+                return $this->finalizeResponse($request, self::problemResponse(
+                    $response,
+                    $error->status,
+                    $error->problemCode,
+                    $error->getMessage(),
+                    $error->details,
+                ));
             }
             $handler = $this->errorHandler;
             $result = $handler($error, $response);
@@ -302,11 +307,30 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         return $request->method === 'HEAD' ? $response->send(null) : $response;
     }
 
+    /** @param array<string, mixed> $details */
+    private static function problemResponse(
+        Response $response,
+        int $status,
+        \Pam\Api\Http\ProblemCode $code,
+        string $title,
+        array $details = [],
+    ): Response {
+        return $response
+            ->json([
+                ...$details,
+                'type' => 'https://pam.dev/problems/' . $code->value,
+                'title' => $title,
+                'status' => $status,
+                'code' => $code->value,
+            ], $status)
+            ->header('content-type', 'application/problem+json; charset=utf-8');
+    }
+
     private function dispatchRoute(Request $request, Response $response): Response
     {
         $result = $this->router->match($request->method, $request->path);
         if ($result->type === RoutingResultType::NotFound) {
-            return $response->json(['error' => 'Route not found'], 404);
+            throw new HttpException(404, \Pam\Api\Http\ProblemCode::NotFound, 'Route not found.');
         }
         if ($result->type === RoutingResultType::MethodNotAllowed) {
             if ($request->method === 'OPTIONS') {
@@ -314,9 +338,12 @@ final class App implements ApplicationInterface, TransportApplicationInterface
                     ->status(204)
                     ->header('allow', implode(', ', $result->allowedMethods));
             }
-            return $response
-                ->header('allow', implode(', ', $result->allowedMethods))
-                ->json(['error' => 'Method Not Allowed'], 405);
+            $response->header('allow', implode(', ', $result->allowedMethods));
+            throw new HttpException(
+                405,
+                \Pam\Api\Http\ProblemCode::MethodNotAllowed,
+                'Method Not Allowed',
+            );
         }
         $route = $result->route ?? throw new \LogicException('A matched route must contain a handler.');
         $this->container->scopedInstance(\Pam\Api\Route::class, $route);

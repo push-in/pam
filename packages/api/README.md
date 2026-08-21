@@ -187,6 +187,20 @@ enum UserType: int
 Return a `JsonResource` from a handler to receive a consistent `data` envelope.
 Validation failures use Problem Details with stable sequential integer codes.
 
+### Problem Details
+
+Routing failures, `HttpException` instances and unexpected exceptions use one
+safe Problem Details envelope with `application/problem+json`:
+
+```json
+{"type":"https://pam.dev/problems/5","title":"Version conflict.","status":409,"code":5}
+```
+
+Exception details may add domain fields but cannot replace `type`, `title`,
+`status` or `code`. Unexpected exception messages are logged and never returned
+to the client. `405` responses retain their deterministic `Allow` header and
+use the sequential `MethodNotAllowed=9` problem code.
+
 ## Quality gate
 
 ```bash
