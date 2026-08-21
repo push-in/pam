@@ -435,6 +435,8 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
+memory_warning_bytes = 1
+task_warning_count = 1
 "#,
     )
     .unwrap();
@@ -475,6 +477,56 @@ autostart = true
     let converged: serde_json::Value = serde_json::from_slice(&converged.stdout).unwrap();
     assert_eq!(applied["results"][0]["actionCode"], 1);
     assert_eq!(converged["results"][0]["actionCode"], 2);
+    let monitored = run_managed_pam(&root, &state, port, &["monit", "--json"]);
+    assert!(monitored.status.success());
+    let monitored: serde_json::Value = serde_json::from_slice(&monitored.stdout).unwrap();
+    assert_eq!(monitored["applications"][0]["resourceAlertStateCode"], 4);
+    assert!(
+        monitored["applications"][0]["resources"]["rssBytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(
+        monitored["applications"][0]["resources"]["tasks"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+
+    fs::write(
+        &config,
+        r#"schema_version = 1
+
+[applications.ecosystem-smoke]
+kind_code = 1
+script = "tests/fixtures/server.php"
+workers = 1
+cwd = "."
+autostart = true
+memory_warning_bytes = 1099511627776
+task_warning_count = 1000000
+"#,
+    )
+    .unwrap();
+    let updated = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["apply", config.to_str().unwrap(), "--json"],
+    );
+    assert!(updated.status.success());
+    let updated: serde_json::Value = serde_json::from_slice(&updated.stdout).unwrap();
+    assert_eq!(updated["results"][0]["actionCode"], 6);
+    let described = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["describe", "ecosystem-smoke", "--json"],
+    );
+    let described: serde_json::Value = serde_json::from_slice(&described.stdout).unwrap();
+    assert_eq!(described["resourceAlertStateCode"], 1);
+    assert_eq!(described["resourcePolicy"]["taskWarningCount"], 1000000);
 
     let stopped = run_managed_pam(&root, &state, port, &["stop", "ecosystem-smoke", "--json"]);
     assert!(stopped.status.success());

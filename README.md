@@ -813,6 +813,8 @@ pam startup --print|--install                       configure the systemd user s
 pam monit [--json]                                  inspect process health and capacity
 pam config:check [pam.toml] [--json]                validate declarative multi-service config
 pam apply [pam.toml] [--json]                       reconcile all declared applications
+pam up ... [--memory-warning-bytes N] [--task-warning-count N]
+           [--memory-max-bytes N] [--task-max-count N]  enforce cgroup-v2 limits
 pam deploy api /srv/api/releases/2026-08-21         activate a readiness-gated release
 pam deploy:history api [--json]                     inspect bounded release history
 pam rollback api [--steps N]                        restore a previous healthy release
