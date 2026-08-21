@@ -836,6 +836,7 @@ pam dashboard [pam-dashboard.html]                  create a private static heal
 pam dashboard:start --token-file TOKEN              start authenticated live local view
 pam dashboard:status|dashboard:stop                 inspect or stop the live view
 pam config:check [pam.toml] [--json]                validate declarative multi-service config
+pam plan [pam.toml] [--json]                        preview reconciliation without mutation
 pam apply [pam.toml] [--json]                       reconcile all declared applications
 pam up ... [--memory-warning-bytes N] [--task-warning-count N]
            [--memory-max-bytes N] [--task-max-count N]  enforce cgroup-v2 limits

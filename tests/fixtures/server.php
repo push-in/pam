@@ -121,7 +121,7 @@ $app->get('/session', static function (Request $request, Response $response): Re
     return $response->json(['visits' => $_SESSION['visits']]);
 });
 $app->get('/block', static function (Request $request, Response $response): Response {
-    usleep(2_000_000);
+    usleep(10_000_000);
     return $response->send('late');
 });
 $app->post('/async-context', static function (Request $request, Response $response): Response {

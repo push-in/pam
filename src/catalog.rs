@@ -121,9 +121,11 @@ impl CommandSpec {
     fn supports_json(self) -> bool {
         matches!(
             self.name,
-            "catalog"
+            "apply"
+                | "catalog"
                 | "clean"
                 | "commands"
+                | "config:check"
                 | "distribution:verify"
                 | "doctor"
                 | "extensions"
@@ -135,6 +137,7 @@ impl CommandSpec {
                 | "dashboard:status"
                 | "dashboard:stop"
                 | "packages"
+                | "plan"
                 | "top"
         )
     }
@@ -211,6 +214,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Observe",
         ),
         command("apply", "Reconcile applications from pam.toml", "Develop"),
+        command(
+            "plan",
+            "Preview pam.toml reconciliation without mutation",
+            "Develop",
+        ),
         command(
             "config:check",
             "Validate a pam.toml ecosystem contract",

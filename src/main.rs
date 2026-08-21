@@ -657,6 +657,7 @@ fn run() -> Result<u8, CliError> {
             | "dashboard:status"
             | "dashboard:stop"
             | "apply"
+            | "plan"
             | "config:check"
             | "deploy"
             | "deploy:history"
