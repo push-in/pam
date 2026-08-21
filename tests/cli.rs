@@ -258,6 +258,14 @@ fn records_reproducible_soak_metadata() {
 #[test]
 fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     let state = temporary_path("process-manager-state");
+    fs::create_dir_all(&state).unwrap();
+    let environment_file = state.join("managed.env");
+    fs::write(&environment_file, "PAM_TEST_MANAGED_ENV='private-value'\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&environment_file, fs::Permissions::from_mode(0o644)).unwrap();
+    }
     let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = probe.local_addr().unwrap().port();
     drop(probe);
@@ -267,6 +275,27 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script = fixture("server.php");
     let script = script.to_str().unwrap();
+
+    let weak_environment = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "up",
+            script,
+            "--name",
+            "managed-smoke",
+            "--env-file",
+            environment_file.to_str().unwrap(),
+        ],
+    );
+    assert!(!weak_environment.status.success());
+    assert!(String::from_utf8_lossy(&weak_environment.stderr).contains("mode 0600"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&environment_file, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let started = run_managed_pam(
         &root,
@@ -279,6 +308,8 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "managed-smoke",
             "--workers",
             "1",
+            "--env-file",
+            environment_file.to_str().unwrap(),
             "--json",
         ],
     );
@@ -309,6 +340,15 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         .expect("pamd should recover an unexpectedly killed master");
     assert_eq!(recovered["desiredStateCode"], 1);
     assert_eq!(recovered["recovery"]["stateCode"], 3);
+    assert_eq!(recovered["environmentFileConfigured"], true);
+    assert!(!recovered.to_string().contains("private-value"));
+    assert!(
+        !recovered
+            .to_string()
+            .contains(environment_file.to_str().unwrap())
+    );
+    let environment_response = manager_dashboard_request(port, "/managed-env", None);
+    assert!(environment_response.contains("private-value"));
     fs::write(
         state.join("logs/managed-smoke.out.log.1"),
         "needle-old-output\n",

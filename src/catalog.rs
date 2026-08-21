@@ -323,7 +323,7 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("start", "Run a supervised server cluster", "Runtime"),
         command(
             "up",
-            "Start and register an application in the background",
+            "Start a managed application with optional private environment",
             "Runtime",
         ),
         command("ps", "List managed PAM applications", "Runtime"),

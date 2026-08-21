@@ -22,6 +22,9 @@ $app->get('/ping', static fn (Request $request, Response $response) => $response
     'message' => 'pong',
     'query' => $request->getQuery('query'),
 ]));
+$app->get('/managed-env', static fn (Request $request, Response $response) => $response->json([
+    'value' => getenv('PAM_TEST_MANAGED_ENV') ?: null,
+]));
 $app->get('/disconnect-cancel', static function (Request $request, Response $response): Response {
     \Pam\Async\delay(60.0);
     return $response->send('should-have-been-cancelled');

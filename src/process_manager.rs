@@ -4,7 +4,7 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
@@ -37,6 +37,8 @@ const DEFAULT_RESTART_DELAY_MILLIS: u64 = 250;
 const DEFAULT_RESTART_BACKOFF_MAX_MILLIS: u64 = 15_000;
 const DEFAULT_MAX_UNSTABLE_RESTARTS: u32 = 10;
 const DEFAULT_MIN_UPTIME_MILLIS: u64 = 30_000;
+const MAX_ENVIRONMENT_FILE_BYTES: u64 = 64 * 1024;
+const MAX_ENVIRONMENT_VARIABLES: usize = 256;
 const MAX_DASHBOARD_REQUEST_BYTES: usize = 16 * 1024;
 static LIVE_DASHBOARD_RUNNING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
@@ -167,6 +169,8 @@ struct ApplicationRecord {
     memory_max_bytes: Option<u64>,
     #[serde(default)]
     task_max_count: Option<u64>,
+    #[serde(default)]
+    environment_file: Option<PathBuf>,
     #[serde(default = "default_stopped_state")]
     desired_state_code: u8,
     #[serde(default)]
@@ -295,6 +299,8 @@ struct EcosystemApplication {
     arguments: Vec<String>,
     #[serde(default = "default_true")]
     autostart: bool,
+    #[serde(default)]
+    env_file: Option<PathBuf>,
     #[serde(default = "default_true")]
     auto_restart: bool,
     #[serde(default = "default_restart_delay_millis")]
@@ -841,6 +847,11 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
     let mut results = Vec::new();
     for (name, application) in config.applications {
         validate_ecosystem_application(&root, &name, &application)?;
+        let environment_file = application
+            .env_file
+            .as_deref()
+            .map(|path| resolve_environment_file(&root, path))
+            .transpose()?;
         let action = if !application.autostart {
             let record_path = paths.application(&name);
             if record_path.exists() {
@@ -858,6 +869,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     .current_dir(cwd)
                     .args(["up", "--name", &name, "--workers"]);
                 command.arg(application.workers.to_string());
+                if let Some(path) = environment_file.as_deref() {
+                    command.arg("--env-file").arg(path);
+                }
                 if !application.auto_restart {
                     command.arg("--no-autorestart");
                 }
@@ -899,6 +913,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 let mut record = read_record(&record_path)?;
                 let limit_updated = record.memory_max_bytes != application.memory_max_bytes
                     || record.task_max_count != application.task_max_count;
+                let environment_updated = record.environment_file != environment_file;
                 let policy_updated = record.memory_warning_bytes
                     != application.memory_warning_bytes
                     || record.task_warning_count != application.task_warning_count
@@ -907,7 +922,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || record.restart_backoff_max_millis != application.restart_backoff_max_millis
                     || record.max_unstable_restarts != application.max_unstable_restarts
                     || record.min_uptime_millis != application.min_uptime_millis;
-                if policy_updated || limit_updated {
+                if policy_updated || limit_updated || environment_updated {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
                     record.memory_max_bytes = application.memory_max_bytes;
@@ -917,6 +932,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     record.restart_backoff_max_millis = application.restart_backoff_max_millis;
                     record.max_unstable_restarts = application.max_unstable_restarts;
                     record.min_uptime_millis = application.min_uptime_millis;
+                    record.environment_file = environment_file;
                     if !record.auto_restart {
                         record.recovery_state_code = RecoveryState::Disabled as u8;
                         record.next_restart_at_millis = None;
@@ -924,9 +940,15 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
-                if limit_updated && state.as_ref().is_some_and(master_is_running) {
+                if (limit_updated || environment_updated)
+                    && state.as_ref().is_some_and(master_is_running)
+                {
                     restart_record(executable, &record, false, false)?;
-                    ReconcileAction::ResourceLimitsUpdated
+                    if limit_updated {
+                        ReconcileAction::ResourceLimitsUpdated
+                    } else {
+                        ReconcileAction::Restarted
+                    }
                 } else if !state.as_ref().is_some_and(master_is_running) {
                     let mut command = Command::new(executable);
                     command.args(["restart", &name]);
@@ -1070,6 +1092,9 @@ fn validate_ecosystem_application(
         application.max_unstable_restarts,
         application.min_uptime_millis,
     )?;
+    if let Some(path) = application.env_file.as_deref() {
+        resolve_environment_file(root, path)?;
+    }
     if application.kind_code == ApplicationKind::LaravelOctane as u8 && application.script.is_some()
     {
         return Err(format!("Laravel application {name:?} cannot set script"));
@@ -1102,6 +1127,111 @@ fn scoped_cwd(root: &Path, cwd: &Path) -> Result<PathBuf, String> {
         return Err("service cwd must stay beneath the pam.toml directory".to_owned());
     }
     Ok(cwd)
+}
+
+fn resolve_environment_file(root: &Path, path: &Path) -> Result<PathBuf, String> {
+    let unresolved = root.join(path);
+    if fs::symlink_metadata(&unresolved).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(format!(
+            "refusing symlink environment file {}",
+            unresolved.display()
+        ));
+    }
+    let path = fs::canonicalize(&unresolved).map_err(|error| {
+        format!(
+            "cannot resolve environment file {}: {error}",
+            path.display()
+        )
+    })?;
+    load_environment_file(&path)?;
+    Ok(path)
+}
+
+fn load_environment_file(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "cannot inspect environment file {}: {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_ENVIRONMENT_FILE_BYTES {
+        return Err(format!(
+            "environment file must be a regular file no larger than {MAX_ENVIRONMENT_FILE_BYTES} bytes"
+        ));
+    }
+    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+        return Err(
+            "environment file must be owned by the current user and mode 0600 or stricter"
+                .to_owned(),
+        );
+    }
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read environment file {}: {error}", path.display()))?;
+    let mut environment = BTreeMap::new();
+    for (index, line) in contents.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("environment file line {} requires KEY=VALUE", index + 1))?;
+        let key = key.trim();
+        if key.is_empty()
+            || !key
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(format!(
+                "environment file line {} has an invalid key",
+                index + 1
+            ));
+        }
+        if matches!(key, "PAM_MANAGER_STATE_DIR" | "PAM_MANAGER_RUNTIME_DIR") {
+            return Err(format!(
+                "environment file line {} overrides reserved manager state",
+                index + 1
+            ));
+        }
+        let value = value.trim();
+        let value = match (value.as_bytes().first(), value.as_bytes().last()) {
+            (Some(b'\''), Some(b'\'')) | (Some(b'\"'), Some(b'\"')) if value.len() >= 2 => {
+                &value[1..value.len() - 1]
+            }
+            (Some(b'\'' | b'\"'), _) | (_, Some(b'\'' | b'\"')) => {
+                return Err(format!(
+                    "environment file line {} has unmatched quotes",
+                    index + 1
+                ));
+            }
+            _ => value,
+        };
+        if value.contains(['\0', '\n', '\r']) {
+            return Err(format!(
+                "environment file line {} has control characters",
+                index + 1
+            ));
+        }
+        environment.insert(key.to_owned(), value.to_owned());
+        if environment.len() > MAX_ENVIRONMENT_VARIABLES {
+            return Err(format!(
+                "environment file cannot exceed {MAX_ENVIRONMENT_VARIABLES} variables"
+            ));
+        }
+    }
+    Ok(environment)
+}
+
+fn apply_environment_file(command: &mut Command, path: Option<&Path>) -> Result<(), String> {
+    if let Some(path) = path {
+        command.envs(load_environment_file(path)?);
+    }
+    Ok(())
 }
 
 fn run_reconcile_command(mut command: Command, name: &str) -> Result<(), String> {
@@ -2663,6 +2793,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut task_warning_count = None;
     let mut memory_max_bytes = None;
     let mut task_max_count = None;
+    let mut environment_file = None;
     let mut auto_restart = true;
     let mut restart_delay_millis = DEFAULT_RESTART_DELAY_MILLIS;
     let mut restart_backoff_max_millis = DEFAULT_RESTART_BACKOFF_MAX_MILLIS;
@@ -2677,6 +2808,12 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             "--attach" => attach = true,
             "--json" => json = true,
             "--no-autorestart" => auto_restart = false,
+            "--env-file" => {
+                environment_file = Some(PathBuf::from(required_utf8(
+                    arguments.next(),
+                    "--env-file",
+                )?))
+            }
             "--restart-delay-ms" => {
                 restart_delay_millis =
                     required_positive_u64(arguments.next(), "--restart-delay-ms")?
@@ -2751,6 +2888,10 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
 
     let cwd = fs::canonicalize(std::env::current_dir().map_err(|error| error.to_string())?)
         .map_err(|error| format!("cannot resolve application directory: {error}"))?;
+    let environment_file = environment_file
+        .as_deref()
+        .map(|path| resolve_environment_file(&cwd, path))
+        .transpose()?;
     let laravel = cwd.join("artisan").is_file() && target.is_none();
     let target = target.unwrap_or_else(|| {
         if laravel {
@@ -2807,6 +2948,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         memory_max_bytes,
         task_max_count,
     )?;
+    apply_environment_file(&mut command, environment_file.as_deref())?;
     if attach {
         command
             .stdin(Stdio::inherit())
@@ -2888,6 +3030,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         task_warning_count,
         memory_max_bytes,
         task_max_count,
+        environment_file,
         desired_state_code: ApplicationState::Online as u8,
         auto_restart,
         restart_delay_millis,
@@ -3067,6 +3210,7 @@ fn restart_record(
         record.memory_max_bytes,
         record.task_max_count,
     )?;
+    apply_environment_file(&mut command, record.environment_file.as_deref())?;
     command.stdin(Stdio::null()).stdout(stdout).stderr(stderr);
     // SAFETY: see the detached launch in `up`.
     unsafe {
@@ -3410,6 +3554,7 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
+        "environmentFileConfigured": record.environment_file.is_some(),
         "resources": resources,
         "resourcePolicy": {
             "memoryWarningBytes": record.memory_warning_bytes,
@@ -3942,6 +4087,7 @@ mod tests {
             task_warning_count: None,
             memory_max_bytes: None,
             task_max_count: None,
+            environment_file: None,
             desired_state_code: ApplicationState::Online as u8,
             auto_restart: true,
             restart_delay_millis: 100,
@@ -3962,6 +4108,35 @@ mod tests {
         schedule_recovery(&mut record, 4_000);
         assert_eq!(record.recovery_state_code, RecoveryState::CircuitOpen as u8);
         assert_eq!(record.next_restart_at_millis, None);
+    }
+
+    #[test]
+    fn environment_files_are_literal_private_and_cannot_redirect_manager_state() {
+        let directory = std::env::temp_dir().join(format!(
+            "pam-env-contract-{}-{}",
+            std::process::id(),
+            epoch_millis()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("production.env");
+        fs::write(
+            &path,
+            "# comment\nexport APP_MODE=production\nLITERAL='$HOME'\nEMPTY=\n",
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let environment = load_environment_file(&path).unwrap();
+        assert_eq!(environment["APP_MODE"], "production");
+        assert_eq!(environment["LITERAL"], "$HOME");
+        assert_eq!(environment["EMPTY"], "");
+
+        fs::write(&path, "PAM_MANAGER_STATE_DIR=/tmp/redirected\n").unwrap();
+        assert!(
+            load_environment_file(&path)
+                .unwrap_err()
+                .contains("reserved")
+        );
+        fs::remove_dir_all(directory).unwrap();
     }
     #[test]
     fn rotated_log_names_are_stable() {
@@ -4049,11 +4224,13 @@ memory_warning_bytes=1024
 memory_max_bytes=2048
 task_warning_count=8
 task_max_count=16
+env_file=".env.production"
 "#;
         let limited = toml::from_str::<EcosystemConfig>(limited).unwrap();
         let api = &limited.applications["api"];
         assert_eq!(api.memory_max_bytes, Some(2048));
         assert_eq!(api.task_max_count, Some(16));
+        assert_eq!(api.env_file, Some(PathBuf::from(".env.production")));
         assert!(validate_resource_policy(Some(3), None, Some(2), None, "api").is_err());
     }
 

@@ -8,6 +8,7 @@ readiness gate, crash recovery, worker recycling, and generational reload.
 pam up --name billing --workers 8
 pam up --name critical --restart-delay-ms 250 --restart-backoff-max-ms 15000 \
   --max-unstable-restarts 10 --min-uptime-ms 30000
+pam up --name production --env-file .env.production
 pam ps
 pam status billing
 pam describe billing
@@ -52,6 +53,15 @@ uptime. After `--max-unstable-restarts`, PAM opens a circuit and requires an
 explicit `pam restart NAME` to retry. `--no-autorestart` disables this policy.
 `status`, `describe`, and `ps --json` expose desired state, recovery state,
 attempt counters, total automatic restarts, and the next retry deadline.
+
+`--env-file FILE` supplies per-application environment without copying secret
+values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
+file again on every launch and restart, so an explicit `pam restart NAME`
+activates rotated values. The format is bounded `KEY=VALUE` text with optional
+single or double quotes and an optional `export ` prefix; interpolation and
+shell execution never occur. The file must be a non-symlink regular UTF-8 file
+owned by the current user, mode `0600` or stricter, at most 64 KiB and 256
+variables. Manager state-directory overrides are reserved and rejected.
 
 Log files rotate before launch or restart when they reach 10 MiB and retain
 five generations by default. `pam up --log-max-bytes N --log-retain N` stores
@@ -132,6 +142,7 @@ memory_warning_bytes = 536870912
 task_warning_count = 64
 memory_max_bytes = 805306368
 task_max_count = 96
+env_file = ".env.production"
 auto_restart = true
 restart_delay_millis = 250
 restart_backoff_max_millis = 15000
@@ -149,7 +160,9 @@ Kind `1` is raw PAM Runtime; kind `2` is Laravel Octane and requires `artisan`
 in its working directory. Working directories must remain beneath the
 configuration directory, worker counts are bounded to 1–256, unknown fields
 fail validation, and configuration files are limited to regular non-symlink
-files of at most 1 MiB. Use `pam config:check --json` in CI and `pam apply
+files of at most 1 MiB. Relative environment-file paths resolve from the
+`pam.toml` directory and changes restart a running application so the new
+environment is effective. Use `pam config:check --json` in CI and `pam apply
 --json` for a stable action-coded reconciliation report.
 
 `memory_warning_bytes` and `task_warning_count` are optional positive alert
