@@ -84,6 +84,11 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn("PAM_RECOVERY_WORKERS=\"${workers}\"", matrix)
         self.assertIn("worker-matrix-report.php", matrix)
         self.assertIn('evidence-manifest.php" "${results}" 7 --verify', matrix)
+        self.assertIn("matrix_status=0", matrix)
+        self.assertIn("report_status=$?", matrix)
+        self.assertIn("(( matrix_status == 0 && report_status == 0 ))", matrix)
+        self.assertIn("report_status=$?", harness)
+        self.assertIn('exit "${report_status}"', harness)
 
 
 if __name__ == "__main__":
