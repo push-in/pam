@@ -798,6 +798,18 @@ pam exec index.php [arguments...]                  explicitly run a PHP script
 pam composer [arguments...]                        run verified Composer inside Pam
 pam dev [index.php] [arguments...]                 recursive hot reload
 pam start [index.php] --workers N                  supervised production cluster
+pam up [index.php] --name api --workers N          start and detach a managed application
+pam ps                                              list managed applications
+pam reload api                                      zero-downtime generational reload
+pam logs api --errors --lines 200                   inspect retained manager logs
+pam logs api --both --follow                        follow stdout and stderr across rotation
+pam daemon start|status|stop                        control the private per-user supervisor
+pam scale api 8                                     persist and apply a new worker count
+pam save && pam resurrect                           save and restore the desired process list
+pam startup --print|--install                       configure the systemd user service
+pam monit [--json]                                  inspect process health and capacity
+pam config:check [pam.toml] [--json]                validate declarative multi-service config
+pam apply [pam.toml] [--json]                       reconcile all declared applications
 pam test [directory] [--pest|--phpunit]            test inside the Embed SAPI
 pam routes [index.php]                              inspect registered routes
 pam inspect [index.php]                             inspect PHP, INI, ABI, and extensions

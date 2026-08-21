@@ -26,6 +26,7 @@ mod octane;
 mod otlp;
 mod php;
 mod plugin_registry;
+mod process_manager;
 mod project;
 mod prometheus;
 mod protocol;
@@ -74,7 +75,7 @@ fn json_errors_requested() -> bool {
 }
 
 fn run() -> Result<u8, CliError> {
-    let mut raw_args = env::args_os();
+    let mut raw_args = env::args_os().peekable();
     let executable = raw_args.next().unwrap_or_else(|| OsString::from("pam"));
     let Some(mut script_arg) = raw_args.next() else {
         if terminal::Terminal::stdout().interactive() {
@@ -625,6 +626,35 @@ fn run() -> Result<u8, CliError> {
 
     if script_arg == "registry" {
         return plugin_registry::run(raw_args.collect()).map_err(CliError::Commands);
+    }
+
+    let managed_logs = script_arg == "logs"
+        && raw_args
+            .peek()
+            .is_some_and(|argument| !argument.to_string_lossy().starts_with('-'));
+    if matches!(
+        script_arg.to_string_lossy().as_ref(),
+        "up" | "ps"
+            | "status"
+            | "describe"
+            | "reload"
+            | "restart"
+            | "scale"
+            | "stop"
+            | "delete"
+            | "save"
+            | "resurrect"
+            | "startup"
+            | "monit"
+            | "apply"
+            | "config:check"
+            | "daemon"
+            | "__pamd"
+            | "__manager_local"
+    ) || managed_logs
+    {
+        let command = script_arg.to_string_lossy();
+        return process_manager::run(&executable, &command, raw_args).map_err(CliError::Commands);
     }
 
     if script_arg == "timeline" {

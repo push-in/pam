@@ -15,6 +15,14 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam dev` — Start the contextual development session.
 - `pam run` — Build and launch the active application.
 - `pam logs` — Stream logs from the active application.
+- `pam daemon` — Manage the per-user PAM supervisor.
+- `pam scale` — Change a managed application's worker count.
+- `pam save` — Save the desired managed process list.
+- `pam resurrect` — Restore the saved managed process list.
+- `pam startup` — Generate or install the Linux user service.
+- `pam monit` — Show managed process health and capacity.
+- `pam apply` — Reconcile applications from pam.toml.
+- `pam config:check` — Validate a pam.toml ecosystem contract.
 - `pam devices` — List connected development targets.
 - `pam devtools` — Toggle contextual development tools.
 - `pam console` — Open the application console.
@@ -63,6 +71,14 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Runtime
 
 - `pam start` — Run a supervised server cluster.
+- `pam up` — Start and register an application in the background.
+- `pam ps` — List managed PAM applications.
+- `pam status` — Inspect managed application health.
+- `pam describe` — Describe a managed application.
+- `pam reload` — Reload a managed application without downtime.
+- `pam restart` — Restart a managed application.
+- `pam stop` — Gracefully stop a managed application.
+- `pam delete` — Remove a stopped application from PAM.
 - `pam octane:start` — Start Laravel Octane on the PAM runtime.
 - `pam octane:status` — Inspect the PAM Octane master.
 - `pam octane:reload` — Reload PAM Octane without downtime.

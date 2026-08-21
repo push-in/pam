@@ -26,6 +26,30 @@ fn run_pam_in(directory: &std::path::Path, arguments: &[&str]) -> Output {
         .expect("pam should start")
 }
 
+fn run_managed_pam(
+    directory: &std::path::Path,
+    state: &std::path::Path,
+    port: u16,
+    arguments: &[&str],
+) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pam"))
+        .current_dir(directory)
+        .env("PAM_MANAGER_STATE_DIR", state)
+        .env("PAM_TEST_PORT", port.to_string())
+        .args(arguments)
+        .output()
+        .expect("managed PAM command should start")
+}
+
+fn run_manager_daemon(state: &std::path::Path, runtime: &std::path::Path, action: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pam"))
+        .env("PAM_MANAGER_STATE_DIR", state)
+        .env("PAM_MANAGER_RUNTIME_DIR", runtime)
+        .args(["daemon", action])
+        .output()
+        .expect("pamd command should start")
+}
+
 fn temporary_path(name: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -198,6 +222,231 @@ fn records_reproducible_soak_metadata() {
         33_554_432
     );
     fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn manages_a_detached_runtime_through_its_complete_lifecycle() {
+    let state = temporary_path("process-manager-state");
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let script = fixture("server.php");
+    let script = script.to_str().unwrap();
+
+    let started = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "up",
+            script,
+            "--name",
+            "managed-smoke",
+            "--workers",
+            "1",
+            "--json",
+        ],
+    );
+    let listed = run_managed_pam(&root, &state, port, &["ps", "--json"]);
+    let scaled = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["scale", "managed-smoke", "2", "--json"],
+    );
+    let reloaded = run_managed_pam(&root, &state, port, &["reload", "managed-smoke", "--json"]);
+    let restarted = run_managed_pam(&root, &state, port, &["restart", "managed-smoke", "--json"]);
+    let saved = run_managed_pam(&root, &state, port, &["save", "--json"]);
+    let stopped = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
+    let resurrected = run_managed_pam(&root, &state, port, &["resurrect", "--json"]);
+    let stopped_again = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
+    let deleted = run_managed_pam(&root, &state, port, &["delete", "managed-smoke", "--json"]);
+
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    assert!(
+        listed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&listed.stderr)
+    );
+    assert!(
+        scaled.status.success(),
+        "{}",
+        String::from_utf8_lossy(&scaled.stderr)
+    );
+    assert!(
+        reloaded.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reloaded.stderr)
+    );
+    assert!(
+        restarted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&restarted.stderr)
+    );
+    assert!(
+        saved.status.success(),
+        "{}",
+        String::from_utf8_lossy(&saved.stderr)
+    );
+    assert!(
+        stopped.status.success(),
+        "{}",
+        String::from_utf8_lossy(&stopped.stderr)
+    );
+    assert!(
+        resurrected.status.success(),
+        "{}",
+        String::from_utf8_lossy(&resurrected.stderr)
+    );
+    assert!(stopped_again.status.success());
+    assert!(
+        deleted.status.success(),
+        "{}",
+        String::from_utf8_lossy(&deleted.stderr)
+    );
+    let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    let scaled: serde_json::Value = serde_json::from_slice(&scaled.stdout).unwrap();
+    let restarted: serde_json::Value = serde_json::from_slice(&restarted.stdout).unwrap();
+    let saved: serde_json::Value = serde_json::from_slice(&saved.stdout).unwrap();
+    let resurrected: serde_json::Value = serde_json::from_slice(&resurrected.stdout).unwrap();
+    assert_eq!(started["kindCode"], 1);
+    assert_eq!(started["stateCode"], 1);
+    assert_eq!(listed["applications"][0]["name"], "managed-smoke");
+    assert_eq!(scaled["workers"], 2);
+    assert_eq!(saved["applications"][0]["desiredStateCode"], 1);
+    assert_eq!(resurrected["resurrected"][0], "managed-smoke");
+    assert_ne!(started["pid"], restarted["pid"]);
+    assert!(!state.join("applications/managed-smoke.json").exists());
+    let daemon_stopped = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
+    assert!(daemon_stopped.status.success());
+    fs::remove_dir_all(state).unwrap();
+}
+
+#[test]
+fn manages_a_private_per_user_daemon() {
+    let root = temporary_path("manager-daemon");
+    let state = root.join("state");
+    let runtime = root.join("runtime");
+    let started = run_manager_daemon(&state, &runtime, "start");
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let status = run_manager_daemon(&state, &runtime, "status");
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("pamd is online"));
+    #[cfg(unix)]
+    {
+        use std::net::Shutdown;
+        use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixStream;
+        assert_eq!(
+            fs::metadata(&runtime).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(runtime.join("pamd.sock"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+        let mut hostile = UnixStream::connect(runtime.join("pamd.sock")).unwrap();
+        hostile.write_all(b"not-json").unwrap();
+        hostile.shutdown(Shutdown::Write).unwrap();
+        let mut response = String::new();
+        hostile.read_to_string(&mut response).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["ok"], false);
+        assert!(
+            run_manager_daemon(&state, &runtime, "status")
+                .status
+                .success()
+        );
+    }
+    let stopped = run_manager_daemon(&state, &runtime, "stop");
+    assert!(stopped.status.success());
+    assert!(!runtime.join("pamd.sock").exists());
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn validates_and_reconciles_a_multi_application_pam_toml() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let state = temporary_path("ecosystem-state");
+    let config = root.join(format!("pam-test-{}.toml", std::process::id()));
+    fs::write(
+        &config,
+        r#"schema_version = 1
+
+[applications.ecosystem-smoke]
+kind_code = 1
+script = "tests/fixtures/server.php"
+workers = 1
+cwd = "."
+autostart = true
+"#,
+    )
+    .unwrap();
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+
+    let checked = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["config:check", config.to_str().unwrap(), "--json"],
+    );
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    let applied = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["apply", config.to_str().unwrap(), "--json"],
+    );
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    let converged = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["apply", config.to_str().unwrap(), "--json"],
+    );
+    assert!(converged.status.success());
+    let applied: serde_json::Value = serde_json::from_slice(&applied.stdout).unwrap();
+    let converged: serde_json::Value = serde_json::from_slice(&converged.stdout).unwrap();
+    assert_eq!(applied["results"][0]["actionCode"], 1);
+    assert_eq!(converged["results"][0]["actionCode"], 2);
+
+    let stopped = run_managed_pam(&root, &state, port, &["stop", "ecosystem-smoke", "--json"]);
+    assert!(stopped.status.success());
+    let deleted = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["delete", "ecosystem-smoke", "--json"],
+    );
+    assert!(deleted.status.success());
+    let daemon_stopped = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
+    assert!(daemon_stopped.status.success());
+    fs::remove_file(config).unwrap();
+    fs::remove_dir_all(state).unwrap();
 }
 
 #[test]
