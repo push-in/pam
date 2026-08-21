@@ -59,6 +59,7 @@ and route parameters by name.
 The `feat/api-2-foundation` development line implements:
 
 - class-and-method controller handlers;
+- boot-time typed configuration with deterministic secret redaction;
 - constructor and method dependency injection;
 - transient, singleton and request-scoped container lifetimes;
 - named routes, built-in/custom constraints and per-route middleware;

@@ -131,6 +131,25 @@ $app->container()->scoped(CurrentUser::class);
 `scoped` values are created once per request and discarded even when the
 handler throws. This boundary is essential for PAM's persistent workers.
 
+## Typed configuration
+
+Define configuration once and fail during boot when required environment is
+missing or malformed:
+
+```php
+$config = Configuration::fromEnvironment([
+    new ConfigDefinition('app.port', 'PAM_PORT', ConfigType::Integer),
+    new ConfigDefinition('auth.secret', 'AUTH_SECRET', sensitive: true),
+]);
+
+$port = $config->integer('app.port');
+```
+
+Supported types are represented by the sequential integer-backed `ConfigType`
+enum. Diagnostics should use `$config->redacted()`, which deterministically
+masks sensitive values. Validation errors name the variable and expected type
+without including its supplied value.
+
 ## Validation and resources
 
 ```php
