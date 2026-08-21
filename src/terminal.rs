@@ -411,6 +411,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "Repeatable isolated PHP extension allowlist",
                 ),
                 (
+                    "--isolate-php-extensions",
+                    "Isolate even when the explicit allowlist is empty",
+                ),
+                (
                     "--admin-address IP:PORT",
                     "Expose health and metrics control plane",
                 ),
@@ -442,6 +446,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 (
                     "--php-extension NAME",
                     "Repeatable isolated PHP extension allowlist",
+                ),
+                (
+                    "--isolate-php-extensions",
+                    "Isolate even when the explicit allowlist is empty",
                 ),
                 ("--admin-address IP:PORT", "Control-plane address"),
                 (
@@ -551,18 +559,20 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
         ),
         "extensions" => (
             "Derive explicit PHP extension arguments from bounded, locked Composer requirements without applying them.",
-            "extensions [path] [--no-dev] [--json]",
+            "extensions [path] [--no-dev] [--json | --toml]",
             &[
                 (
                     "--no-dev",
                     "Exclude root and locked development requirements",
                 ),
                 ("--json", "Emit a versioned explainable profile"),
+                ("--toml", "Emit a copy-ready pinned pam.toml profile"),
             ],
             &[
                 "extensions",
                 "extensions . --no-dev",
                 "extensions . --no-dev --json",
+                "extensions . --no-dev --toml",
             ],
         ),
         "distribution:verify" => (

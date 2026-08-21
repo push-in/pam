@@ -483,6 +483,16 @@ fn compares_compatible_and_isolated_php_extension_profiles() {
         .unwrap(),
     )
     .unwrap();
+    fs::write(
+        results.join("declarative-profile-check.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 1,
+            "valid": true,
+            "applications": 1
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     for (directory_name, extensions, total, readiness, engine) in [
         ("compatible", serde_json::json!([]), 200, 130, 80),
         ("isolated", serde_json::json!(["iconv"]), 150, 90, 20),
@@ -532,6 +542,7 @@ fn compares_compatible_and_isolated_php_extension_profiles() {
         serde_json::from_slice(&fs::read(results.join("extension-profile-report.json")).unwrap())
             .unwrap();
     assert_eq!(report["suite_code"], 8);
+    assert_eq!(report["gate_codes"]["declarative_profile"], 1);
     assert_eq!(
         report["composer_profile"]["selected_extensions"][0],
         "iconv"
@@ -659,6 +670,71 @@ fn derives_a_bounded_explainable_composer_extension_profile() {
         production["lockContentHash"],
         "ff17aa792baa38e4862573aa737743c0"
     );
+    let toml = run_pam(&[
+        "extensions",
+        project.to_str().unwrap(),
+        "--no-dev",
+        "--toml",
+    ]);
+    assert!(toml.status.success());
+    let toml = String::from_utf8(toml.stdout).unwrap();
+    assert!(toml.contains("[applications.APP.php_extension_profile]"));
+    assert!(toml.contains("kind_code = 1"));
+    assert!(toml.contains("extensions = []"));
+    assert!(toml.contains(production["manifestSha256"].as_str().unwrap()));
+
+    fs::copy(fixture("server.php"), project.join("index.php")).unwrap();
+    let config = project.join("pam.toml");
+    fs::write(
+        &config,
+        format!(
+            r#"schema_version = 1
+
+[applications.profiled]
+kind_code = 1
+script = "index.php"
+cwd = "."
+
+[applications.profiled.php_extension_profile]
+kind_code = 1
+manifest_sha256 = "{}"
+lock_sha256 = "{}"
+lock_content_hash = "{}"
+extensions = []
+"#,
+            production["manifestSha256"].as_str().unwrap(),
+            production["lockSha256"].as_str().unwrap(),
+            production["lockContentHash"].as_str().unwrap(),
+        ),
+    )
+    .unwrap();
+    let checked = run_pam_in(
+        &project,
+        &["config:check", config.to_str().unwrap(), "--json"],
+    );
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    fs::write(
+        project.join("composer.json"),
+        "{\n  \"require\": {\"ext-json\": \"*\"},\n  \"require-dev\": {\"ext-pam_missing_test\": \"*\"}\n}\n",
+    )
+    .unwrap();
+    let drifted = run_pam_in(
+        &project,
+        &["config:check", config.to_str().unwrap(), "--json"],
+    );
+    assert!(!drifted.status.success());
+    assert!(String::from_utf8_lossy(&drifted.stderr).contains("drifted at manifest_sha256"));
+
+    // Restore the original locked content before checking semantic lock staleness.
+    fs::write(
+        project.join("composer.json"),
+        r#"{"require":{"ext-json":"*"},"require-dev":{"ext-pam_missing_test":"*"}}"#,
+    )
+    .unwrap();
 
     let development = run_pam(&["extensions", project.to_str().unwrap(), "--json"]);
     assert_eq!(development.status.code(), Some(1));
@@ -1396,6 +1472,7 @@ task_warning_count = 1000000
     let described: serde_json::Value = serde_json::from_slice(&described.stdout).unwrap();
     assert_eq!(described["resourceAlertStateCode"], 1);
     assert_eq!(described["phpExtensions"], serde_json::json!(["iconv"]));
+    assert_eq!(described["phpExtensionIsolation"], true);
     assert_eq!(described["resourcePolicy"]["taskWarningCount"], 1000000);
 
     let stopped = run_managed_pam(&root, &state, port, &["stop", "ecosystem-smoke", "--json"]);

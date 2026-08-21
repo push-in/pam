@@ -20,6 +20,7 @@ const CLUSTER_OPTIONS: &[&str] = &[
     "--pool",
     "--php-extension",
 ];
+const CLUSTER_FLAGS: &[&str] = &["--isolate-php-extensions"];
 
 pub fn start(
     executable: &OsStr,
@@ -98,7 +99,9 @@ fn split_start_arguments(
     let mut arguments = arguments.peekable();
     while let Some(argument) = arguments.next() {
         let text = argument.to_string_lossy();
-        if let Some((name, value)) = text.split_once('=')
+        if CLUSTER_FLAGS.contains(&text.as_ref()) {
+            supervisor.push(argument);
+        } else if let Some((name, value)) = text.split_once('=')
             && CLUSTER_OPTIONS.contains(&name)
         {
             if value.is_empty() {
@@ -124,12 +127,18 @@ mod tests {
     #[test]
     fn separates_supervisor_and_laravel_options() {
         let (supervisor, server) = split_start_arguments(
-            ["--workers=8", "--host=0.0.0.0", "--port", "8080"]
-                .into_iter()
-                .map(OsString::from),
+            [
+                "--workers=8",
+                "--isolate-php-extensions",
+                "--host=0.0.0.0",
+                "--port",
+                "8080",
+            ]
+            .into_iter()
+            .map(OsString::from),
         )
         .unwrap();
-        assert_eq!(supervisor, ["--workers", "8"]);
+        assert_eq!(supervisor, ["--workers", "8", "--isolate-php-extensions"]);
         assert_eq!(server, ["--host=0.0.0.0", "--port", "8080"]);
     }
 }

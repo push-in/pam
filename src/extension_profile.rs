@@ -46,33 +46,35 @@ struct ExtensionRequirement {
     sources: Vec<RequirementSource>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ExtensionProfileReport {
+pub(crate) struct ExtensionProfileReport {
     schema_version: u8,
-    state_code: u8,
-    ready: bool,
-    include_dev: bool,
+    pub state_code: u8,
+    pub ready: bool,
+    pub include_dev: bool,
     project_root: String,
-    manifest_sha256: String,
-    lock_sha256: String,
-    lock_content_hash: String,
+    pub manifest_sha256: String,
+    pub lock_sha256: String,
+    pub lock_content_hash: String,
     requirements: Vec<ExtensionRequirement>,
     provided_extensions: Vec<String>,
     builtin_extensions: Vec<String>,
-    selected_extensions: Vec<String>,
-    missing_extensions: Vec<String>,
+    pub selected_extensions: Vec<String>,
+    pub missing_extensions: Vec<String>,
     arguments: Vec<String>,
 }
 
 pub fn run(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut include_dev = true;
     let mut json = false;
+    let mut toml = false;
     let mut target = None;
     for argument in arguments {
         match argument.to_string_lossy().as_ref() {
             "--no-dev" => include_dev = false,
             "--json" => json = true,
+            "--toml" => toml = true,
             option if option.starts_with('-') => {
                 return Err(format!("unknown extensions option: {option}"));
             }
@@ -80,28 +82,41 @@ pub fn run(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             _ => return Err("extensions accepts at most one project path".to_owned()),
         }
     }
+    if json && toml {
+        return Err("extensions --json and --toml are mutually exclusive".to_owned());
+    }
     let target = target.unwrap_or_else(|| PathBuf::from("."));
-    let root = discover_root(&target)?;
-    let lock_content_hash = verify_lock_freshness(executable, &root)?;
-    let compatible = loaded_extensions(executable, false)?;
-    let baseline = loaded_extensions(executable, true)?;
-    let report = build_report(
-        &root,
-        include_dev,
-        &compatible,
-        &baseline,
-        lock_content_hash,
-    )?;
+    let report = derive(executable, &target, include_dev)?;
     let ready = report.ready;
     if json {
         println!(
             "{}",
             serde_json::to_string_pretty(&report).map_err(|error| error.to_string())?
         );
+    } else if toml && ready {
+        print_toml(&report);
     } else {
         print_human(&report);
     }
     Ok(if ready { 0 } else { 1 })
+}
+
+pub(crate) fn derive(
+    executable: &OsStr,
+    target: &Path,
+    include_dev: bool,
+) -> Result<ExtensionProfileReport, String> {
+    let root = discover_root(target)?;
+    let lock_content_hash = verify_lock_freshness(executable, &root)?;
+    let compatible = loaded_extensions(executable, false)?;
+    let baseline = loaded_extensions(executable, true)?;
+    build_report(
+        &root,
+        include_dev,
+        &compatible,
+        &baseline,
+        lock_content_hash,
+    )
 }
 
 fn discover_root(target: &Path) -> Result<PathBuf, String> {
@@ -506,6 +521,21 @@ fn print_human(report: &ExtensionProfileReport) {
         println!("  {}", report.arguments.join(" "));
     }
     println!("Compatible mode remains the default until you apply these arguments.");
+}
+
+fn print_toml(report: &ExtensionProfileReport) {
+    let extensions = report
+        .selected_extensions
+        .iter()
+        .map(|extension| format!("\"{extension}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    println!("[applications.APP.php_extension_profile]");
+    println!("kind_code = {}", if report.include_dev { 2 } else { 1 });
+    println!("manifest_sha256 = \"{}\"", report.manifest_sha256);
+    println!("lock_sha256 = \"{}\"", report.lock_sha256);
+    println!("lock_content_hash = \"{}\"", report.lock_content_hash);
+    println!("extensions = [{extensions}]");
 }
 
 #[cfg(test)]

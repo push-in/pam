@@ -177,6 +177,8 @@ struct ApplicationRecord {
     command: Vec<String>,
     #[serde(default)]
     php_extensions: Vec<String>,
+    #[serde(default)]
+    php_extension_isolation: bool,
     master_state_file: PathBuf,
     stdout_log: PathBuf,
     stderr_log: PathBuf,
@@ -407,6 +409,8 @@ struct EcosystemApplication {
     arguments: Vec<String>,
     #[serde(default)]
     php_extensions: Vec<String>,
+    #[serde(default)]
+    php_extension_profile: Option<EcosystemPhpExtensionProfile>,
     #[serde(default = "default_true")]
     autostart: bool,
     #[serde(default)]
@@ -441,6 +445,17 @@ struct EcosystemApplication {
     memory_max_bytes: Option<u64>,
     #[serde(default)]
     task_max_count: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EcosystemPhpExtensionProfile {
+    kind_code: u8,
+    manifest_sha256: String,
+    lock_sha256: String,
+    lock_content_hash: String,
+    #[serde(default)]
+    extensions: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -499,7 +514,7 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "dashboard:status" => live_dashboard_status(arguments),
         "dashboard:stop" => live_dashboard_stop(arguments),
         "apply" => apply_ecosystem(executable, arguments),
-        "config:check" => check_ecosystem(arguments),
+        "config:check" => check_ecosystem(executable, arguments),
         "deploy" => deploy(executable, arguments),
         "deploy:history" => deployment_history(arguments),
         "rollback" => rollback(executable, arguments),
@@ -1015,8 +1030,15 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
     let (config, root) = load_ecosystem(&path)?;
     let paths = ManagerPaths::load()?;
     let mut results = Vec::new();
+    let mut profile_cache = BTreeMap::new();
     for (name, application) in config.applications {
-        validate_ecosystem_application(&root, &name, &application)?;
+        let (effective_php_extensions, php_extension_isolation) = validate_ecosystem_application(
+            executable,
+            &root,
+            &name,
+            &application,
+            &mut profile_cache,
+        )?;
         let environment_file = application
             .env_file
             .as_deref()
@@ -1050,8 +1072,11 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     .current_dir(cwd)
                     .args(["up", "--name", &name, "--workers"]);
                 command.arg(application.workers.to_string());
-                for extension in normalized_php_extensions(&application.php_extensions) {
-                    command.args(["--php-extension", &extension]);
+                if php_extension_isolation {
+                    command.arg("--isolate-php-extensions");
+                }
+                for extension in &effective_php_extensions {
+                    command.args(["--php-extension", extension]);
                 }
                 if let Some(path) = environment_file.as_deref() {
                     command.arg("--env-file").arg(path);
@@ -1113,9 +1138,10 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 let limit_updated = record.memory_max_bytes != application.memory_max_bytes
                     || record.task_max_count != application.task_max_count;
                 let environment_updated = record.environment_file != environment_file;
-                let expected_php_extensions =
-                    normalized_php_extensions(&application.php_extensions);
+                let expected_php_extensions = effective_php_extensions;
                 let extensions_updated = record.php_extensions != expected_php_extensions;
+                let extension_isolation_updated =
+                    record.php_extension_isolation != php_extension_isolation;
                 let health_updated = record.health_check_address
                     != health_check.as_ref().map(|(address, _)| *address)
                     || record.health_check_path
@@ -1142,6 +1168,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || environment_updated
                     || health_updated
                     || extensions_updated
+                    || extension_isolation_updated
                 {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
@@ -1155,6 +1182,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     record.shutdown_timeout_millis = application.shutdown_timeout_millis;
                     record.environment_file = environment_file;
                     record.php_extensions = expected_php_extensions.clone();
+                    record.php_extension_isolation = php_extension_isolation;
+                    set_command_flag(
+                        &mut record.command,
+                        "--isolate-php-extensions",
+                        php_extension_isolation,
+                    );
                     set_command_options(
                         &mut record.command,
                         "--php-extension",
@@ -1182,7 +1215,11 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
-                if (limit_updated || environment_updated || health_updated || extensions_updated)
+                if (limit_updated
+                    || environment_updated
+                    || health_updated
+                    || extensions_updated
+                    || extension_isolation_updated)
                     && state.as_ref().is_some_and(master_is_running)
                 {
                     restart_record(executable, &record, false, false)?;
@@ -1235,11 +1272,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
     Ok(0)
 }
 
-fn check_ecosystem(arguments: Vec<OsString>) -> Result<u8, String> {
+fn check_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let (path, json) = parse_config_arguments(arguments, "config:check")?;
     let (config, root) = load_ecosystem(&path)?;
+    let mut profile_cache = BTreeMap::new();
     for (name, application) in &config.applications {
-        validate_ecosystem_application(&root, name, application)?;
+        validate_ecosystem_application(executable, &root, name, application, &mut profile_cache)?;
     }
     if json {
         println!(
@@ -1310,10 +1348,12 @@ fn load_ecosystem(path: &Path) -> Result<(EcosystemConfig, PathBuf), String> {
 }
 
 fn validate_ecosystem_application(
+    executable: &OsStr,
     root: &Path,
     name: &str,
     application: &EcosystemApplication,
-) -> Result<(), String> {
+    profile_cache: &mut BTreeMap<(PathBuf, u8), crate::extension_profile::ExtensionProfileReport>,
+) -> Result<(Vec<String>, bool), String> {
     validate_name(name)?;
     if !matches!(application.kind_code, 1 | 2) {
         return Err(format!("application {name:?} kind_code must be 1 or 2"));
@@ -1383,7 +1423,103 @@ fn validate_ecosystem_application(
     for extension in &application.php_extensions {
         crate::cluster::validate_php_extension(extension)?;
     }
-    Ok(())
+    if application.php_extension_profile.is_some() && !application.php_extensions.is_empty() {
+        return Err(format!(
+            "application {name:?} cannot combine php_extensions with php_extension_profile"
+        ));
+    }
+    let Some(reference) = application.php_extension_profile.as_ref() else {
+        let extensions = normalized_php_extensions(&application.php_extensions);
+        return Ok((extensions.clone(), !extensions.is_empty()));
+    };
+    if !matches!(reference.kind_code, 1 | 2) {
+        return Err(format!(
+            "application {name:?} php_extension_profile kind_code must be 1 or 2"
+        ));
+    }
+    for (field, value, length) in [
+        ("manifest_sha256", &reference.manifest_sha256, 64),
+        ("lock_sha256", &reference.lock_sha256, 64),
+        ("lock_content_hash", &reference.lock_content_hash, 32),
+    ] {
+        if value.len() != length
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(format!(
+                "application {name:?} php_extension_profile {field} must be {length} lowercase hexadecimal characters"
+            ));
+        }
+    }
+    if reference.extensions.len() > 64 {
+        return Err(format!(
+            "application {name:?} php_extension_profile cannot select more than 64 extensions"
+        ));
+    }
+    for extension in &reference.extensions {
+        crate::cluster::validate_php_extension(extension)?;
+    }
+    let expected_extensions = normalized_php_extensions(&reference.extensions);
+    if expected_extensions != reference.extensions {
+        return Err(format!(
+            "application {name:?} php_extension_profile extensions must be sorted and unique"
+        ));
+    }
+    let key = (cwd, reference.kind_code);
+    let profile = if let Some(profile) = profile_cache.get(&key) {
+        profile.clone()
+    } else {
+        let profile =
+            crate::extension_profile::derive(executable, &key.0, reference.kind_code == 2)
+                .map_err(|error| {
+                    format!("application {name:?} PHP extension profile failed: {error}")
+                })?;
+        profile_cache.insert(key.clone(), profile.clone());
+        profile
+    };
+    if !profile.ready {
+        return Err(format!(
+            "application {name:?} PHP extension profile is not ready; missing: {}",
+            profile.missing_extensions.join(", ")
+        ));
+    }
+    for (field, pinned, actual) in [
+        (
+            "manifest_sha256",
+            reference.manifest_sha256.as_str(),
+            profile.manifest_sha256.as_str(),
+        ),
+        (
+            "lock_sha256",
+            reference.lock_sha256.as_str(),
+            profile.lock_sha256.as_str(),
+        ),
+        (
+            "lock_content_hash",
+            reference.lock_content_hash.as_str(),
+            profile.lock_content_hash.as_str(),
+        ),
+    ] {
+        if pinned != actual {
+            return Err(format!(
+                "application {name:?} PHP extension profile drifted at {field}; run `pam extensions {} {}--toml`, review the result, and update pam.toml explicitly",
+                key.0.display(),
+                if reference.kind_code == 1 {
+                    "--no-dev "
+                } else {
+                    ""
+                },
+            ));
+        }
+    }
+    if reference.extensions != profile.selected_extensions {
+        return Err(format!(
+            "application {name:?} PHP extension profile drifted at extensions; pinned {:?}, derived {:?}",
+            reference.extensions, profile.selected_extensions
+        ));
+    }
+    Ok((profile.selected_extensions, true))
 }
 
 fn scoped_cwd(root: &Path, cwd: &Path) -> Result<PathBuf, String> {
@@ -3257,6 +3393,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut task_max_count = None;
     let mut environment_file = None;
     let mut php_extensions = Vec::new();
+    let mut php_extension_isolation = false;
     let mut shutdown_timeout_millis = DEFAULT_SHUTDOWN_TIMEOUT_MILLIS;
     let mut health_check_url = None;
     let mut health_check_interval_millis = DEFAULT_HEALTH_INTERVAL_MILLIS;
@@ -3284,8 +3421,10 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                 )?))
             }
             "--php-extension" => {
+                php_extension_isolation = true;
                 php_extensions.push(required_utf8(arguments.next(), "--php-extension")?)
             }
+            "--isolate-php-extensions" => php_extension_isolation = true,
             "--shutdown-timeout-ms" => {
                 shutdown_timeout_millis =
                     required_positive_u64(arguments.next(), "--shutdown-timeout-ms")?
@@ -3451,6 +3590,9 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             OsString::from(workers.to_string()),
         ]);
     }
+    if php_extension_isolation {
+        launch_arguments.push(OsString::from("--isolate-php-extensions"));
+    }
     for extension in &php_extensions {
         launch_arguments.extend([OsString::from("--php-extension"), OsString::from(extension)]);
     }
@@ -3540,6 +3682,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             )
             .collect(),
         php_extensions,
+        php_extension_isolation,
         master_state_file: effective_state,
         stdout_log,
         stderr_log,
@@ -4156,6 +4299,7 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
             "phaseP95Millis": state.worker_startup_phase_p95_millis,
         })),
         "phpExtensions": record.php_extensions,
+        "phpExtensionIsolation": record.php_extension_isolation,
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
@@ -4304,6 +4448,25 @@ fn set_command_option(command: &mut Vec<String>, option: &str, value: &str) {
         .position(|argument| argument == "--")
         .unwrap_or(command.len());
     command.splice(separator..separator, [option.to_owned(), value.to_owned()]);
+}
+
+fn set_command_flag(command: &mut Vec<String>, option: &str, enabled: bool) {
+    let mut separator = command
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(command.len());
+    let mut index = 0;
+    while index < separator {
+        if command[index] == option {
+            command.remove(index);
+            separator -= 1;
+        } else {
+            index += 1;
+        }
+    }
+    if enabled {
+        command.insert(separator, option.to_owned());
+    }
 }
 
 fn normalized_php_extensions(extensions: &[String]) -> Vec<String> {
@@ -4802,6 +4965,7 @@ mod tests {
             working_directory: PathBuf::from("/srv/api"),
             command: vec!["pam".to_owned(), "start".to_owned()],
             php_extensions: Vec::new(),
+            php_extension_isolation: false,
             master_state_file: PathBuf::from("state.json"),
             stdout_log: PathBuf::from("out.log"),
             stderr_log: PathBuf::from("error.log"),
@@ -5057,6 +5221,29 @@ mod tests {
                 "--port=1",
             ]
         );
+    }
+
+    #[test]
+    fn extension_isolation_flag_is_reconciled_before_application_arguments() {
+        let mut command = vec![
+            "pam".to_owned(),
+            "start".to_owned(),
+            "--".to_owned(),
+            "--isolate-php-extensions".to_owned(),
+        ];
+        set_command_flag(&mut command, "--isolate-php-extensions", true);
+        assert_eq!(
+            command,
+            [
+                "pam",
+                "start",
+                "--isolate-php-extensions",
+                "--",
+                "--isolate-php-extensions"
+            ]
+        );
+        set_command_flag(&mut command, "--isolate-php-extensions", false);
+        assert_eq!(command, ["pam", "start", "--", "--isolate-php-extensions"]);
     }
 
     #[test]

@@ -86,6 +86,20 @@ foreach ($selectedExtensions as $extension) {
         exit(1);
     }
 }
+$declarativeCheckPath = $directory.'/declarative-profile-check.json';
+if (!is_file($declarativeCheckPath) || is_link($declarativeCheckPath)
+    || filesize($declarativeCheckPath) > 256 * 1024) {
+    fwrite(STDERR, "Declarative profile check evidence is missing or unsafe\n");
+    exit(1);
+}
+$declarativeCheck = decodeJsonObject($declarativeCheckPath);
+$declarativeProfilePassed = ($declarativeCheck['schemaVersion'] ?? null) === 1
+    && ($declarativeCheck['valid'] ?? null) === true
+    && ($declarativeCheck['applications'] ?? null) === 1;
+if (!$declarativeProfilePassed) {
+    fwrite(STDERR, "Declarative profile check evidence contract is invalid\n");
+    exit(1);
+}
 
 $profiles = [
     ExtensionProfileCode::Compatible->value => ['directory' => 'compatible', 'extensions' => []],
@@ -158,7 +172,7 @@ $improvement = static fn (int $before, int $after): int => $before === 0
 $bothPassed = $compatible['passed'] && $isolated['passed'];
 $equivalentRounds = $compatible['rounds'] === $isolated['rounds'];
 $isolatedEngineNotSlower = $isolatedEngine <= $compatibleEngine;
-$passed = $bothPassed && $equivalentRounds && $isolatedEngineNotSlower;
+$passed = $bothPassed && $equivalentRounds && $isolatedEngineNotSlower && $declarativeProfilePassed;
 $report = [
     'schema_version' => 1,
     'suite_code' => 8,
@@ -183,6 +197,7 @@ $report = [
     ],
     'gate_codes' => [
         'composer_profile' => ExtensionProfileGate::Passed->value,
+        'declarative_profile' => ($declarativeProfilePassed ? ExtensionProfileGate::Passed : ExtensionProfileGate::Failed)->value,
         'both_profiles' => ($bothPassed ? ExtensionProfileGate::Passed : ExtensionProfileGate::Failed)->value,
         'equivalent_rounds' => ($equivalentRounds ? ExtensionProfileGate::Passed : ExtensionProfileGate::Failed)->value,
         'isolated_engine_not_slower' => ($isolatedEngineNotSlower ? ExtensionProfileGate::Passed : ExtensionProfileGate::Failed)->value,

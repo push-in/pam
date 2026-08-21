@@ -234,12 +234,14 @@ PHP module inventory with the same main `php.ini` running without `conf.d`.
 It reports integer-coded requirement origins, manifest/lock SHA-256 digests,
 built-in, package-provided, selected and missing extensions, then prints the
 exact repeatable arguments for operator review. `--json` exposes the versioned
-schema-1 result. It refuses missing, stale, symlinked, malformed or oversized
-Composer documents and never applies the profile automatically:
+schema-1 result. `--toml` emits a copy-ready, hash-pinned declarative reference.
+It refuses missing, stale, symlinked, malformed or oversized Composer documents
+and never applies the profile automatically:
 
 ```bash
 pam extensions . --no-dev
 pam extensions . --no-dev --json
+pam extensions . --no-dev --toml
 pam up public/index.php --name api --workers 16 --php-extension iconv
 ```
 
@@ -412,6 +414,13 @@ restart_backoff_max_millis = 15000
 max_unstable_restarts = 10
 min_uptime_millis = 30000
 
+[applications.api.php_extension_profile]
+kind_code = 1
+manifest_sha256 = "<64 lowercase hexadecimal characters>"
+lock_sha256 = "<64 lowercase hexadecimal characters>"
+lock_content_hash = "<32 lowercase hexadecimal characters>"
+extensions = ["iconv", "mbstring", "pdo", "pdo_mysql", "opcache"]
+
 [applications.web]
 kind_code = 2
 workers = 8
@@ -427,6 +436,14 @@ files of at most 1 MiB. Relative environment-file paths resolve from the
 `pam.toml` directory and changes restart a running application so the new
 environment is effective. Use `pam config:check --json` in CI and `pam apply
 --json` for a stable action-coded reconciliation report.
+
+Generate the nested table with `pam extensions PATH --no-dev --toml` and replace
+`APP` with the application name. Profile kind code `1` excludes development
+requirements and `2` includes them. A profile is mutually exclusive with
+`php_extensions`; PAM re-derives it at check/apply time and fails closed if the
+manifest digest, lock digest, Composer content hash, selected modules, or module
+availability has drifted. Even an empty selection remains explicitly isolated.
+Applications without either setting retain compatible host-PHP behavior.
 
 `memory_warning_bytes` and `task_warning_count` are optional positive alert
 thresholds. On Linux, `status`, `describe` and `monit` inspect the complete
