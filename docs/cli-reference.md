@@ -28,6 +28,16 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam deploy` — Activate a readiness-gated release.
 - `pam deploy:history` — Inspect bounded deployment history.
 - `pam rollback` — Restore a previous healthy release.
+- `pam traffic:start` — Start a weighted release ingress.
+- `pam traffic:set` — Change candidate traffic atomically.
+- `pam traffic:promote` — Promote candidate to stable.
+- `pam traffic:abort` — Abort candidate traffic.
+## Observe
+
+- `pam traffic:status` — Inspect release traffic state.
+## Ship
+
+- `pam traffic:stop` — Stop a release traffic ingress.
 ## Develop
 
 - `pam devices` — List connected development targets.

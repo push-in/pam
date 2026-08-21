@@ -37,6 +37,7 @@ mod ship;
 mod support;
 mod terminal;
 mod timeline;
+mod traffic;
 mod worker_state;
 
 const EX_NOINPUT: u8 = 66;
@@ -651,9 +652,16 @@ fn run() -> Result<u8, CliError> {
             | "deploy"
             | "deploy:history"
             | "rollback"
+            | "traffic:start"
+            | "traffic:set"
+            | "traffic:promote"
+            | "traffic:abort"
+            | "traffic:status"
+            | "traffic:stop"
             | "daemon"
             | "__pamd"
             | "__manager_local"
+            | "__traffic_proxy"
     ) || managed_logs
     {
         let command = script_arg.to_string_lossy();

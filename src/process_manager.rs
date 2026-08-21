@@ -218,6 +218,13 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "deploy" => deploy(executable, arguments),
         "deploy:history" => deployment_history(arguments),
         "rollback" => rollback(executable, arguments),
+        "traffic:start" => traffic_start(executable, arguments),
+        "traffic:set" => traffic_set(arguments),
+        "traffic:promote" => traffic_promote(arguments),
+        "traffic:abort" => traffic_abort(arguments),
+        "traffic:status" => traffic_status(arguments),
+        "traffic:stop" => traffic_stop(arguments),
+        "__traffic_proxy" => traffic_proxy(arguments),
         "daemon" => daemon(executable, arguments),
         "__pamd" => daemon_serve(executable),
         _ => Err(format!(
@@ -243,7 +250,261 @@ fn daemon_managed_command(command: &str) -> bool {
             | "deploy"
             | "deploy:history"
             | "rollback"
+            | "traffic:start"
+            | "traffic:set"
+            | "traffic:promote"
+            | "traffic:abort"
+            | "traffic:status"
+            | "traffic:stop"
     )
+}
+
+fn traffic_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut name = None;
+    let mut listen = None;
+    let mut stable = None;
+    let mut candidate = None;
+    let mut weight = 0_u16;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--listen" => listen = Some(parse_socket(arguments.next(), "--listen")?),
+            "--stable" => stable = Some(parse_socket(arguments.next(), "--stable")?),
+            "--candidate" => candidate = Some(parse_socket(arguments.next(), "--candidate")?),
+            "--weight-bps" => weight = parse_basis_points(arguments.next())?,
+            "--json" => json = true,
+            option if option.starts_with('-') => {
+                return Err(format!("unknown traffic:start option: {option}"));
+            }
+            _ if name.is_none() => name = Some(argument.to_string_lossy().into_owned()),
+            _ => return Err("traffic:start accepts one name".to_owned()),
+        }
+    }
+    let name = name.ok_or_else(|| "traffic:start requires a name".to_owned())?;
+    validate_name(&name)?;
+    let paths = ManagerPaths::load()?;
+    let config_path = paths.traffic_config(&name);
+    let state_path = paths.traffic_state(&name);
+    let metrics_path = paths.traffic_metrics(&name);
+    if state_path.exists()
+        && read_master_state(&state_path).is_ok_and(|state| master_is_running(&state))
+    {
+        return Err(format!("traffic ingress {name:?} is already online"));
+    }
+    let config = crate::traffic::TrafficConfig {
+        schema_version: 1,
+        generation: 1,
+        name: name.clone(),
+        listen: listen.ok_or_else(|| "traffic:start requires --listen".to_owned())?,
+        stable: stable.ok_or_else(|| "traffic:start requires --stable".to_owned())?,
+        candidate,
+        candidate_weight_basis_points: weight,
+    };
+    crate::traffic::validate_config(&config)?;
+    write_private_json(&config_path, &config)?;
+    let stdout = secure_append(&paths.logs.join(format!("traffic-{name}.out.log")))?;
+    let stderr = secure_append(&paths.logs.join(format!("traffic-{name}.error.log")))?;
+    let mut command = Command::new(executable);
+    command
+        .args(["__traffic_proxy"])
+        .arg(&config_path)
+        .arg(&state_path)
+        .arg(&metrics_path)
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    };
+    command
+        .spawn()
+        .map_err(|error| format!("cannot start traffic ingress: {error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let state = loop {
+        if let Ok(state) = read_master_state(&state_path)
+            && master_is_running(&state)
+        {
+            break state;
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("traffic ingress {name:?} did not become ready"));
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    print_traffic(&config, Some(&state), json);
+    Ok(0)
+}
+
+fn traffic_set(arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut name = None;
+    let mut candidate = None;
+    let mut weight = None;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--candidate" => candidate = Some(parse_socket(arguments.next(), "--candidate")?),
+            "--weight-bps" => weight = Some(parse_basis_points(arguments.next())?),
+            "--json" => json = true,
+            option if option.starts_with('-') => {
+                return Err(format!("unknown traffic:set option: {option}"));
+            }
+            _ if name.is_none() => name = Some(argument.to_string_lossy().into_owned()),
+            _ => return Err("traffic:set accepts one name".to_owned()),
+        }
+    }
+    let name = name.ok_or_else(|| "traffic:set requires a name".to_owned())?;
+    validate_name(&name)?;
+    let paths = ManagerPaths::load()?;
+    let mut config = crate::traffic::read_config(&paths.traffic_config(&name))?;
+    if let Some(candidate) = candidate {
+        config.candidate = Some(candidate);
+    }
+    if let Some(weight) = weight {
+        config.candidate_weight_basis_points = weight;
+    }
+    config.generation = config
+        .generation
+        .checked_add(1)
+        .ok_or_else(|| "traffic generation exhausted".to_owned())?;
+    crate::traffic::validate_config(&config)?;
+    write_private_json(&paths.traffic_config(&name), &config)?;
+    print_traffic(
+        &config,
+        read_master_state(&paths.traffic_state(&name)).ok().as_ref(),
+        json,
+    );
+    Ok(0)
+}
+
+fn traffic_promote(arguments: Vec<OsString>) -> Result<u8, String> {
+    update_traffic_terminal(arguments, true)
+}
+
+fn traffic_abort(arguments: Vec<OsString>) -> Result<u8, String> {
+    update_traffic_terminal(arguments, false)
+}
+
+fn update_traffic_terminal(arguments: Vec<OsString>, promote: bool) -> Result<u8, String> {
+    let (name, json) = parse_name_json(
+        arguments,
+        if promote {
+            "traffic:promote"
+        } else {
+            "traffic:abort"
+        },
+    )?;
+    let paths = ManagerPaths::load()?;
+    let mut config = crate::traffic::read_config(&paths.traffic_config(&name))?;
+    if promote {
+        config.stable = config
+            .candidate
+            .ok_or_else(|| "traffic ingress has no candidate to promote".to_owned())?;
+    }
+    config.candidate = None;
+    config.candidate_weight_basis_points = 0;
+    config.generation = config
+        .generation
+        .checked_add(1)
+        .ok_or_else(|| "traffic generation exhausted".to_owned())?;
+    write_private_json(&paths.traffic_config(&name), &config)?;
+    print_traffic(
+        &config,
+        read_master_state(&paths.traffic_state(&name)).ok().as_ref(),
+        json,
+    );
+    Ok(0)
+}
+
+fn traffic_status(arguments: Vec<OsString>) -> Result<u8, String> {
+    let (name, json) = parse_name_json(arguments, "traffic:status")?;
+    let paths = ManagerPaths::load()?;
+    let config = crate::traffic::read_config(&paths.traffic_config(&name))?;
+    let state = read_master_state(&paths.traffic_state(&name)).ok();
+    let online = state.as_ref().is_some_and(master_is_running);
+    print_traffic(&config, state.as_ref(), json);
+    Ok(if online { 0 } else { 1 })
+}
+
+fn traffic_stop(arguments: Vec<OsString>) -> Result<u8, String> {
+    let (name, json) = parse_name_json(arguments, "traffic:stop")?;
+    let paths = ManagerPaths::load()?;
+    if let Ok(state) = read_master_state(&paths.traffic_state(&name))
+        && master_is_running(&state)
+    {
+        signal_master(&state, STOP_SIGNAL)?;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while master_is_running(&state) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(50));
+        }
+        if master_is_running(&state) {
+            return Err(format!("traffic ingress {name:?} did not stop"));
+        }
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"name":name,"stateCode":ApplicationState::Stopped as u8})
+        );
+    } else {
+        println!("Stopped traffic ingress {name}");
+    }
+    Ok(0)
+}
+
+fn traffic_proxy(arguments: Vec<OsString>) -> Result<u8, String> {
+    match arguments.as_slice() {
+        [config, state, metrics] => crate::traffic::run(
+            PathBuf::from(config),
+            PathBuf::from(state),
+            PathBuf::from(metrics),
+        ),
+        _ => Err("__traffic_proxy requires config, state and metrics paths".to_owned()),
+    }
+}
+
+fn parse_socket(value: Option<OsString>, option: &str) -> Result<std::net::SocketAddr, String> {
+    required_utf8(value, option)?
+        .parse()
+        .map_err(|_| format!("{option} requires IP:port"))
+}
+
+fn parse_basis_points(value: Option<OsString>) -> Result<u16, String> {
+    required_utf8(value, "--weight-bps")?
+        .parse::<u16>()
+        .ok()
+        .filter(|value| *value <= 10_000)
+        .ok_or_else(|| "--weight-bps requires an integer from 0 to 10000".to_owned())
+}
+
+fn print_traffic(config: &crate::traffic::TrafficConfig, state: Option<&MasterState>, json: bool) {
+    let online = state.is_some_and(master_is_running);
+    if json {
+        let metrics = ManagerPaths::load().ok().and_then(|paths| {
+            crate::traffic::read_metrics(&paths.traffic_metrics(&config.name)).ok()
+        });
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"name":config.name,"stateCode":if online { ApplicationState::Online as u8 } else { ApplicationState::Stopped as u8 },"pid":state.map(|value| value.pid),"listen":config.listen,"stable":config.stable,"candidate":config.candidate,"candidateWeightBasisPoints":config.candidate_weight_basis_points,"generation":config.generation,"metrics":metrics})
+        );
+    } else {
+        println!(
+            "{} {}: {} -> stable {}, candidate {:?} @ {} bps",
+            config.name,
+            if online { "online" } else { "stopped" },
+            config.listen,
+            config.stable,
+            config.candidate,
+            config.candidate_weight_basis_points
+        );
+    }
 }
 
 fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -1724,6 +1985,7 @@ struct ManagerPaths {
     runtime: PathBuf,
     logs: PathBuf,
     deployments: PathBuf,
+    traffic: PathBuf,
 }
 impl ManagerPaths {
     fn load() -> Result<Self, String> {
@@ -1744,12 +2006,14 @@ impl ManagerPaths {
             runtime: base.join("runtime"),
             logs: base.join("logs"),
             deployments: base.join("deployments"),
+            traffic: base.join("traffic"),
         };
         for path in [
             &paths.applications,
             &paths.runtime,
             &paths.logs,
             &paths.deployments,
+            &paths.traffic,
         ] {
             secure_directory(path)?;
         }
@@ -1760,6 +2024,15 @@ impl ManagerPaths {
     }
     fn deployment(&self, name: &str) -> PathBuf {
         self.deployments.join(format!("{name}.json"))
+    }
+    fn traffic_config(&self, name: &str) -> PathBuf {
+        self.traffic.join(format!("{name}.json"))
+    }
+    fn traffic_state(&self, name: &str) -> PathBuf {
+        self.runtime.join(format!("traffic-{name}.json"))
+    }
+    fn traffic_metrics(&self, name: &str) -> PathBuf {
+        self.traffic.join(format!("{name}.metrics.json"))
     }
 }
 
