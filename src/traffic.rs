@@ -32,6 +32,18 @@ pub struct TrafficConfig {
     pub stable: SocketAddr,
     pub candidate: Option<SocketAddr>,
     pub candidate_weight_basis_points: u16,
+    #[serde(default = "default_rollout_phase")]
+    pub rollout_phase_code: u8,
+    #[serde(default)]
+    pub rollout_deadline_millis: Option<u64>,
+    #[serde(default)]
+    pub last_rollout_decision_code: Option<u8>,
+    #[serde(default)]
+    pub last_evaluated_at_millis: Option<u64>,
+    #[serde(default)]
+    pub last_evaluated_candidate_requests: Option<u64>,
+    #[serde(default)]
+    pub last_evaluated_candidate_errors: Option<u64>,
     #[serde(default)]
     pub tls_certificate: Option<PathBuf>,
     #[serde(default)]
@@ -47,6 +59,7 @@ struct TrafficState {
 
 #[derive(Default)]
 struct TrafficCounters {
+    generation: AtomicU64,
     stable_requests: AtomicU64,
     stable_errors: AtomicU64,
     stable_latency_micros: AtomicU64,
@@ -59,6 +72,8 @@ struct TrafficCounters {
 #[serde(rename_all = "camelCase")]
 pub struct TrafficMetrics {
     pub schema_version: u8,
+    #[serde(default)]
+    pub generation: u64,
     pub stable_requests: u64,
     pub stable_errors: u64,
     pub stable_latency_micros: u64,
@@ -88,7 +103,9 @@ async fn serve(
         .set_nonblocking(true)
         .map_err(|error| format!("cannot configure PAM traffic listener: {error}"))?;
     let shared = Arc::new(RwLock::new(config.clone()));
+    let metrics = Arc::new(TrafficCounters::new(config.generation));
     let watcher = Arc::clone(&shared);
+    let watched_metrics = Arc::clone(&metrics);
     let watched_path = config_path.clone();
     let watch_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(Duration::from_millis(200));
@@ -101,12 +118,12 @@ async fn serve(
                     .write()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
                 if candidate.generation > current.generation {
+                    watched_metrics.reset(candidate.generation);
                     *current = candidate;
                 }
             }
         }
     });
-    let metrics = Arc::new(TrafficCounters::default());
     let metric_counters = Arc::clone(&metrics);
     let metric_path = metrics_path.clone();
     let metric_task = tokio::spawn(async move {
@@ -206,6 +223,7 @@ async fn proxy(
     match state.client.request(request).await {
         Ok(mut response) => {
             state.metrics.observe(
+                config.generation,
                 candidate.is_some(),
                 response.status().is_server_error(),
                 started.elapsed(),
@@ -228,16 +246,39 @@ async fn proxy(
             response.map(|body| Body::new(body.map_err(std::io::Error::other)))
         }
         Err(_) => {
-            state
-                .metrics
-                .observe(candidate.is_some(), true, started.elapsed());
+            state.metrics.observe(
+                config.generation,
+                candidate.is_some(),
+                true,
+                started.elapsed(),
+            );
             unavailable("PAM release unavailable")
         }
     }
 }
 
 impl TrafficCounters {
-    fn observe(&self, candidate: bool, error: bool, latency: Duration) {
+    fn new(generation: u64) -> Self {
+        Self {
+            generation: AtomicU64::new(generation),
+            ..Self::default()
+        }
+    }
+
+    fn reset(&self, generation: u64) {
+        self.stable_requests.store(0, Ordering::Relaxed);
+        self.stable_errors.store(0, Ordering::Relaxed);
+        self.stable_latency_micros.store(0, Ordering::Relaxed);
+        self.candidate_requests.store(0, Ordering::Relaxed);
+        self.candidate_errors.store(0, Ordering::Relaxed);
+        self.candidate_latency_micros.store(0, Ordering::Relaxed);
+        self.generation.store(generation, Ordering::Release);
+    }
+
+    fn observe(&self, generation: u64, candidate: bool, error: bool, latency: Duration) {
+        if self.generation.load(Ordering::Acquire) != generation {
+            return;
+        }
         let micros = latency.as_micros().try_into().unwrap_or(u64::MAX);
         let (requests, errors, total) = if candidate {
             (
@@ -262,6 +303,7 @@ impl TrafficCounters {
     fn snapshot(&self) -> TrafficMetrics {
         TrafficMetrics {
             schema_version: 1,
+            generation: self.generation.load(Ordering::Acquire),
             stable_requests: self.stable_requests.load(Ordering::Relaxed),
             stable_errors: self.stable_errors.load(Ordering::Relaxed),
             stable_latency_micros: self.stable_latency_micros.load(Ordering::Relaxed),
@@ -334,6 +376,13 @@ pub fn validate_config(config: &TrafficConfig) -> Result<(), String> {
     if config.candidate_weight_basis_points > 10_000 {
         return Err("candidate weight must be 0-10000 basis points".to_owned());
     }
+    if !(1..=4).contains(&config.rollout_phase_code)
+        || config
+            .last_rollout_decision_code
+            .is_some_and(|value| !(1..=4).contains(&value))
+    {
+        return Err("unsupported traffic rollout state".to_owned());
+    }
     if config.candidate.is_none() && config.candidate_weight_basis_points != 0 {
         return Err("candidate weight requires a candidate upstream".to_owned());
     }
@@ -362,6 +411,10 @@ pub fn validate_config(config: &TrafficConfig) -> Result<(), String> {
         return Err("public traffic ingress requires explicit upstream addresses".to_owned());
     }
     Ok(())
+}
+
+const fn default_rollout_phase() -> u8 {
+    1
 }
 
 fn validate_tls_file(path: &Path, label: &str) -> Result<(), String> {
@@ -433,6 +486,12 @@ mod tests {
             stable: "127.0.0.1:8081".parse().unwrap(),
             candidate: None,
             candidate_weight_basis_points: 1,
+            rollout_phase_code: 2,
+            rollout_deadline_millis: None,
+            last_rollout_decision_code: None,
+            last_evaluated_at_millis: None,
+            last_evaluated_candidate_requests: None,
+            last_evaluated_candidate_errors: None,
             tls_certificate: None,
             tls_private_key: None,
         };
