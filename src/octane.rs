@@ -18,6 +18,7 @@ const CLUSTER_OPTIONS: &[&str] = &[
     "--admin-address",
     "--ingress-address",
     "--pool",
+    "--php-extension",
 ];
 
 pub fn start(

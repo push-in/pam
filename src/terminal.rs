@@ -403,6 +403,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("--workers N", "Worker process count"),
                 ("--max-requests N", "Recycle a worker after N requests"),
                 (
+                    "--php-extension NAME",
+                    "Repeatable isolated PHP extension allowlist",
+                ),
+                (
                     "--admin-address IP:PORT",
                     "Expose health and metrics control plane",
                 ),
@@ -421,15 +425,20 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &[
                 "start index.php --workers 4",
+                "start index.php --workers 16 --php-extension iconv --php-extension mbstring",
                 "start index.php --workers 8 --admin-address 127.0.0.1:3010",
             ],
         ),
         "octane:start" => (
             "Start Laravel Octane on PAM's Rust and Tokio runtime.",
-            "octane:start [--workers N | --pool SPEC...] [--host ADDRESS] [--port PORT]",
+            "octane:start [--workers N | --pool SPEC...] [--php-extension NAME...] [--host ADDRESS] [--port PORT]",
             &[
                 ("--workers N", "Number of isolated Laravel workers"),
                 ("--max-requests N", "Recycle workers after N requests"),
+                (
+                    "--php-extension NAME",
+                    "Repeatable isolated PHP extension allowlist",
+                ),
                 ("--admin-address IP:PORT", "Control-plane address"),
                 (
                     "--ingress-address IP:PORT",

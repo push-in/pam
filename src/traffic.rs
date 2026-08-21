@@ -447,6 +447,7 @@ impl ReadyState {
             worker_spawn_spread_millis: None,
             worker_startup_p95_millis: None,
             worker_startup_max_millis: None,
+            worker_startup_phase_p95_millis: None,
         };
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
         fs::write(

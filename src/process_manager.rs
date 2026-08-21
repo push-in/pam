@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -175,6 +175,8 @@ struct ApplicationRecord {
     kind_code: u8,
     working_directory: PathBuf,
     command: Vec<String>,
+    #[serde(default)]
+    php_extensions: Vec<String>,
     master_state_file: PathBuf,
     stdout_log: PathBuf,
     stderr_log: PathBuf,
@@ -403,6 +405,8 @@ struct EcosystemApplication {
     cwd: PathBuf,
     #[serde(default)]
     arguments: Vec<String>,
+    #[serde(default)]
+    php_extensions: Vec<String>,
     #[serde(default = "default_true")]
     autostart: bool,
     #[serde(default)]
@@ -1046,6 +1050,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     .current_dir(cwd)
                     .args(["up", "--name", &name, "--workers"]);
                 command.arg(application.workers.to_string());
+                for extension in normalized_php_extensions(&application.php_extensions) {
+                    command.args(["--php-extension", &extension]);
+                }
                 if let Some(path) = environment_file.as_deref() {
                     command.arg("--env-file").arg(path);
                 }
@@ -1106,6 +1113,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 let limit_updated = record.memory_max_bytes != application.memory_max_bytes
                     || record.task_max_count != application.task_max_count;
                 let environment_updated = record.environment_file != environment_file;
+                let expected_php_extensions =
+                    normalized_php_extensions(&application.php_extensions);
+                let extensions_updated = record.php_extensions != expected_php_extensions;
                 let health_updated = record.health_check_address
                     != health_check.as_ref().map(|(address, _)| *address)
                     || record.health_check_path
@@ -1127,7 +1137,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || record.max_unstable_restarts != application.max_unstable_restarts
                     || record.min_uptime_millis != application.min_uptime_millis
                     || record.shutdown_timeout_millis != application.shutdown_timeout_millis;
-                if policy_updated || limit_updated || environment_updated || health_updated {
+                if policy_updated
+                    || limit_updated
+                    || environment_updated
+                    || health_updated
+                    || extensions_updated
+                {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
                     record.memory_max_bytes = application.memory_max_bytes;
@@ -1139,6 +1154,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     record.min_uptime_millis = application.min_uptime_millis;
                     record.shutdown_timeout_millis = application.shutdown_timeout_millis;
                     record.environment_file = environment_file;
+                    record.php_extensions = expected_php_extensions.clone();
+                    set_command_options(
+                        &mut record.command,
+                        "--php-extension",
+                        &expected_php_extensions,
+                    );
                     record.health_check_address =
                         health_check.as_ref().map(|(address, _)| *address);
                     record.health_check_path = health_check.map(|(_, path)| path);
@@ -1161,7 +1182,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
-                if (limit_updated || environment_updated || health_updated)
+                if (limit_updated || environment_updated || health_updated || extensions_updated)
                     && state.as_ref().is_some_and(master_is_running)
                 {
                     restart_record(executable, &record, false, false)?;
@@ -1353,6 +1374,14 @@ fn validate_ecosystem_application(
         return Err(format!(
             "application {name:?} contains invalid argument controls"
         ));
+    }
+    if application.php_extensions.len() > 64 {
+        return Err(format!(
+            "application {name:?} cannot select more than 64 PHP extensions"
+        ));
+    }
+    for extension in &application.php_extensions {
+        crate::cluster::validate_php_extension(extension)?;
     }
     Ok(())
 }
@@ -3227,6 +3256,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut memory_max_bytes = None;
     let mut task_max_count = None;
     let mut environment_file = None;
+    let mut php_extensions = Vec::new();
     let mut shutdown_timeout_millis = DEFAULT_SHUTDOWN_TIMEOUT_MILLIS;
     let mut health_check_url = None;
     let mut health_check_interval_millis = DEFAULT_HEALTH_INTERVAL_MILLIS;
@@ -3252,6 +3282,9 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     arguments.next(),
                     "--env-file",
                 )?))
+            }
+            "--php-extension" => {
+                php_extensions.push(required_utf8(arguments.next(), "--php-extension")?)
             }
             "--shutdown-timeout-ms" => {
                 shutdown_timeout_millis =
@@ -3343,6 +3376,13 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         task_max_count,
         "application",
     )?;
+    if php_extensions.len() > 64 {
+        return Err("--php-extension cannot select more than 64 extensions".to_owned());
+    }
+    for extension in &php_extensions {
+        crate::cluster::validate_php_extension(extension)?;
+    }
+    php_extensions = normalized_php_extensions(&php_extensions);
     validate_shutdown_policy(shutdown_timeout_millis)?;
     validate_recovery_policy(
         restart_delay_millis,
@@ -3410,6 +3450,9 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             OsString::from("--workers"),
             OsString::from(workers.to_string()),
         ]);
+    }
+    for extension in &php_extensions {
+        launch_arguments.extend([OsString::from("--php-extension"), OsString::from(extension)]);
     }
     if !application_arguments.is_empty() {
         launch_arguments.push(OsString::from("--"));
@@ -3496,6 +3539,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     .map(|argument| argument.to_string_lossy().into_owned()),
             )
             .collect(),
+        php_extensions,
         master_state_file: effective_state,
         stdout_log,
         stderr_log,
@@ -4109,7 +4153,9 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
             "spawnSpreadMillis": state.worker_spawn_spread_millis,
             "spawnToReadyP95Millis": state.worker_startup_p95_millis,
             "spawnToReadyMaximumMillis": state.worker_startup_max_millis,
+            "phaseP95Millis": state.worker_startup_phase_p95_millis,
         })),
+        "phpExtensions": record.php_extensions,
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
@@ -4258,6 +4304,38 @@ fn set_command_option(command: &mut Vec<String>, option: &str, value: &str) {
         .position(|argument| argument == "--")
         .unwrap_or(command.len());
     command.splice(separator..separator, [option.to_owned(), value.to_owned()]);
+}
+
+fn normalized_php_extensions(extensions: &[String]) -> Vec<String> {
+    extensions
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn set_command_options(command: &mut Vec<String>, option: &str, values: &[String]) {
+    let separator = command
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(command.len());
+    let suffix = command.split_off(separator);
+    let mut index = 0;
+    while index < command.len() {
+        if command[index] == option {
+            command.remove(index);
+            if index < command.len() {
+                command.remove(index);
+            }
+        } else {
+            index += 1;
+        }
+    }
+    for value in values {
+        command.extend([option.to_owned(), value.clone()]);
+    }
+    command.extend(suffix);
 }
 
 fn systemd_unit(executable: &Path) -> Result<String, String> {
@@ -4723,6 +4801,7 @@ mod tests {
             kind_code: 1,
             working_directory: PathBuf::from("/srv/api"),
             command: vec!["pam".to_owned(), "start".to_owned()],
+            php_extensions: Vec::new(),
             master_state_file: PathBuf::from("state.json"),
             stdout_log: PathBuf::from("out.log"),
             stderr_log: PathBuf::from("error.log"),
@@ -4832,6 +4911,7 @@ mod tests {
             worker_spawn_spread_millis: None,
             worker_startup_p95_millis: None,
             worker_startup_max_millis: None,
+            worker_startup_phase_p95_millis: None,
         };
 
         assert!(terminate_master(&state, MIN_SHUTDOWN_TIMEOUT_MILLIS).unwrap());
@@ -4859,6 +4939,7 @@ mod tests {
             worker_spawn_spread_millis: None,
             worker_startup_p95_millis: None,
             worker_startup_max_millis: None,
+            worker_startup_phase_p95_millis: None,
         };
         assert!(!health_start_period_elapsed(&state, 30_000, 39_999));
         assert!(health_start_period_elapsed(&state, 30_000, 40_000));
@@ -4941,6 +5022,40 @@ mod tests {
         assert_eq!(
             missing,
             ["pam", "start", "--workers", "2", "--", "--port=1"]
+        );
+    }
+
+    #[test]
+    fn extension_allowlist_is_replaced_before_application_arguments() {
+        let mut command = vec![
+            "pam".to_owned(),
+            "start".to_owned(),
+            "--php-extension".to_owned(),
+            "redis".to_owned(),
+            "--php-extension".to_owned(),
+            "mbstring".to_owned(),
+            "--".to_owned(),
+            "--port=1".to_owned(),
+        ];
+
+        set_command_options(
+            &mut command,
+            "--php-extension",
+            &["iconv".to_owned(), "pdo".to_owned()],
+        );
+
+        assert_eq!(
+            command,
+            [
+                "pam",
+                "start",
+                "--php-extension",
+                "iconv",
+                "--php-extension",
+                "pdo",
+                "--",
+                "--port=1",
+            ]
         );
     }
 

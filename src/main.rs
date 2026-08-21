@@ -45,6 +45,7 @@ const EX_NOINPUT: u8 = 66;
 const EX_SOFTWARE: u8 = 70;
 
 fn main() -> ExitCode {
+    php::mark_process_entry();
     match run() {
         Ok(code) => ExitCode::from(code),
         Err(error) => {

@@ -11,6 +11,25 @@ enum EvidenceSuite: int
     case ManagerRecovery = 5;
     case ManagerRecoveryComparison = 6;
     case ManagerRecoveryWorkerMatrix = 7;
+    case ManagerRecoveryExtensionProfile = 8;
+}
+
+/** @return array<string, mixed> */
+function decodeEvidenceJson(string $path): array
+{
+    $decoded = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+    if (!is_array($decoded)) {
+        throw new RuntimeException("evidence JSON must contain an object: {$path}");
+    }
+    $object = [];
+    foreach ($decoded as $key => $value) {
+        if (!is_string($key)) {
+            throw new RuntimeException("evidence JSON object contains a non-string key: {$path}");
+        }
+        $object[$key] = $value;
+    }
+
+    return $object;
 }
 
 $directory = isset($argv[1]) ? rtrim($argv[1], '/') : '';
@@ -18,14 +37,14 @@ $suiteValue = filter_var($argv[2] ?? null, FILTER_VALIDATE_INT);
 $verify = ($argv[3] ?? '') === '--verify';
 
 if ($directory === '' || !is_dir($directory) || $suiteValue === false) {
-    fwrite(STDERR, "usage: php evidence-manifest.php <results-directory> <suite-id: 1|2|3|4|5|6|7> [--verify]\n");
+    fwrite(STDERR, "usage: php evidence-manifest.php <results-directory> <suite-id: 1|2|3|4|5|6|7|8> [--verify]\n");
     exit(64);
 }
 
 try {
     $suite = EvidenceSuite::from($suiteValue);
 } catch (ValueError) {
-    fwrite(STDERR, "evidence suite id must be 1 (comparison), 2 (matrix), 3 (soak), 4 (overload), 5 (manager recovery), 6 (manager recovery comparison), or 7 (manager recovery worker matrix)\n");
+    fwrite(STDERR, "evidence suite id must be 1 (comparison), 2 (matrix), 3 (soak), 4 (overload), 5 (manager recovery), 6 (manager recovery comparison), 7 (manager recovery worker matrix), or 8 (manager recovery extension profile)\n");
     exit(64);
 }
 
@@ -80,11 +99,7 @@ if ($verify) {
         fwrite(STDERR, "evidence manifest is missing: {$manifestPath}\n");
         exit(1);
     }
-    $manifest = json_decode(
-        (string) file_get_contents($manifestPath),
-        true,
-        flags: JSON_THROW_ON_ERROR,
-    );
+    $manifest = decodeEvidenceJson($manifestPath);
     if (($manifest['schema_version'] ?? null) !== 1
         || ($manifest['suite_id'] ?? null) !== $suite->value
         || !is_array($manifest['artifacts'] ?? null)) {
@@ -101,9 +116,7 @@ if ($verify) {
 }
 
 $metadataPath = $directory.'/metadata.json';
-$metadata = is_file($metadataPath)
-    ? json_decode((string) file_get_contents($metadataPath), true, flags: JSON_THROW_ON_ERROR)
-    : [];
+$metadata = is_file($metadataPath) ? decodeEvidenceJson($metadataPath) : [];
 $reportPath = match ($suite) {
     EvidenceSuite::Comparison => $directory.'/report.json',
     EvidenceSuite::Matrix => $directory.'/matrix-report.json',
@@ -112,10 +125,14 @@ $reportPath = match ($suite) {
     EvidenceSuite::ManagerRecovery => $directory.'/recovery-report.json',
     EvidenceSuite::ManagerRecoveryComparison => $directory.'/comparison-report.json',
     EvidenceSuite::ManagerRecoveryWorkerMatrix => $directory.'/worker-matrix-report.json',
+    EvidenceSuite::ManagerRecoveryExtensionProfile => $directory.'/extension-profile-report.json',
 };
-$report = is_file($reportPath)
-    ? json_decode((string) file_get_contents($reportPath), true, flags: JSON_THROW_ON_ERROR)
+$report = is_file($reportPath) ? decodeEvidenceJson($reportPath) : [];
+$measurementGate = is_array($report['measurement_gate'] ?? null)
+    ? $report['measurement_gate']
     : [];
+$dynamicGate = is_array($report['dynamic_gate'] ?? null) ? $report['dynamic_gate'] : [];
+$gateCodes = is_array($report['gate_codes'] ?? null) ? $report['gate_codes'] : [];
 $manifest = [
     'schema_version' => 1,
     'suite_id' => $suite->value,
@@ -124,30 +141,35 @@ $manifest = [
     'parameters' => $metadata['parameters'] ?? null,
     'gates' => match ($suite) {
         EvidenceSuite::Comparison => [
-            'measurement' => $report['measurement_gate']['passed'] ?? false,
-            'dynamic' => ($report['dynamic_gate']['passed_frankenphp'] ?? false)
-                && ($report['dynamic_gate']['p99_passed'] ?? false)
-                && ($report['dynamic_gate']['zero_errors'] ?? false),
+            'measurement' => $measurementGate['passed'] ?? false,
+            'dynamic' => ($dynamicGate['passed_frankenphp'] ?? false)
+                && ($dynamicGate['p99_passed'] ?? false)
+                && ($dynamicGate['zero_errors'] ?? false),
         ],
         EvidenceSuite::Matrix => $report['gates'] ?? null,
         EvidenceSuite::Soak => ['soak' => $report['passed'] ?? false],
         EvidenceSuite::Overload => ['overload' => $report['passed'] ?? false],
         EvidenceSuite::ManagerRecovery => [
-            'success' => ($report['gate_codes']['success'] ?? null) === 1,
-            'latency' => ($report['gate_codes']['latency'] ?? null) === 1,
-            'detection' => ($report['gate_codes']['detection'] ?? null) === 1,
-            'backoff' => ($report['gate_codes']['backoff'] ?? null) === 1,
-            'readiness' => ($report['gate_codes']['readiness'] ?? null) === 1,
-            'resources' => ($report['gate_codes']['resources'] ?? null) === 1,
+            'success' => ($gateCodes['success'] ?? null) === 1,
+            'latency' => ($gateCodes['latency'] ?? null) === 1,
+            'detection' => ($gateCodes['detection'] ?? null) === 1,
+            'backoff' => ($gateCodes['backoff'] ?? null) === 1,
+            'readiness' => ($gateCodes['readiness'] ?? null) === 1,
+            'resources' => ($gateCodes['resources'] ?? null) === 1,
         ],
         EvidenceSuite::ManagerRecoveryComparison => [
-            'pam_success' => ($report['gate_codes']['pam_success'] ?? null) === 1,
-            'pm2_success' => ($report['gate_codes']['pm2_success'] ?? null) === 1,
-            'equivalent_rounds' => ($report['gate_codes']['equivalent_rounds'] ?? null) === 1,
+            'pam_success' => ($gateCodes['pam_success'] ?? null) === 1,
+            'pm2_success' => ($gateCodes['pm2_success'] ?? null) === 1,
+            'equivalent_rounds' => ($gateCodes['equivalent_rounds'] ?? null) === 1,
         ],
         EvidenceSuite::ManagerRecoveryWorkerMatrix => [
-            'all_configurations' => ($report['gate_codes']['all_configurations'] ?? null) === 1,
-            'equivalent_rounds' => ($report['gate_codes']['equivalent_rounds'] ?? null) === 1,
+            'all_configurations' => ($gateCodes['all_configurations'] ?? null) === 1,
+            'equivalent_rounds' => ($gateCodes['equivalent_rounds'] ?? null) === 1,
+        ],
+        EvidenceSuite::ManagerRecoveryExtensionProfile => [
+            'both_profiles' => ($gateCodes['both_profiles'] ?? null) === 1,
+            'equivalent_rounds' => ($gateCodes['equivalent_rounds'] ?? null) === 1,
+            'isolated_engine_not_slower' => ($gateCodes['isolated_engine_not_slower'] ?? null) === 1,
         ],
     },
     'artifacts' => $describeArtifacts($artifactFiles($directory)),
