@@ -293,6 +293,8 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     assert_eq!(resurrected["resurrected"][0], "managed-smoke");
     assert_ne!(started["pid"], restarted["pid"]);
     assert!(!state.join("applications/managed-smoke.json").exists());
+    let daemon_stopped = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
+    assert!(daemon_stopped.status.success());
     fs::remove_dir_all(state).unwrap();
 }
 
@@ -312,7 +314,9 @@ fn manages_a_private_per_user_daemon() {
     assert!(String::from_utf8_lossy(&status.stdout).contains("pamd is online"));
     #[cfg(unix)]
     {
+        use std::net::Shutdown;
         use std::os::unix::fs::PermissionsExt;
+        use std::os::unix::net::UnixStream;
         assert_eq!(
             fs::metadata(&runtime).unwrap().permissions().mode() & 0o777,
             0o700
@@ -324,6 +328,18 @@ fn manages_a_private_per_user_daemon() {
                 .mode()
                 & 0o777,
             0o600
+        );
+        let mut hostile = UnixStream::connect(runtime.join("pamd.sock")).unwrap();
+        hostile.write_all(b"not-json").unwrap();
+        hostile.shutdown(Shutdown::Write).unwrap();
+        let mut response = String::new();
+        hostile.read_to_string(&mut response).unwrap();
+        let response: serde_json::Value = serde_json::from_str(&response).unwrap();
+        assert_eq!(response["ok"], false);
+        assert!(
+            run_manager_daemon(&state, &runtime, "status")
+                .status
+                .success()
         );
     }
     let stopped = run_manager_daemon(&state, &runtime, "stop");
@@ -397,6 +413,8 @@ autostart = true
         &["delete", "ecosystem-smoke", "--json"],
     );
     assert!(deleted.status.success());
+    let daemon_stopped = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
+    assert!(daemon_stopped.status.success());
     fs::remove_file(config).unwrap();
     fs::remove_dir_all(state).unwrap();
 }

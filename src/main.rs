@@ -649,6 +649,7 @@ fn run() -> Result<u8, CliError> {
             | "config:check"
             | "daemon"
             | "__pamd"
+            | "__manager_local"
     ) || managed_logs
     {
         let command = script_arg.to_string_lossy();

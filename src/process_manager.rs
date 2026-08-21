@@ -25,12 +25,14 @@ const DEFAULT_LOG_MAX_BYTES: u64 = 10 * 1024 * 1024;
 const DEFAULT_LOG_RETAIN: usize = 5;
 const MAX_LOG_RETAIN: usize = 100;
 const MAX_DAEMON_MESSAGE_BYTES: usize = 16 * 1024;
+const MAX_DAEMON_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[repr(u8)]
 enum DaemonOperation {
     Ping = 1,
     Stop = 2,
+    Execute = 3,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -38,6 +40,12 @@ enum DaemonOperation {
 struct DaemonRequest {
     schema_version: u8,
     operation_code: u8,
+    #[serde(default)]
+    command: Option<String>,
+    #[serde(default)]
+    arguments: Vec<String>,
+    #[serde(default)]
+    working_directory: Option<PathBuf>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -47,6 +55,12 @@ struct DaemonResponse {
     ok: bool,
     pid: u32,
     message: String,
+    #[serde(default)]
+    exit_code: u8,
+    #[serde(default)]
+    stdout: String,
+    #[serde(default)]
+    stderr: String,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
@@ -133,28 +147,64 @@ pub fn run(
     command: &str,
     arguments: impl Iterator<Item = OsString>,
 ) -> Result<u8, String> {
+    let arguments = arguments.collect::<Vec<_>>();
+    if command == "__manager_local" {
+        let mut arguments = arguments.into_iter();
+        let local_command = required_utf8(arguments.next(), "__manager_local command")?;
+        return run_local(executable, &local_command, arguments.collect());
+    }
+    let interactive = (command == "up" && arguments.iter().any(|value| value == "--attach"))
+        || (command == "logs"
+            && arguments
+                .iter()
+                .any(|value| value == "--follow" || value == "-f"));
+    if daemon_managed_command(command) && !interactive {
+        ensure_daemon(executable)?;
+        return daemon_execute(command, arguments);
+    }
+    run_local(executable, command, arguments)
+}
+
+fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Result<u8, String> {
     match command {
-        "up" => up(executable, arguments.collect()),
-        "ps" => list(arguments.collect()),
-        "status" | "describe" => inspect(command, arguments.collect()),
-        "reload" => signal(arguments.collect(), RELOAD_SIGNAL, "reloading"),
-        "restart" => restart(executable, arguments.collect()),
-        "scale" => scale(executable, arguments.collect()),
-        "stop" => stop(arguments.collect()),
-        "delete" => delete(arguments.collect()),
-        "logs" => logs(arguments.collect()),
-        "save" => save(arguments.collect()),
-        "resurrect" => resurrect(executable, arguments.collect()),
-        "startup" => startup(executable, arguments.collect()),
-        "monit" => monit(arguments.collect()),
-        "apply" => apply_ecosystem(executable, arguments.collect()),
-        "config:check" => check_ecosystem(arguments.collect()),
-        "daemon" => daemon(executable, arguments.collect()),
+        "up" => up(executable, arguments),
+        "ps" => list(arguments),
+        "status" | "describe" => inspect(command, arguments),
+        "reload" => signal(arguments, RELOAD_SIGNAL, "reloading"),
+        "restart" => restart(executable, arguments),
+        "scale" => scale(executable, arguments),
+        "stop" => stop(arguments),
+        "delete" => delete(arguments),
+        "logs" => logs(arguments),
+        "save" => save(arguments),
+        "resurrect" => resurrect(executable, arguments),
+        "startup" => startup(executable, arguments),
+        "monit" => monit(arguments),
+        "apply" => apply_ecosystem(executable, arguments),
+        "config:check" => check_ecosystem(arguments),
+        "daemon" => daemon(executable, arguments),
         "__pamd" => daemon_serve(executable),
         _ => Err(format!(
             "unsupported PAM process-manager command: {command}"
         )),
     }
+}
+
+fn daemon_managed_command(command: &str) -> bool {
+    matches!(
+        command,
+        "up" | "ps"
+            | "status"
+            | "describe"
+            | "reload"
+            | "restart"
+            | "scale"
+            | "stop"
+            | "delete"
+            | "save"
+            | "resurrect"
+            | "monit"
+    )
 }
 
 fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -544,37 +594,9 @@ fn daemon(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                 println!("pamd is already online");
                 return Ok(0);
             }
-            let paths = ManagerPaths::load()?;
-            let stderr = secure_append(&paths.logs.join("pamd.error.log"))?;
-            let stdout = secure_append(&paths.logs.join("pamd.out.log"))?;
-            let mut command = Command::new(executable);
-            command
-                .arg("__pamd")
-                .stdin(Stdio::null())
-                .stdout(stdout)
-                .stderr(stderr);
-            // SAFETY: the child is single-threaded between fork and exec.
-            unsafe {
-                command.pre_exec(|| {
-                    if libc::setsid() < 0 {
-                        Err(std::io::Error::last_os_error())
-                    } else {
-                        Ok(())
-                    }
-                })
-            };
-            command
-                .spawn()
-                .map_err(|error| format!("cannot start pamd: {error}"))?;
-            let deadline = Instant::now() + Duration::from_secs(5);
-            while Instant::now() < deadline {
-                if let Ok(response) = daemon_request(DaemonOperation::Ping) {
-                    println!("pamd is online (PID {})", response.pid);
-                    return Ok(0);
-                }
-                thread::sleep(Duration::from_millis(50));
-            }
-            Err("pamd did not become ready; inspect pamd.error.log".to_owned())
+            let response = start_daemon(executable)?;
+            println!("pamd is online (PID {})", response.pid);
+            Ok(0)
         }
         "status" => match daemon_request(DaemonOperation::Ping) {
             Ok(response) => {
@@ -593,6 +615,46 @@ fn daemon(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         }
         _ => Err("daemon requires one of: start, status, stop".to_owned()),
     }
+}
+
+fn ensure_daemon(executable: &OsStr) -> Result<(), String> {
+    if daemon_request(DaemonOperation::Ping).is_ok() {
+        return Ok(());
+    }
+    start_daemon(executable).map(|_| ())
+}
+
+fn start_daemon(executable: &OsStr) -> Result<DaemonResponse, String> {
+    let paths = ManagerPaths::load()?;
+    let stderr = secure_append(&paths.logs.join("pamd.error.log"))?;
+    let stdout = secure_append(&paths.logs.join("pamd.out.log"))?;
+    let mut command = Command::new(executable);
+    command
+        .arg("__pamd")
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr);
+    // SAFETY: the child is single-threaded between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    };
+    command
+        .spawn()
+        .map_err(|error| format!("cannot start pamd: {error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        if let Ok(response) = daemon_request(DaemonOperation::Ping) {
+            return Ok(response);
+        }
+        thread::sleep(Duration::from_millis(50));
+    }
+    Err("pamd did not become ready; inspect pamd.error.log".to_owned())
 }
 
 fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
@@ -615,29 +677,118 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
     }
     let own_uid = unsafe { libc::geteuid() };
     for connection in listener.incoming() {
-        let mut stream = connection.map_err(|error| error.to_string())?;
-        if peer_uid(&stream)? != own_uid {
+        let mut stream = match connection {
+            Ok(stream) => stream,
+            Err(error) => {
+                eprintln!("pamd accept error: {error}");
+                continue;
+            }
+        };
+        let (response, stop) = match handle_daemon_request(executable, &mut stream, own_uid) {
+            Ok(result) => result,
+            Err(error) => (daemon_error_response(error), false),
+        };
+        if let Err(error) = serde_json::to_writer(&mut stream, &response) {
+            eprintln!("pamd response error: {error}");
             continue;
         }
-        let request = read_daemon_request(&mut stream)?;
-        let operation = request.operation_code;
-        let stop = operation == DaemonOperation::Stop as u8;
-        let valid = request.schema_version == 1
-            && matches!(operation, value if value == DaemonOperation::Ping as u8 || value == DaemonOperation::Stop as u8);
-        let response = DaemonResponse {
-            schema_version: 1,
-            ok: valid,
-            pid: std::process::id(),
-            message: if valid { "ok" } else { "unsupported request" }.to_owned(),
-        };
-        serde_json::to_writer(&mut stream, &response).map_err(|error| error.to_string())?;
-        stream.write_all(b"\n").map_err(|error| error.to_string())?;
-        if valid && stop {
+        if let Err(error) = stream.write_all(b"\n") {
+            eprintln!("pamd response error: {error}");
+        }
+        if stop && response.ok {
             break;
         }
     }
     fs::remove_file(&socket).map_err(|error| format!("cannot remove daemon socket: {error}"))?;
     Ok(0)
+}
+
+fn handle_daemon_request(
+    executable: &OsStr,
+    stream: &mut UnixStream,
+    own_uid: libc::uid_t,
+) -> Result<(DaemonResponse, bool), String> {
+    if peer_uid(stream)? != own_uid {
+        return Err("peer UID does not own this pamd".to_owned());
+    }
+    let request = read_daemon_request(stream)?;
+    if request.schema_version != 1 {
+        return Err("unsupported daemon schema".to_owned());
+    }
+    let operation = request.operation_code;
+    if operation == DaemonOperation::Ping as u8 || operation == DaemonOperation::Stop as u8 {
+        return Ok((
+            daemon_success_response(),
+            operation == DaemonOperation::Stop as u8,
+        ));
+    }
+    if operation != DaemonOperation::Execute as u8 {
+        return Err("unsupported daemon operation".to_owned());
+    }
+    let command = request
+        .command
+        .ok_or_else(|| "execute requires command".to_owned())?;
+    if !daemon_managed_command(&command) || request.arguments.len() > 256 {
+        return Err("command is not allowed through pamd".to_owned());
+    }
+    let cwd = request
+        .working_directory
+        .ok_or_else(|| "execute requires cwd".to_owned())?;
+    let cwd =
+        fs::canonicalize(cwd).map_err(|error| format!("cannot resolve client cwd: {error}"))?;
+    if !cwd.is_dir() {
+        return Err("client cwd is not a directory".to_owned());
+    }
+    let output = Command::new(executable)
+        .arg("__manager_local")
+        .arg(&command)
+        .args(&request.arguments)
+        .current_dir(cwd)
+        .output()
+        .map_err(|error| format!("cannot execute manager command: {error}"))?;
+    let stdout =
+        String::from_utf8(output.stdout).map_err(|_| "manager stdout is not UTF-8".to_owned())?;
+    let stderr =
+        String::from_utf8(output.stderr).map_err(|_| "manager stderr is not UTF-8".to_owned())?;
+    if stdout.len() + stderr.len() > MAX_DAEMON_RESPONSE_BYTES as usize {
+        return Err("manager response exceeds 2 MiB".to_owned());
+    }
+    Ok((
+        DaemonResponse {
+            schema_version: 1,
+            ok: true,
+            pid: std::process::id(),
+            message: "ok".to_owned(),
+            exit_code: output.status.code().unwrap_or(1).try_into().unwrap_or(1),
+            stdout,
+            stderr,
+        },
+        false,
+    ))
+}
+
+fn daemon_success_response() -> DaemonResponse {
+    DaemonResponse {
+        schema_version: 1,
+        ok: true,
+        pid: std::process::id(),
+        message: "ok".to_owned(),
+        exit_code: 0,
+        stdout: String::new(),
+        stderr: String::new(),
+    }
+}
+
+fn daemon_error_response(message: String) -> DaemonResponse {
+    DaemonResponse {
+        schema_version: 1,
+        ok: false,
+        pid: std::process::id(),
+        message,
+        exit_code: 1,
+        stdout: String::new(),
+        stderr: String::new(),
+    }
 }
 
 fn daemon_request(operation: DaemonOperation) -> Result<DaemonResponse, String> {
@@ -648,6 +799,9 @@ fn daemon_request(operation: DaemonOperation) -> Result<DaemonResponse, String> 
         &DaemonRequest {
             schema_version: 1,
             operation_code: operation as u8,
+            command: None,
+            arguments: Vec::new(),
+            working_directory: None,
         },
     )
     .map_err(|error| error.to_string())?;
@@ -655,12 +809,64 @@ fn daemon_request(operation: DaemonOperation) -> Result<DaemonResponse, String> 
     stream
         .shutdown(Shutdown::Write)
         .map_err(|error| error.to_string())?;
-    let response: DaemonResponse =
-        serde_json::from_reader(stream).map_err(|error| error.to_string())?;
+    let response = read_daemon_response(stream)?;
     if response.schema_version != 1 || !response.ok {
         return Err(response.message);
     }
     Ok(response)
+}
+
+fn daemon_execute(command: &str, arguments: Vec<OsString>) -> Result<u8, String> {
+    let arguments = arguments
+        .into_iter()
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|_| "pamd arguments must be UTF-8".to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let request = DaemonRequest {
+        schema_version: 1,
+        operation_code: DaemonOperation::Execute as u8,
+        command: Some(command.to_owned()),
+        arguments,
+        working_directory: Some(std::env::current_dir().map_err(|error| error.to_string())?),
+    };
+    let bytes = serde_json::to_vec(&request).map_err(|error| error.to_string())?;
+    if bytes.len() > MAX_DAEMON_MESSAGE_BYTES {
+        return Err("daemon request exceeds size limit".to_owned());
+    }
+    let mut stream = UnixStream::connect(daemon_socket_path()?)
+        .map_err(|error| format!("cannot connect to pamd: {error}"))?;
+    stream
+        .write_all(&bytes)
+        .map_err(|error| error.to_string())?;
+    stream
+        .shutdown(Shutdown::Write)
+        .map_err(|error| error.to_string())?;
+    let response = read_daemon_response(stream)?;
+    if response.schema_version != 1 || !response.ok {
+        return Err(response.message);
+    }
+    std::io::stdout()
+        .write_all(response.stdout.as_bytes())
+        .map_err(|error| error.to_string())?;
+    std::io::stderr()
+        .write_all(response.stderr.as_bytes())
+        .map_err(|error| error.to_string())?;
+    Ok(response.exit_code)
+}
+
+fn read_daemon_response(stream: UnixStream) -> Result<DaemonResponse, String> {
+    let mut bytes = Vec::new();
+    stream
+        .take(MAX_DAEMON_RESPONSE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_DAEMON_RESPONSE_BYTES {
+        return Err("daemon response exceeds 2 MiB".to_owned());
+    }
+    serde_json::from_slice(&bytes).map_err(|error| error.to_string())
 }
 
 fn read_daemon_request(stream: &mut UnixStream) -> Result<DaemonRequest, String> {
@@ -1483,6 +1689,14 @@ mod tests {
     }
     #[test]
     fn public_integer_codes_are_sequential() {
+        assert_eq!(
+            [
+                DaemonOperation::Ping as u8,
+                DaemonOperation::Stop as u8,
+                DaemonOperation::Execute as u8,
+            ],
+            [1, 2, 3]
+        );
         assert_eq!(
             [
                 ApplicationKind::Runtime as u8,
