@@ -175,6 +175,21 @@ serialization from PHP/application bootstrap cost. The master checks worker
 state every 5 ms during startup, down from 20 ms, without changing the 10 ms
 accept-loop safety delay inside each worker.
 
+The [first hosted run with startup diagnostics](https://github.com/push-in/pam/actions/runs/32510174077)
+on clean Linux commit `1d2bc51` recovered all 30/30 masters and passed every
+gate. For 1, 4 and 16 workers, total p50/p95 was 172/176 ms, 239/245 ms and
+560/615 ms; readiness p50/p95 was 92/92 ms, 153/155 ms and 463/507 ms. Spawn
+spread p50/p95 was 0/0 ms, 1/2 ms and 25/36 ms, while spawn-to-ready p50/p95
+was 76/80 ms, 135/139 ms and 441/479 ms. Daemon RSS growth remained below
+1 MiB in every configuration. The downloaded bundle independently verified all
+20 artifacts against the clean source commit. Compared with the preceding
+hosted run, total p95 changed by +7/+4/+35 ms and readiness p95 by 0/-10/+22 ms;
+therefore this single paired run does not establish a polling-driven latency
+improvement. It does establish that process-launch spread is a small part of
+the 16-worker critical path: concurrent PHP/application bootstrap dominates.
+The next optimization must target measured bootstrap work or safe reuse while
+retaining worker isolation and complete-generation readiness.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`
