@@ -169,11 +169,12 @@ the desired endpoint.
 
 Suite `8` compares the compatible host-extension profile with an explicit,
 fixture-minimal extension profile at 16 workers. It keeps the 650 ms total and
-550 ms readiness budgets, and uses a 250 ms effective-backoff envelope because
-that phase includes daemon scheduling delay under simultaneous worker startup.
+550 ms readiness budgets, a 25 ms detection envelope and a 250 ms
+effective-backoff envelope because these phases include daemon scheduling delay
+while sixteen workers terminate and start simultaneously.
 The extension optimization itself remains guarded by equal successful round
 counts and by requiring the isolated PHP-engine p95 to be no slower. The normal
-suite-5 and suite-7 backoff gate remains 20 ms.
+suite-5 and suite-7 detection/backoff gates remain 10/20 ms.
 
 The [first passing hosted suite-8 run](https://github.com/push-in/pam/actions/runs/32515500047)
 on clean Linux commit `38e0781` recovered both profiles 10/10. Compatible versus
