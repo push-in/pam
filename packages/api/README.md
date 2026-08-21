@@ -187,6 +187,30 @@ The middleware emits limit/remaining/retry headers and a Problem Details `429`
 response. Applications behind proxies must supply a key resolver that trusts
 only their explicitly configured proxy boundary.
 
+## Signed bearer tokens
+
+`HmacTokenCodec` provides a strict HS256 access-token foundation with bounded
+token/payload sizes, constant-time signature and issuer/audience checks,
+`iat`/`nbf`/`exp` validation, unique token IDs and abilities:
+
+```php
+$tokens = new HmacTokenCodec(
+    secret: $secretFromYourSecretManager,
+    issuer: 'https://auth.example.com',
+    audience: 'orders-api',
+);
+$app->middleware(new AuthenticateMiddleware(
+    new BearerTokenAuthenticator($tokens),
+    $app->container(),
+));
+```
+
+Signing secrets must contain at least 32 bytes and must not be stored in source
+control. Access tokens are capped at 24 hours. Refresh-token rotation,
+revocation and OAuth/OIDC authorization-server duties belong to the application
+or a dedicated identity provider; they must not be simulated with long-lived
+access tokens.
+
 ## Production building blocks
 
 PAM API exposes small, replaceable contracts instead of choosing application

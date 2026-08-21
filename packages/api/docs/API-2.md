@@ -70,6 +70,7 @@ The `feat/api-2-foundation` development line implements:
 - PHPUnit and PHPStan level 9 verification;
 - pluggable rate-limit stores with a bounded in-memory token bucket fallback;
 - authenticators, request-scoped principals, abilities and authorization;
+- strict signed bearer access tokens with temporal, issuer and audience checks;
 - idempotency and response-cache stores with bounded memory implementations;
 - route model binding and custom binding resolvers;
 - OpenAPI 3.1, compatibility checks and TypeScript/Kotlin/Swift clients;
