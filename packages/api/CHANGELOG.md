@@ -19,6 +19,7 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - bounded route configuration and PCRE match/depth budgets;
 - an executable reflection-derived public API compatibility baseline enforced
   by Composer and required CI;
+- a deterministic 118-symbol public API reference checked by Composer;
 - an executable upgrade fixture bound to the published 1.0.2 source commit;
 - built-in fluent test assertions for successful responses, headers and exact
   JSON payloads, used by the canonical structured starter;

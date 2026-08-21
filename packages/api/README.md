@@ -209,6 +209,15 @@ after approving a compatible public addition. A breaking baseline update is
 reserved for an intentional major version whose migration guide and changelog
 are ready.
 
+The same reviewed baseline generates the complete
+[public API reference](docs/PUBLIC-API.md). `composer verify` rejects stale
+reference output; regenerate it only after explicitly accepting compatible API
+additions:
+
+```bash
+composer docs:generate
+```
+
 See the [PAM API 2 design and delivery contract](docs/API-2.md) for the complete
 15-track implementation plan and current delivery status.
 

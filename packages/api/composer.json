@@ -51,11 +51,14 @@
     "scripts": {
         "analyse": "phpstan analyse --configuration=phpstan.neon --memory-limit=1G",
         "api:compat": "bin/api-compat check",
+        "docs:check": "bin/api-reference --check",
+        "docs:generate": "bin/api-reference --write",
         "benchmark": "php benchmarks/router.php",
         "test": "phpunit --configuration=phpunit.xml",
         "verify": [
             "@analyse",
             "@api:compat",
+            "@docs:check",
             "@test"
         ]
     },
