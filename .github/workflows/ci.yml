@@ -55,9 +55,19 @@ jobs:
           php-version: '8.4'
           tools: composer:v2
       - name: Install PHP Embed development package
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: |
-          timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php
+          repository_added=false
+          for attempt in 1 2 3; do
+            if timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php; then
+              repository_added=true
+              break
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              sleep "$((attempt * 5))"
+            fi
+          done
+          test "${repository_added}" = true
           sudo sed -i \
             's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/apt-mirrors.txt
@@ -118,6 +128,7 @@ jobs:
             tests.test_distribution_contract \
             tests.test_ecosystem_compatibility \
             tests.test_product_visual_evidence \
+            tests.test_process_manager_evidence_workflow \
             tests.test_runtime_distribution_workflow \
             tests.test_visual_workflows
       - name: Lint
@@ -269,6 +280,13 @@ jobs:
           fi
           ./target/debug/pam support tests/fixtures/hello.php \
             >"${PAM_DOCTOR_EVIDENCE}/support-runtime.json"
+          PAM_MANAGER_STATE_DIR="${RUNNER_TEMP}/pam-support-manager-state" \
+          PAM_MANAGER_RUNTIME_DIR="${RUNNER_TEMP}/pam-support-manager-runtime" \
+            ./target/debug/pam support tests/fixtures/hello.php --manager \
+            >"${PAM_DOCTOR_EVIDENCE}/support-manager.json"
+          PAM_MANAGER_STATE_DIR="${RUNNER_TEMP}/pam-support-manager-state" \
+          PAM_MANAGER_RUNTIME_DIR="${RUNNER_TEMP}/pam-support-manager-runtime" \
+            ./target/debug/pam daemon stop
           python3 - "${PAM_DOCTOR_EVIDENCE}" "${support_project}" "${HOME}" <<'PY'
           import hashlib
           import json
@@ -278,7 +296,7 @@ jobs:
           evidence = Path(sys.argv[1])
           secrets = [sys.argv[2], sys.argv[3], "source-file-secret-must-not-leak",
                      "environment-secret-must-not-leak", "PAM_SUPPORT_PRIVATE_VALUE"]
-          for name in ["support-product.json", "support-runtime.json"]:
+          for name in ["support-product.json", "support-runtime.json", "support-manager.json"]:
               raw = (evidence / name).read_bytes()
               assert len(raw) <= 512 * 1024
               text = raw.decode("utf-8")
@@ -287,6 +305,7 @@ jobs:
               assert set(report) == {
                   "schemaVersion", "resultCode", "surfaceCode", "generatedAtUnixMs",
                   "pamVersion", "host", "privacy", "diagnosticsSha256", "diagnostics",
+                  "managerSha256", "manager",
               }
               assert report["schemaVersion"] == 1
               assert report["resultCode"] in [1, 2]
@@ -294,12 +313,22 @@ jobs:
               assert report["privacy"] == {
                   "redactionCode": 1, "includesEnvironment": False,
                   "includesFileContents": False, "includesNetworkData": False,
+                  "includesProcessMetadata": name == "support-manager.json",
+                  "includesLogContents": False,
                   "pathToken": "$PROJECT",
               }
               canonical = json.dumps(
                   report["diagnostics"], separators=(",", ":"), ensure_ascii=False
               ).encode("utf-8")
               assert hashlib.sha256(canonical).hexdigest() == report["diagnosticsSha256"]
+              if name == "support-manager.json":
+                  manager = json.dumps(
+                      report["manager"], separators=(",", ":"), ensure_ascii=False
+                  ).encode("utf-8")
+                  assert hashlib.sha256(manager).hexdigest() == report["managerSha256"]
+              else:
+                  assert report["manager"] is None
+                  assert report["managerSha256"] is None
           assert "$PROJECT" in (evidence / "support-product.json").read_text()
           assert "cannot create new support report" in (evidence / "support-overwrite.log").read_text()
           PY
@@ -312,7 +341,7 @@ jobs:
             cd "${PAM_DOCTOR_EVIDENCE}"
             sha256sum desktop-host.json desktop-host.schema.json project.json \
               provenance.json runtime.json schema.json support-product.json \
-              support-runtime.json >SHA256SUMS
+              support-runtime.json support-manager.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
       - uses: actions/upload-artifact@v4

@@ -21,6 +21,7 @@ mod doctor_contract;
 mod ecosystem;
 mod editor;
 mod ingress;
+mod manager_dashboard;
 mod mobile;
 mod octane;
 mod otlp;
@@ -648,6 +649,11 @@ fn run() -> Result<u8, CliError> {
             | "resurrect"
             | "startup"
             | "monit"
+            | "monit:history"
+            | "dashboard"
+            | "dashboard:start"
+            | "dashboard:status"
+            | "dashboard:stop"
             | "apply"
             | "config:check"
             | "deploy"
@@ -664,6 +670,7 @@ fn run() -> Result<u8, CliError> {
             | "__pamd"
             | "__manager_local"
             | "__traffic_proxy"
+            | "__manager_dashboard_server"
     ) || managed_logs
     {
         let command = script_arg.to_string_lossy();

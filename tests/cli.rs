@@ -39,6 +39,7 @@ fn run_managed_pam(
     Command::new(env!("CARGO_BIN_EXE_pam"))
         .current_dir(directory)
         .env("PAM_MANAGER_STATE_DIR", state)
+        .env("PAM_MANAGER_RUNTIME_DIR", state.join("runtime"))
         .env("PAM_TEST_PORT", port.to_string())
         .args(arguments)
         .output()
@@ -136,6 +137,24 @@ fn traffic_request(port: u16, affinity: &str) -> String {
     response
 }
 
+fn manager_dashboard_request(port: u16, path: &str, authorization: Option<&str>) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let authorization = authorization
+        .map(|value| format!("Authorization: {value}\r\n"))
+        .unwrap_or_default();
+    stream
+        .write_all(
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{authorization}Connection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
 fn css_hex(styles: &str, property: &str) -> [f64; 3] {
     let prefix = format!("{property}: #");
     let value = styles
@@ -218,6 +237,156 @@ fn creates_and_verifies_benchmark_evidence_manifests() {
 }
 
 #[test]
+fn creates_and_verifies_manager_recovery_evidence() {
+    let results = temporary_path("manager-recovery-evidence");
+    fs::create_dir_all(&results).unwrap();
+    fs::write(
+        results.join("metadata.json"),
+        r#"{"source":{"commit":"abc","dirty":false},"parameters":{"rounds":3}}"#,
+    )
+    .unwrap();
+    fs::write(
+        results.join("recovery.csv"),
+        "round,recovery_millis,success\n1,100,1\n2,150,1\n3,200,1\n",
+    )
+    .unwrap();
+    fs::write(
+        results.join("resources.json"),
+        r#"{"daemon_rss_before_bytes":1000000,"daemon_rss_after_bytes":2000000}"#,
+    )
+    .unwrap();
+    let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/recovery-report.php");
+    let reported = run_pam(&[
+        report_path.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "500",
+        "2000000",
+    ]);
+    assert!(reported.status.success());
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
+    assert_eq!(report["suite_code"], 5);
+    assert_eq!(report["recovery_millis"]["p50"], 150);
+    assert_eq!(report["recovery_millis"]["p95"], 200);
+    assert_eq!(report["gate_codes"]["success"], 1);
+    assert_eq!(report["passed"], true);
+    let failed_gate = run_pam(&[
+        report_path.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "100",
+        "2000000",
+    ]);
+    assert!(!failed_gate.status.success());
+    let failed_report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
+    assert_eq!(failed_report["gate_codes"]["latency"], 2);
+    assert_eq!(failed_report["passed"], false);
+    assert!(
+        run_pam(&[
+            report_path.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "500",
+            "2000000",
+        ])
+        .status
+        .success()
+    );
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "5"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "5",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::write(results.join("recovery.csv"), "tampered\n").unwrap();
+    assert!(
+        !run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "5",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn compares_pam_and_pm2_recovery_without_conflating_topologies() {
+    let results = temporary_path("manager-recovery-comparison");
+    for system in ["pam", "pm2"] {
+        fs::create_dir_all(results.join(system)).unwrap();
+        fs::write(
+            results.join(system).join("resources.json"),
+            r#"{"daemon_rss_before_bytes":1000000,"daemon_rss_after_bytes":1250000}"#,
+        )
+        .unwrap();
+    }
+    fs::write(
+        results.join("pam/recovery.csv"),
+        "round,recovery_millis,success\n1,600,1\n2,650,1\n3,700,1\n",
+    )
+    .unwrap();
+    fs::write(
+        results.join("pm2/recovery.csv"),
+        "round,recovery_millis,success\n1,100,1\n2,110,1\n3,120,1\n",
+    )
+    .unwrap();
+    fs::write(
+        results.join("metadata.json"),
+        r#"{"source":{"commit":"abc","dirty":false},"parameters":{"rounds":3}}"#,
+    )
+    .unwrap();
+    let report = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/comparison-report.php");
+    assert!(
+        run_pam(&[report.to_str().unwrap(), results.to_str().unwrap()])
+            .status
+            .success()
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("comparison-report.json")).unwrap()).unwrap();
+    assert_eq!(report["suite_code"], 6);
+    assert_eq!(report["systems"]["pam"]["topology_code"], 1);
+    assert_eq!(report["systems"]["pm2"]["topology_code"], 2);
+    assert_eq!(report["comparison"]["p95_delta_millis"], 580);
+    assert_eq!(report["comparison"]["rss_not_directly_comparable"], true);
+    assert_eq!(report["passed"], true);
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "6"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "6",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
 fn records_reproducible_soak_metadata() {
     let results = temporary_path("soak-metadata");
     fs::create_dir_all(&results).unwrap();
@@ -269,12 +438,44 @@ fn records_reproducible_soak_metadata() {
 #[test]
 fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     let state = temporary_path("process-manager-state");
+    fs::create_dir_all(&state).unwrap();
+    let environment_file = state.join("managed.env");
+    fs::write(&environment_file, "PAM_TEST_MANAGED_ENV='private-value'\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&environment_file, fs::Permissions::from_mode(0o644)).unwrap();
+    }
     let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = probe.local_addr().unwrap().port();
     drop(probe);
+    let live_probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let live_port = live_probe.local_addr().unwrap().port();
+    drop(live_probe);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script = fixture("server.php");
     let script = script.to_str().unwrap();
+
+    let weak_environment = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "up",
+            script,
+            "--name",
+            "managed-smoke",
+            "--env-file",
+            environment_file.to_str().unwrap(),
+        ],
+    );
+    assert!(!weak_environment.status.success());
+    assert!(String::from_utf8_lossy(&weak_environment.stderr).contains("mode 0600"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&environment_file, fs::Permissions::from_mode(0o600)).unwrap();
+    }
 
     let started = run_managed_pam(
         &root,
@@ -287,6 +488,75 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "managed-smoke",
             "--workers",
             "1",
+            "--env-file",
+            environment_file.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let started_snapshot: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let original_pid = started_snapshot["pid"].as_u64().unwrap() as i32;
+    unsafe {
+        libc::kill(original_pid, libc::SIGKILL);
+    }
+    let recovered = (0..60)
+        .find_map(|_| {
+            thread::sleep(Duration::from_millis(100));
+            let output =
+                run_managed_pam(&root, &state, port, &["status", "managed-smoke", "--json"]);
+            let snapshot: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+            (output.status.success()
+                && snapshot["pid"].as_u64() != Some(original_pid as u64)
+                && snapshot["recovery"]["totalAutoRestartCount"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    >= 1)
+                .then_some(snapshot)
+        })
+        .expect("pamd should recover an unexpectedly killed master");
+    assert_eq!(recovered["desiredStateCode"], 1);
+    assert_eq!(recovered["recovery"]["stateCode"], 3);
+    assert_eq!(recovered["environmentFileConfigured"], true);
+    assert!(!recovered.to_string().contains("private-value"));
+    assert!(
+        !recovered
+            .to_string()
+            .contains(environment_file.to_str().unwrap())
+    );
+    let environment_response = manager_dashboard_request(port, "/managed-env", None);
+    assert!(environment_response.contains("private-value"));
+    fs::write(
+        state.join("logs/managed-smoke.out.log.1"),
+        "needle-old-output\n",
+    )
+    .unwrap();
+    fs::write(
+        state.join("logs/managed-smoke.out.log"),
+        "ignored\nneedle-new-output\n",
+    )
+    .unwrap();
+    fs::write(
+        state.join("logs/managed-smoke.error.log"),
+        "needle-new-error\n",
+    )
+    .unwrap();
+    let queried_logs = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "logs",
+            "managed-smoke",
+            "--both",
+            "--include-rotated",
+            "--query",
+            "needle-",
+            "--lines",
+            "3",
             "--json",
         ],
     );
@@ -299,17 +569,133 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     );
     let reloaded = run_managed_pam(&root, &state, port, &["reload", "managed-smoke", "--json"]);
     let restarted = run_managed_pam(&root, &state, port, &["restart", "managed-smoke", "--json"]);
+    let daemon_recycled = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
+    assert!(daemon_recycled.status.success());
+    let daemon_restarted = run_managed_pam(&root, &state, port, &["daemon", "start"]);
+    assert!(daemon_restarted.status.success());
+    let automatic_history = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["monit:history", "managed-smoke", "--json"],
+    );
+    assert!(automatic_history.status.success());
+    let automatic_history: serde_json::Value =
+        serde_json::from_slice(&automatic_history.stdout).unwrap();
+    assert_eq!(
+        automatic_history["applications"][0]["entries"][0]["stateCode"],
+        1
+    );
+    let history_recorded = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["monit:history", "managed-smoke", "--record", "--json"],
+    );
+    let dashboard_token = state.join("dashboard-token");
+    let token = "0123456789abcdef0123456789abcdef";
+    fs::write(&dashboard_token, token).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dashboard_token, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let weak_token_rejected = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "dashboard:start",
+            "--listen",
+            &format!("127.0.0.1:{live_port}"),
+            "--token-file",
+            dashboard_token.to_str().unwrap(),
+        ],
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dashboard_token, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let live_started = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "dashboard:start",
+            "--listen",
+            &format!("127.0.0.1:{live_port}"),
+            "--token-file",
+            dashboard_token.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        live_started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&live_started.stderr)
+    );
+    let unauthorized_dashboard = manager_dashboard_request(live_port, "/", None);
+    let wrong_dashboard = manager_dashboard_request(live_port, "/", Some("Bearer wrong"));
+    let authorized_dashboard =
+        manager_dashboard_request(live_port, "/", Some(&format!("Bearer {token}")));
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("pam:{token}"));
+    let healthy_dashboard =
+        manager_dashboard_request(live_port, "/health", Some(&format!("Basic {basic}")));
+    let live_status = run_managed_pam(&root, &state, port, &["dashboard:status", "--json"]);
+    let live_config = fs::read_to_string(state.join("live-dashboard.json")).unwrap();
+    let remote_rejected = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "dashboard:start",
+            "--listen",
+            "0.0.0.0:9616",
+            "--token-file",
+            dashboard_token.to_str().unwrap(),
+        ],
+    );
+    let live_stopped = run_managed_pam(&root, &state, port, &["dashboard:stop", "--json"]);
+    let stopped_status = run_managed_pam(&root, &state, port, &["dashboard:status", "--json"]);
+    let dashboard = state.join("managed-dashboard.html");
+    let dashboard_created = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["dashboard", "--output", dashboard.to_str().unwrap()],
+    );
+    let dashboard_overwrite = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["dashboard", "--output", dashboard.to_str().unwrap()],
+    );
+    let history_path = state.join("history/managed-smoke.json");
+    let history_bytes = fs::read(&history_path).unwrap();
+    #[cfg(unix)]
+    let history_mode = {
+        use std::os::unix::fs::PermissionsExt;
+        fs::metadata(&history_path).unwrap().permissions().mode() & 0o777
+    };
     let saved = run_managed_pam(&root, &state, port, &["save", "--json"]);
     let stopped = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
+    thread::sleep(Duration::from_millis(600));
+    let intentionally_stopped =
+        run_managed_pam(&root, &state, port, &["status", "managed-smoke", "--json"]);
     let resurrected = run_managed_pam(&root, &state, port, &["resurrect", "--json"]);
     let stopped_again = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
     let deleted = run_managed_pam(&root, &state, port, &["delete", "managed-smoke", "--json"]);
 
-    assert!(
-        started.status.success(),
-        "{}",
-        String::from_utf8_lossy(&started.stderr)
-    );
+    assert!(queried_logs.status.success());
+    let queried_logs: serde_json::Value = serde_json::from_slice(&queried_logs.stdout).unwrap();
+    assert_eq!(queried_logs["schemaVersion"], 1);
+    assert_eq!(queried_logs["entries"].as_array().unwrap().len(), 3);
+    assert_eq!(queried_logs["entries"][0]["rotatedIndex"], 1);
+    assert_eq!(queried_logs["entries"][0]["streamCode"], 1);
+    assert_eq!(queried_logs["entries"][2]["streamCode"], 2);
+    assert_eq!(queried_logs["truncated"], false);
+    assert!(!queried_logs.to_string().contains("/logs/"));
     assert!(
         listed.status.success(),
         "{}",
@@ -330,6 +716,87 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&restarted.stderr)
     );
+    assert!(history_recorded.status.success());
+    let resource_history: serde_json::Value =
+        serde_json::from_slice(&history_recorded.stdout).unwrap();
+    assert_eq!(resource_history["schemaVersion"], 1);
+    assert_eq!(resource_history["sampleIntervalSeconds"], 60);
+    assert_eq!(resource_history["retentionLimit"], 120);
+    assert_eq!(resource_history["applications"][0]["name"], "managed-smoke");
+    assert_eq!(
+        resource_history["applications"][0]["entries"][0]["stateCode"],
+        1
+    );
+    assert!(
+        resource_history["applications"][0]["entries"][0]["rssBytes"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    assert!(history_bytes.len() < 1024 * 1024);
+    let history_text = String::from_utf8(history_bytes).unwrap();
+    assert!(!history_text.contains(script));
+    assert!(!history_text.contains("needle-new-output"));
+    #[cfg(unix)]
+    assert_eq!(history_mode, 0o600);
+    assert!(unauthorized_dashboard.starts_with("HTTP/1.1 401 Unauthorized"));
+    assert!(!weak_token_rejected.status.success());
+    assert!(String::from_utf8_lossy(&weak_token_rejected.stderr).contains("owner-only"));
+    assert!(unauthorized_dashboard.contains("WWW-Authenticate: Basic"));
+    assert!(wrong_dashboard.starts_with("HTTP/1.1 401 Unauthorized"));
+    assert!(authorized_dashboard.starts_with("HTTP/1.1 200 OK"));
+    assert!(authorized_dashboard.contains("Content-Security-Policy: default-src 'none'"));
+    assert!(authorized_dashboard.contains("Cache-Control: no-store"));
+    assert!(authorized_dashboard.contains("Live local view"));
+    assert!(authorized_dashboard.contains("managed-smoke"));
+    assert!(!authorized_dashboard.contains(script));
+    assert!(!authorized_dashboard.contains(token));
+    assert!(!authorized_dashboard.contains("<script"));
+    assert!(healthy_dashboard.starts_with("HTTP/1.1 200 OK"));
+    assert!(healthy_dashboard.contains("\"stateCode\":1"));
+    assert!(live_status.status.success());
+    let live_status: serde_json::Value = serde_json::from_slice(&live_status.stdout).unwrap();
+    assert_eq!(live_status["stateCode"], 1);
+    assert_eq!(live_status["online"], true);
+    assert!(!live_status.to_string().contains(token));
+    assert!(!live_config.contains(token));
+    assert!(!live_config.contains(dashboard_token.to_str().unwrap()));
+    assert!(!remote_rejected.status.success());
+    assert!(String::from_utf8_lossy(&remote_rejected.stderr).contains("loopback"));
+    assert!(live_stopped.status.success());
+    assert!(!stopped_status.status.success());
+    let stopped_status: serde_json::Value = serde_json::from_slice(&stopped_status.stdout).unwrap();
+    assert_eq!(stopped_status["stateCode"], 2);
+    assert!(!state.join("runtime/live-dashboard.json").exists());
+    assert!(!state.join("live-dashboard.json").exists());
+    assert!(
+        dashboard_created.status.success(),
+        "{}",
+        String::from_utf8_lossy(&dashboard_created.stderr)
+    );
+    assert!(!dashboard_overwrite.status.success());
+    assert!(
+        String::from_utf8_lossy(&dashboard_overwrite.stderr)
+            .contains("cannot create new manager dashboard")
+    );
+    let dashboard_html = fs::read_to_string(&dashboard).unwrap();
+    assert!(dashboard_html.len() < 2 * 1024 * 1024);
+    assert!(dashboard_html.contains("managed-smoke"));
+    assert!(dashboard_html.contains("Online"));
+    assert!(dashboard_html.contains("Resident memory"));
+    assert!(!dashboard_html.contains("<script"));
+    assert!(!dashboard_html.contains(script));
+    assert!(!dashboard_html.contains("needle-new-output"));
+    assert!(dashboard_html.contains("Peak RSS"));
+    assert!(dashboard_html.contains("Stable"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&dashboard).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
     assert!(
         saved.status.success(),
         "{}",
@@ -340,6 +807,12 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&stopped.stderr)
     );
+    assert!(!intentionally_stopped.status.success());
+    let intentionally_stopped: serde_json::Value =
+        serde_json::from_slice(&intentionally_stopped.stdout).unwrap();
+    assert_eq!(intentionally_stopped["stateCode"], 2);
+    assert_eq!(intentionally_stopped["desiredStateCode"], 2);
+    assert_eq!(intentionally_stopped["recovery"]["stateCode"], 5);
     assert!(
         resurrected.status.success(),
         "{}",
@@ -351,7 +824,7 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&deleted.stderr)
     );
-    let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let started = started_snapshot;
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
     let scaled: serde_json::Value = serde_json::from_slice(&scaled.stdout).unwrap();
     let restarted: serde_json::Value = serde_json::from_slice(&restarted.stdout).unwrap();
@@ -365,6 +838,7 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     assert_eq!(resurrected["resurrected"][0], "managed-smoke");
     assert_ne!(started["pid"], restarted["pid"]);
     assert!(!state.join("applications/managed-smoke.json").exists());
+    assert!(!state.join("history/managed-smoke.json").exists());
     let daemon_stopped = run_managed_pam(&root, &state, port, &["daemon", "stop"]);
     assert!(daemon_stopped.status.success());
     fs::remove_dir_all(state).unwrap();
@@ -418,6 +892,107 @@ fn manages_a_private_per_user_daemon() {
     assert!(stopped.status.success());
     assert!(!runtime.join("pamd.sock").exists());
     fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn replaces_a_live_master_after_bounded_health_check_failures() {
+    let state = temporary_path("manager-health-check");
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let health_url = format!("http://127.0.0.1:{port}/block");
+    let started = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "up",
+            fixture("server.php").to_str().unwrap(),
+            "--name",
+            "unhealthy-smoke",
+            "--health-check-url",
+            &health_url,
+            "--health-check-interval-ms",
+            "250",
+            "--health-check-timeout-ms",
+            "50",
+            "--health-check-start-period-ms",
+            "1000",
+            "--health-check-failures",
+            "2",
+            "--json",
+        ],
+    );
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let original_pid = started["pid"].as_u64().unwrap();
+    assert_eq!(started["healthCheck"]["configured"], true);
+    assert_eq!(started["healthCheck"]["stateCode"], 5);
+    assert_eq!(started["healthCheck"]["startPeriodMillis"], 1000);
+    assert!(!started.to_string().contains("/block"));
+
+    thread::sleep(Duration::from_millis(600));
+    let warming = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["status", "unhealthy-smoke", "--json"],
+    );
+    let warming: serde_json::Value = serde_json::from_slice(&warming.stdout).unwrap();
+    assert_eq!(warming["pid"].as_u64(), Some(original_pid));
+    assert_eq!(warming["healthCheck"]["stateCode"], 5);
+    assert_eq!(
+        warming["healthCheck"]["lastCheckedAtMillis"],
+        serde_json::Value::Null
+    );
+    assert_eq!(warming["healthCheck"]["totalUnhealthyRestartCount"], 0);
+
+    let recovered = (0..100)
+        .find_map(|_| {
+            thread::sleep(Duration::from_millis(100));
+            let status = run_managed_pam(
+                &root,
+                &state,
+                port,
+                &["status", "unhealthy-smoke", "--json"],
+            );
+            let snapshot: serde_json::Value = serde_json::from_slice(&status.stdout).ok()?;
+            (status.status.success()
+                && snapshot["pid"].as_u64() != Some(original_pid)
+                && snapshot["healthCheck"]["totalUnhealthyRestartCount"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    >= 1
+                && snapshot["recovery"]["totalAutoRestartCount"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    >= 1)
+                .then_some(snapshot)
+        })
+        .expect("pamd should replace a live but unhealthy master");
+    assert_eq!(recovered["desiredStateCode"], 1);
+
+    assert!(
+        run_managed_pam(&root, &state, port, &["stop", "unhealthy-smoke"])
+            .status
+            .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, port, &["delete", "unhealthy-smoke"])
+            .status
+            .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, port, &["daemon", "stop"])
+            .status
+            .success()
+    );
+    fs::remove_dir_all(state).unwrap();
 }
 
 #[test]
@@ -2386,6 +2961,8 @@ fn creates_a_bounded_redacted_support_report_without_persisting_by_default() {
     assert_eq!(report["privacy"]["includesEnvironment"], false);
     assert_eq!(report["privacy"]["includesFileContents"], false);
     assert_eq!(report["privacy"]["includesNetworkData"], false);
+    assert_eq!(report["privacy"]["includesProcessMetadata"], false);
+    assert_eq!(report["privacy"]["includesLogContents"], false);
     assert_eq!(report["diagnostics"]["target"], "$PROJECT");
     assert!(!String::from_utf8_lossy(&support.stdout).contains(target.to_str().unwrap()));
 
@@ -2394,6 +2971,40 @@ fn creates_a_bounded_redacted_support_report_without_persisting_by_default() {
         report["diagnosticsSha256"],
         format!("{:x}", Sha256::digest(diagnostics))
     );
+
+    let manager_root = temporary_path("support-manager");
+    let manager_state = manager_root.join("state");
+    let manager_runtime = manager_root.join("runtime");
+    let manager_support = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .env("PAM_MANAGER_STATE_DIR", &manager_state)
+        .env("PAM_MANAGER_RUNTIME_DIR", &manager_runtime)
+        .args(["support", target.to_str().unwrap(), "--manager"])
+        .output()
+        .unwrap();
+    assert!(manager_support.status.success());
+    let manager_report: serde_json::Value =
+        serde_json::from_slice(&manager_support.stdout).unwrap();
+    assert_eq!(manager_report["privacy"]["includesProcessMetadata"], true);
+    assert_eq!(manager_report["privacy"]["includesLogContents"], false);
+    assert_eq!(manager_report["manager"]["schemaVersion"], 1);
+    assert_eq!(
+        manager_report["manager"]["applications"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+    let manager = serde_json::to_vec(&manager_report["manager"]).unwrap();
+    assert_eq!(
+        manager_report["managerSha256"],
+        format!("{:x}", Sha256::digest(manager))
+    );
+    assert!(
+        run_manager_daemon(&manager_state, &manager_runtime, "stop")
+            .status
+            .success()
+    );
+    fs::remove_dir_all(manager_root).unwrap();
 }
 
 #[test]

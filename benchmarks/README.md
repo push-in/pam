@@ -56,3 +56,24 @@ not from an arbitrary benchmark-friendly value.
 
 Do not publish “faster than” conclusions unless raw commands, versions, hardware,
 configuration and every result round are included.
+
+## Process-manager recovery
+
+`benchmarks/process-manager/run.sh` measures full master recovery from
+`SIGKILL`, from signal dispatch until a different ready PID is observable. It
+uses an isolated manager state/runtime directory, resets recovery state before
+each round, records every latency in CSV, and gates 100% successful recovery,
+p95 latency, and daemon RSS growth.
+
+```bash
+PAM_RECOVERY_ROUNDS=10 \
+PAM_RECOVERY_MAX_P95_MILLIS=2000 \
+PAM_RECOVERY_MAX_RSS_GROWTH_BYTES=16777216 \
+benchmarks/process-manager/run.sh
+```
+
+The default output is ignored under `benchmarks/process-manager/results/` and
+contains metadata, raw measurements, resource evidence, a schema-1 report and
+a suite-5 SHA-256 manifest. The runner refuses to overwrite evidence. Set
+`PAM_RECOVERY_RESULTS` to a new directory and `PAM_BENCH_BINARY` to the exact
+candidate binary for release measurements.

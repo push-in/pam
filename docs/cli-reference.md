@@ -14,13 +14,26 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 
 - `pam dev` — Start the contextual development session.
 - `pam run` — Build and launch the active application.
-- `pam logs` — Stream logs from the active application.
+- `pam logs` — Query or follow managed application logs.
 - `pam daemon` — Manage the per-user PAM supervisor.
 - `pam scale` — Change a managed application's worker count.
 - `pam save` — Save the desired managed process list.
 - `pam resurrect` — Restore the saved managed process list.
 - `pam startup` — Generate or install the Linux user service.
 - `pam monit` — Show managed process health and capacity.
+## Observe
+
+- `pam monit:history` — Inspect bounded process resource history.
+## Develop
+
+- `pam dashboard` — Create a private manager health dashboard.
+## Observe
+
+- `pam dashboard:start` — Start the authenticated local live dashboard.
+- `pam dashboard:status` — Inspect the local live dashboard service.
+- `pam dashboard:stop` — Stop the local live dashboard service.
+## Develop
+
 - `pam apply` — Reconcile applications from pam.toml.
 - `pam config:check` — Validate a pam.toml ecosystem contract.
 ## Ship
@@ -89,7 +102,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Runtime
 
 - `pam start` — Run a supervised server cluster.
-- `pam up` — Start and register an application in the background.
+- `pam up` — Start an environment-aware, health-supervised application.
 - `pam ps` — List managed PAM applications.
 - `pam status` — Inspect managed application health.
 - `pam describe` — Describe a managed application.

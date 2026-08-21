@@ -127,6 +127,12 @@ impl CommandSpec {
                 | "distribution:verify"
                 | "doctor"
                 | "info"
+                | "logs"
+                | "monit"
+                | "monit:history"
+                | "dashboard:start"
+                | "dashboard:status"
+                | "dashboard:stop"
                 | "packages"
                 | "top"
         )
@@ -151,7 +157,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         ),
         command("dev", "Start the contextual development session", "Develop"),
         command("run", "Build and launch the active application", "Develop"),
-        command("logs", "Stream logs from the active application", "Develop"),
+        command(
+            "logs",
+            "Query or follow managed application logs",
+            "Develop",
+        ),
         command("daemon", "Manage the per-user PAM supervisor", "Develop"),
         command(
             "scale",
@@ -173,6 +183,31 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "monit",
             "Show managed process health and capacity",
             "Develop",
+        ),
+        command(
+            "monit:history",
+            "Inspect bounded process resource history",
+            "Observe",
+        ),
+        command(
+            "dashboard",
+            "Create a private manager health dashboard",
+            "Develop",
+        ),
+        command(
+            "dashboard:start",
+            "Start the authenticated local live dashboard",
+            "Observe",
+        ),
+        command(
+            "dashboard:status",
+            "Inspect the local live dashboard service",
+            "Observe",
+        ),
+        command(
+            "dashboard:stop",
+            "Stop the local live dashboard service",
+            "Observe",
         ),
         command("apply", "Reconcile applications from pam.toml", "Develop"),
         command(
@@ -298,7 +333,7 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("start", "Run a supervised server cluster", "Runtime"),
         command(
             "up",
-            "Start and register an application in the background",
+            "Start an environment-aware, health-supervised application",
             "Runtime",
         ),
         command("ps", "List managed PAM applications", "Runtime"),

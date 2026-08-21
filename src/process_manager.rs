@@ -1,19 +1,22 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::Shutdown;
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::cluster::{
     MasterState, RELOAD_SIGNAL, STOP_SIGNAL, master_is_running, read_master_state, signal_master,
@@ -27,6 +30,28 @@ const MAX_LOG_RETAIN: usize = 100;
 const MAX_DAEMON_MESSAGE_BYTES: usize = 16 * 1024;
 const MAX_DAEMON_RESPONSE_BYTES: u64 = 2 * 1024 * 1024;
 const MAX_DEPLOY_HISTORY: usize = 50;
+const MAX_DASHBOARD_BYTES: usize = 2 * 1024 * 1024;
+const MAX_RESOURCE_HISTORY: usize = 120;
+const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
+const SUPERVISION_INTERVAL: Duration = Duration::from_millis(250);
+const DEFAULT_RESTART_DELAY_MILLIS: u64 = 250;
+const DEFAULT_RESTART_BACKOFF_MAX_MILLIS: u64 = 15_000;
+const DEFAULT_MAX_UNSTABLE_RESTARTS: u32 = 10;
+const DEFAULT_MIN_UPTIME_MILLIS: u64 = 30_000;
+const DEFAULT_HEALTH_INTERVAL_MILLIS: u64 = 5_000;
+const DEFAULT_HEALTH_TIMEOUT_MILLIS: u64 = 1_000;
+const DEFAULT_HEALTH_FAILURE_THRESHOLD: u32 = 3;
+const MAX_HEALTH_START_PERIOD_MILLIS: u64 = 3_600_000;
+const DEFAULT_SHUTDOWN_TIMEOUT_MILLIS: u64 = 20_000;
+const MIN_SHUTDOWN_TIMEOUT_MILLIS: u64 = 100;
+const MAX_SHUTDOWN_TIMEOUT_MILLIS: u64 = 300_000;
+const FORCED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONCURRENT_HEALTH_PROBES: usize = 64;
+const MAX_ENVIRONMENT_FILE_BYTES: u64 = 64 * 1024;
+const MAX_ENVIRONMENT_VARIABLES: usize = 256;
+const MAX_DASHBOARD_REQUEST_BYTES: usize = 16 * 1024;
+static LIVE_DASHBOARD_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[repr(u8)]
@@ -98,6 +123,13 @@ enum RolloutDecision {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
+enum LogStream {
+    StandardOutput = 1,
+    StandardError = 2,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 enum ResourceAlertState {
     Healthy = 1,
     MemoryWarning = 2,
@@ -112,6 +144,26 @@ enum ResourceEnforcementState {
     Enforced = 1,
     NotRequested = 2,
     Unverified = 3,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum RecoveryState {
+    Healthy = 1,
+    Backoff = 2,
+    Stabilizing = 3,
+    CircuitOpen = 4,
+    Disabled = 5,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum HealthState {
+    Disabled = 1,
+    Healthy = 2,
+    Failing = 3,
+    Unhealthy = 4,
+    Starting = 5,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -137,7 +189,63 @@ struct ApplicationRecord {
     memory_max_bytes: Option<u64>,
     #[serde(default)]
     task_max_count: Option<u64>,
+    #[serde(default)]
+    environment_file: Option<PathBuf>,
+    #[serde(default = "default_shutdown_timeout_millis")]
+    shutdown_timeout_millis: u64,
+    #[serde(default)]
+    health_check_address: Option<SocketAddr>,
+    #[serde(default)]
+    health_check_path: Option<String>,
+    #[serde(default = "default_health_interval_millis")]
+    health_check_interval_millis: u64,
+    #[serde(default = "default_health_timeout_millis")]
+    health_check_timeout_millis: u64,
+    #[serde(default)]
+    health_check_start_period_millis: u64,
+    #[serde(default = "default_health_failure_threshold")]
+    health_check_failure_threshold: u32,
+    #[serde(default)]
+    consecutive_health_failures: u32,
+    #[serde(default)]
+    last_health_check_at_millis: Option<u64>,
+    #[serde(default)]
+    last_health_success_at_millis: Option<u64>,
+    #[serde(default = "default_disabled_health_state")]
+    health_state_code: u8,
+    #[serde(default)]
+    total_unhealthy_restart_count: u64,
+    #[serde(default = "default_stopped_state")]
+    desired_state_code: u8,
+    #[serde(default)]
+    auto_restart: bool,
+    #[serde(default = "default_restart_delay_millis")]
+    restart_delay_millis: u64,
+    #[serde(default = "default_restart_backoff_max_millis")]
+    restart_backoff_max_millis: u64,
+    #[serde(default = "default_max_unstable_restarts")]
+    max_unstable_restarts: u32,
+    #[serde(default = "default_min_uptime_millis")]
+    min_uptime_millis: u64,
+    #[serde(default)]
+    unstable_restart_count: u32,
+    #[serde(default)]
+    total_auto_restart_count: u64,
+    #[serde(default)]
+    next_restart_at_millis: Option<u64>,
+    #[serde(default = "default_disabled_recovery_state")]
+    recovery_state_code: u8,
     created_at_millis: u64,
+}
+
+#[derive(Debug)]
+struct HealthProbeResult {
+    name: String,
+    pid: u32,
+    address: SocketAddr,
+    path: String,
+    checked_at_millis: u64,
+    success: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -168,6 +276,44 @@ struct DeploymentEntry {
     release_directory: PathBuf,
     activated_at_millis: u64,
     event_kind_code: u8,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResourceHistory {
+    schema_version: u8,
+    name: String,
+    entries: Vec<ResourceHistoryEntry>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ResourceHistoryEntry {
+    observed_at_millis: u64,
+    state_code: u8,
+    workers: usize,
+    rss_bytes: u64,
+    tasks: u64,
+    alert_state_code: u8,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveDashboardConfig {
+    schema_version: u8,
+    listen: SocketAddr,
+    token_sha256: [u8; 32],
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveDashboardState {
+    schema_version: u8,
+    state_code: u8,
+    pid: u32,
+    process_start_ticks: u64,
+    listen: SocketAddr,
+    started_at_millis: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -207,6 +353,30 @@ struct EcosystemApplication {
     arguments: Vec<String>,
     #[serde(default = "default_true")]
     autostart: bool,
+    #[serde(default)]
+    env_file: Option<PathBuf>,
+    #[serde(default = "default_shutdown_timeout_millis")]
+    shutdown_timeout_millis: u64,
+    #[serde(default)]
+    health_check_url: Option<String>,
+    #[serde(default = "default_health_interval_millis")]
+    health_check_interval_millis: u64,
+    #[serde(default = "default_health_timeout_millis")]
+    health_check_timeout_millis: u64,
+    #[serde(default)]
+    health_check_start_period_millis: u64,
+    #[serde(default = "default_health_failure_threshold")]
+    health_check_failure_threshold: u32,
+    #[serde(default = "default_true")]
+    auto_restart: bool,
+    #[serde(default = "default_restart_delay_millis")]
+    restart_delay_millis: u64,
+    #[serde(default = "default_restart_backoff_max_millis")]
+    restart_backoff_max_millis: u64,
+    #[serde(default = "default_max_unstable_restarts")]
+    max_unstable_restarts: u32,
+    #[serde(default = "default_min_uptime_millis")]
+    min_uptime_millis: u64,
     #[serde(default)]
     memory_warning_bytes: Option<u64>,
     #[serde(default)]
@@ -267,6 +437,11 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "resurrect" => resurrect(executable, arguments),
         "startup" => startup(executable, arguments),
         "monit" => monit(arguments),
+        "monit:history" => resource_history(arguments),
+        "dashboard" => dashboard(arguments),
+        "dashboard:start" => live_dashboard_start(executable, arguments),
+        "dashboard:status" => live_dashboard_status(arguments),
+        "dashboard:stop" => live_dashboard_stop(arguments),
         "apply" => apply_ecosystem(executable, arguments),
         "config:check" => check_ecosystem(arguments),
         "deploy" => deploy(executable, arguments),
@@ -280,6 +455,7 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "traffic:evaluate" => traffic_evaluate(arguments),
         "traffic:stop" => traffic_stop(arguments),
         "__traffic_proxy" => traffic_proxy(arguments),
+        "__manager_dashboard_server" => live_dashboard_server(arguments),
         "daemon" => daemon(executable, arguments),
         "__pamd" => daemon_serve(executable),
         _ => Err(format!(
@@ -302,6 +478,11 @@ fn daemon_managed_command(command: &str) -> bool {
             | "save"
             | "resurrect"
             | "monit"
+            | "monit:history"
+            | "dashboard"
+            | "dashboard:start"
+            | "dashboard:status"
+            | "dashboard:stop"
             | "deploy"
             | "deploy:history"
             | "rollback"
@@ -686,6 +867,54 @@ fn parse_socket(value: Option<OsString>, option: &str) -> Result<std::net::Socke
         .map_err(|_| format!("{option} requires IP:port"))
 }
 
+fn parse_health_check_url(value: &str) -> Result<(SocketAddr, String), String> {
+    let remainder = value
+        .strip_prefix("http://")
+        .ok_or_else(|| "health check URL must use http://".to_owned())?;
+    let (authority, path) = remainder
+        .split_once('/')
+        .map_or((remainder, "/".to_owned()), |(authority, path)| {
+            (authority, format!("/{path}"))
+        });
+    let address = authority
+        .parse::<SocketAddr>()
+        .map_err(|_| "health check URL requires an explicit IP address and port".to_owned())?;
+    if !address.ip().is_loopback() {
+        return Err("health check URL must target a loopback address".to_owned());
+    }
+    let lowercase_path = path.to_ascii_lowercase();
+    if path.len() > 1024
+        || !path.starts_with('/')
+        || path.contains(['\0', '\r', '\n', ' '])
+        || lowercase_path.contains("%0d")
+        || lowercase_path.contains("%0a")
+    {
+        return Err("health check path is invalid or exceeds 1024 bytes".to_owned());
+    }
+    Ok((address, path))
+}
+
+fn validate_health_policy(
+    url: Option<&str>,
+    interval_millis: u64,
+    timeout_millis: u64,
+    failure_threshold: u32,
+) -> Result<Option<(SocketAddr, String)>, String> {
+    if !(250..=3_600_000).contains(&interval_millis) {
+        return Err("health check interval must be 250-3600000 milliseconds".to_owned());
+    }
+    if !(50..=5_000).contains(&timeout_millis) || timeout_millis >= interval_millis {
+        return Err(
+            "health check timeout must be 50-5000 milliseconds and less than the interval"
+                .to_owned(),
+        );
+    }
+    if !(1..=100).contains(&failure_threshold) {
+        return Err("health check failure threshold must be 1-100".to_owned());
+    }
+    url.map(parse_health_check_url).transpose()
+}
+
 fn parse_basis_points(value: Option<OsString>) -> Result<u16, String> {
     required_utf8(value, "--weight-bps")?
         .parse::<u16>()
@@ -732,18 +961,28 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
     let mut results = Vec::new();
     for (name, application) in config.applications {
         validate_ecosystem_application(&root, &name, &application)?;
+        let environment_file = application
+            .env_file
+            .as_deref()
+            .map(|path| resolve_environment_file(&root, path))
+            .transpose()?;
+        let health_check = validate_health_policy(
+            application.health_check_url.as_deref(),
+            application.health_check_interval_millis,
+            application.health_check_timeout_millis,
+            application.health_check_failure_threshold,
+        )?;
+        validate_shutdown_policy(application.shutdown_timeout_millis)?;
+        validate_health_start_period(
+            application.health_check_start_period_millis,
+            health_check.is_some(),
+        )?;
         let action = if !application.autostart {
             let record_path = paths.application(&name);
             if record_path.exists() {
-                let record = read_record(&record_path)?;
-                if running_state(&record)
-                    .as_ref()
-                    .is_some_and(master_is_running)
-                {
-                    let mut command = Command::new(executable);
-                    command.args(["stop", &name]);
-                    run_reconcile_command(command, &name)?;
-                }
+                let mut command = Command::new(executable);
+                command.args(["stop", &name]);
+                run_reconcile_command(command, &name)?;
             }
             ReconcileAction::Disabled
         } else {
@@ -755,6 +994,36 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     .current_dir(cwd)
                     .args(["up", "--name", &name, "--workers"]);
                 command.arg(application.workers.to_string());
+                if let Some(path) = environment_file.as_deref() {
+                    command.arg("--env-file").arg(path);
+                }
+                if let Some(url) = application.health_check_url.as_deref() {
+                    command
+                        .arg("--health-check-url")
+                        .arg(url)
+                        .arg("--health-check-interval-ms")
+                        .arg(application.health_check_interval_millis.to_string())
+                        .arg("--health-check-timeout-ms")
+                        .arg(application.health_check_timeout_millis.to_string())
+                        .arg("--health-check-start-period-ms")
+                        .arg(application.health_check_start_period_millis.to_string())
+                        .arg("--health-check-failures")
+                        .arg(application.health_check_failure_threshold.to_string());
+                }
+                if !application.auto_restart {
+                    command.arg("--no-autorestart");
+                }
+                command
+                    .arg("--shutdown-timeout-ms")
+                    .arg(application.shutdown_timeout_millis.to_string())
+                    .arg("--restart-delay-ms")
+                    .arg(application.restart_delay_millis.to_string())
+                    .arg("--restart-backoff-max-ms")
+                    .arg(application.restart_backoff_max_millis.to_string())
+                    .arg("--max-unstable-restarts")
+                    .arg(application.max_unstable_restarts.to_string())
+                    .arg("--min-uptime-ms")
+                    .arg(application.min_uptime_millis.to_string());
                 if let Some(value) = application.memory_warning_bytes {
                     command.args(["--memory-warning-bytes", &value.to_string()]);
                 }
@@ -784,20 +1053,71 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 let mut record = read_record(&record_path)?;
                 let limit_updated = record.memory_max_bytes != application.memory_max_bytes
                     || record.task_max_count != application.task_max_count;
+                let environment_updated = record.environment_file != environment_file;
+                let health_updated = record.health_check_address
+                    != health_check.as_ref().map(|(address, _)| *address)
+                    || record.health_check_path
+                        != health_check.as_ref().map(|(_, path)| path.clone())
+                    || record.health_check_interval_millis
+                        != application.health_check_interval_millis
+                    || record.health_check_timeout_millis
+                        != application.health_check_timeout_millis
+                    || record.health_check_start_period_millis
+                        != application.health_check_start_period_millis
+                    || record.health_check_failure_threshold
+                        != application.health_check_failure_threshold;
                 let policy_updated = record.memory_warning_bytes
                     != application.memory_warning_bytes
-                    || record.task_warning_count != application.task_warning_count;
-                if policy_updated || limit_updated {
+                    || record.task_warning_count != application.task_warning_count
+                    || record.auto_restart != application.auto_restart
+                    || record.restart_delay_millis != application.restart_delay_millis
+                    || record.restart_backoff_max_millis != application.restart_backoff_max_millis
+                    || record.max_unstable_restarts != application.max_unstable_restarts
+                    || record.min_uptime_millis != application.min_uptime_millis
+                    || record.shutdown_timeout_millis != application.shutdown_timeout_millis;
+                if policy_updated || limit_updated || environment_updated || health_updated {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
                     record.memory_max_bytes = application.memory_max_bytes;
                     record.task_max_count = application.task_max_count;
+                    record.auto_restart = application.auto_restart;
+                    record.restart_delay_millis = application.restart_delay_millis;
+                    record.restart_backoff_max_millis = application.restart_backoff_max_millis;
+                    record.max_unstable_restarts = application.max_unstable_restarts;
+                    record.min_uptime_millis = application.min_uptime_millis;
+                    record.shutdown_timeout_millis = application.shutdown_timeout_millis;
+                    record.environment_file = environment_file;
+                    record.health_check_address =
+                        health_check.as_ref().map(|(address, _)| *address);
+                    record.health_check_path = health_check.map(|(_, path)| path);
+                    record.health_check_interval_millis = application.health_check_interval_millis;
+                    record.health_check_timeout_millis = application.health_check_timeout_millis;
+                    record.health_check_start_period_millis =
+                        application.health_check_start_period_millis;
+                    record.health_check_failure_threshold =
+                        application.health_check_failure_threshold;
+                    record.consecutive_health_failures = 0;
+                    record.last_health_check_at_millis = None;
+                    record.health_state_code = initial_health_state(
+                        record.health_check_address.is_some(),
+                        record.health_check_start_period_millis,
+                    );
+                    if !record.auto_restart {
+                        record.recovery_state_code = RecoveryState::Disabled as u8;
+                        record.next_restart_at_millis = None;
+                    }
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
-                if limit_updated && state.as_ref().is_some_and(master_is_running) {
+                if (limit_updated || environment_updated || health_updated)
+                    && state.as_ref().is_some_and(master_is_running)
+                {
                     restart_record(executable, &record, false, false)?;
-                    ReconcileAction::ResourceLimitsUpdated
+                    if limit_updated {
+                        ReconcileAction::ResourceLimitsUpdated
+                    } else {
+                        ReconcileAction::Restarted
+                    }
                 } else if !state.as_ref().is_some_and(master_is_running) {
                     let mut command = Command::new(executable);
                     command.args(["restart", &name]);
@@ -935,6 +1255,31 @@ fn validate_ecosystem_application(
         application.task_max_count,
         &format!("application {name:?}"),
     )?;
+    validate_recovery_policy(
+        application.restart_delay_millis,
+        application.restart_backoff_max_millis,
+        application.max_unstable_restarts,
+        application.min_uptime_millis,
+    )?;
+    validate_shutdown_policy(application.shutdown_timeout_millis)?;
+    validate_health_start_period(
+        application.health_check_start_period_millis,
+        application.health_check_url.is_some(),
+    )?;
+    if let Some(path) = application.env_file.as_deref() {
+        resolve_environment_file(root, path)?;
+    }
+    validate_health_policy(
+        application.health_check_url.as_deref(),
+        application.health_check_interval_millis,
+        application.health_check_timeout_millis,
+        application.health_check_failure_threshold,
+    )?;
+    if application.health_check_url.is_some() && !application.auto_restart {
+        return Err(format!(
+            "application {name:?} health checks require auto_restart = true"
+        ));
+    }
     if application.kind_code == ApplicationKind::LaravelOctane as u8 && application.script.is_some()
     {
         return Err(format!("Laravel application {name:?} cannot set script"));
@@ -969,6 +1314,111 @@ fn scoped_cwd(root: &Path, cwd: &Path) -> Result<PathBuf, String> {
     Ok(cwd)
 }
 
+fn resolve_environment_file(root: &Path, path: &Path) -> Result<PathBuf, String> {
+    let unresolved = root.join(path);
+    if fs::symlink_metadata(&unresolved).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Err(format!(
+            "refusing symlink environment file {}",
+            unresolved.display()
+        ));
+    }
+    let path = fs::canonicalize(&unresolved).map_err(|error| {
+        format!(
+            "cannot resolve environment file {}: {error}",
+            path.display()
+        )
+    })?;
+    load_environment_file(&path)?;
+    Ok(path)
+}
+
+fn load_environment_file(path: &Path) -> Result<BTreeMap<String, String>, String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "cannot inspect environment file {}: {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.file_type().is_file() || metadata.len() > MAX_ENVIRONMENT_FILE_BYTES {
+        return Err(format!(
+            "environment file must be a regular file no larger than {MAX_ENVIRONMENT_FILE_BYTES} bytes"
+        ));
+    }
+    if metadata.uid() != unsafe { libc::geteuid() } || metadata.mode() & 0o077 != 0 {
+        return Err(
+            "environment file must be owned by the current user and mode 0600 or stricter"
+                .to_owned(),
+        );
+    }
+    let contents = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read environment file {}: {error}", path.display()))?;
+    let mut environment = BTreeMap::new();
+    for (index, line) in contents.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("export ").unwrap_or(line);
+        let (key, value) = line
+            .split_once('=')
+            .ok_or_else(|| format!("environment file line {} requires KEY=VALUE", index + 1))?;
+        let key = key.trim();
+        if key.is_empty()
+            || !key
+                .bytes()
+                .next()
+                .is_some_and(|byte| byte.is_ascii_alphabetic() || byte == b'_')
+            || !key
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        {
+            return Err(format!(
+                "environment file line {} has an invalid key",
+                index + 1
+            ));
+        }
+        if matches!(key, "PAM_MANAGER_STATE_DIR" | "PAM_MANAGER_RUNTIME_DIR") {
+            return Err(format!(
+                "environment file line {} overrides reserved manager state",
+                index + 1
+            ));
+        }
+        let value = value.trim();
+        let value = match (value.as_bytes().first(), value.as_bytes().last()) {
+            (Some(b'\''), Some(b'\'')) | (Some(b'\"'), Some(b'\"')) if value.len() >= 2 => {
+                &value[1..value.len() - 1]
+            }
+            (Some(b'\'' | b'\"'), _) | (_, Some(b'\'' | b'\"')) => {
+                return Err(format!(
+                    "environment file line {} has unmatched quotes",
+                    index + 1
+                ));
+            }
+            _ => value,
+        };
+        if value.contains(['\0', '\n', '\r']) {
+            return Err(format!(
+                "environment file line {} has control characters",
+                index + 1
+            ));
+        }
+        environment.insert(key.to_owned(), value.to_owned());
+        if environment.len() > MAX_ENVIRONMENT_VARIABLES {
+            return Err(format!(
+                "environment file cannot exceed {MAX_ENVIRONMENT_VARIABLES} variables"
+            ));
+        }
+    }
+    Ok(environment)
+}
+
+fn apply_environment_file(command: &mut Command, path: Option<&Path>) -> Result<(), String> {
+    if let Some(path) = path {
+        command.envs(load_environment_file(path)?);
+    }
+    Ok(())
+}
+
 fn run_reconcile_command(mut command: Command, name: &str) -> Result<(), String> {
     let output = command
         .output()
@@ -990,6 +1440,39 @@ fn default_current_directory() -> PathBuf {
 }
 const fn default_true() -> bool {
     true
+}
+const fn default_stopped_state() -> u8 {
+    ApplicationState::Stopped as u8
+}
+const fn default_restart_delay_millis() -> u64 {
+    DEFAULT_RESTART_DELAY_MILLIS
+}
+const fn default_restart_backoff_max_millis() -> u64 {
+    DEFAULT_RESTART_BACKOFF_MAX_MILLIS
+}
+const fn default_max_unstable_restarts() -> u32 {
+    DEFAULT_MAX_UNSTABLE_RESTARTS
+}
+const fn default_min_uptime_millis() -> u64 {
+    DEFAULT_MIN_UPTIME_MILLIS
+}
+const fn default_disabled_recovery_state() -> u8 {
+    RecoveryState::Disabled as u8
+}
+const fn default_health_interval_millis() -> u64 {
+    DEFAULT_HEALTH_INTERVAL_MILLIS
+}
+const fn default_health_timeout_millis() -> u64 {
+    DEFAULT_HEALTH_TIMEOUT_MILLIS
+}
+const fn default_health_failure_threshold() -> u32 {
+    DEFAULT_HEALTH_FAILURE_THRESHOLD
+}
+const fn default_shutdown_timeout_millis() -> u64 {
+    DEFAULT_SHUTDOWN_TIMEOUT_MILLIS
+}
+const fn default_disabled_health_state() -> u8 {
+    HealthState::Disabled as u8
 }
 
 fn scale(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -1024,14 +1507,7 @@ fn save(arguments: Vec<OsString>) -> Result<u8, String> {
             .iter()
             .map(|record| SavedApplication {
                 name: record.name.clone(),
-                desired_state_code: if running_state(record)
-                    .as_ref()
-                    .is_some_and(master_is_running)
-                {
-                    ApplicationState::Online as u8
-                } else {
-                    ApplicationState::Stopped as u8
-                },
+                desired_state_code: record.desired_state_code,
             })
             .collect(),
     };
@@ -1074,7 +1550,10 @@ fn resurrect_saved(executable: &OsStr) -> Result<Vec<String>, String> {
         if saved.desired_state_code != ApplicationState::Online as u8 {
             continue;
         }
-        let record = read_record(&paths.application(&saved.name))?;
+        let path = paths.application(&saved.name);
+        let mut record = read_record(&path)?;
+        reset_recovery(&mut record);
+        write_record(&path, &record)?;
         if running_state(&record)
             .as_ref()
             .is_some_and(master_is_running)
@@ -1085,6 +1564,229 @@ fn resurrect_saved(executable: &OsStr) -> Result<Vec<String>, String> {
         restarted.push(saved.name);
     }
     Ok(restarted)
+}
+
+fn reset_recovery(record: &mut ApplicationRecord) {
+    record.desired_state_code = ApplicationState::Online as u8;
+    record.unstable_restart_count = 0;
+    record.next_restart_at_millis = None;
+    record.recovery_state_code = if record.auto_restart {
+        RecoveryState::Healthy as u8
+    } else {
+        RecoveryState::Disabled as u8
+    };
+    record.consecutive_health_failures = 0;
+    record.health_state_code = initial_health_state(
+        record.health_check_address.is_some(),
+        record.health_check_start_period_millis,
+    );
+}
+
+const fn initial_health_state(configured: bool, start_period_millis: u64) -> u8 {
+    if !configured {
+        HealthState::Disabled as u8
+    } else if start_period_millis > 0 {
+        HealthState::Starting as u8
+    } else {
+        HealthState::Healthy as u8
+    }
+}
+
+fn health_probe(address: SocketAddr, path: &str, timeout: Duration) -> bool {
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, timeout) else {
+        return false;
+    };
+    if stream.set_read_timeout(Some(timeout)).is_err()
+        || stream.set_write_timeout(Some(timeout)).is_err()
+        || write!(
+            stream,
+            "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: close\r\n\r\n"
+        )
+        .is_err()
+    {
+        return false;
+    }
+    let mut bytes = Vec::new();
+    if Read::by_ref(&mut stream)
+        .take(8193)
+        .read_to_end(&mut bytes)
+        .is_err()
+        || bytes.len() > 8192
+    {
+        return false;
+    }
+    let Some(line) = bytes.split(|byte| *byte == b'\n').next() else {
+        return false;
+    };
+    let Ok(line) = std::str::from_utf8(line) else {
+        return false;
+    };
+    let mut fields = line.strip_suffix('\r').unwrap_or(line).split_whitespace();
+    matches!(fields.next(), Some("HTTP/1.0" | "HTTP/1.1"))
+        && fields
+            .next()
+            .and_then(|code| code.parse::<u16>().ok())
+            .is_some_and(|code| (200..300).contains(&code))
+}
+
+fn health_start_period_elapsed(state: &MasterState, start_period_millis: u64, now: u64) -> bool {
+    now.saturating_sub(state.started_at_millis) >= start_period_millis
+}
+
+fn schedule_health_probes(
+    paths: &ManagerPaths,
+    sender: &mpsc::Sender<HealthProbeResult>,
+    in_flight: &mut HashSet<String>,
+) -> Result<(), String> {
+    let now = epoch_millis();
+    for record in read_all_records(paths)? {
+        if in_flight.len() >= MAX_CONCURRENT_HEALTH_PROBES {
+            break;
+        }
+        let (Some(address), Some(path), Some(state)) = (
+            record.health_check_address,
+            record.health_check_path.clone(),
+            running_state(&record).filter(master_is_running),
+        ) else {
+            continue;
+        };
+        if record.desired_state_code != ApplicationState::Online as u8
+            || in_flight.contains(&record.name)
+            || !health_start_period_elapsed(&state, record.health_check_start_period_millis, now)
+            || record.last_health_check_at_millis.is_some_and(|checked| {
+                now.saturating_sub(checked) < record.health_check_interval_millis
+            })
+        {
+            continue;
+        }
+        in_flight.insert(record.name.clone());
+        let sender = sender.clone();
+        let name = record.name;
+        let timeout = Duration::from_millis(record.health_check_timeout_millis);
+        thread::spawn(move || {
+            let success = health_probe(address, &path, timeout);
+            let _ = sender.send(HealthProbeResult {
+                name,
+                pid: state.pid,
+                address,
+                path,
+                checked_at_millis: epoch_millis(),
+                success,
+            });
+        });
+    }
+    Ok(())
+}
+
+fn apply_health_probe_results(
+    paths: &ManagerPaths,
+    receiver: &mpsc::Receiver<HealthProbeResult>,
+    in_flight: &mut HashSet<String>,
+) -> Result<(), String> {
+    while let Ok(result) = receiver.try_recv() {
+        in_flight.remove(&result.name);
+        let path = paths.application(&result.name);
+        let Ok(mut record) = read_record(&path) else {
+            continue;
+        };
+        let state = running_state(&record);
+        if record.desired_state_code != ApplicationState::Online as u8
+            || record.health_check_address != Some(result.address)
+            || record.health_check_path.as_deref() != Some(result.path.as_str())
+            || state.as_ref().map(|state| state.pid) != Some(result.pid)
+        {
+            continue;
+        }
+        record.last_health_check_at_millis = Some(result.checked_at_millis);
+        if result.success {
+            record.consecutive_health_failures = 0;
+            record.last_health_success_at_millis = Some(result.checked_at_millis);
+            record.health_state_code = HealthState::Healthy as u8;
+        } else {
+            record.consecutive_health_failures =
+                record.consecutive_health_failures.saturating_add(1);
+            if record.consecutive_health_failures >= record.health_check_failure_threshold {
+                record.health_state_code = HealthState::Unhealthy as u8;
+                record.total_unhealthy_restart_count =
+                    record.total_unhealthy_restart_count.saturating_add(1);
+                write_record(&path, &record)?;
+                if let Some(state) = state.filter(master_is_running) {
+                    signal_master(&state, libc::SIGKILL)?;
+                }
+                continue;
+            }
+            record.health_state_code = HealthState::Failing as u8;
+        }
+        write_record(&path, &record)?;
+    }
+    Ok(())
+}
+
+fn schedule_recovery(record: &mut ApplicationRecord, now: u64) {
+    record.unstable_restart_count = record.unstable_restart_count.saturating_add(1);
+    if record.unstable_restart_count > record.max_unstable_restarts {
+        record.recovery_state_code = RecoveryState::CircuitOpen as u8;
+        record.next_restart_at_millis = None;
+        return;
+    }
+    let exponent = record.unstable_restart_count.saturating_sub(1).min(20);
+    let multiplier = 1_u64 << exponent;
+    let delay = record
+        .restart_delay_millis
+        .saturating_mul(multiplier)
+        .min(record.restart_backoff_max_millis);
+    record.recovery_state_code = RecoveryState::Backoff as u8;
+    record.next_restart_at_millis = Some(now.saturating_add(delay));
+}
+
+fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<(), String> {
+    let now = epoch_millis();
+    for mut record in read_all_records(paths)? {
+        if record.desired_state_code != ApplicationState::Online as u8 || !record.auto_restart {
+            continue;
+        }
+        let path = paths.application(&record.name);
+        if let Some(state) = running_state(&record).filter(master_is_running) {
+            if record.recovery_state_code == RecoveryState::Stabilizing as u8
+                && now.saturating_sub(state.started_at_millis) >= record.min_uptime_millis
+            {
+                record.unstable_restart_count = 0;
+                record.next_restart_at_millis = None;
+                record.recovery_state_code = RecoveryState::Healthy as u8;
+                write_record(&path, &record)?;
+            }
+            continue;
+        }
+        if record.recovery_state_code == RecoveryState::CircuitOpen as u8 {
+            continue;
+        }
+        if record.recovery_state_code != RecoveryState::Backoff as u8
+            || record.next_restart_at_millis.is_none()
+        {
+            schedule_recovery(&mut record, now);
+            write_record(&path, &record)?;
+            continue;
+        }
+        if record
+            .next_restart_at_millis
+            .is_some_and(|deadline| deadline > now)
+        {
+            continue;
+        }
+        match restart_record(executable, &record, false, false) {
+            Ok(_) => {
+                record.total_auto_restart_count = record.total_auto_restart_count.saturating_add(1);
+                record.next_restart_at_millis = None;
+                record.recovery_state_code = RecoveryState::Stabilizing as u8;
+            }
+            Err(error) => {
+                eprintln!("pamd could not recover {:?}: {error}", record.name);
+                schedule_recovery(&mut record, epoch_millis());
+            }
+        }
+        write_record(&path, &record)?;
+    }
+    Ok(())
 }
 
 fn startup(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -1144,6 +1846,644 @@ fn monit(arguments: Vec<OsString>) -> Result<u8, String> {
         }
     }
     Ok(0)
+}
+
+fn resource_history(arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut name = None;
+    let mut json = false;
+    let mut record = false;
+    let mut limit = MAX_RESOURCE_HISTORY;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--json" => json = true,
+            "--record" => record = true,
+            "--limit" => {
+                limit = required_positive(arguments.next(), "--limit")?;
+                if limit > MAX_RESOURCE_HISTORY {
+                    return Err(format!("--limit cannot exceed {MAX_RESOURCE_HISTORY}"));
+                }
+            }
+            option if option.starts_with('-') => {
+                return Err(format!("unknown monit:history option: {option}"));
+            }
+            _ if name.is_none() => name = Some(argument.to_string_lossy().into_owned()),
+            _ => return Err("monit:history accepts at most one application name".to_owned()),
+        }
+    }
+    if let Some(name) = name.as_deref() {
+        validate_name(name)?;
+    }
+    let paths = ManagerPaths::load()?;
+    if record {
+        record_resource_history(&paths)?;
+    }
+    let records = read_all_records(&paths)?;
+    let histories = records
+        .iter()
+        .filter(|application| name.as_deref().is_none_or(|name| name == application.name))
+        .map(|application| {
+            let mut history = read_resource_history(&paths, &application.name)?;
+            if history.entries.len() > limit {
+                history.entries.drain(..history.entries.len() - limit);
+            }
+            Ok(history)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    if name.is_some() && histories.is_empty() {
+        return Err(format!("unknown managed application {:?}", name.unwrap()));
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"sampleIntervalSeconds":RESOURCE_SAMPLE_INTERVAL.as_secs(),"retentionLimit":MAX_RESOURCE_HISTORY,"applications":histories})
+        );
+    } else {
+        println!(
+            "PAM RESOURCE HISTORY (latest {limit} samples)\nNAME\tOBSERVED_AT_MS\tSTATE\tWORKERS\tRSS_BYTES\tTASKS\tALERT"
+        );
+        for history in histories {
+            for entry in history.entries {
+                println!(
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    history.name,
+                    entry.observed_at_millis,
+                    entry.state_code,
+                    entry.workers,
+                    entry.rss_bytes,
+                    entry.tasks,
+                    entry.alert_state_code
+                );
+            }
+        }
+    }
+    Ok(0)
+}
+
+fn record_resource_history(paths: &ManagerPaths) -> Result<(), String> {
+    let observed_at_millis = epoch_millis();
+    for record in read_all_records(paths)? {
+        let state = running_state(&record);
+        let online = state.as_ref().is_some_and(master_is_running);
+        let resources = state
+            .as_ref()
+            .filter(|_| online)
+            .map(|value| crate::resource_monitor::process_tree(value.pid))
+            .unwrap_or_default();
+        let mut history = read_resource_history(paths, &record.name)?;
+        append_resource_entry(
+            &mut history,
+            ResourceHistoryEntry {
+                observed_at_millis,
+                state_code: if online {
+                    ApplicationState::Online as u8
+                } else {
+                    ApplicationState::Stopped as u8
+                },
+                workers: state.as_ref().map_or(0, |value| value.workers),
+                rss_bytes: resources.rss_bytes,
+                tasks: resources.tasks,
+                alert_state_code: resource_alert_state(&record, &resources) as u8,
+            },
+        );
+        write_private_json(&paths.resource_history(&record.name), &history)?;
+    }
+    Ok(())
+}
+
+fn append_resource_entry(history: &mut ResourceHistory, entry: ResourceHistoryEntry) {
+    history.entries.push(entry);
+    if history.entries.len() > MAX_RESOURCE_HISTORY {
+        history
+            .entries
+            .drain(..history.entries.len() - MAX_RESOURCE_HISTORY);
+    }
+}
+
+fn read_resource_history(paths: &ManagerPaths, name: &str) -> Result<ResourceHistory, String> {
+    let path = paths.resource_history(name);
+    if !path.exists() {
+        return Ok(ResourceHistory {
+            schema_version: 1,
+            name: name.to_owned(),
+            entries: Vec::new(),
+        });
+    }
+    let history: ResourceHistory = read_private_json(&path)?;
+    if history.schema_version != 1
+        || history.name != name
+        || history.entries.len() > MAX_RESOURCE_HISTORY
+        || history.entries.iter().any(|entry| {
+            !matches!(entry.state_code, 1 | 2)
+                || !matches!(entry.alert_state_code, 1..=5)
+                || entry.workers > 256
+        })
+        || history
+            .entries
+            .windows(2)
+            .any(|entries| entries[0].observed_at_millis > entries[1].observed_at_millis)
+    {
+        return Err("invalid resource history contract".to_owned());
+    }
+    Ok(history)
+}
+
+fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
+    let output = match arguments.as_slice() {
+        [] => PathBuf::from("pam-dashboard.html"),
+        [path] if path != "--output" => PathBuf::from(path),
+        [option, path] if option == "--output" => PathBuf::from(path),
+        _ => return Err("dashboard accepts one output path or --output FILE.html".to_owned()),
+    };
+    if output.extension() != Some(OsStr::new("html")) {
+        return Err("dashboard output must use the .html extension".to_owned());
+    }
+    if let Some(parent) = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create dashboard directory: {error}"))?;
+    }
+    let paths = ManagerPaths::load()?;
+    let applications = dashboard_applications(&paths)?;
+    let html = crate::manager_dashboard::render(&applications);
+    if html.len() > MAX_DASHBOARD_BYTES {
+        return Err("manager dashboard exceeds the 2 MiB safety limit".to_owned());
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true).mode(0o600);
+    let mut file = options.open(&output).map_err(|error| {
+        format!(
+            "cannot create new manager dashboard {}: {error}",
+            output.display()
+        )
+    })?;
+    file.write_all(html.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("cannot persist manager dashboard: {error}"))?;
+    println!(
+        "Wrote private PAM manager dashboard to {}",
+        output.display()
+    );
+    Ok(0)
+}
+
+fn dashboard_applications(
+    paths: &ManagerPaths,
+) -> Result<Vec<crate::manager_dashboard::DashboardApplication>, String> {
+    read_all_records(paths)?
+        .into_iter()
+        .map(|record| {
+            let state = running_state(&record);
+            let online = state.as_ref().is_some_and(master_is_running);
+            let resources = state
+                .as_ref()
+                .filter(|_| online)
+                .map(|value| crate::resource_monitor::process_tree(value.pid))
+                .unwrap_or_default();
+            let alert = resource_alert_state(&record, &resources);
+            let history = read_resource_history(paths, &record.name)?;
+            let first_rss = history.entries.first().map(|entry| entry.rss_bytes);
+            let latest_rss = history.entries.last().map(|entry| entry.rss_bytes);
+            let peak_rss_bytes = history
+                .entries
+                .iter()
+                .map(|entry| entry.rss_bytes)
+                .max()
+                .unwrap_or(0);
+            let (alert_label, alert_class) = match alert {
+                ResourceAlertState::Healthy => ("Healthy", "healthy"),
+                ResourceAlertState::MemoryWarning => ("Memory warning", "warning"),
+                ResourceAlertState::TaskWarning => ("Task warning", "warning"),
+                ResourceAlertState::MemoryAndTaskWarning => ("Memory + task warning", "warning"),
+                ResourceAlertState::Unavailable => ("Metrics unavailable", "unavailable"),
+            };
+            Ok(crate::manager_dashboard::DashboardApplication {
+                name: record.name,
+                kind_label: if record.kind_code == ApplicationKind::LaravelOctane as u8 {
+                    "Laravel Octane"
+                } else {
+                    "PAM Runtime"
+                },
+                online,
+                workers: state.as_ref().map_or(0, |value| value.workers),
+                rss_bytes: resources.rss_bytes,
+                tasks: resources.tasks,
+                alert_label,
+                alert_class,
+                warning: matches!(
+                    alert,
+                    ResourceAlertState::MemoryWarning
+                        | ResourceAlertState::TaskWarning
+                        | ResourceAlertState::MemoryAndTaskWarning
+                ),
+                history_samples: history.entries.len(),
+                peak_rss_bytes,
+                rss_delta_bytes: (history.entries.len() >= 2).then(|| {
+                    i128::from(latest_rss.unwrap_or(0)) - i128::from(first_rss.unwrap_or(0))
+                }),
+            })
+        })
+        .collect()
+}
+
+fn live_dashboard_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut listen = "127.0.0.1:9615".parse::<SocketAddr>().unwrap();
+    let mut token_file = None;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--listen" => listen = parse_socket(arguments.next(), "--listen")?,
+            "--token-file" => {
+                token_file = Some(PathBuf::from(required_utf8(
+                    arguments.next(),
+                    "--token-file",
+                )?))
+            }
+            "--json" => json = true,
+            option => return Err(format!("unknown dashboard:start option: {option}")),
+        }
+    }
+    if !listen.ip().is_loopback() || listen.port() == 0 {
+        return Err(
+            "dashboard:start requires an explicit loopback IP and non-zero port".to_owned(),
+        );
+    }
+    let token_file =
+        token_file.ok_or_else(|| "dashboard:start requires --token-file".to_owned())?;
+    let token_file = fs::canonicalize(&token_file)
+        .map_err(|error| format!("cannot resolve dashboard token file: {error}"))?;
+    let metadata = fs::metadata(&token_file)
+        .map_err(|error| format!("cannot inspect dashboard token file: {error}"))?;
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err("dashboard token file must be owner-only (mode 0600 or stricter)".to_owned());
+    }
+    let credential = crate::admin_auth::read_file(&token_file)?;
+    let paths = ManagerPaths::load()?;
+    let state_path = paths.live_dashboard_state();
+    if read_live_dashboard_state(&state_path).is_ok_and(|state| live_dashboard_running(&state)) {
+        return Err("live manager dashboard is already online".to_owned());
+    }
+    if state_path.exists() {
+        fs::remove_file(&state_path)
+            .map_err(|error| format!("cannot remove stale dashboard state: {error}"))?;
+    }
+    let config_path = paths.live_dashboard_config();
+    write_private_json(
+        &config_path,
+        &LiveDashboardConfig {
+            schema_version: 1,
+            listen,
+            token_sha256: credential.digest(),
+        },
+    )?;
+    let stdout = secure_append(&paths.logs.join("live-dashboard.out.log"))?;
+    let stderr = secure_append(&paths.logs.join("live-dashboard.error.log"))?;
+    let mut command = Command::new(executable);
+    command
+        .arg("__manager_dashboard_server")
+        .arg(&config_path)
+        .arg(&state_path)
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    };
+    command
+        .spawn()
+        .map_err(|error| format!("cannot start live manager dashboard: {error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let state = loop {
+        if let Ok(state) = read_live_dashboard_state(&state_path)
+            && live_dashboard_running(&state)
+        {
+            break state;
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "live manager dashboard did not become ready; inspect live-dashboard.error.log"
+                    .to_owned(),
+            );
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+    print_live_dashboard_state(&state, json);
+    Ok(0)
+}
+
+fn live_dashboard_status(arguments: Vec<OsString>) -> Result<u8, String> {
+    let json = parse_json_only(arguments, "dashboard:status")?;
+    let path = ManagerPaths::load()?.live_dashboard_state();
+    let state = read_live_dashboard_state(&path).ok();
+    let online = state.as_ref().is_some_and(live_dashboard_running);
+    if let Some(state) = state.filter(|_| online) {
+        print_live_dashboard_state(&state, json);
+    } else if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"stateCode":2,"online":false})
+        );
+    } else {
+        println!("Live PAM manager dashboard is stopped");
+    }
+    Ok(if online { 0 } else { 1 })
+}
+
+fn live_dashboard_stop(arguments: Vec<OsString>) -> Result<u8, String> {
+    let json = parse_json_only(arguments, "dashboard:stop")?;
+    let paths = ManagerPaths::load()?;
+    let state_path = paths.live_dashboard_state();
+    let state = read_live_dashboard_state(&state_path)?;
+    if live_dashboard_running(&state) {
+        let result = unsafe { libc::kill(state.pid as i32, libc::SIGTERM) };
+        if result != 0 {
+            return Err(format!(
+                "cannot stop live manager dashboard: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while live_dashboard_running(&state) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
+        if live_dashboard_running(&state) {
+            return Err("live manager dashboard did not stop before the deadline".to_owned());
+        }
+    }
+    for path in [state_path, paths.live_dashboard_config()] {
+        if path.exists() {
+            fs::remove_file(&path)
+                .map_err(|error| format!("cannot remove live dashboard state: {error}"))?;
+        }
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"stateCode":2,"online":false})
+        );
+    } else {
+        println!("Stopped live PAM manager dashboard");
+    }
+    Ok(0)
+}
+
+fn print_live_dashboard_state(state: &LiveDashboardState, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"stateCode":1,"online":true,"pid":state.pid,"listen":state.listen,"startedAtMillis":state.started_at_millis})
+        );
+    } else {
+        println!(
+            "Live PAM manager dashboard online at http://{}",
+            state.listen
+        );
+    }
+}
+
+fn read_live_dashboard_state(path: &Path) -> Result<LiveDashboardState, String> {
+    let state: LiveDashboardState = read_private_json(path)?;
+    if state.schema_version != 1
+        || state.state_code != 1
+        || !state.listen.ip().is_loopback()
+        || state.listen.port() == 0
+        || state.pid == 0
+        || state.process_start_ticks == 0
+    {
+        return Err("invalid live dashboard state contract".to_owned());
+    }
+    Ok(state)
+}
+
+fn live_dashboard_running(state: &LiveDashboardState) -> bool {
+    (unsafe { libc::kill(state.pid as i32, 0) == 0 })
+        && linux_process_start_ticks(state.pid) == Some(state.process_start_ticks)
+}
+
+fn linux_process_start_ticks(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_name = stat.get(stat.rfind(')')? + 2..)?;
+    after_name.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn live_dashboard_server(arguments: Vec<OsString>) -> Result<u8, String> {
+    let [config_path, state_path] = arguments.as_slice() else {
+        return Err("__manager_dashboard_server requires config and state paths".to_owned());
+    };
+    let config_path = PathBuf::from(config_path);
+    let state_path = PathBuf::from(state_path);
+    let config: LiveDashboardConfig = read_private_json(&config_path)?;
+    if config.schema_version != 1 || !config.listen.ip().is_loopback() || config.listen.port() == 0
+    {
+        return Err("invalid live dashboard config contract".to_owned());
+    }
+    let listener = TcpListener::bind(config.listen)
+        .map_err(|error| format!("cannot bind live dashboard {}: {error}", config.listen))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    LIVE_DASHBOARD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+    unsafe {
+        libc::signal(libc::SIGTERM, live_dashboard_signal as libc::sighandler_t);
+        libc::signal(libc::SIGINT, live_dashboard_signal as libc::sighandler_t);
+    }
+    write_private_json(
+        &state_path,
+        &LiveDashboardState {
+            schema_version: 1,
+            state_code: 1,
+            pid: std::process::id(),
+            process_start_ticks: linux_process_start_ticks(std::process::id())
+                .ok_or_else(|| "cannot identify live dashboard process".to_owned())?,
+            listen: config.listen,
+            started_at_millis: epoch_millis(),
+        },
+    )?;
+    while LIVE_DASHBOARD_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Err(error) = serve_live_dashboard_request(&mut stream, &config.token_sha256)
+                {
+                    eprintln!("live dashboard request rejected: {error}");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => return Err(format!("live dashboard accept failed: {error}")),
+        }
+    }
+    if state_path.exists() {
+        fs::remove_file(state_path).map_err(|error| error.to_string())?;
+    }
+    Ok(0)
+}
+
+extern "C" fn live_dashboard_signal(_: libc::c_int) {
+    LIVE_DASHBOARD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn serve_live_dashboard_request(
+    stream: &mut TcpStream,
+    expected_digest: &[u8; 32],
+) -> Result<(), String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 2048];
+    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+        let read = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if read == 0 {
+            return Err("request ended before headers".to_owned());
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.len() > MAX_DASHBOARD_REQUEST_BYTES {
+            write_http_response(
+                stream,
+                "431 Request Header Fields Too Large",
+                "text/plain; charset=utf-8",
+                b"Request headers exceed 16 KiB.\n",
+                &[],
+            )?;
+            return Ok(());
+        }
+    }
+    let request =
+        std::str::from_utf8(&request).map_err(|_| "request headers are not UTF-8".to_owned())?;
+    let mut lines = request.split("\r\n");
+    let request_line = lines.next().unwrap_or_default();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts.next().unwrap_or_default();
+    let target = request_parts.next().unwrap_or_default();
+    let version = request_parts.next().unwrap_or_default();
+    if request_parts.next().is_some() || version != "HTTP/1.1" {
+        write_http_response(
+            stream,
+            "400 Bad Request",
+            "text/plain; charset=utf-8",
+            b"Malformed HTTP request.\n",
+            &[],
+        )?;
+        return Ok(());
+    }
+    let authorized = lines
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        .and_then(|(_, value)| live_dashboard_credential(value.trim()))
+        .is_some_and(|credential| {
+            constant_time_digest_eq(
+                expected_digest,
+                &Sha256::digest(credential.as_bytes()).into(),
+            )
+        });
+    if !authorized {
+        write_http_response(
+            stream,
+            "401 Unauthorized",
+            "text/plain; charset=utf-8",
+            b"Authentication required. Use HTTP Basic user pam with the dashboard token as password, or a Bearer token.\n",
+            &["WWW-Authenticate: Basic realm=\"PAM manager\", charset=\"UTF-8\""],
+        )?;
+        return Ok(());
+    }
+    if method != "GET" {
+        write_http_response(
+            stream,
+            "405 Method Not Allowed",
+            "text/plain; charset=utf-8",
+            b"Only GET is supported.\n",
+            &["Allow: GET"],
+        )?;
+        return Ok(());
+    }
+    match target {
+        "/" => {
+            let paths = ManagerPaths::load()?;
+            let html = crate::manager_dashboard::render_live(&dashboard_applications(&paths)?);
+            if html.len() > MAX_DASHBOARD_BYTES {
+                return Err("live dashboard exceeds the 2 MiB safety limit".to_owned());
+            }
+            write_http_response(
+                stream,
+                "200 OK",
+                "text/html; charset=utf-8",
+                html.as_bytes(),
+                &[],
+            )?;
+        }
+        "/health" => write_http_response(
+            stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            br#"{"schemaVersion":1,"stateCode":1,"healthy":true}"#,
+            &[],
+        )?,
+        _ => write_http_response(
+            stream,
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            b"Not found.\n",
+            &[],
+        )?,
+    }
+    Ok(())
+}
+
+fn live_dashboard_credential(header: &str) -> Option<String> {
+    if let Some(token) = header.strip_prefix("Bearer ") {
+        return Some(token.to_owned());
+    }
+    let encoded = header.strip_prefix("Basic ")?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    decoded.strip_prefix("pam:").map(str::to_owned)
+}
+
+fn constant_time_digest_eq(expected: &[u8; 32], supplied: &[u8; 32]) -> bool {
+    expected
+        .iter()
+        .zip(supplied)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+    extra_headers: &[&str],
+) -> Result<(), String> {
+    let mut headers = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nPragma: no-cache\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\r\n",
+        body.len()
+    );
+    for header in extra_headers {
+        headers.push_str(header);
+        headers.push_str("\r\n");
+    }
+    headers.push_str("\r\n");
+    stream
+        .write_all(headers.as_bytes())
+        .and_then(|()| stream.write_all(body))
+        .map_err(|error| error.to_string())
 }
 
 fn deploy(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -1264,19 +2604,7 @@ fn stop_record(record: &ApplicationRecord) -> Result<(), String> {
     let Some(state) = running_state(record) else {
         return Ok(());
     };
-    if master_is_running(&state) {
-        signal_master(&state, STOP_SIGNAL)?;
-    }
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while master_is_running(&state) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(50));
-    }
-    if master_is_running(&state) {
-        return Err(format!(
-            "application {:?} did not stop before release activation",
-            record.name
-        ));
-    }
+    terminate_master(&state, record.shutdown_timeout_millis)?;
     Ok(())
 }
 
@@ -1478,16 +2806,54 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
         .map_err(|error| format!("cannot bind daemon socket {}: {error}", socket.display()))?;
     fs::set_permissions(&socket, fs::Permissions::from_mode(0o600))
         .map_err(|error| error.to_string())?;
-    let dump = ManagerPaths::load()?.base.join("dump.json");
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("cannot configure daemon socket: {error}"))?;
+    let paths = ManagerPaths::load()?;
+    let dump = paths.base.join("dump.json");
     if dump.exists()
         && let Err(error) = resurrect_saved(executable)
     {
         eprintln!("pamd could not restore saved applications: {error}");
     }
+    if let Err(error) = record_resource_history(&paths) {
+        eprintln!("pamd could not record initial resource history: {error}");
+    }
+    let mut next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
+    let mut next_supervision = Instant::now();
+    let (health_sender, health_receiver) = mpsc::channel();
+    let mut health_probes_in_flight = HashSet::new();
     let own_uid = unsafe { libc::geteuid() };
-    for connection in listener.incoming() {
-        let mut stream = match connection {
-            Ok(stream) => stream,
+    loop {
+        reap_daemon_children();
+        if let Err(error) =
+            apply_health_probe_results(&paths, &health_receiver, &mut health_probes_in_flight)
+        {
+            eprintln!("pamd health result error: {error}");
+        }
+        if Instant::now() >= next_supervision {
+            if let Err(error) = supervise_applications(executable, &paths) {
+                eprintln!("pamd supervision error: {error}");
+            }
+            if let Err(error) =
+                schedule_health_probes(&paths, &health_sender, &mut health_probes_in_flight)
+            {
+                eprintln!("pamd health scheduling error: {error}");
+            }
+            next_supervision = Instant::now() + SUPERVISION_INTERVAL;
+        }
+        if Instant::now() >= next_sample {
+            if let Err(error) = record_resource_history(&paths) {
+                eprintln!("pamd could not record resource history: {error}");
+            }
+            next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
+        }
+        let mut stream = match listener.accept() {
+            Ok((stream, _)) => stream,
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(25));
+                continue;
+            }
             Err(error) => {
                 eprintln!("pamd accept error: {error}");
                 continue;
@@ -1791,6 +3157,18 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut task_warning_count = None;
     let mut memory_max_bytes = None;
     let mut task_max_count = None;
+    let mut environment_file = None;
+    let mut shutdown_timeout_millis = DEFAULT_SHUTDOWN_TIMEOUT_MILLIS;
+    let mut health_check_url = None;
+    let mut health_check_interval_millis = DEFAULT_HEALTH_INTERVAL_MILLIS;
+    let mut health_check_timeout_millis = DEFAULT_HEALTH_TIMEOUT_MILLIS;
+    let mut health_check_start_period_millis = 0;
+    let mut health_check_failure_threshold = DEFAULT_HEALTH_FAILURE_THRESHOLD;
+    let mut auto_restart = true;
+    let mut restart_delay_millis = DEFAULT_RESTART_DELAY_MILLIS;
+    let mut restart_backoff_max_millis = DEFAULT_RESTART_BACKOFF_MAX_MILLIS;
+    let mut max_unstable_restarts = DEFAULT_MAX_UNSTABLE_RESTARTS;
+    let mut min_uptime_millis = DEFAULT_MIN_UPTIME_MILLIS;
     let mut application_arguments = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -1799,6 +3177,55 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             "--workers" => workers = Some(required_positive(arguments.next(), "--workers")?),
             "--attach" => attach = true,
             "--json" => json = true,
+            "--no-autorestart" => auto_restart = false,
+            "--env-file" => {
+                environment_file = Some(PathBuf::from(required_utf8(
+                    arguments.next(),
+                    "--env-file",
+                )?))
+            }
+            "--shutdown-timeout-ms" => {
+                shutdown_timeout_millis =
+                    required_positive_u64(arguments.next(), "--shutdown-timeout-ms")?
+            }
+            "--health-check-url" => {
+                health_check_url = Some(required_utf8(arguments.next(), "--health-check-url")?)
+            }
+            "--health-check-interval-ms" => {
+                health_check_interval_millis =
+                    required_positive_u64(arguments.next(), "--health-check-interval-ms")?
+            }
+            "--health-check-timeout-ms" => {
+                health_check_timeout_millis =
+                    required_positive_u64(arguments.next(), "--health-check-timeout-ms")?
+            }
+            "--health-check-start-period-ms" => {
+                health_check_start_period_millis =
+                    required_u64(arguments.next(), "--health-check-start-period-ms")?
+            }
+            "--health-check-failures" => {
+                health_check_failure_threshold =
+                    required_positive(arguments.next(), "--health-check-failures")?
+                        .try_into()
+                        .map_err(|_| "--health-check-failures is too large".to_owned())?
+            }
+            "--restart-delay-ms" => {
+                restart_delay_millis =
+                    required_positive_u64(arguments.next(), "--restart-delay-ms")?
+            }
+            "--restart-backoff-max-ms" => {
+                restart_backoff_max_millis =
+                    required_positive_u64(arguments.next(), "--restart-backoff-max-ms")?
+            }
+            "--max-unstable-restarts" => {
+                max_unstable_restarts =
+                    required_positive(arguments.next(), "--max-unstable-restarts")?
+                        .try_into()
+                        .map_err(|_| "--max-unstable-restarts is too large".to_owned())?;
+            }
+            "--min-uptime-ms" => {
+                min_uptime_millis = required_positive_u64(arguments.next(), "--min-uptime-ms")?
+            }
             "--log-max-bytes" => {
                 log_max_bytes = required_positive_u64(arguments.next(), "--log-max-bytes")?
             }
@@ -1847,9 +3274,30 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         task_max_count,
         "application",
     )?;
+    validate_shutdown_policy(shutdown_timeout_millis)?;
+    validate_recovery_policy(
+        restart_delay_millis,
+        restart_backoff_max_millis,
+        max_unstable_restarts,
+        min_uptime_millis,
+    )?;
+    let health_check = validate_health_policy(
+        health_check_url.as_deref(),
+        health_check_interval_millis,
+        health_check_timeout_millis,
+        health_check_failure_threshold,
+    )?;
+    validate_health_start_period(health_check_start_period_millis, health_check.is_some())?;
+    if health_check.is_some() && !auto_restart {
+        return Err("health checks require automatic restart".to_owned());
+    }
 
     let cwd = fs::canonicalize(std::env::current_dir().map_err(|error| error.to_string())?)
         .map_err(|error| format!("cannot resolve application directory: {error}"))?;
+    let environment_file = environment_file
+        .as_deref()
+        .map(|path| resolve_environment_file(&cwd, path))
+        .transpose()?;
     let laravel = cwd.join("artisan").is_file() && target.is_none();
     let target = target.unwrap_or_else(|| {
         if laravel {
@@ -1906,6 +3354,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         memory_max_bytes,
         task_max_count,
     )?;
+    apply_environment_file(&mut command, environment_file.as_deref())?;
     if attach {
         command
             .stdin(Stdio::inherit())
@@ -1963,7 +3412,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         thread::sleep(Duration::from_millis(50));
     };
     let record = ApplicationRecord {
-        schema_version: 1,
+        schema_version: 2,
         name: name.clone(),
         kind_code: if laravel {
             ApplicationKind::LaravelOctane as u8
@@ -1987,6 +3436,36 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         task_warning_count,
         memory_max_bytes,
         task_max_count,
+        environment_file,
+        shutdown_timeout_millis,
+        health_check_address: health_check.as_ref().map(|(address, _)| *address),
+        health_check_path: health_check.map(|(_, path)| path),
+        health_check_interval_millis,
+        health_check_timeout_millis,
+        health_check_start_period_millis,
+        health_check_failure_threshold,
+        consecutive_health_failures: 0,
+        last_health_check_at_millis: None,
+        last_health_success_at_millis: None,
+        health_state_code: initial_health_state(
+            health_check_url.is_some(),
+            health_check_start_period_millis,
+        ),
+        total_unhealthy_restart_count: 0,
+        desired_state_code: ApplicationState::Online as u8,
+        auto_restart,
+        restart_delay_millis,
+        restart_backoff_max_millis,
+        max_unstable_restarts,
+        min_uptime_millis,
+        unstable_restart_count: 0,
+        total_auto_restart_count: 0,
+        next_restart_at_millis: None,
+        recovery_state_code: if auto_restart {
+            RecoveryState::Healthy as u8
+        } else {
+            RecoveryState::Disabled as u8
+        },
         created_at_millis: epoch_millis(),
     };
     write_record(&record_path, &record)?;
@@ -2070,24 +3549,29 @@ fn signal(arguments: Vec<OsString>, signal: i32, action: &str) -> Result<u8, Str
 
 fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
     let (name, json) = parse_name_json(arguments, "stop")?;
-    let record = record(&name)?;
+    let paths = ManagerPaths::load()?;
+    let path = paths.application(&name);
+    let mut record = read_record(&path)?;
+    record.desired_state_code = ApplicationState::Stopped as u8;
+    record.recovery_state_code = RecoveryState::Disabled as u8;
+    record.unstable_restart_count = 0;
+    record.next_restart_at_millis = None;
+    record.consecutive_health_failures = 0;
+    record.health_state_code = HealthState::Disabled as u8;
+    write_record(&path, &record)?;
     let Some(state) = running_state(&record) else {
         return Ok(0);
     };
-    if master_is_running(&state) {
-        signal_master(&state, STOP_SIGNAL)?;
-    }
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while master_is_running(&state) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(50));
-    }
-    if master_is_running(&state) {
-        return Err(format!("application {name:?} did not stop in 20 seconds"));
-    }
+    let forced = terminate_master(&state, record.shutdown_timeout_millis)?;
     if json {
         println!(
             "{}",
-            serde_json::json!({"schemaVersion":1,"name":name,"stateCode":ApplicationState::Stopped as u8})
+            serde_json::json!({"schemaVersion":1,"name":name,"stateCode":ApplicationState::Stopped as u8,"forced":forced})
+        );
+    } else if forced {
+        println!(
+            "Stopped {name} (forced after {} ms)",
+            record.shutdown_timeout_millis
         );
     } else {
         println!("Stopped {name}");
@@ -2097,7 +3581,11 @@ fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
 
 fn restart(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let (name, json) = parse_name_json(arguments, "restart")?;
-    let record = record(&name)?;
+    let paths = ManagerPaths::load()?;
+    let path = paths.application(&name);
+    let mut record = read_record(&path)?;
+    reset_recovery(&mut record);
+    write_record(&path, &record)?;
     restart_record(executable, &record, json, true)
 }
 
@@ -2108,18 +3596,11 @@ fn restart_record(
     emit: bool,
 ) -> Result<u8, String> {
     let name = &record.name;
-    if let Some(state) = running_state(record)
-        && master_is_running(&state)
-    {
-        signal_master(&state, STOP_SIGNAL)?;
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while master_is_running(&state) && Instant::now() < deadline {
-            thread::sleep(Duration::from_millis(50));
-        }
-        if master_is_running(&state) {
-            return Err(format!("application {name:?} did not stop before restart"));
-        }
-    }
+    let forced = if let Some(state) = running_state(record) {
+        terminate_master(&state, record.shutdown_timeout_millis)?
+    } else {
+        false
+    };
     if record.command.len() < 2 {
         return Err(format!("application {name:?} has no restart command"));
     }
@@ -2139,6 +3620,7 @@ fn restart_record(
         record.memory_max_bytes,
         record.task_max_count,
     )?;
+    apply_environment_file(&mut command, record.environment_file.as_deref())?;
     command.stdin(Stdio::null()).stdout(stdout).stderr(stderr);
     // SAFETY: see the detached launch in `up`.
     unsafe {
@@ -2177,12 +3659,56 @@ fn restart_record(
     };
     if emit {
         if json {
-            println!("{}", application_json(record, Some(&state)));
+            let mut application = application_json(record, Some(&state));
+            application["shutdownForced"] = serde_json::json!(forced);
+            println!("{application}");
+        } else if forced {
+            println!(
+                "Restarted {name} (PID {}, previous master forced after {} ms)",
+                state.pid, record.shutdown_timeout_millis
+            );
         } else {
             println!("Restarted {name} (PID {})", state.pid);
         }
     }
     Ok(0)
+}
+
+fn terminate_master(state: &MasterState, graceful_timeout_millis: u64) -> Result<bool, String> {
+    if !master_is_running(state) {
+        return Ok(false);
+    }
+    signal_master(state, STOP_SIGNAL)?;
+    let graceful_deadline = Instant::now() + Duration::from_millis(graceful_timeout_millis);
+    while master_is_running(state) && Instant::now() < graceful_deadline {
+        reap_daemon_children();
+        thread::sleep(Duration::from_millis(50));
+    }
+    if !master_is_running(state) {
+        return Ok(false);
+    }
+    signal_master(state, libc::SIGKILL)?;
+    let forced_deadline = Instant::now() + FORCED_SHUTDOWN_TIMEOUT;
+    while master_is_running(state) && Instant::now() < forced_deadline {
+        reap_daemon_children();
+        thread::sleep(Duration::from_millis(50));
+    }
+    if master_is_running(state) {
+        return Err(format!(
+            "master PID {} remained alive after SIGKILL",
+            state.pid
+        ));
+    }
+    Ok(true)
+}
+
+fn reap_daemon_children() {
+    loop {
+        let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+        if result <= 0 {
+            break;
+        }
+    }
 }
 
 fn delete(arguments: Vec<OsString>) -> Result<u8, String> {
@@ -2197,6 +3723,11 @@ fn delete(arguments: Vec<OsString>) -> Result<u8, String> {
         return Err(format!("application {name:?} is online; stop it first"));
     }
     fs::remove_file(&path).map_err(|error| format!("cannot delete application record: {error}"))?;
+    let history = paths.resource_history(&name);
+    if history.exists() {
+        fs::remove_file(&history)
+            .map_err(|error| format!("cannot delete application resource history: {error}"))?;
+    }
     if json {
         println!(
             "{}",
@@ -2214,6 +3745,9 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut errors = false;
     let mut both = false;
     let mut follow = false;
+    let mut json = false;
+    let mut query = None::<String>;
+    let mut include_rotated = false;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.to_string_lossy().as_ref() {
@@ -2221,6 +3755,9 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
             "--errors" => errors = true,
             "--both" => both = true,
             "--follow" | "-f" => follow = true,
+            "--json" => json = true,
+            "--query" => query = Some(required_utf8(arguments.next(), "--query")?),
+            "--include-rotated" => include_rotated = true,
             option if option.starts_with('-') => {
                 return Err(format!("unknown logs option: {option}"));
             }
@@ -2234,18 +3771,79 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
     if errors && both {
         return Err("logs accepts either --errors or --both, not both".to_owned());
     }
-    let paths = if both {
-        vec![record.stdout_log, record.stderr_log]
+    if follow && (json || query.is_some() || include_rotated) {
+        return Err("logs --follow cannot be combined with structured query options".to_owned());
+    }
+    if query.as_ref().is_some_and(|value| {
+        value.is_empty() || value.len() > 256 || value.contains(['\0', '\n', '\r'])
+    }) {
+        return Err("logs --query requires 1-256 characters without controls".to_owned());
+    }
+    let streams = if both {
+        vec![
+            (record.stdout_log, LogStream::StandardOutput),
+            (record.stderr_log, LogStream::StandardError),
+        ]
     } else if errors {
-        vec![record.stderr_log]
+        vec![(record.stderr_log, LogStream::StandardError)]
     } else {
-        vec![record.stdout_log]
+        vec![(record.stdout_log, LogStream::StandardOutput)]
     };
-    for path in &paths {
-        print_tail(path, lines.min(100_000))?;
+    if json || query.is_some() || include_rotated {
+        let limit = lines.min(10_000);
+        let mut entries = VecDeque::with_capacity(limit.min(1024));
+        let mut truncated = false;
+        for (path, stream) in &streams {
+            let mut files = if include_rotated {
+                (1..=record.log_retain)
+                    .rev()
+                    .map(|index| (rotated_log_path(path, index), index))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            files.push((path.clone(), 0));
+            for (file, rotated_index) in files {
+                if !file.exists() {
+                    continue;
+                }
+                for line in read_log_lines(&file)? {
+                    if query.as_ref().is_none_or(|query| line.contains(query)) {
+                        if entries.len() == limit {
+                            entries.pop_front();
+                            truncated = true;
+                        }
+                        entries.push_back(serde_json::json!({
+                            "streamCode": *stream as u8,
+                            "rotatedIndex": rotated_index,
+                            "line": line,
+                        }));
+                    }
+                }
+            }
+        }
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"schemaVersion":1,"name":name,"query":query,"truncated":truncated,"entries":entries})
+            );
+        } else {
+            for entry in entries {
+                println!("{}", entry["line"].as_str().unwrap_or_default());
+            }
+        }
+    } else {
+        for (path, _) in &streams {
+            print_tail(path, lines.min(100_000))?;
+        }
     }
     if follow {
-        follow_logs(&paths)?;
+        follow_logs(
+            &streams
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>(),
+        )?;
     }
     Ok(0)
 }
@@ -2254,22 +3852,25 @@ fn follow_logs(paths: &[PathBuf]) -> Result<(), String> {
     let mut offsets = paths
         .iter()
         .map(|path| {
-            fs::metadata(path)
+            fs::symlink_metadata(path)
+                .ok()
+                .filter(|metadata| metadata.file_type().is_file())
                 .map(|metadata| metadata.len())
                 .unwrap_or(0)
         })
         .collect::<Vec<_>>();
     loop {
         for (index, path) in paths.iter().enumerate() {
-            let length = fs::metadata(path)
+            let length = fs::symlink_metadata(path)
+                .ok()
+                .filter(|metadata| metadata.file_type().is_file())
                 .map(|metadata| metadata.len())
                 .unwrap_or(0);
             if length < offsets[index] {
                 offsets[index] = 0;
             }
             if length > offsets[index] {
-                let mut file = File::open(path)
-                    .map_err(|error| format!("cannot follow log {}: {error}", path.display()))?;
+                let mut file = open_log_read(path)?;
                 file.seek(SeekFrom::Start(offsets[index]))
                     .map_err(|error| error.to_string())?;
                 let mut bytes = Vec::new();
@@ -2329,20 +3930,40 @@ const fn default_log_retain() -> usize {
 }
 
 fn print_tail(path: &Path, lines: usize) -> Result<(), String> {
-    let mut file =
-        File::open(path).map_err(|error| format!("cannot open log {}: {error}", path.display()))?;
-    let length = file.metadata().map_err(|error| error.to_string())?.len();
-    let window = length.min(8 * 1024 * 1024);
-    file.seek(SeekFrom::Start(length - window))
-        .map_err(|error| error.to_string())?;
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .map_err(|error| format!("log is not valid UTF-8: {error}"))?;
-    let selected = text.lines().rev().take(lines).collect::<Vec<_>>();
+    let text = read_log_lines(path)?;
+    let selected = text.iter().rev().take(lines).collect::<Vec<_>>();
     for line in selected.into_iter().rev() {
         println!("{line}");
     }
     Ok(())
+}
+
+fn read_log_lines(path: &Path) -> Result<Vec<String>, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect log {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!("refusing non-regular log {}", path.display()));
+    }
+    let mut file = open_log_read(path)?;
+    let length = file.metadata().map_err(|error| error.to_string())?.len();
+    let window = length.min(8 * 1024 * 1024);
+    file.seek(SeekFrom::Start(length - window))
+        .map_err(|error| error.to_string())?;
+    let mut bytes = Vec::with_capacity(window as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read log {}: {error}", path.display()))?;
+    Ok(String::from_utf8_lossy(&bytes)
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+fn open_log_read(path: &Path) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options.read(true).custom_flags(libc::O_NOFOLLOW);
+    options
+        .open(path)
+        .map_err(|error| format!("cannot open log {}: {error}", path.display()))
 }
 
 fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> serde_json::Value {
@@ -2371,12 +3992,30 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "name": record.name,
         "kindCode": record.kind_code,
         "stateCode": if online { ApplicationState::Online as u8 } else { ApplicationState::Stopped as u8 },
+        "desiredStateCode": record.desired_state_code,
         "pid": state.map(|state| state.pid),
         "workers": state.map(|state| state.workers),
         "startedAtMillis": state.map(|state| state.started_at_millis),
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
+        "environmentFileConfigured": record.environment_file.is_some(),
+        "shutdownPolicy": {
+            "gracefulTimeoutMillis": record.shutdown_timeout_millis,
+            "forcedTimeoutMillis": FORCED_SHUTDOWN_TIMEOUT.as_millis(),
+        },
+        "healthCheck": {
+            "configured": record.health_check_address.is_some(),
+            "stateCode": record.health_state_code,
+            "intervalMillis": record.health_check_interval_millis,
+            "timeoutMillis": record.health_check_timeout_millis,
+            "startPeriodMillis": record.health_check_start_period_millis,
+            "failureThreshold": record.health_check_failure_threshold,
+            "consecutiveFailures": record.consecutive_health_failures,
+            "lastCheckedAtMillis": record.last_health_check_at_millis,
+            "lastSuccessAtMillis": record.last_health_success_at_millis,
+            "totalUnhealthyRestartCount": record.total_unhealthy_restart_count,
+        },
         "resources": resources,
         "resourcePolicy": {
             "memoryWarningBytes": record.memory_warning_bytes,
@@ -2386,6 +4025,17 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
             "enforcementCode": resource_enforcement_state as u8,
         },
         "resourceAlertStateCode": resource_alert_state as u8,
+        "recovery": {
+            "stateCode": record.recovery_state_code,
+            "autoRestart": record.auto_restart,
+            "restartDelayMillis": record.restart_delay_millis,
+            "restartBackoffMaxMillis": record.restart_backoff_max_millis,
+            "maxUnstableRestarts": record.max_unstable_restarts,
+            "minUptimeMillis": record.min_uptime_millis,
+            "unstableRestartCount": record.unstable_restart_count,
+            "totalAutoRestartCount": record.total_auto_restart_count,
+            "nextRestartAtMillis": record.next_restart_at_millis,
+        },
     })
 }
 
@@ -2417,6 +4067,7 @@ struct ManagerPaths {
     logs: PathBuf,
     deployments: PathBuf,
     traffic: PathBuf,
+    history: PathBuf,
 }
 impl ManagerPaths {
     fn load() -> Result<Self, String> {
@@ -2438,6 +4089,7 @@ impl ManagerPaths {
             logs: base.join("logs"),
             deployments: base.join("deployments"),
             traffic: base.join("traffic"),
+            history: base.join("history"),
         };
         for path in [
             &paths.applications,
@@ -2445,6 +4097,7 @@ impl ManagerPaths {
             &paths.logs,
             &paths.deployments,
             &paths.traffic,
+            &paths.history,
         ] {
             secure_directory(path)?;
         }
@@ -2464,6 +4117,15 @@ impl ManagerPaths {
     }
     fn traffic_metrics(&self, name: &str) -> PathBuf {
         self.traffic.join(format!("{name}.metrics.json"))
+    }
+    fn resource_history(&self, name: &str) -> PathBuf {
+        self.history.join(format!("{name}.json"))
+    }
+    fn live_dashboard_config(&self) -> PathBuf {
+        self.base.join("live-dashboard.json")
+    }
+    fn live_dashboard_state(&self) -> PathBuf {
+        self.runtime.join("live-dashboard.json")
     }
 }
 
@@ -2573,13 +4235,68 @@ fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
     if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD_BYTES {
         return Err(format!("invalid application record {}", path.display()));
     }
-    let record: ApplicationRecord =
+    let mut record: ApplicationRecord =
         serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
             .map_err(|error| format!("invalid application record: {error}"))?;
-    if record.schema_version != 1 || record.kind_code == 0 || record.kind_code > 2 {
+    if !matches!(record.schema_version, 1 | 2) || record.kind_code == 0 || record.kind_code > 2 {
         return Err("unsupported application record contract".to_owned());
     }
     validate_name(&record.name)?;
+    if record.schema_version == 1 {
+        let online = running_state(&record)
+            .as_ref()
+            .is_some_and(master_is_running);
+        record.schema_version = 2;
+        record.desired_state_code = if online {
+            ApplicationState::Online as u8
+        } else {
+            ApplicationState::Stopped as u8
+        };
+        record.auto_restart = online;
+        record.recovery_state_code = if online {
+            RecoveryState::Healthy as u8
+        } else {
+            RecoveryState::Disabled as u8
+        };
+    }
+    if !matches!(record.desired_state_code, 1 | 2)
+        || !(1..=5).contains(&record.recovery_state_code)
+        || !(1..=5).contains(&record.health_state_code)
+    {
+        return Err("invalid application recovery state".to_owned());
+    }
+    validate_recovery_policy(
+        record.restart_delay_millis,
+        record.restart_backoff_max_millis,
+        record.max_unstable_restarts,
+        record.min_uptime_millis,
+    )?;
+    validate_shutdown_policy(record.shutdown_timeout_millis)?;
+    if record.health_check_address.is_some() != record.health_check_path.is_some() {
+        return Err(
+            "application health check address and path must be configured together".to_owned(),
+        );
+    }
+    let health_url = record.health_check_address.map(|address| {
+        format!(
+            "http://{}{}",
+            address,
+            record.health_check_path.as_deref().unwrap_or("/")
+        )
+    });
+    validate_health_start_period(
+        record.health_check_start_period_millis,
+        health_url.is_some(),
+    )?;
+    validate_health_policy(
+        health_url.as_deref(),
+        record.health_check_interval_millis,
+        record.health_check_timeout_millis,
+        record.health_check_failure_threshold,
+    )?;
+    if health_url.is_some() && !record.auto_restart {
+        return Err("application health checks require automatic restart".to_owned());
+    }
     Ok(record)
 }
 fn read_all_records(paths: &ManagerPaths) -> Result<Vec<ApplicationRecord>, String> {
@@ -2640,6 +4357,11 @@ fn required_positive_u64(value: Option<OsString>, option: &str) -> Result<u64, S
         .filter(|value| *value > 0)
         .ok_or_else(|| format!("{option} requires a positive integer"))
 }
+fn required_u64(value: Option<OsString>, option: &str) -> Result<u64, String> {
+    required_utf8(value, option)?
+        .parse::<u64>()
+        .map_err(|_| format!("{option} requires a non-negative integer"))
+}
 fn validate_resource_policy(
     memory_warning_bytes: Option<u64>,
     task_warning_count: Option<u64>,
@@ -2662,6 +4384,54 @@ fn validate_resource_policy(
             .is_some_and(|(warning, maximum)| warning > maximum)
     {
         return Err(format!("{label} warning cannot exceed its hard limit"));
+    }
+    Ok(())
+}
+
+fn validate_shutdown_policy(timeout_millis: u64) -> Result<(), String> {
+    if !(MIN_SHUTDOWN_TIMEOUT_MILLIS..=MAX_SHUTDOWN_TIMEOUT_MILLIS).contains(&timeout_millis) {
+        return Err(format!(
+            "shutdown timeout must be between {MIN_SHUTDOWN_TIMEOUT_MILLIS} and {MAX_SHUTDOWN_TIMEOUT_MILLIS} milliseconds"
+        ));
+    }
+    Ok(())
+}
+
+fn validate_health_start_period(
+    start_period_millis: u64,
+    health_check_configured: bool,
+) -> Result<(), String> {
+    if start_period_millis > MAX_HEALTH_START_PERIOD_MILLIS {
+        return Err(format!(
+            "health check start period must be 0-{MAX_HEALTH_START_PERIOD_MILLIS} milliseconds"
+        ));
+    }
+    if start_period_millis > 0 && !health_check_configured {
+        return Err("health check start period requires a health check URL".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_recovery_policy(
+    delay_millis: u64,
+    maximum_delay_millis: u64,
+    maximum_restarts: u32,
+    minimum_uptime_millis: u64,
+) -> Result<(), String> {
+    if !(10..=60_000).contains(&delay_millis) {
+        return Err("restart delay must be 10-60000 milliseconds".to_owned());
+    }
+    if !(delay_millis..=300_000).contains(&maximum_delay_millis) {
+        return Err(
+            "restart backoff maximum must be at least the delay and at most 300000 milliseconds"
+                .to_owned(),
+        );
+    }
+    if !(1..=100).contains(&maximum_restarts) {
+        return Err("maximum unstable restarts must be 1-100".to_owned());
+    }
+    if !(1_000..=3_600_000).contains(&minimum_uptime_millis) {
+        return Err("minimum stable uptime must be 1000-3600000 milliseconds".to_owned());
     }
     Ok(())
 }
@@ -2783,6 +4553,13 @@ mod tests {
         );
         assert_eq!(
             [
+                LogStream::StandardOutput as u8,
+                LogStream::StandardError as u8,
+            ],
+            [1, 2]
+        );
+        assert_eq!(
+            [
                 ResourceAlertState::Healthy as u8,
                 ResourceAlertState::MemoryWarning as u8,
                 ResourceAlertState::TaskWarning as u8,
@@ -2799,6 +4576,171 @@ mod tests {
             ],
             [1, 2, 3]
         );
+        assert_eq!(
+            [
+                RecoveryState::Healthy as u8,
+                RecoveryState::Backoff as u8,
+                RecoveryState::Stabilizing as u8,
+                RecoveryState::CircuitOpen as u8,
+                RecoveryState::Disabled as u8,
+            ],
+            [1, 2, 3, 4, 5]
+        );
+        assert_eq!(
+            [
+                HealthState::Disabled as u8,
+                HealthState::Healthy as u8,
+                HealthState::Failing as u8,
+                HealthState::Unhealthy as u8,
+                HealthState::Starting as u8,
+            ],
+            [1, 2, 3, 4, 5]
+        );
+    }
+
+    #[test]
+    fn recovery_backoff_is_exponential_bounded_and_opens_the_circuit() {
+        let mut record = ApplicationRecord {
+            schema_version: 2,
+            name: "api".to_owned(),
+            kind_code: 1,
+            working_directory: PathBuf::from("/srv/api"),
+            command: vec!["pam".to_owned(), "start".to_owned()],
+            master_state_file: PathBuf::from("state.json"),
+            stdout_log: PathBuf::from("out.log"),
+            stderr_log: PathBuf::from("error.log"),
+            log_max_bytes: DEFAULT_LOG_MAX_BYTES,
+            log_retain: DEFAULT_LOG_RETAIN,
+            memory_warning_bytes: None,
+            task_warning_count: None,
+            memory_max_bytes: None,
+            task_max_count: None,
+            environment_file: None,
+            shutdown_timeout_millis: DEFAULT_SHUTDOWN_TIMEOUT_MILLIS,
+            health_check_address: None,
+            health_check_path: None,
+            health_check_interval_millis: DEFAULT_HEALTH_INTERVAL_MILLIS,
+            health_check_timeout_millis: DEFAULT_HEALTH_TIMEOUT_MILLIS,
+            health_check_start_period_millis: 0,
+            health_check_failure_threshold: DEFAULT_HEALTH_FAILURE_THRESHOLD,
+            consecutive_health_failures: 0,
+            last_health_check_at_millis: None,
+            last_health_success_at_millis: None,
+            health_state_code: HealthState::Disabled as u8,
+            total_unhealthy_restart_count: 0,
+            desired_state_code: ApplicationState::Online as u8,
+            auto_restart: true,
+            restart_delay_millis: 100,
+            restart_backoff_max_millis: 250,
+            max_unstable_restarts: 3,
+            min_uptime_millis: 1_000,
+            unstable_restart_count: 0,
+            total_auto_restart_count: 0,
+            next_restart_at_millis: None,
+            recovery_state_code: RecoveryState::Healthy as u8,
+            created_at_millis: 1,
+        };
+        for (now, deadline) in [(1_000, 1_100), (2_000, 2_200), (3_000, 3_250)] {
+            schedule_recovery(&mut record, now);
+            assert_eq!(record.recovery_state_code, RecoveryState::Backoff as u8);
+            assert_eq!(record.next_restart_at_millis, Some(deadline));
+        }
+        schedule_recovery(&mut record, 4_000);
+        assert_eq!(record.recovery_state_code, RecoveryState::CircuitOpen as u8);
+        assert_eq!(record.next_restart_at_millis, None);
+    }
+
+    #[test]
+    fn shutdown_escalates_when_a_master_ignores_sigterm() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; while :; do :; done"])
+            .spawn()
+            .expect("spawn signal-resistant master");
+        thread::sleep(Duration::from_millis(50));
+        let state = MasterState {
+            version: 1,
+            pid: child.id(),
+            process_start: crate::cluster::linux_process_start(child.id()),
+            workers: 1,
+            admin_address: None,
+            started_at_millis: epoch_millis(),
+        };
+
+        assert!(terminate_master(&state, MIN_SHUTDOWN_TIMEOUT_MILLIS).unwrap());
+        let _ = child.wait();
+        assert!(!master_is_running(&state));
+    }
+
+    #[test]
+    fn shutdown_timeout_policy_is_bounded() {
+        assert!(validate_shutdown_policy(MIN_SHUTDOWN_TIMEOUT_MILLIS).is_ok());
+        assert!(validate_shutdown_policy(MAX_SHUTDOWN_TIMEOUT_MILLIS).is_ok());
+        assert!(validate_shutdown_policy(MIN_SHUTDOWN_TIMEOUT_MILLIS - 1).is_err());
+        assert!(validate_shutdown_policy(MAX_SHUTDOWN_TIMEOUT_MILLIS + 1).is_err());
+    }
+
+    #[test]
+    fn health_start_period_suppresses_liveness_until_elapsed() {
+        let state = MasterState {
+            version: 1,
+            pid: 1,
+            process_start: None,
+            workers: 1,
+            admin_address: None,
+            started_at_millis: 10_000,
+        };
+        assert!(!health_start_period_elapsed(&state, 30_000, 39_999));
+        assert!(health_start_period_elapsed(&state, 30_000, 40_000));
+        assert!(health_start_period_elapsed(&state, 0, 10_000));
+        assert!(!health_start_period_elapsed(&state, 30_000, 9_000));
+        assert!(validate_health_start_period(3_600_000, true).is_ok());
+        assert!(validate_health_start_period(3_600_001, true).is_err());
+        assert!(validate_health_start_period(1, false).is_err());
+    }
+
+    #[test]
+    fn environment_files_are_literal_private_and_cannot_redirect_manager_state() {
+        let directory = std::env::temp_dir().join(format!(
+            "pam-env-contract-{}-{}",
+            std::process::id(),
+            epoch_millis()
+        ));
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("production.env");
+        fs::write(
+            &path,
+            "# comment\nexport APP_MODE=production\nLITERAL='$HOME'\nEMPTY=\n",
+        )
+        .unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let environment = load_environment_file(&path).unwrap();
+        assert_eq!(environment["APP_MODE"], "production");
+        assert_eq!(environment["LITERAL"], "$HOME");
+        assert_eq!(environment["EMPTY"], "");
+
+        fs::write(&path, "PAM_MANAGER_STATE_DIR=/tmp/redirected\n").unwrap();
+        assert!(
+            load_environment_file(&path)
+                .unwrap_err()
+                .contains("reserved")
+        );
+        fs::remove_dir_all(directory).unwrap();
+    }
+    #[test]
+    fn health_checks_are_loopback_bounded_and_do_not_accept_header_injection() {
+        let (address, path) =
+            parse_health_check_url("http://127.0.0.1:8080/health?full=1").unwrap();
+        assert!(address.ip().is_loopback());
+        assert_eq!(path, "/health?full=1");
+        for rejected in [
+            "https://127.0.0.1:8080/health",
+            "http://example.com:8080/health",
+            "http://192.0.2.1:8080/health",
+            "http://127.0.0.1:8080/health%0d%0aHost:evil",
+            "http://127.0.0.1/health",
+        ] {
+            assert!(parse_health_check_url(rejected).is_err(), "{rejected}");
+        }
     }
     #[test]
     fn rotated_log_names_are_stable() {
@@ -2886,11 +4828,20 @@ memory_warning_bytes=1024
 memory_max_bytes=2048
 task_warning_count=8
 task_max_count=16
+env_file=".env.production"
+health_check_url="http://127.0.0.1:8080/health"
+health_check_interval_millis=5000
+health_check_timeout_millis=1000
+health_check_start_period_millis=30000
+health_check_failure_threshold=3
 "#;
         let limited = toml::from_str::<EcosystemConfig>(limited).unwrap();
         let api = &limited.applications["api"];
         assert_eq!(api.memory_max_bytes, Some(2048));
         assert_eq!(api.task_max_count, Some(16));
+        assert_eq!(api.env_file, Some(PathBuf::from(".env.production")));
+        assert_eq!(api.health_check_failure_threshold, 3);
+        assert_eq!(api.health_check_start_period_millis, 30_000);
         assert!(validate_resource_policy(Some(3), None, Some(2), None, "api").is_err());
     }
 
@@ -2913,5 +4864,29 @@ task_max_count=16
         }
         assert_eq!(history.entries.len(), MAX_DEPLOY_HISTORY);
         assert_eq!(history.entries[0].release_directory, PathBuf::from("1"));
+    }
+
+    #[test]
+    fn resource_history_retention_is_bounded() {
+        let mut history = ResourceHistory {
+            schema_version: 1,
+            name: "api".to_owned(),
+            entries: Vec::new(),
+        };
+        for index in 0..=MAX_RESOURCE_HISTORY {
+            append_resource_entry(
+                &mut history,
+                ResourceHistoryEntry {
+                    observed_at_millis: index as u64,
+                    state_code: ApplicationState::Online as u8,
+                    workers: 1,
+                    rss_bytes: index as u64,
+                    tasks: 1,
+                    alert_state_code: ResourceAlertState::Healthy as u8,
+                },
+            );
+        }
+        assert_eq!(history.entries.len(), MAX_RESOURCE_HISTORY);
+        assert_eq!(history.entries[0].observed_at_millis, 1);
     }
 }

@@ -6,6 +6,13 @@ readiness gate, crash recovery, worker recycling, and generational reload.
 
 ```bash
 pam up --name billing --workers 8
+pam up --name critical --restart-delay-ms 250 --restart-backoff-max-ms 15000 \
+  --max-unstable-restarts 10 --min-uptime-ms 30000
+pam up --name production --env-file .env.production
+pam up --name production --shutdown-timeout-ms 20000
+pam up --name api --health-check-url http://127.0.0.1:8080/health \
+  --health-check-interval-ms 5000 --health-check-timeout-ms 1000 \
+  --health-check-start-period-ms 30000 --health-check-failures 3
 pam ps
 pam status billing
 pam describe billing
@@ -43,18 +50,109 @@ the raw Runtime path. Arguments after `--` belong to the application.
 `--attach` keeps standard input, output, and error connected to the terminal.
 Detached applications write separate output and error logs.
 
+Detached applications automatically recover an unexpectedly exited master.
+The delay doubles after each unstable restart, is capped by
+`--restart-backoff-max-ms`, and resets only after `--min-uptime-ms` of stable
+uptime. After `--max-unstable-restarts`, PAM opens a circuit and requires an
+explicit `pam restart NAME` to retry. `--no-autorestart` disables this policy.
+`status`, `describe`, and `ps --json` expose desired state, recovery state,
+attempt counters, total automatic restarts, and the next retry deadline.
+The reproducible `benchmarks/process-manager/run.sh` harness repeatedly kills
+an isolated managed master and records raw recovery latency, success rate and
+daemon RSS growth. Its suite-5 evidence manifest binds every artifact by
+SHA-256 and detects later modification. The `Performance evidence` workflow
+accepts manual suite ID `5`, builds the measured release binary on Ubuntu 24.04,
+runs ten recovery rounds, verifies the manifest before upload, and retains the
+clean-host artifact for 30 days. Its default gates require 100% recovery,
+p95 at most 2000 ms, and daemon RSS growth at most 16 MiB. A launch failure
+keeps the workflow red but retains at most 64 KiB of CLI diagnostics and 1 MiB
+of application stderr so clean-host failures remain actionable after cleanup.
+
+The first hosted Ubuntu 24.04 suite-5 run is
+[32469172846](https://github.com/push-in/pam/actions/runs/32469172846), bound to
+commit `c644031`. All 10 masters recovered: p50 was 626 ms, p95 and maximum were
+630 ms, and daemon RSS grew by 823296 bytes. Success, latency, and resource gate
+codes were all `1`. The downloaded four-artifact bundle passed an independent
+offline manifest verification after the workflow's own verification.
+
+Suite `6` runs the same crash-recovery protocol against PAM and the exact
+lockfile-pinned PM2 7.0.3 on one Ubuntu host: one PHP application instance, the
+same ten `SIGKILL` rounds, 10 ms configured restart delay, 10 ms polling and a
+10-second per-round deadline. It reports each system independently and uses
+topology code `1` for PAM's master/worker replacement and `2` for PM2's directly
+managed single process. Latency deltas are directional evidence, not a claim
+that those topologies perform identical work; daemon RSS is explicitly marked
+non-comparable. Both systems must recover every round, and the recursive suite-6
+manifest binds the PAM report, both raw CSV/resource pairs, tool versions,
+PM2 package integrity and shared parameters.
+The isolated benchmark lock overrides PM2's vulnerable `js-yaml` 4.3.0 with the
+compatible 4.3.1 security release, and CI rejects high-severity production-tree
+advisories before running the comparison.
+Evidence provenance defines `source.dirty` over tracked files, so the pinned
+auxiliary `pam-native` checkout does not create a false dirty result; its exact
+40-character commit is recorded separately as `tools.pam_native_commit`.
+
+The [first clean hosted suite-6 run](https://github.com/push-in/pam/actions/runs/32472443364)
+on Linux commit `44a0304` recovered 10/10 processes for both systems. PAM's
+master/worker recovery measured p50 616 ms and p95/maximum 668 ms; PM2's direct
+single-process recovery measured p50 112 ms and p95/maximum 122 ms, a directional
+p95 delta of 546 ms. The evidence records `dirty=false`, PAM Native commit
+`26a768c`, PM2 7.0.3 and its package integrity. All gate codes were `1`, and the
+downloaded eight-artifact bundle passed independent offline verification. The
+RSS values remain intentionally excluded from comparison because the daemon
+topologies and responsibilities differ.
+
+`--env-file FILE` supplies per-application environment without copying secret
+values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
+file again on every launch and restart, so an explicit `pam restart NAME`
+activates rotated values. The format is bounded `KEY=VALUE` text with optional
+single or double quotes and an optional `export ` prefix; interpolation and
+shell execution never occur. The file must be a non-symlink regular UTF-8 file
+owned by the current user, mode `0600` or stricter, at most 64 KiB and 256
+variables. Manager state-directory overrides are reserved and rejected.
+
+`--health-check-url` adds active liveness supervision for a master that remains
+present but no longer serves healthy responses. PAM accepts only an explicit
+loopback IP and port over HTTP, never follows redirects, never resolves DNS,
+bounds the response prefix to 8 KiB, and treats only status `200`–`299` as
+healthy. Probes run outside the daemon request thread with at most 64 in flight;
+stale results are discarded by PID and configuration identity. After the
+configured consecutive-failure threshold, PAM records the unhealthy event,
+kills the stuck master, and delegates restart/backoff/circuit behavior to the
+same recovery state machine. Health checks require automatic restart.
+`--health-check-start-period-ms` defers liveness probes for 0–3600000 ms after
+each master start. It defaults to zero for compatibility and uses the new
+master's recorded start time after every manual or automatic restart. This
+prevents a slow but valid warmup from consuming the failure threshold; status
+JSON exposes the effective value as `healthCheck.startPeriodMillis`.
+
+`--shutdown-timeout-ms` controls how long PAM waits after `SIGTERM` during
+`stop`, `restart`, deploy activation, and rollback. The accepted range is
+100–300000 ms and the default is 20000 ms. If the master is still alive, PAM
+escalates to `SIGKILL`, verifies termination for up to five seconds, and reports
+the forced shutdown in human and JSON output. This keeps automation bounded
+while preserving graceful draining under normal operation.
+
 Log files rotate before launch or restart when they reach 10 MiB and retain
 five generations by default. `pam up --log-max-bytes N --log-retain N` stores
 per-application limits. `pam logs NAME --follow` streams appended bytes and
 continues across rotation; `--errors` selects stderr and `--both` follows both.
+For bounded operational queries, combine `--query TEXT`, `--lines N`,
+`--include-rotated`, `--both` and `--json`. The versioned result uses stream
+codes stdout `1` and stderr `2`, includes only the rotation index and line, and
+never exposes manager filesystem paths. Queries retain at most 10,000 matching
+lines from bounded 8 MiB windows per file, accept lossy non-UTF-8 content, and
+reject empty, oversized or control-bearing filters. Structured query options
+cannot be combined with the unbounded interactive `--follow` mode.
 
 ## Lifecycle semantics
 
 - `reload` starts a new generation, waits for readiness, activates it, and then
   drains the old generation. Failed readiness keeps the healthy generation.
-- `restart` gracefully stops the master and executes its recorded command again.
+- `restart` resets an open recovery circuit, gracefully stops the master, and executes its recorded command again.
   It has a downtime window and receives a new PID.
-- `stop` retains registration and logs.
+- `stop` persists stopped intent before signaling, retains registration and
+  logs, and is never undone by automatic recovery.
 - `delete` accepts only stopped applications and preserves their logs.
 - `scale` persists a new worker target and performs a readiness-gated restart.
 - `save` records online/stopped intent in a bounded schema; `resurrect` starts
@@ -63,7 +161,10 @@ continues across rotation; `--errors` selects stderr and `--both` follows both.
 
 All lifecycle commands accept `--json`. Public kind and state values are
 sequential integer enums: Runtime kind `1`, Laravel Octane kind `2`, online
-state `1`, and stopped state `2`.
+state `1`, and stopped state `2`. Recovery states are healthy `1`, backoff `2`,
+stabilizing `3`, circuit open `4`, and disabled `5`.
+Health states are disabled `1`, healthy `2`, failing `3`, and unhealthy `4`.
+The bounded pre-liveness startup period is starting `5`.
 
 ## Linux state and security
 
@@ -71,7 +172,7 @@ The default root follows the XDG base-directory convention:
 
 ```text
 $XDG_STATE_HOME/pam/
-├── applications/   bounded schema-1 registrations
+├── applications/   bounded schema-2 registrations
 ├── runtime/        master state and PID fingerprints
 └── logs/           stdout and stderr streams
 ```
@@ -113,6 +214,18 @@ memory_warning_bytes = 536870912
 task_warning_count = 64
 memory_max_bytes = 805306368
 task_max_count = 96
+env_file = ".env.production"
+shutdown_timeout_millis = 20000
+health_check_url = "http://127.0.0.1:8080/health"
+health_check_interval_millis = 5000
+health_check_timeout_millis = 1000
+health_check_start_period_millis = 30000
+health_check_failure_threshold = 3
+auto_restart = true
+restart_delay_millis = 250
+restart_backoff_max_millis = 15000
+max_unstable_restarts = 10
+min_uptime_millis = 30000
 
 [applications.web]
 kind_code = 2
@@ -125,7 +238,9 @@ Kind `1` is raw PAM Runtime; kind `2` is Laravel Octane and requires `artisan`
 in its working directory. Working directories must remain beneath the
 configuration directory, worker counts are bounded to 1–256, unknown fields
 fail validation, and configuration files are limited to regular non-symlink
-files of at most 1 MiB. Use `pam config:check --json` in CI and `pam apply
+files of at most 1 MiB. Relative environment-file paths resolve from the
+`pam.toml` directory and changes restart a running application so the new
+environment is effective. Use `pam config:check --json` in CI and `pam apply
 --json` for a stable action-coded reconciliation report.
 
 `memory_warning_bytes` and `task_warning_count` are optional positive alert
@@ -144,6 +259,47 @@ silently running without the requested policy. The resource snapshot reads
 codes are verified `1`, not requested `2`, unverified/mismatched `3`. A hard-limit
 change restarts the application and returns reconcile action `7`; warning-only
 changes remain action `6`. Warnings must not exceed their corresponding maximum.
+
+## Bounded resource history
+
+The private per-user daemon records one resource sample per managed application
+at startup and every 60 seconds. `pam monit:history [NAME] [--limit N]` reads the
+latest entries; add `--json` for schema-versioned automation or `--record` to
+capture an immediate incident sample. Limits range from 1 to 120.
+
+Every application has an independent owner-only history capped at 120 entries.
+Entries contain only observation time, sequential integer process/alert states,
+worker count, aggregate RSS, and task count. Commands, paths, environment,
+network details, and logs are excluded. `pam delete` removes the corresponding
+history, while stopped applications remain explicitly sampled with state code
+`2` and unavailable alert code `5` until deletion.
+
+`pam dashboard` summarizes the bounded window as exact sample count, peak RSS,
+and textual RSS direction. This supplements the current snapshot; the JSON
+history remains the authoritative lossless local evidence.
+
+## Authenticated live dashboard
+
+`pam dashboard:start --token-file TOKEN [--listen 127.0.0.1:PORT]` starts a
+detached read-only HTTP view. `dashboard:status` reports its sequential state
+code (`1` online, `2` stopped), PID, loopback listener and start time;
+`dashboard:stop` terminates it and removes both runtime state and the private
+credential digest. The default listener is `127.0.0.1:9615`, and every other
+loopback port is accepted except zero. PAM rejects all non-loopback addresses.
+The runtime state binds the PID to its Linux process-start ticks, so stale state
+cannot make status trust—or stop signal—an unrelated process after PID reuse.
+
+The token file follows the hardened control-plane credential contract and must
+also be owner-only on Linux. Only a SHA-256 digest is persisted. Both browser
+Basic authentication (`pam:TOKEN`) and Bearer authentication use constant-time
+digest comparison. Requests are limited to 16 KiB of headers and two seconds of
+read/write time; only authenticated `GET /` and `GET /health` exist. Responses
+are `no-store`, deny framing/referrers/sniffing, and carry a script-free CSP.
+
+The live page deliberately has no timer or JavaScript. “Refresh now” performs a
+new authenticated GET and leaves refresh under explicit user control, avoiding
+unexpected screen-reader announcements or keyboard-focus resets. It shares the
+same 2 MiB rendering bound and privacy exclusions as static snapshots.
 
 ## Transactional releases
 

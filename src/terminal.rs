@@ -284,6 +284,18 @@ pub fn print_help(executable: &OsStr) {
                 "top [admin-url] [--json]",
                 "Stream live runtime metrics or NDJSON diagnostics",
             ),
+            (
+                "dashboard [output.html]",
+                "Create a private manager health dashboard",
+            ),
+            (
+                "dashboard:start|status|stop",
+                "Operate the authenticated local live dashboard",
+            ),
+            (
+                "monit:history [name] [--json]",
+                "Inspect bounded process resource history",
+            ),
             ("benchmark <url>", "Measure throughput and latency"),
         ],
     );

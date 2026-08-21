@@ -112,6 +112,7 @@ Inside every PAM project, the workflow is the same:
 ```bash
 pam doctor
 pam support --output pam-support.json
+pam support --manager --output pam-support-manager.json
 pam dev
 pam test
 pam build
@@ -122,6 +123,8 @@ When a development or CI environment needs investigation, `pam support` emits a
 bounded JSON report to standard output without copying source files, environment
 variables, or network data. Paths are redacted, persistence is explicit, and an
 existing report is never overwritten. See the [CLI guide](docs/cli.md#privacy-safe-support-reports).
+Add `--manager` to include a bounded, separately hashed and path-redacted process
+health/resource snapshot; log contents remain excluded.
 
 ## Native means native. Reactive means reactive.
 
@@ -807,15 +810,28 @@ pam composer [arguments...]                        run verified Composer inside 
 pam dev [index.php] [arguments...]                 recursive hot reload
 pam start [index.php] --workers N                  supervised production cluster
 pam up [index.php] --name api --workers N          start and detach a managed application
+pam up ... [--restart-delay-ms N] [--restart-backoff-max-ms N]
+           [--max-unstable-restarts N] [--min-uptime-ms N] [--no-autorestart]
+pam up ... [--shutdown-timeout-ms N]              bound graceful stop before SIGKILL
+pam up ... --env-file .env.production             load a private app environment
+pam up ... --health-check-url http://127.0.0.1:8080/health
+           [--health-check-interval-ms N] [--health-check-timeout-ms N]
+           [--health-check-start-period-ms N]
+           [--health-check-failures N]             recover live but unhealthy masters
 pam ps                                              list managed applications
 pam reload api                                      zero-downtime generational reload
 pam logs api --errors --lines 200                   inspect retained manager logs
 pam logs api --both --follow                        follow stdout and stderr across rotation
+pam logs api --both --include-rotated --query ERROR --lines 500 --json
 pam daemon start|status|stop                        control the private per-user supervisor
 pam scale api 8                                     persist and apply a new worker count
 pam save && pam resurrect                           save and restore the desired process list
 pam startup --print|--install                       configure the systemd user service
 pam monit [--json]                                  inspect process health and capacity
+pam monit:history [name] [--json]                   inspect bounded one-minute history
+pam dashboard [pam-dashboard.html]                  create a private static health snapshot
+pam dashboard:start --token-file TOKEN              start authenticated live local view
+pam dashboard:status|dashboard:stop                 inspect or stop the live view
 pam config:check [pam.toml] [--json]                validate declarative multi-service config
 pam apply [pam.toml] [--json]                       reconcile all declared applications
 pam up ... [--memory-warning-bytes N] [--task-warning-count N]

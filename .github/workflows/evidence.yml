@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       suite_id:
-        description: 1 comparison, 2 worker matrix, 3 runtime soak, 4 overload
+        description: 1 comparison, 2 worker matrix, 3 runtime soak, 4 overload, 5 manager recovery, 6 PM2 recovery comparison
         required: true
         default: '1'
         type: choice
@@ -15,6 +15,8 @@ on:
           - '2'
           - '3'
           - '4'
+          - '5'
+          - '6'
 
 permissions:
   contents: read
@@ -40,6 +42,9 @@ jobs:
       PAM_BENCH_COOLDOWN: '1'
       PAM_BENCH_WORKER_MATRIX: 1 4 8
       PAM_SOAK_DURATION: 30m
+      PAM_RECOVERY_ROUNDS: '10'
+      PAM_RECOVERY_MAX_P95_MILLIS: '2000'
+      PAM_RECOVERY_MAX_RSS_GROWTH_BYTES: '16777216'
     steps:
       - uses: actions/checkout@v5
         with:
@@ -57,6 +62,12 @@ jobs:
           php-version: '8.4'
           coverage: none
           tools: composer:v2
+      - uses: actions/setup-node@v4
+        if: env.PAM_EVIDENCE_SUITE_ID == '6'
+        with:
+          node-version: '22.22.0'
+          cache: npm
+          cache-dependency-path: benchmarks/process-manager/pm2/package-lock.json
       - name: Install benchmark system dependencies
         run: |
           sudo add-apt-repository -y ppa:ondrej/php
@@ -69,6 +80,23 @@ jobs:
         run: composer install --working-dir=packages/octane --dry-run --no-interaction --prefer-dist
       - name: Install locked benchmark dependencies
         run: composer install --working-dir=packages/octane --no-interaction --prefer-dist
+      - name: Preflight locked manager fixture dependencies
+        if: env.PAM_EVIDENCE_SUITE_ID == '5' || env.PAM_EVIDENCE_SUITE_ID == '6'
+        run: composer install --working-dir=compat/composer-smoke --dry-run --no-dev --no-interaction --prefer-dist
+      - name: Install locked manager fixture dependencies
+        if: env.PAM_EVIDENCE_SUITE_ID == '5' || env.PAM_EVIDENCE_SUITE_ID == '6'
+        run: composer install --working-dir=compat/composer-smoke --no-dev --no-interaction --prefer-dist
+      - name: Preflight locked PM2 comparison dependencies
+        if: env.PAM_EVIDENCE_SUITE_ID == '6'
+        working-directory: benchmarks/process-manager/pm2
+        run: |
+          npm view pm2@7.0.3 version engines deprecated dist.integrity --json
+          npm ci --dry-run --ignore-scripts --no-audit --no-fund
+          npm audit --omit=dev --audit-level=high
+      - name: Install locked PM2 comparison dependencies
+        if: env.PAM_EVIDENCE_SUITE_ID == '6'
+        working-directory: benchmarks/process-manager/pm2
+        run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Build the measured release binary
         run: cargo build --locked --release
       - name: Run selected evidence suite
@@ -78,6 +106,8 @@ jobs:
             2) benchmarks/octane/matrix.sh ;;
             3) benchmarks/octane/soak.sh ;;
             4) benchmarks/octane/overload.sh ;;
+            5) benchmarks/process-manager/run.sh ;;
+            6) benchmarks/process-manager/compare-pm2.sh ;;
             *) printf 'unknown evidence suite id: %s\n' "${PAM_EVIDENCE_SUITE_ID}" >&2; exit 64 ;;
           esac
       - name: Verify evidence before publication
@@ -87,6 +117,8 @@ jobs:
             2) results=benchmarks/octane/results/matrix ;;
             3) results=benchmarks/octane/results/soak ;;
             4) results=benchmarks/octane/results/overload ;;
+            5) results=benchmarks/process-manager/results ;;
+            6) results=benchmarks/process-manager/results/comparison ;;
           esac
           php benchmarks/octane/evidence-manifest.php \
             "${results}" "${PAM_EVIDENCE_SUITE_ID}" --verify
@@ -94,6 +126,8 @@ jobs:
         if: always()
         with:
           name: pam-evidence-suite-${{ env.PAM_EVIDENCE_SUITE_ID }}-${{ github.sha }}
-          path: benchmarks/octane/results/
-          if-no-files-found: warn
+          path: |
+            benchmarks/octane/results/
+            benchmarks/process-manager/results/
+          if-no-files-found: error
           retention-days: 30

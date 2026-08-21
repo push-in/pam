@@ -51,11 +51,17 @@ report to standard output. It does not read application file contents, copy
 environment variables, capture network data, or create a cache. Absolute project
 and home paths are replaced with `$PROJECT` and `$HOME`; the embedded diagnostic
 payload has a SHA-256 digest so a support recipient can detect accidental changes.
+`--manager` explicitly adds the versioned `pam monit --json` snapshot with its
+own SHA-256 digest after the same path redaction. The privacy contract then marks
+process metadata as included while continuing to exclude environment values,
+network data and log contents. Failure to collect requested manager evidence
+makes the overall report unsuccessful instead of silently omitting it.
 
 Persistence is opt-in:
 
 ```bash
 pam support . --output pam-support.json
+pam support . --manager --output pam-support-manager.json
 ```
 
 The output path must end in `.json`, must not already exist, and is created with
@@ -70,6 +76,68 @@ environment secrets. It recomputes the embedded diagnostic digest, checks the
 512 KiB bound and owner-only persisted mode, verifies redaction, and proves that
 an existing report cannot be overwritten. These reports reuse the seven-day
 Doctor evidence artifact instead of creating another retained CI bundle.
+
+## Private manager dashboard
+
+`pam dashboard [FILE.html]` creates a dependency-free, read-only HTML snapshot
+of every managed application. The default output is `pam-dashboard.html`; an
+explicit path can also be supplied with `--output FILE.html`.
+
+The snapshot includes application name and kind, textual process state, worker
+count, aggregate resident memory, task count, and resource-warning state. It
+excludes commands, paths, environment values, network data, and log contents.
+It contains no JavaScript or external assets and adapts to light, dark,
+high-contrast, reduced-motion, narrow-screen, keyboard, and screen-reader use.
+
+Dashboard files must end in `.html`, are bounded to 2 MiB, and are created with
+owner-only permissions on Unix. PAM never overwrites an existing snapshot:
+
+```bash
+pam dashboard manager-health.html
+```
+
+This is a local point-in-time flight recorder, not a network service. Review it
+before sharing and use a new filename whenever fresh evidence is needed.
+
+While `pamd` is running, it records one private resource sample per managed
+application every 60 seconds. `pam monit:history [NAME] [--limit N] [--json]`
+reads the newest samples; `--record` captures an explicit sample for incident
+response and deterministic automation. Each application retains at most 120
+samples in its own owner-only JSON record, so a busy or long-lived manager cannot
+grow one unbounded history file. Deleting an application deletes this history.
+
+History contains timestamps, integer state and alert codes, workers, aggregate
+RSS, and task counts. It contains no commands, paths, environment values,
+network data, or logs. The dashboard summarizes sample count, peak RSS, and the
+RSS direction in text; exact samples remain available through the CLI table or
+versioned JSON contract.
+
+### Authenticated live local view
+
+`pam dashboard:start --token-file TOKEN` starts the read-only dashboard as a
+detached local service on `127.0.0.1:9615`. The token file must be a bounded,
+regular, non-symlink file with 32–256 printable ASCII characters and owner-only
+permissions. PAM reads it once, persists only its SHA-256 digest in private
+manager state, and never places the token in arguments, URLs, status, HTML, or
+logs. Override the address with `--listen 127.0.0.1:PORT`; non-loopback binds and
+port zero fail closed.
+
+```bash
+umask 077
+openssl rand -hex 32 > pam-dashboard.token
+pam dashboard:start --token-file pam-dashboard.token
+pam dashboard:status --json
+pam dashboard:stop
+```
+
+Browsers can authenticate through HTTP Basic with user `pam` and the token as
+password. Automation can send `Authorization: Bearer TOKEN`. `/` renders fresh
+manager state on every authenticated GET and `/health` returns a versioned
+integer-coded health envelope. Responses disable caching, framing, referrers,
+MIME sniffing, scripts, external assets, and form submission through headers and
+CSP. Refresh is explicit so screen-reader and keyboard context is not reset by a
+timer. `status` never exposes credential material; `stop` removes runtime state
+and the stored digest.
 
 ## Machine interfaces
 

@@ -68,9 +68,19 @@ jobs:
           php-version: '8.4'
           tools: composer:v2
       - name: Install PHP Embed toolchain
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: |
-          timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php
+          repository_added=false
+          for attempt in 1 2 3; do
+            if timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php; then
+              repository_added=true
+              break
+            fi
+            if [ "${attempt}" -lt 3 ]; then
+              sleep "$((attempt * 5))"
+            fi
+          done
+          test "${repository_added}" = true
           sudo sed -i \
             's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/apt-mirrors.txt
