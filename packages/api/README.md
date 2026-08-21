@@ -266,6 +266,12 @@ failure when one occurred, and execute before the request scope is destroyed.
 An observer cleanup failure is logged and cannot prevent later observers or
 container cleanup from running.
 
+`MemoryProfiler` is the bounded first PAM Lens collector. Enable it explicitly
+with `ProfilerMode::Development` or `ProfilerMode::Testing` and register it as
+an observer. It emits `X-Debug-Token` and stores only method, path, status,
+duration, memory delta and failure class; request/response bodies and headers
+are never retained. Disabled mode is the default and emits nothing.
+
 ## OpenAPI and generated clients
 
 ```php

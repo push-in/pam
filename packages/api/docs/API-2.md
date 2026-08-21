@@ -79,6 +79,7 @@ The `feat/api-2-foundation` development line implements:
 - OpenAPI 3.1, compatibility checks and TypeScript/Kotlin/Swift clients;
 - request-scoped tenancy and normalized request observations;
 - deterministic request lifecycle observers with failure-aware reverse cleanup;
+- a bounded opt-in development profiler that never retains headers or payloads;
 - transactions, events, bounded jobs, retry and circuit-breaker primitives;
 - strict CORS, trusted-proxy IP resolution and cooperative deadlines;
 - composable health checks and container-scope diagnostics;
