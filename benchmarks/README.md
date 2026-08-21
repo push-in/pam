@@ -81,6 +81,12 @@ a suite-5 SHA-256 manifest. The runner refuses to overwrite evidence. Set
 `PAM_RECOVERY_RESULTS` to a new directory and `PAM_BENCH_BINARY` to the exact
 candidate binary for release measurements.
 
+Each round also records `worker-startup.csv`: worker count, first-to-last spawn
+spread, and the generation's p95/maximum spawn-to-ready latency. These values
+come from worker-published timestamps carried through the ready master state,
+not from external CLI polling. The report aggregates them separately from the
+existing end-to-end and recovery-phase metrics.
+
 Set `PAM_RECOVERY_WORKERS` from 1 through 64 to measure a bounded worker count.
 Suite 7 fixes the release matrix at 1, 4 and 16 workers and runs the complete
 suite-5 protocol independently for each configuration:

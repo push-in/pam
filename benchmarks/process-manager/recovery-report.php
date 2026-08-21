@@ -94,6 +94,48 @@ if ($phaseRows !== count($latencies)) {
     fwrite(STDERR, "recovery and phase round counts differ\n");
     exit(1);
 }
+$startupCsv = $directory.'/worker-startup.csv';
+if (!is_file($startupCsv) || is_link($startupCsv) || filesize($startupCsv) > 1024 * 1024) {
+    fwrite(STDERR, "worker startup CSV is missing, unsafe, or oversized\n");
+    exit(1);
+}
+$startupHandle = fopen($startupCsv, 'rb');
+if ($startupHandle === false || fgetcsv($startupHandle) !== [
+    'round', 'workers', 'spawn_spread_millis', 'spawn_to_ready_p95_millis',
+    'spawn_to_ready_maximum_millis', 'success',
+]) {
+    fwrite(STDERR, "worker startup CSV header is invalid\n");
+    exit(1);
+}
+$startup = ['spawn_spread' => [], 'spawn_to_ready_p95' => [], 'spawn_to_ready_maximum' => []];
+$startupRows = 0;
+$workerCount = null;
+while (($row = fgetcsv($startupHandle)) !== false) {
+    ++$startupRows;
+    $values = array_map(
+        static fn (mixed $value): int|false => filter_var($value, FILTER_VALIDATE_INT),
+        $row,
+    );
+    if (count($row) !== 6 || in_array(false, $values, true) || $values[0] !== $startupRows
+        || $values[1] < 1 || min(array_slice($values, 2, 3)) < 0
+        || $values[4] < $values[3] || !in_array($values[5], [0, 1], true)
+        || $values[5] !== $recoveryOutcomes[$startupRows - 1]
+        || ($workerCount !== null && $values[1] !== $workerCount)) {
+        fwrite(STDERR, "worker startup CSV contains an invalid row\n");
+        exit(1);
+    }
+    $workerCount ??= $values[1];
+    if ($values[5] === 1) {
+        foreach (array_keys($startup) as $index => $metric) {
+            $startup[$metric][] = $values[$index + 2];
+        }
+    }
+}
+fclose($startupHandle);
+if ($startupRows !== count($latencies)) {
+    fwrite(STDERR, "recovery and worker startup round counts differ\n");
+    exit(1);
+}
 sort($latencies, SORT_NUMERIC);
 $percentile = static function (array $values, float $quantile): int {
     $index = max(0, (int) ceil(count($values) * $quantile) - 1);
@@ -130,6 +172,15 @@ foreach ($phases as $name => $values) {
         'maximum' => max($values),
     ];
 }
+$startupSummary = [];
+foreach ($startup as $name => $values) {
+    sort($values, SORT_NUMERIC);
+    $startupSummary[$name.'_millis'] = $values === [] ? null : [
+        'p50' => $percentile($values, 0.50),
+        'p95' => $percentile($values, 0.95),
+        'maximum' => max($values),
+    ];
+}
 $detectionGate = ($phaseSummary['detection_millis']['p95'] ?? PHP_INT_MAX) <= $maximumDetectionP95;
 $backoffGate = ($phaseSummary['backoff_millis']['p95'] ?? PHP_INT_MAX) <= $maximumBackoffP95;
 $readinessGate = ($phaseSummary['readiness_millis']['p95'] ?? PHP_INT_MAX) <= $maximumReadinessP95;
@@ -144,6 +195,10 @@ $report = [
         'maximum' => max($latencies),
     ],
     'recovery_phases' => $phaseSummary,
+    'worker_startup' => [
+        'workers' => $workerCount,
+        ...$startupSummary,
+    ],
     'daemon_rss_growth_bytes' => $rssGrowth,
     'thresholds' => [
         'maximum_p95_millis' => $maximumP95,

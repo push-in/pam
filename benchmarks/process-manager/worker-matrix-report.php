@@ -38,6 +38,7 @@ foreach ($expectedWorkers as $workers) {
         || !is_int($configurationRounds) || $configurationRounds < 3
         || ($metadata['parameters']['workers'] ?? null) !== $workers
         || ($metadata['parameters']['rounds'] ?? null) !== $configurationRounds
+        || !is_array($report['worker_startup'] ?? null)
         || !is_array($metadata['source'] ?? null) || !is_array($metadata['host'] ?? null)
         || !is_array($metadata['tools'] ?? null)) {
         fwrite(STDERR, "worker-matrix contract is invalid for {$workers} workers\n");
@@ -63,6 +64,7 @@ foreach ($expectedWorkers as $workers) {
         'successful_rounds' => $report['successful_rounds'] ?? null,
         'recovery_millis' => $report['recovery_millis'] ?? null,
         'recovery_phases' => $report['recovery_phases'] ?? null,
+        'worker_startup' => $report['worker_startup'],
         'daemon_rss_growth_bytes' => $report['daemon_rss_growth_bytes'] ?? null,
         'thresholds' => $report['thresholds'] ?? null,
         'gate_codes' => $report['gate_codes'] ?? null,

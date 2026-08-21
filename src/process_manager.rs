@@ -4105,6 +4105,11 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "pid": state.map(|state| state.pid),
         "workers": state.map(|state| state.workers),
         "startedAtMillis": state.map(|state| state.started_at_millis),
+        "workerStartup": state.map(|state| serde_json::json!({
+            "spawnSpreadMillis": state.worker_spawn_spread_millis,
+            "spawnToReadyP95Millis": state.worker_startup_p95_millis,
+            "spawnToReadyMaximumMillis": state.worker_startup_max_millis,
+        })),
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
@@ -4824,6 +4829,9 @@ mod tests {
             workers: 1,
             admin_address: None,
             started_at_millis: epoch_millis(),
+            worker_spawn_spread_millis: None,
+            worker_startup_p95_millis: None,
+            worker_startup_max_millis: None,
         };
 
         assert!(terminate_master(&state, MIN_SHUTDOWN_TIMEOUT_MILLIS).unwrap());
@@ -4848,6 +4856,9 @@ mod tests {
             workers: 1,
             admin_address: None,
             started_at_millis: 10_000,
+            worker_spawn_spread_millis: None,
+            worker_startup_p95_millis: None,
+            worker_startup_max_millis: None,
         };
         assert!(!health_start_period_elapsed(&state, 30_000, 39_999));
         assert!(health_start_period_elapsed(&state, 30_000, 40_000));

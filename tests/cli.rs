@@ -230,6 +230,11 @@ fn creates_and_verifies_manager_recovery_evidence() {
         r#"{"daemon_rss_before_bytes":1000000,"daemon_rss_after_bytes":2000000}"#,
     )
     .unwrap();
+    fs::write(
+        results.join("worker-startup.csv"),
+        "round,workers,spawn_spread_millis,spawn_to_ready_p95_millis,spawn_to_ready_maximum_millis,success\n1,4,3,70,75,1\n2,4,4,110,115,1\n3,4,5,150,155,1\n",
+    )
+    .unwrap();
     let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("benchmarks/process-manager/recovery-report.php");
     let reported = run_pam(&[
@@ -250,6 +255,12 @@ fn creates_and_verifies_manager_recovery_evidence() {
     assert_eq!(report["recovery_phases"]["detection_millis"]["p95"], 20);
     assert_eq!(report["recovery_phases"]["backoff_millis"]["p50"], 10);
     assert_eq!(report["recovery_phases"]["readiness_millis"]["p95"], 150);
+    assert_eq!(report["worker_startup"]["workers"], 4);
+    assert_eq!(report["worker_startup"]["spawn_spread_millis"]["p95"], 5);
+    assert_eq!(
+        report["worker_startup"]["spawn_to_ready_p95_millis"]["p95"],
+        150
+    );
     assert_eq!(report["gate_codes"]["success"], 1);
     assert_eq!(report["gate_codes"]["detection"], 1);
     assert_eq!(report["gate_codes"]["backoff"], 1);
@@ -403,7 +414,7 @@ fn aggregates_and_verifies_manager_recovery_worker_matrix() {
         .unwrap();
         fs::write(
             directory.join("recovery-report.json"),
-            format!(r#"{{"schema_version":1,"suite_code":5,"rounds":3,"successful_rounds":3,"recovery_millis":{{"p50":{},"p95":{},"maximum":{}}},"recovery_phases":{{"readiness_millis":{{"p50":50,"p95":60,"maximum":70}}}},"daemon_rss_growth_bytes":0,"thresholds":{{"maximum_p95_millis":500}},"gate_codes":{{"success":1,"latency":1,"detection":1,"backoff":1,"readiness":1,"resources":1}},"passed":true}}"#, 100 + index, 110 + index, 120 + index),
+            format!(r#"{{"schema_version":1,"suite_code":5,"rounds":3,"successful_rounds":3,"recovery_millis":{{"p50":{},"p95":{},"maximum":{}}},"recovery_phases":{{"readiness_millis":{{"p50":50,"p95":60,"maximum":70}}}},"worker_startup":{{"workers":{workers},"spawn_spread_millis":{{"p50":2,"p95":3,"maximum":3}},"spawn_to_ready_p95_millis":{{"p50":50,"p95":60,"maximum":60}},"spawn_to_ready_maximum_millis":{{"p50":55,"p95":65,"maximum":65}}}},"daemon_rss_growth_bytes":0,"thresholds":{{"maximum_p95_millis":500}},"gate_codes":{{"success":1,"latency":1,"detection":1,"backoff":1,"readiness":1,"resources":1}},"passed":true}}"#, 100 + index, 110 + index, 120 + index),
         )
         .unwrap();
     }
@@ -589,6 +600,17 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         .as_u64()
         .unwrap();
     assert!(detected <= recovery_started && recovery_started <= recovery_ready);
+    assert_eq!(recovered["workerStartup"]["spawnSpreadMillis"], 0);
+    assert!(
+        recovered["workerStartup"]["spawnToReadyP95Millis"]
+            .as_u64()
+            .is_some_and(|value| value > 0)
+    );
+    assert!(
+        recovered["workerStartup"]["spawnToReadyMaximumMillis"]
+            .as_u64()
+            .is_some_and(|value| value > 0)
+    );
     assert_eq!(recovered["environmentFileConfigured"], true);
     assert!(!recovered.to_string().contains("private-value"));
     assert!(
