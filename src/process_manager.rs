@@ -470,6 +470,13 @@ enum ReconcileAction {
     ResourceLimitsUpdated = 7,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum ReconcileMode {
+    Plan = 1,
+    Apply = 2,
+}
+
 pub fn run(
     executable: &OsStr,
     command: &str,
@@ -513,7 +520,8 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "dashboard:start" => live_dashboard_start(executable, arguments),
         "dashboard:status" => live_dashboard_status(arguments),
         "dashboard:stop" => live_dashboard_stop(arguments),
-        "apply" => apply_ecosystem(executable, arguments),
+        "apply" => reconcile_ecosystem(executable, arguments, true),
+        "plan" => reconcile_ecosystem(executable, arguments, false),
         "config:check" => check_ecosystem(executable, arguments),
         "deploy" => deploy(executable, arguments),
         "deploy:history" => deployment_history(arguments),
@@ -1025,10 +1033,19 @@ fn print_traffic(config: &crate::traffic::TrafficConfig, state: Option<&MasterSt
     }
 }
 
-fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
-    let (path, json) = parse_config_arguments(arguments, "apply")?;
-    let (config, root) = load_ecosystem(&path)?;
-    let paths = ManagerPaths::load()?;
+fn reconcile_ecosystem(
+    executable: &OsStr,
+    arguments: Vec<OsString>,
+    apply: bool,
+) -> Result<u8, String> {
+    let command_name = if apply { "apply" } else { "plan" };
+    let (path, json) = parse_config_arguments(arguments, command_name)?;
+    let (config, root, configuration_sha256) = load_ecosystem(&path)?;
+    let paths = if apply {
+        ManagerPaths::load()?
+    } else {
+        ManagerPaths::locate()?
+    };
     let mut results = Vec::new();
     let mut profile_cache = BTreeMap::new();
     for (name, application) in config.applications {
@@ -1057,7 +1074,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
         )?;
         let action = if !application.autostart {
             let record_path = paths.application(&name);
-            if record_path.exists() {
+            if apply && record_path.exists() {
                 let mut command = Command::new(executable);
                 command.args(["stop", &name]);
                 run_reconcile_command(command, &name)?;
@@ -1131,7 +1148,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 if !application.arguments.is_empty() {
                     command.arg("--").args(&application.arguments);
                 }
-                run_reconcile_command(command, &name)?;
+                if apply {
+                    run_reconcile_command(command, &name)?;
+                }
                 ReconcileAction::Created
             } else {
                 let mut record = read_record(&record_path)?;
@@ -1212,7 +1231,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                         record.recovery_state_code = RecoveryState::Disabled as u8;
                         record.next_restart_at_millis = None;
                     }
-                    write_record(&record_path, &record)?;
+                    if apply {
+                        write_record(&record_path, &record)?;
+                    }
                 }
                 let state = running_state(&record);
                 if (limit_updated
@@ -1222,7 +1243,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || extension_isolation_updated)
                     && state.as_ref().is_some_and(master_is_running)
                 {
-                    restart_record(executable, &record, false, false)?;
+                    if apply {
+                        restart_record(executable, &record, false, false)?;
+                    }
                     if limit_updated {
                         ReconcileAction::ResourceLimitsUpdated
                     } else {
@@ -1231,7 +1254,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 } else if !state.as_ref().is_some_and(master_is_running) {
                     let mut command = Command::new(executable);
                     command.args(["restart", &name]);
-                    run_reconcile_command(command, &name)?;
+                    if apply {
+                        run_reconcile_command(command, &name)?;
+                    }
                     ReconcileAction::Restarted
                 } else if state
                     .as_ref()
@@ -1239,7 +1264,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 {
                     let mut command = Command::new(executable);
                     command.args(["scale", &name, &application.workers.to_string()]);
-                    run_reconcile_command(command, &name)?;
+                    if apply {
+                        run_reconcile_command(command, &name)?;
+                    }
                     ReconcileAction::Scaled
                 } else if policy_updated {
                     ReconcileAction::PolicyUpdated
@@ -1250,14 +1277,19 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
         };
         results.push(serde_json::json!({"name":name,"actionCode":action as u8}));
     }
+    let change_count = results
+        .iter()
+        .filter(|result| result["actionCode"] != ReconcileAction::Unchanged as u8)
+        .count();
     if json {
         println!(
             "{}",
-            serde_json::json!({"schemaVersion":1,"results":results})
+            serde_json::json!({"schemaVersion":1,"modeCode":if apply { ReconcileMode::Apply as u8 } else { ReconcileMode::Plan as u8 },"applied":apply,"configurationSha256":configuration_sha256,"changeCount":change_count,"results":results})
         );
     } else {
         println!(
-            "Applied {} applications from {}",
+            "{} {} applications from {}",
+            if apply { "Applied" } else { "Planned" },
             results.len(),
             path.display()
         );
@@ -1274,7 +1306,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
 
 fn check_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let (path, json) = parse_config_arguments(arguments, "config:check")?;
-    let (config, root) = load_ecosystem(&path)?;
+    let (config, root, _) = load_ecosystem(&path)?;
     let mut profile_cache = BTreeMap::new();
     for (name, application) in &config.applications {
         validate_ecosystem_application(executable, &root, name, application, &mut profile_cache)?;
@@ -1314,7 +1346,7 @@ fn parse_config_arguments(
     Ok((path.unwrap_or_else(|| PathBuf::from("pam.toml")), json))
 }
 
-fn load_ecosystem(path: &Path) -> Result<(EcosystemConfig, PathBuf), String> {
+fn load_ecosystem(path: &Path) -> Result<(EcosystemConfig, PathBuf, String), String> {
     if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
         return Err(format!(
             "refusing symlink ecosystem configuration {}",
@@ -1332,6 +1364,7 @@ fn load_ecosystem(path: &Path) -> Result<(EcosystemConfig, PathBuf), String> {
     }
     let text = fs::read_to_string(&path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    let configuration_sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
     let config: EcosystemConfig =
         toml::from_str(&text).map_err(|error| format!("invalid pam.toml: {error}"))?;
     if config.schema_version != 1
@@ -1344,7 +1377,7 @@ fn load_ecosystem(path: &Path) -> Result<(EcosystemConfig, PathBuf), String> {
         .parent()
         .ok_or_else(|| "pam.toml has no parent directory".to_owned())?
         .to_path_buf();
-    Ok((config, root))
+    Ok((config, root, configuration_sha256))
 }
 
 fn validate_ecosystem_application(
@@ -4377,7 +4410,7 @@ struct ManagerPaths {
     history: PathBuf,
 }
 impl ManagerPaths {
-    fn load() -> Result<Self, String> {
+    fn locate() -> Result<Self, String> {
         let base = if let Some(path) = std::env::var_os("PAM_MANAGER_STATE_DIR") {
             PathBuf::from(path)
         } else if let Some(path) = std::env::var_os("XDG_STATE_HOME") {
@@ -4389,7 +4422,7 @@ impl ManagerPaths {
             )
             .join(".local/state/pam")
         };
-        let paths = Self {
+        Ok(Self {
             base: base.clone(),
             applications: base.join("applications"),
             runtime: base.join("runtime"),
@@ -4397,7 +4430,10 @@ impl ManagerPaths {
             deployments: base.join("deployments"),
             traffic: base.join("traffic"),
             history: base.join("history"),
-        };
+        })
+    }
+    fn load() -> Result<Self, String> {
+        let paths = Self::locate()?;
         for path in [
             &paths.applications,
             &paths.runtime,
@@ -4867,6 +4903,10 @@ mod tests {
                 ReconcileAction::ResourceLimitsUpdated as u8,
             ],
             [1, 2, 3, 4, 5, 6, 7]
+        );
+        assert_eq!(
+            [ReconcileMode::Plan as u8, ReconcileMode::Apply as u8],
+            [1, 2]
         );
         assert_eq!(
             [

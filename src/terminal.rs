@@ -262,6 +262,16 @@ pub fn print_help(executable: &OsStr) {
                 "Explain a locked Composer PHP extension profile",
             ),
             ("test [path]", "Run Pest or PHPUnit inside Pam"),
+            ("up [script.php]", "Start and detach a managed application"),
+            (
+                "plan [pam.toml]",
+                "Preview declarative reconciliation safely",
+            ),
+            ("apply [pam.toml]", "Reconcile declarative applications"),
+            (
+                "ps | logs | monit",
+                "Operate and observe managed applications",
+            ),
         ],
     );
     command_group(
@@ -574,6 +584,18 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "extensions . --no-dev --json",
                 "extensions . --no-dev --toml",
             ],
+        ),
+        "plan" => (
+            "Read live manager state and preview the exact pam.toml reconciliation without starting the daemon, writing state, or changing processes.",
+            "plan [pam.toml] [--json]",
+            &[("--json", "Emit stable mode and action codes")],
+            &["plan", "plan pam.toml --json"],
+        ),
+        "apply" => (
+            "Recompute and execute the pam.toml reconciliation plan.",
+            "apply [pam.toml] [--json]",
+            &[("--json", "Emit stable mode and action codes")],
+            &["apply", "apply pam.toml --json"],
         ),
         "distribution:verify" => (
             "Verify signed clean-host distribution evidence without network access.",

@@ -69,10 +69,22 @@ That evidence gate now passes in the
 the locked profile selected `iconv`, both 16-worker profiles recovered 10/10,
 and total/readiness/PHP-engine p95 improved by 42.47%/50.37%/83.96%. Every gate
 returned code `1`, and the downloaded 15-artifact bundle verified independently
-against clean commit `bdcab86`. The next process-manager target is a declarative
-profile reference that pins these manifest/lock hashes and fails reconciliation
-closed when dependencies drift, without silently changing the compatible
-default.
+against clean commit `bdcab86`. The follow-up shipped a declarative profile
+reference that pins those hashes, re-derives each unique project/profile only
+once per reconciliation, preserves explicit empty isolation and fails closed on
+dependency or host-module drift. Its
+[hosted suite-8 run](https://github.com/push-in/pam/actions/runs/32522760307)
+verified 16 artifacts against clean commit `10defa5`; the new declarative-profile
+gate and every existing gate returned code `1`, while isolated total/readiness/
+PHP-engine p95 improved by 42.27%/49.25%/81.47%.
+
+The next operator-safety gap is review before mutation. The official
+[Terraform plan contract](https://developer.hashicorp.com/terraform/cli/commands/plan)
+reads current state, compares it with configuration and proposes actions without
+executing them, while explicitly warning that speculative plans can become
+stale. PAM therefore needs a read-only live-state plan on the exact apply
+decision path, bound to the configuration digest, and must recompute at apply
+time rather than treating preview output as executable authority.
 
 ### Competitive research refresh — 2026-08-21 progressive delivery
 

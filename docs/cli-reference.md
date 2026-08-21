@@ -35,6 +35,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Develop
 
 - `pam apply` — Reconcile applications from pam.toml.
+- `pam plan` — Preview pam.toml reconciliation without mutation.
 - `pam config:check` — Validate a pam.toml ecosystem contract.
 ## Ship
 
