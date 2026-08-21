@@ -261,25 +261,26 @@ final class App implements ApplicationInterface, TransportApplicationInterface
                 $observer->starting($request);
                 $startedObservers[] = $observer;
             }
-            return $this->pipeline?->handle($request, $response)
+            $handled = $this->pipeline?->handle($request, $response)
                 ?? throw new \LogicException('Pam API pipeline was not compiled.');
+            return $this->finalizeResponse($request, $handled);
         } catch (\Throwable $error) {
             $failure = $error;
             if ($error instanceof HttpException) {
-                return $response->json([
+                return $this->finalizeResponse($request, $response->json([
                     'type' => 'https://pam.dev/problems/' . $error->problemCode->value,
                     'title' => $error->getMessage(),
                     'status' => $error->status,
                     'code' => $error->problemCode->value,
                     ...$error->details,
-                ], $error->status);
+                ], $error->status));
             }
             $handler = $this->errorHandler;
             $result = $handler($error, $response);
             if (!$result instanceof Response) {
                 throw new \UnexpectedValueException('The Pam error handler must return Response.');
             }
-            return $result;
+            return $this->finalizeResponse($request, $result);
         } finally {
             foreach (array_reverse($startedObservers) as $observer) {
                 try {
@@ -294,6 +295,11 @@ final class App implements ApplicationInterface, TransportApplicationInterface
             }
             $this->container->endScope();
         }
+    }
+
+    private function finalizeResponse(Request $request, Response $response): Response
+    {
+        return $request->method === 'HEAD' ? $response->send(null) : $response;
     }
 
     private function dispatchRoute(Request $request, Response $response): Response

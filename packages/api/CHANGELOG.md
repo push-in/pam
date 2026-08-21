@@ -15,6 +15,7 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - signed bearer access tokens with bounded key rotation and revocation;
 - typed configuration with deterministic secret redaction;
 - automatic `HEAD`/`OPTIONS` semantics and deterministic `Allow` headers;
+- final `HEAD` body suppression with status and header preservation;
 - request lifecycle observers and a bounded privacy-safe development profiler;
 - a lease-based job queue contract and bounded worker with retries, expired
   lease recovery and dead-letter transitions;

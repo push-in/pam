@@ -86,6 +86,19 @@ final class RouterFluentTest extends TestCase
         self::assertSame(['custom'], $result['headers']['x-options']);
     }
 
+    public function testHeadPreservesGetMetadataAndSuppressesItsBody(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->get('/report', static fn (Request $request, Response $response): Response =>
+            $response->status(202)->header('x-report', 'ready')->send('must-not-leave-worker'));
+
+        $result = $app->handle($this->request('HEAD', '/report'), new Response())->export();
+
+        self::assertSame(202, $result['status']);
+        self::assertSame(['ready'], $result['headers']['x-report']);
+        self::assertSame('', $result['body']);
+    }
+
     private function request(string $method, string $path): Request
     {
         return new Request($method, $path, [], [], '');
