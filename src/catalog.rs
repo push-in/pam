@@ -127,6 +127,7 @@ impl CommandSpec {
                 | "distribution:verify"
                 | "doctor"
                 | "info"
+                | "logs"
                 | "packages"
                 | "top"
         )
@@ -151,7 +152,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         ),
         command("dev", "Start the contextual development session", "Develop"),
         command("run", "Build and launch the active application", "Develop"),
-        command("logs", "Stream logs from the active application", "Develop"),
+        command(
+            "logs",
+            "Query or follow managed application logs",
+            "Develop",
+        ),
         command("daemon", "Manage the per-user PAM supervisor", "Develop"),
         command(
             "scale",

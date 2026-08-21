@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -94,6 +94,13 @@ enum RolloutDecision {
     Promoted = 2,
     Aborted = 3,
     DeadlineAborted = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum LogStream {
+    StandardOutput = 1,
+    StandardError = 2,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -2195,6 +2202,9 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut errors = false;
     let mut both = false;
     let mut follow = false;
+    let mut json = false;
+    let mut query = None::<String>;
+    let mut include_rotated = false;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.to_string_lossy().as_ref() {
@@ -2202,6 +2212,9 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
             "--errors" => errors = true,
             "--both" => both = true,
             "--follow" | "-f" => follow = true,
+            "--json" => json = true,
+            "--query" => query = Some(required_utf8(arguments.next(), "--query")?),
+            "--include-rotated" => include_rotated = true,
             option if option.starts_with('-') => {
                 return Err(format!("unknown logs option: {option}"));
             }
@@ -2215,18 +2228,79 @@ fn logs(arguments: Vec<OsString>) -> Result<u8, String> {
     if errors && both {
         return Err("logs accepts either --errors or --both, not both".to_owned());
     }
-    let paths = if both {
-        vec![record.stdout_log, record.stderr_log]
+    if follow && (json || query.is_some() || include_rotated) {
+        return Err("logs --follow cannot be combined with structured query options".to_owned());
+    }
+    if query.as_ref().is_some_and(|value| {
+        value.is_empty() || value.len() > 256 || value.contains(['\0', '\n', '\r'])
+    }) {
+        return Err("logs --query requires 1-256 characters without controls".to_owned());
+    }
+    let streams = if both {
+        vec![
+            (record.stdout_log, LogStream::StandardOutput),
+            (record.stderr_log, LogStream::StandardError),
+        ]
     } else if errors {
-        vec![record.stderr_log]
+        vec![(record.stderr_log, LogStream::StandardError)]
     } else {
-        vec![record.stdout_log]
+        vec![(record.stdout_log, LogStream::StandardOutput)]
     };
-    for path in &paths {
-        print_tail(path, lines.min(100_000))?;
+    if json || query.is_some() || include_rotated {
+        let limit = lines.min(10_000);
+        let mut entries = VecDeque::with_capacity(limit.min(1024));
+        let mut truncated = false;
+        for (path, stream) in &streams {
+            let mut files = if include_rotated {
+                (1..=record.log_retain)
+                    .rev()
+                    .map(|index| (rotated_log_path(path, index), index))
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+            files.push((path.clone(), 0));
+            for (file, rotated_index) in files {
+                if !file.exists() {
+                    continue;
+                }
+                for line in read_log_lines(&file)? {
+                    if query.as_ref().is_none_or(|query| line.contains(query)) {
+                        if entries.len() == limit {
+                            entries.pop_front();
+                            truncated = true;
+                        }
+                        entries.push_back(serde_json::json!({
+                            "streamCode": *stream as u8,
+                            "rotatedIndex": rotated_index,
+                            "line": line,
+                        }));
+                    }
+                }
+            }
+        }
+        if json {
+            println!(
+                "{}",
+                serde_json::json!({"schemaVersion":1,"name":name,"query":query,"truncated":truncated,"entries":entries})
+            );
+        } else {
+            for entry in entries {
+                println!("{}", entry["line"].as_str().unwrap_or_default());
+            }
+        }
+    } else {
+        for (path, _) in &streams {
+            print_tail(path, lines.min(100_000))?;
+        }
     }
     if follow {
-        follow_logs(&paths)?;
+        follow_logs(
+            &streams
+                .iter()
+                .map(|(path, _)| path.clone())
+                .collect::<Vec<_>>(),
+        )?;
     }
     Ok(0)
 }
@@ -2235,22 +2309,25 @@ fn follow_logs(paths: &[PathBuf]) -> Result<(), String> {
     let mut offsets = paths
         .iter()
         .map(|path| {
-            fs::metadata(path)
+            fs::symlink_metadata(path)
+                .ok()
+                .filter(|metadata| metadata.file_type().is_file())
                 .map(|metadata| metadata.len())
                 .unwrap_or(0)
         })
         .collect::<Vec<_>>();
     loop {
         for (index, path) in paths.iter().enumerate() {
-            let length = fs::metadata(path)
+            let length = fs::symlink_metadata(path)
+                .ok()
+                .filter(|metadata| metadata.file_type().is_file())
                 .map(|metadata| metadata.len())
                 .unwrap_or(0);
             if length < offsets[index] {
                 offsets[index] = 0;
             }
             if length > offsets[index] {
-                let mut file = File::open(path)
-                    .map_err(|error| format!("cannot follow log {}: {error}", path.display()))?;
+                let mut file = open_log_read(path)?;
                 file.seek(SeekFrom::Start(offsets[index]))
                     .map_err(|error| error.to_string())?;
                 let mut bytes = Vec::new();
@@ -2310,20 +2387,40 @@ const fn default_log_retain() -> usize {
 }
 
 fn print_tail(path: &Path, lines: usize) -> Result<(), String> {
-    let mut file =
-        File::open(path).map_err(|error| format!("cannot open log {}: {error}", path.display()))?;
-    let length = file.metadata().map_err(|error| error.to_string())?.len();
-    let window = length.min(8 * 1024 * 1024);
-    file.seek(SeekFrom::Start(length - window))
-        .map_err(|error| error.to_string())?;
-    let mut text = String::new();
-    file.read_to_string(&mut text)
-        .map_err(|error| format!("log is not valid UTF-8: {error}"))?;
-    let selected = text.lines().rev().take(lines).collect::<Vec<_>>();
+    let text = read_log_lines(path)?;
+    let selected = text.iter().rev().take(lines).collect::<Vec<_>>();
     for line in selected.into_iter().rev() {
         println!("{line}");
     }
     Ok(())
+}
+
+fn read_log_lines(path: &Path) -> Result<Vec<String>, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("cannot inspect log {}: {error}", path.display()))?;
+    if !metadata.file_type().is_file() {
+        return Err(format!("refusing non-regular log {}", path.display()));
+    }
+    let mut file = open_log_read(path)?;
+    let length = file.metadata().map_err(|error| error.to_string())?.len();
+    let window = length.min(8 * 1024 * 1024);
+    file.seek(SeekFrom::Start(length - window))
+        .map_err(|error| error.to_string())?;
+    let mut bytes = Vec::with_capacity(window as usize);
+    file.read_to_end(&mut bytes)
+        .map_err(|error| format!("cannot read log {}: {error}", path.display()))?;
+    Ok(String::from_utf8_lossy(&bytes)
+        .lines()
+        .map(str::to_owned)
+        .collect())
+}
+
+fn open_log_read(path: &Path) -> Result<File, String> {
+    let mut options = OpenOptions::new();
+    options.read(true).custom_flags(libc::O_NOFOLLOW);
+    options
+        .open(path)
+        .map_err(|error| format!("cannot open log {}: {error}", path.display()))
 }
 
 fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> serde_json::Value {
@@ -2761,6 +2858,13 @@ mod tests {
                 RolloutDecision::DeadlineAborted as u8,
             ],
             [1, 2, 3, 4]
+        );
+        assert_eq!(
+            [
+                LogStream::StandardOutput as u8,
+                LogStream::StandardError as u8,
+            ],
+            [1, 2]
         );
         assert_eq!(
             [

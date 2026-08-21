@@ -800,6 +800,7 @@ pam ps                                              list managed applications
 pam reload api                                      zero-downtime generational reload
 pam logs api --errors --lines 200                   inspect retained manager logs
 pam logs api --both --follow                        follow stdout and stderr across rotation
+pam logs api --both --include-rotated --query ERROR --lines 500 --json
 pam daemon start|status|stop                        control the private per-user supervisor
 pam scale api 8                                     persist and apply a new worker count
 pam save && pam resurrect                           save and restore the desired process list

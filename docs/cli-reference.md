@@ -14,7 +14,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 
 - `pam dev` — Start the contextual development session.
 - `pam run` — Build and launch the active application.
-- `pam logs` — Stream logs from the active application.
+- `pam logs` — Query or follow managed application logs.
 - `pam daemon` — Manage the per-user PAM supervisor.
 - `pam scale` — Change a managed application's worker count.
 - `pam save` — Save the desired managed process list.

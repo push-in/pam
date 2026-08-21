@@ -260,6 +260,37 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "--json",
         ],
     );
+    fs::write(
+        state.join("logs/managed-smoke.out.log.1"),
+        "needle-old-output\n",
+    )
+    .unwrap();
+    fs::write(
+        state.join("logs/managed-smoke.out.log"),
+        "ignored\nneedle-new-output\n",
+    )
+    .unwrap();
+    fs::write(
+        state.join("logs/managed-smoke.error.log"),
+        "needle-new-error\n",
+    )
+    .unwrap();
+    let queried_logs = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "logs",
+            "managed-smoke",
+            "--both",
+            "--include-rotated",
+            "--query",
+            "needle-",
+            "--lines",
+            "3",
+            "--json",
+        ],
+    );
     let listed = run_managed_pam(&root, &state, port, &["ps", "--json"]);
     let scaled = run_managed_pam(
         &root,
@@ -280,6 +311,15 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&started.stderr)
     );
+    assert!(queried_logs.status.success());
+    let queried_logs: serde_json::Value = serde_json::from_slice(&queried_logs.stdout).unwrap();
+    assert_eq!(queried_logs["schemaVersion"], 1);
+    assert_eq!(queried_logs["entries"].as_array().unwrap().len(), 3);
+    assert_eq!(queried_logs["entries"][0]["rotatedIndex"], 1);
+    assert_eq!(queried_logs["entries"][0]["streamCode"], 1);
+    assert_eq!(queried_logs["entries"][2]["streamCode"], 2);
+    assert_eq!(queried_logs["truncated"], false);
+    assert!(!queried_logs.to_string().contains("/logs/"));
     assert!(
         listed.status.success(),
         "{}",

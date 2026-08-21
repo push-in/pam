@@ -47,6 +47,13 @@ Log files rotate before launch or restart when they reach 10 MiB and retain
 five generations by default. `pam up --log-max-bytes N --log-retain N` stores
 per-application limits. `pam logs NAME --follow` streams appended bytes and
 continues across rotation; `--errors` selects stderr and `--both` follows both.
+For bounded operational queries, combine `--query TEXT`, `--lines N`,
+`--include-rotated`, `--both` and `--json`. The versioned result uses stream
+codes stdout `1` and stderr `2`, includes only the rotation index and line, and
+never exposes manager filesystem paths. Queries retain at most 10,000 matching
+lines from bounded 8 MiB windows per file, accept lossy non-UTF-8 content, and
+reject empty, oversized or control-bearing filters. Structured query options
+cannot be combined with the unbounded interactive `--follow` mode.
 
 ## Lifecycle semantics
 
