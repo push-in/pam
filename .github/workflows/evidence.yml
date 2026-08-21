@@ -73,6 +73,12 @@ jobs:
         run: composer install --working-dir=packages/octane --dry-run --no-interaction --prefer-dist
       - name: Install locked benchmark dependencies
         run: composer install --working-dir=packages/octane --no-interaction --prefer-dist
+      - name: Preflight locked manager fixture dependencies
+        if: env.PAM_EVIDENCE_SUITE_ID == '5'
+        run: composer install --working-dir=compat/composer-smoke --dry-run --no-dev --no-interaction --prefer-dist
+      - name: Install locked manager fixture dependencies
+        if: env.PAM_EVIDENCE_SUITE_ID == '5'
+        run: composer install --working-dir=compat/composer-smoke --no-dev --no-interaction --prefer-dist
       - name: Build the measured release binary
         run: cargo build --locked --release
       - name: Run selected evidence suite
