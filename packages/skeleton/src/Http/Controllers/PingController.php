@@ -16,6 +16,8 @@ final readonly class PingController
 
     public function show(Request $request): PingResource
     {
-        return new PingResource($this->readiness->snapshot());
+        return new PingResource($this->readiness->snapshot(
+            $request->getHeader('x-request-id'),
+        ));
     }
 }

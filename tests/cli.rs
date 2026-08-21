@@ -2160,6 +2160,27 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join(".env.example").is_file());
     assert!(directory.join("phpunit.xml").is_file());
     assert!(directory.join("tests/ApplicationTest.php").is_file());
+    assert!(
+        directory
+            .join("src/Http/Controllers/PingController.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Http/Resources/PingResource.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Services/ReadinessService.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Services/ReadinessSnapshot.php")
+            .is_file()
+    );
+    assert!(directory.join("src/Services/ReadinessStatus.php").is_file());
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     assert!(manifest.contains("\"pushinbr/pam-api\""));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
@@ -2168,9 +2189,33 @@ fn initializes_a_project_without_overwriting_files() {
         "A PHP application powered by the PAM runtime."
     );
     assert_eq!(manifest_json["license"], "proprietary");
-    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^2.0");
     assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
-    assert_eq!(manifest_json["require-dev"]["pushinbr/pam-testing"], "^1.0");
+    assert!(
+        manifest_json["require-dev"]
+            .get("pushinbr/pam-testing")
+            .is_none()
+    );
+    assert_eq!(
+        manifest_json["repositories"][0]["options"]["versions"]["pushinbr/pam-api"],
+        "2.0.0"
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("index.php")).unwrap(),
+        include_str!("../packages/skeleton/index.php")
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("src/Http/Controllers/PingController.php")).unwrap(),
+        include_str!("../packages/skeleton/src/Http/Controllers/PingController.php")
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("src/Http/Resources/PingResource.php")).unwrap(),
+        include_str!("../packages/skeleton/src/Http/Resources/PingResource.php")
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("tests/ApplicationTest.php")).unwrap(),
+        include_str!("../packages/skeleton/tests/ApplicationTest.php")
+    );
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());
@@ -2218,7 +2263,7 @@ fn initializes_raw_and_socket_presets_without_composer() {
     let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
     assert!(manifest.contains("pushinbr/pam-socket"));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^2.0");
     assert_eq!(manifest_json["require"]["pushinbr/pam-socket"], "^1.0");
 
     fs::remove_dir_all(raw).unwrap();

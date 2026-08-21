@@ -342,9 +342,13 @@ sequential integer codes.
 ```php
 (new TestClient($app))
     ->postJson('/login', ['email' => 'dev@pam.dev'])
-    ->assertStatus(200)
+    ->assertSuccessful()
+    ->assertHeader('content-type', 'application/json')
     ->assertJsonPath('data.status', 1);
 ```
+
+Use `assertJson()` for an exact payload, `assertJsonPath()` for a focused value,
+and `assertStatus()` when the endpoint intentionally returns a specific code.
 
 Run `composer benchmark` for the standalone router benchmark.
 

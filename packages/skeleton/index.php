@@ -2,20 +2,23 @@
 
 declare(strict_types=1);
 
-use Pam\App;
-use Pam\Api\Middleware\SecurityHeadersMiddleware;
 use App\Http\Controllers\PingController;
-use Pam\Http\Request;
-use Pam\Http\Response;
+use Pam\Api\Config\ConfigDefinition;
+use Pam\Api\Config\Configuration;
+use Pam\Api\Config\ConfigType;
+use Pam\Api\Middleware\SecurityHeadersMiddleware;
+use Pam\App;
 
+$config = Configuration::fromEnvironment([
+    new ConfigDefinition(
+        key: 'app.port',
+        environment: 'PAM_PORT',
+        type: ConfigType::Integer,
+        required: false,
+        default: 3000,
+    ),
+]);
 $app = new App();
 $app->middleware(new SecurityHeadersMiddleware());
-
 $app->get('/api/ping', [PingController::class, 'show']);
-
-$app->get('/api/users/{id}', static fn (Request $request, Response $response): Response =>
-    $response->json([
-        'id' => $request->route('id'),
-    ]));
-
-$app->listen((int) (getenv('PAM_PORT') ?: 3000));
+$app->listen($config->integer('app.port'));

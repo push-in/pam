@@ -40,6 +40,34 @@ final readonly class TestResponse
         return $this;
     }
 
+    public function assertSuccessful(): self
+    {
+        $status = $this->status();
+        if ($status < 200 || $status >= 300) {
+            throw new \RuntimeException("Expected a successful response; received status {$status}.");
+        }
+        return $this;
+    }
+
+    public function assertHeader(string $name, ?string $expected = null): self
+    {
+        $actual = $this->header($name);
+        if ($actual === null || ($expected !== null && $actual !== $expected)) {
+            throw new \RuntimeException("Response header {$name} did not contain the expected value.");
+        }
+        return $this;
+    }
+
+    /** @param array<array-key, mixed> $expected */
+    public function assertJson(array $expected): self
+    {
+        $actual = $this->json();
+        if (!is_array($actual) || $actual !== $expected) {
+            throw new \RuntimeException('Response JSON did not exactly match the expected payload.');
+        }
+        return $this;
+    }
+
     public function assertJsonPath(string $path, mixed $expected): self
     {
         $value = $this->json();
@@ -55,4 +83,3 @@ final readonly class TestResponse
         return $this;
     }
 }
-

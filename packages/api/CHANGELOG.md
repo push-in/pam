@@ -19,6 +19,8 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - bounded route configuration and PCRE match/depth budgets;
 - an executable reflection-derived public API compatibility baseline enforced
   by Composer and required CI;
+- built-in fluent test assertions for successful responses, headers and exact
+  JSON payloads, used by the canonical structured starter;
 - request lifecycle observers and a bounded privacy-safe development profiler;
 - a lease-based job queue contract and bounded worker with retries, expired
   lease recovery and dead-letter transitions;

@@ -6,7 +6,7 @@ use Pam\App;
 use App\Http\Controllers\PingController;
 use Pam\Http\Request;
 use Pam\Http\Response;
-use Pam\Testing\TestClient;
+use Pam\Api\Testing\TestClient;
 use PHPUnit\Framework\TestCase;
 
 final class ApplicationTest extends TestCase
@@ -17,10 +17,11 @@ final class ApplicationTest extends TestCase
         $app->get('/api/ping', [PingController::class, 'show']);
 
         (new TestClient($app))
-            ->get('/api/ping')
-            ->assertSuccessful()
+            ->get('/api/ping', ['x-request-id' => 'starter-test'])
+            ->assertStatus(200)
             ->assertJsonPath('data.status', 1)
-            ->assertJsonPath('data.message', 'pong');
-        self::addToAssertionCount(1);
+            ->assertJsonPath('data.message', 'pong')
+            ->assertJsonPath('data.requestId', 'starter-test');
+        self::addToAssertionCount(4);
     }
 }

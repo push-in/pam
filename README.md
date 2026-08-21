@@ -75,11 +75,14 @@ $ cd my-api && pam dev
 ↻ Hot reload enabled
 
 $ curl http://127.0.0.1:3000/api/ping
-{"message":"pong"}
+{"data":{"status":1,"message":"pong","requestId":null}}
 ```
 
 Your application is now warm and persistent. Composer loaded once. The runtime
-stays alive. Requests execute in isolated Fibers.
+stays alive. Requests execute in isolated Fibers. The generated API is already
+split into a named controller action, application service, readonly snapshot,
+JSON Resource and integer-backed readiness enum; `index.php` validates typed
+configuration and enables security headers before listening.
 
 Choose another target without learning another platform CLI:
 

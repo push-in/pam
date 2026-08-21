@@ -99,6 +99,14 @@ pam init my-desktop-app --template desktop
 pam init my-product --template product
 ```
 
+The API preset targets PAM API 2.0 and generates the same source files shipped
+by `pushinbr/pam-skeleton`: a named `PingController::show` action, a readiness
+service and readonly snapshot, an integer-backed readiness enum, a JSON
+Resource, typed port configuration, security headers and an executable
+in-memory test. Run `pam composer test` immediately after creation. During the
+2.0 development line, `--no-install` may be used before the corresponding
+Packagist prerelease exists.
+
 The `product` template creates one bounded workspace with independently runnable
 Server, Native, and Desktop applications plus `packages/contracts`, a local PHP
 package shared by all three. Its first executable flow exposes the same typed

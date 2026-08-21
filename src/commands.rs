@@ -995,13 +995,20 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let version = "^1.0";
+    let api_version = "^2.0";
+    let ecosystem_version = "^1.0";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.4")),
-        ("pushinbr/pam-api".to_owned(), serde_json::json!(version)),
+        (
+            "pushinbr/pam-api".to_owned(),
+            serde_json::json!(api_version),
+        ),
     ]);
     if socket {
-        require.insert("pushinbr/pam-socket".to_owned(), serde_json::json!(version));
+        require.insert(
+            "pushinbr/pam-socket".to_owned(),
+            serde_json::json!(ecosystem_version),
+        );
     }
     let mut manifest = serde_json::json!({
         "name": "app/pam-project",
@@ -1011,7 +1018,6 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
         "require": require,
         "require-dev": {
             "laravel/pint": "^1.30",
-            "pushinbr/pam-testing": version,
             "phpunit/phpunit": "^12.5"
         },
         "autoload": {"psr-4": {"App\\": "src/"}},
@@ -1032,82 +1038,69 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
             + "\n"),
     )?;
 
-    let socket_setup = if socket {
-        r#"
+    let mut index = include_str!("../packages/skeleton/index.php").to_owned();
+    if socket {
+        index = index.replace(
+            "$app = new App();",
+            r#"$app = new App();
+
 $socket = \Pam\Socket\Server::create();
 $socket->on('connection', static function (\Pam\WS\Socket $client): void {
     $client->emit('welcome', ['message' => 'Connected to Pam Socket']);
-});
-"#
-    } else {
-        ""
-    };
-    write_new(
-        &directory.join("index.php"),
-        &format!(
-            r#"<?php
-
-declare(strict_types=1);
-
-use Pam\App;
-use Pam\Http\Request;
-use Pam\Http\Response;
-
-$app = new App;
-{socket_setup}
-$app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json([
-    'message' => 'pong',
-]));
-$app->listen((int) (getenv('PAM_PORT') ?: 3000));
-"#
-        ),
-    )?;
-    write_new(&directory.join(".gitignore"), "/vendor/\n/.pam/\n")?;
-    write_new(&directory.join(".env.example"), "PAM_PORT=3000\n")?;
-    write_new(
-        &directory.join("phpunit.xml"),
-        r#"<?xml version="1.0" encoding="UTF-8"?>
-<phpunit bootstrap="vendor/autoload.php" colors="true" cacheDirectory=".pam/phpunit-cache">
-    <testsuites>
-        <testsuite name="Pam application">
-            <directory>tests</directory>
-        </testsuite>
-    </testsuites>
-</phpunit>
-"#,
-    )?;
-    fs::create_dir_all(directory.join("tests"))
-        .map_err(|error| format!("cannot create test directory: {error}"))?;
-    write_new(
-        &directory.join("tests/ApplicationTest.php"),
-        r#"<?php
-
-declare(strict_types=1);
-
-use Pam\App;
-use Pam\Http\Request;
-use Pam\Http\Response;
-use Pam\Testing\TestClient;
-use PHPUnit\Framework\TestCase;
-
-final class ApplicationTest extends TestCase
-{
-    public function test_ping_endpoint(): void
-    {
-        $app = new App(discoverPackages: false);
-        $app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json(['message' => 'pong']));
-
-        (new TestClient($app))
-            ->get('/api/ping')
-            ->assertSuccessful()
-            ->assertJson(['message' => 'pong']);
-        self::addToAssertionCount(1);
+});"#,
+        );
     }
-}
-"#,
-    )?;
+    write_new(&directory.join("index.php"), &index)?;
+    for (path, contents) in API_STARTER_FILES {
+        let target = directory.join(path);
+        let parent = target
+            .parent()
+            .ok_or_else(|| format!("starter file has no parent: {}", target.display()))?;
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        write_new(&target, contents)?;
+    }
     Ok(())
 }
+
+const API_STARTER_FILES: &[(&str, &str)] = &[
+    (
+        ".env.example",
+        include_str!("../packages/skeleton/.env.example"),
+    ),
+    (
+        ".gitignore",
+        include_str!("../packages/skeleton/.gitignore"),
+    ),
+    (
+        "phpunit.xml",
+        include_str!("../packages/skeleton/phpunit.xml"),
+    ),
+    (
+        "src/Http/Controllers/PingController.php",
+        include_str!("../packages/skeleton/src/Http/Controllers/PingController.php"),
+    ),
+    (
+        "src/Http/Resources/PingResource.php",
+        include_str!("../packages/skeleton/src/Http/Resources/PingResource.php"),
+    ),
+    (
+        "src/Services/ReadinessService.php",
+        include_str!("../packages/skeleton/src/Services/ReadinessService.php"),
+    ),
+    (
+        "src/Services/ReadinessSnapshot.php",
+        include_str!("../packages/skeleton/src/Services/ReadinessSnapshot.php"),
+    ),
+    (
+        "src/Services/ReadinessStatus.php",
+        include_str!("../packages/skeleton/src/Services/ReadinessStatus.php"),
+    ),
+    (
+        "tests/ApplicationTest.php",
+        include_str!("../packages/skeleton/tests/ApplicationTest.php"),
+    ),
+];
 
 fn init_product(directory: &Path, options: &InitOptions) -> Result<(), String> {
     let applications = directory.join("apps");
@@ -1742,7 +1735,7 @@ declare(strict_types=1);
 use Pam\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
-use Pam\Testing\TestClient;
+use Pam\Api\Testing\TestClient;
 use PHPUnit\Framework\TestCase;
 use Product\Contracts\ProductMutation;
 use Product\Contracts\ProductMutationReceipt;
@@ -5809,11 +5802,11 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-core-api": "0.1.0",
-                        "pushinbr/pam-api": "0.1.0",
-                        "pushinbr/pam-psr-bridge": "0.1.0",
-                        "pushinbr/pam-socket": "0.1.0",
-                        "pushinbr/pam-testing": "0.1.0"
+                        "pushinbr/pam-core-api": "1.0.0",
+                        "pushinbr/pam-api": "2.0.0",
+                        "pushinbr/pam-psr-bridge": "1.0.0",
+                        "pushinbr/pam-socket": "1.0.0",
+                        "pushinbr/pam-testing": "1.0.0"
                     }
                 }
             })

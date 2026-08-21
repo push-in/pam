@@ -89,6 +89,8 @@ The `feat/api-2-foundation` development line implements:
 - strict CORS, trusted-proxy IP resolution and cooperative deadlines;
 - composable health checks and container-scope diagnostics;
 - an in-memory test client with fluent response assertions;
+- a canonical structured starter embedded by `pam init` and exercised through
+  a clean dependency install and Embed SAPI smoke test;
 - a reproducible router benchmark.
 
 Eloquent is the official ORM and is integrated with Fiber-local connection

@@ -8898,6 +8898,51 @@
                         }
                     ]
                 },
+                "assertHeader": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "expected",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "assertJson": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "expected",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
                 "assertJsonPath": {
                     "static": false,
                     "final": false,
@@ -8942,6 +8987,14 @@
                             "hasDefault": false
                         }
                     ]
+                },
+                "assertSuccessful": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": []
                 },
                 "body": {
                     "static": false,
