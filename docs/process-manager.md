@@ -108,8 +108,16 @@ schedule an exact bounded wake-up, while a 250 ms scan remains as a compatibilit
 fallback when the running kernel cannot provide a descriptor. This avoids both
 the former two-pass recovery delay and aggressive idle polling across large
 application catalogs. A controlled local 10-round run after this change measured
-PAM p50/p95 193/199 ms versus PM2 103/108 ms; hosted evidence is required before
-those figures replace the published baseline.
+PAM p50/p95 193/199 ms versus PM2 103/108 ms.
+
+The [hosted optimized suite-6 run](https://github.com/push-in/pam/actions/runs/32501406324)
+confirmed the result on clean Linux commit `795a20c`: PAM recovered 10/10 with
+p50 197 ms and p95/maximum 201 ms, down 70% from the previous hosted p95 of
+668 ms. PM2 recovered 10/10 with p50 114 ms and p95/maximum 119 ms, leaving an
+82 ms directional p95 gap. PAM daemon RSS grew 651264 bytes, but remains excluded
+from cross-topology comparison. The stricter 300 ms PAM p95 gate and every other
+gate passed with code `1`; the downloaded eight-artifact bundle passed independent
+offline verification with `dirty=false` and the expected pinned tool identities.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
