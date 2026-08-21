@@ -54,11 +54,13 @@
         "docs:check": "bin/api-reference --check",
         "docs:generate": "bin/api-reference --write",
         "benchmark": "php benchmarks/router.php",
+        "benchmark:check": "php benchmarks/router.php --assert",
         "test": "phpunit --configuration=phpunit.xml",
         "verify": [
             "@analyse",
             "@api:compat",
             "@docs:check",
+            "@benchmark:check",
             "@test"
         ]
     },

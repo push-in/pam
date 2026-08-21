@@ -20,10 +20,11 @@ try {
         throw new RuntimeException('Public API baseline size is invalid.');
     }
     $baseline = json_decode((string) file_get_contents($baselinePath), true, 512, JSON_THROW_ON_ERROR);
-    if (!is_array($baseline) || ($baseline['schema'] ?? null) !== 1 || !is_array($baseline['symbols'] ?? null)) {
+    if (!is_array($baseline) || ($baseline['schema'] ?? null) !== 1) {
         throw new RuntimeException('Public API baseline schema is invalid.');
     }
-    $reference = renderReference($baseline['symbols']);
+    $symbols = referenceSymbols($baseline['symbols'] ?? null);
+    $reference = renderReference($symbols);
     if ($mode === '--write') {
         if (file_put_contents($output, $reference, LOCK_EX) !== strlen($reference)) {
             throw new RuntimeException('Could not write the public API reference.');
@@ -35,7 +36,7 @@ try {
     if (!is_string($current) || !hash_equals($reference, $current)) {
         throw new RuntimeException('Public API reference is stale; run bin/api-reference --write.');
     }
-    fwrite(STDOUT, 'Public API reference current: ' . count($baseline['symbols']) . " symbols.\n");
+    fwrite(STDOUT, 'Public API reference current: ' . count($symbols) . " symbols.\n");
 } catch (Throwable $error) {
     fwrite(STDERR, 'Public API reference error: ' . $error->getMessage() . "\n");
     exit(1);
@@ -73,8 +74,9 @@ function renderReference(array $symbols): string
         if (is_string($symbol['parent'] ?? null)) {
             $declaration .= ' extends ' . $symbol['parent'];
         }
-        if (is_array($symbol['interfaces'] ?? null) && $symbol['interfaces'] !== []) {
-            $declaration .= ' implements ' . implode(', ', $symbol['interfaces']);
+        $interfaces = referenceStringList($symbol['interfaces'] ?? []);
+        if ($interfaces !== []) {
+            $declaration .= ' implements ' . implode(', ', $interfaces);
         }
         if (is_string($symbol['backingType'] ?? null)) {
             $declaration .= ': ' . $symbol['backingType'];
@@ -162,4 +164,36 @@ function referenceValue(mixed $value): string
 function referenceAnchor(string $name): string
 {
     return strtolower(str_replace('\\', '', $name));
+}
+
+/** @return array<string, mixed> */
+function referenceSymbols(mixed $symbols): array
+{
+    if (!is_array($symbols)) {
+        throw new RuntimeException('Public API symbols are invalid.');
+    }
+    $normalized = [];
+    foreach ($symbols as $name => $symbol) {
+        if (!is_string($name)) {
+            throw new RuntimeException('Public API symbol name is invalid.');
+        }
+        $normalized[$name] = $symbol;
+    }
+    return $normalized;
+}
+
+/** @return list<string> */
+function referenceStringList(mixed $values): array
+{
+    if (!is_array($values)) {
+        throw new RuntimeException('Public API string list is invalid.');
+    }
+    $normalized = [];
+    foreach ($values as $value) {
+        if (!is_string($value)) {
+            throw new RuntimeException('Public API string list value is invalid.');
+        }
+        $normalized[] = $value;
+    }
+    return $normalized;
 }

@@ -1,7 +1,9 @@
 parameters:
     level: 9
     paths:
+        - benchmarks/router.php
         - bin/api-compat
+        - bin/api-reference
         - src
         - tests
     tmpDir: .build/phpstan

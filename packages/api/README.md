@@ -359,7 +359,11 @@ sequential integer codes.
 Use `assertJson()` for an exact payload, `assertJsonPath()` for a focused value,
 and `assertStatus()` when the endpoint intentionally returns a specific code.
 
-Run `composer benchmark` for the standalone router benchmark.
+Run `composer benchmark` for the standalone router benchmark. Its schema 1 JSON
+reports warmed static and constrained-dynamic throughput, p50/p95/p99 latency,
+peak memory and the exact regression budget. `composer verify` runs
+`benchmark:check` with intentionally conservative ceilings to catch severe
+regressions while avoiding hardware-specific marketing claims.
 
 ## License
 
