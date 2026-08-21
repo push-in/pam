@@ -107,6 +107,24 @@ fn traffic_request(port: u16, affinity: &str) -> String {
     response
 }
 
+fn manager_dashboard_request(port: u16, path: &str, authorization: Option<&str>) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    let authorization = authorization
+        .map(|value| format!("Authorization: {value}\r\n"))
+        .unwrap_or_default();
+    stream
+        .write_all(
+            format!(
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{authorization}Connection: close\r\n\r\n"
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
 fn css_hex(styles: &str, property: &str) -> [f64; 3] {
     let prefix = format!("{property}: #");
     let value = styles
@@ -243,6 +261,9 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let port = probe.local_addr().unwrap().port();
     drop(probe);
+    let live_probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let live_port = live_probe.local_addr().unwrap().port();
+    drop(live_probe);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let script = fixture("server.php");
     let script = script.to_str().unwrap();
@@ -329,6 +350,72 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         port,
         &["monit:history", "managed-smoke", "--record", "--json"],
     );
+    let dashboard_token = state.join("dashboard-token");
+    let token = "0123456789abcdef0123456789abcdef";
+    fs::write(&dashboard_token, token).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dashboard_token, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    let weak_token_rejected = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "dashboard:start",
+            "--listen",
+            &format!("127.0.0.1:{live_port}"),
+            "--token-file",
+            dashboard_token.to_str().unwrap(),
+        ],
+    );
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&dashboard_token, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    let live_started = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "dashboard:start",
+            "--listen",
+            &format!("127.0.0.1:{live_port}"),
+            "--token-file",
+            dashboard_token.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        live_started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&live_started.stderr)
+    );
+    let unauthorized_dashboard = manager_dashboard_request(live_port, "/", None);
+    let wrong_dashboard = manager_dashboard_request(live_port, "/", Some("Bearer wrong"));
+    let authorized_dashboard =
+        manager_dashboard_request(live_port, "/", Some(&format!("Bearer {token}")));
+    let basic = base64::engine::general_purpose::STANDARD.encode(format!("pam:{token}"));
+    let healthy_dashboard =
+        manager_dashboard_request(live_port, "/health", Some(&format!("Basic {basic}")));
+    let live_status = run_managed_pam(&root, &state, port, &["dashboard:status", "--json"]);
+    let live_config = fs::read_to_string(state.join("live-dashboard.json")).unwrap();
+    let remote_rejected = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "dashboard:start",
+            "--listen",
+            "0.0.0.0:9616",
+            "--token-file",
+            dashboard_token.to_str().unwrap(),
+        ],
+    );
+    let live_stopped = run_managed_pam(&root, &state, port, &["dashboard:stop", "--json"]);
+    let stopped_status = run_managed_pam(&root, &state, port, &["dashboard:status", "--json"]);
     let dashboard = state.join("managed-dashboard.html");
     let dashboard_created = run_managed_pam(
         &root,
@@ -407,6 +494,36 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     assert!(!history_text.contains("needle-new-output"));
     #[cfg(unix)]
     assert_eq!(history_mode, 0o600);
+    assert!(unauthorized_dashboard.starts_with("HTTP/1.1 401 Unauthorized"));
+    assert!(!weak_token_rejected.status.success());
+    assert!(String::from_utf8_lossy(&weak_token_rejected.stderr).contains("owner-only"));
+    assert!(unauthorized_dashboard.contains("WWW-Authenticate: Basic"));
+    assert!(wrong_dashboard.starts_with("HTTP/1.1 401 Unauthorized"));
+    assert!(authorized_dashboard.starts_with("HTTP/1.1 200 OK"));
+    assert!(authorized_dashboard.contains("Content-Security-Policy: default-src 'none'"));
+    assert!(authorized_dashboard.contains("Cache-Control: no-store"));
+    assert!(authorized_dashboard.contains("Live local view"));
+    assert!(authorized_dashboard.contains("managed-smoke"));
+    assert!(!authorized_dashboard.contains(script));
+    assert!(!authorized_dashboard.contains(token));
+    assert!(!authorized_dashboard.contains("<script"));
+    assert!(healthy_dashboard.starts_with("HTTP/1.1 200 OK"));
+    assert!(healthy_dashboard.contains("\"stateCode\":1"));
+    assert!(live_status.status.success());
+    let live_status: serde_json::Value = serde_json::from_slice(&live_status.stdout).unwrap();
+    assert_eq!(live_status["stateCode"], 1);
+    assert_eq!(live_status["online"], true);
+    assert!(!live_status.to_string().contains(token));
+    assert!(!live_config.contains(token));
+    assert!(!live_config.contains(dashboard_token.to_str().unwrap()));
+    assert!(!remote_rejected.status.success());
+    assert!(String::from_utf8_lossy(&remote_rejected.stderr).contains("loopback"));
+    assert!(live_stopped.status.success());
+    assert!(!stopped_status.status.success());
+    let stopped_status: serde_json::Value = serde_json::from_slice(&stopped_status.stdout).unwrap();
+    assert_eq!(stopped_status["stateCode"], 2);
+    assert!(!state.join("runtime/live-dashboard.json").exists());
+    assert!(!state.join("live-dashboard.json").exists());
     assert!(
         dashboard_created.status.success(),
         "{}",

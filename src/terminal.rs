@@ -289,6 +289,10 @@ pub fn print_help(executable: &OsStr) {
                 "Create a private manager health dashboard",
             ),
             (
+                "dashboard:start|status|stop",
+                "Operate the authenticated local live dashboard",
+            ),
+            (
                 "monit:history [name] [--json]",
                 "Inspect bounded process resource history",
             ),

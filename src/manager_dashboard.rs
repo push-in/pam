@@ -70,6 +70,26 @@ pub fn render(applications: &[DashboardApplication]) -> String {
     html
 }
 
+pub fn render_live(applications: &[DashboardApplication]) -> String {
+    let generated_at_millis: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX);
+    render(applications)
+        .replacen(
+            "</style>",
+            ".livebar{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:3.5rem;padding:.5rem max(1rem,calc((100% - 1180px)/2));border-bottom:1px solid var(--line);background:var(--panel);color:var(--muted);font-size:.82rem}.livebar strong{color:var(--ink)}.refresh{display:inline-flex;align-items:center;min-height:44px;padding:0 1rem;border:2px solid var(--signal);color:var(--signal);font-weight:750;text-decoration:none}.refresh:hover,.refresh:focus-visible{background:var(--signal);color:var(--paper);outline:3px solid var(--ink);outline-offset:2px}@media(max-width:560px){.livebar{align-items:flex-start;flex-direction:column;padding-block:1rem}}</style>",
+            1,
+        )
+        .replacen(
+            "<body>",
+            &format!("<body><aside class=\"livebar\" aria-label=\"Live dashboard controls\"><p><strong>Live local view</strong><br>Snapshot generated at Unix millisecond {generated_at_millis}. Automatic refresh is off to preserve reading and keyboard context.</p><a class=\"refresh\" href=\"/\">Refresh now</a></aside>"),
+            1,
+        )
+}
+
 fn escape_html(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -144,5 +164,36 @@ mod tests {
         assert!(html.contains("Status and trends are written as text"));
         assert!(html.contains("Up 512.0 KiB"));
         assert!(!html.contains("<script"));
+
+        let live = render_live(&[]);
+        assert!(live.contains("Live local view"));
+        assert!(live.contains("Automatic refresh is off"));
+        assert!(live.contains("min-height:44px"));
+        assert!(!live.contains("<script"));
+    }
+
+    #[test]
+    fn maximum_manager_dashboard_stays_bounded_and_fast() {
+        let applications = (0..1_024)
+            .map(|index| DashboardApplication {
+                name: format!("application-{index}"),
+                kind_label: "PAM Runtime",
+                online: true,
+                workers: 256,
+                rss_bytes: u64::MAX,
+                tasks: u64::MAX,
+                alert_label: "Memory + task warning",
+                alert_class: "warning",
+                warning: true,
+                history_samples: 120,
+                peak_rss_bytes: u64::MAX,
+                rss_delta_bytes: Some(i128::from(u64::MAX)),
+            })
+            .collect::<Vec<_>>();
+        let started = std::time::Instant::now();
+        let html = render_live(&applications);
+        assert!(html.len() < 2 * 1024 * 1024);
+        assert!(started.elapsed() < std::time::Duration::from_secs(1));
+        assert_eq!(html.matches("<tr>").count(), 1_025);
     }
 }

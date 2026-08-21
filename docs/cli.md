@@ -112,6 +112,33 @@ network data, or logs. The dashboard summarizes sample count, peak RSS, and the
 RSS direction in text; exact samples remain available through the CLI table or
 versioned JSON contract.
 
+### Authenticated live local view
+
+`pam dashboard:start --token-file TOKEN` starts the read-only dashboard as a
+detached local service on `127.0.0.1:9615`. The token file must be a bounded,
+regular, non-symlink file with 32–256 printable ASCII characters and owner-only
+permissions. PAM reads it once, persists only its SHA-256 digest in private
+manager state, and never places the token in arguments, URLs, status, HTML, or
+logs. Override the address with `--listen 127.0.0.1:PORT`; non-loopback binds and
+port zero fail closed.
+
+```bash
+umask 077
+openssl rand -hex 32 > pam-dashboard.token
+pam dashboard:start --token-file pam-dashboard.token
+pam dashboard:status --json
+pam dashboard:stop
+```
+
+Browsers can authenticate through HTTP Basic with user `pam` and the token as
+password. Automation can send `Authorization: Bearer TOKEN`. `/` renders fresh
+manager state on every authenticated GET and `/health` returns a versioned
+integer-coded health envelope. Responses disable caching, framing, referrers,
+MIME sniffing, scripts, external assets, and form submission through headers and
+CSP. Refresh is explicit so screen-reader and keyboard context is not reset by a
+timer. `status` never exposes credential material; `stop` removes runtime state
+and the stored digest.
+
 ## Machine interfaces
 
 These commands emit JSON without terminal decoration:

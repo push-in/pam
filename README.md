@@ -811,6 +811,8 @@ pam startup --print|--install                       configure the systemd user s
 pam monit [--json]                                  inspect process health and capacity
 pam monit:history [name] [--json]                   inspect bounded one-minute history
 pam dashboard [pam-dashboard.html]                  create a private static health snapshot
+pam dashboard:start --token-file TOKEN              start authenticated live local view
+pam dashboard:status|dashboard:stop                 inspect or stop the live view
 pam config:check [pam.toml] [--json]                validate declarative multi-service config
 pam apply [pam.toml] [--json]                       reconcile all declared applications
 pam up ... [--memory-warning-bytes N] [--task-warning-count N]

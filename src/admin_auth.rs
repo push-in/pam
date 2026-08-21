@@ -58,7 +58,7 @@ fn environment_value(name: &str) -> Result<Option<String>, String> {
     }
 }
 
-fn read_file(path: &Path) -> Result<AdminCredential, String> {
+pub(crate) fn read_file(path: &Path) -> Result<AdminCredential, String> {
     let metadata = fs::symlink_metadata(path).map_err(|error| {
         format!(
             "cannot inspect {ADMIN_TOKEN_FILE_ENV} {}: {error}",

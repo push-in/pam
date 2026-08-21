@@ -170,6 +170,29 @@ history, while stopped applications remain explicitly sampled with state code
 and textual RSS direction. This supplements the current snapshot; the JSON
 history remains the authoritative lossless local evidence.
 
+## Authenticated live dashboard
+
+`pam dashboard:start --token-file TOKEN [--listen 127.0.0.1:PORT]` starts a
+detached read-only HTTP view. `dashboard:status` reports its sequential state
+code (`1` online, `2` stopped), PID, loopback listener and start time;
+`dashboard:stop` terminates it and removes both runtime state and the private
+credential digest. The default listener is `127.0.0.1:9615`, and every other
+loopback port is accepted except zero. PAM rejects all non-loopback addresses.
+The runtime state binds the PID to its Linux process-start ticks, so stale state
+cannot make status trust—or stop signal—an unrelated process after PID reuse.
+
+The token file follows the hardened control-plane credential contract and must
+also be owner-only on Linux. Only a SHA-256 digest is persisted. Both browser
+Basic authentication (`pam:TOKEN`) and Bearer authentication use constant-time
+digest comparison. Requests are limited to 16 KiB of headers and two seconds of
+read/write time; only authenticated `GET /` and `GET /health` exist. Responses
+are `no-store`, deny framing/referrers/sniffing, and carry a script-free CSP.
+
+The live page deliberately has no timer or JavaScript. “Refresh now” performs a
+new authenticated GET and leaves refresh under explicit user control, avoiding
+unexpected screen-reader announcements or keyboard-focus resets. It shares the
+same 2 MiB rendering bound and privacy exclusions as static snapshots.
+
 ## Transactional releases
 
 `pam deploy NAME RELEASE_DIRECTORY` activates an already-built release without

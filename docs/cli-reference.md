@@ -27,6 +27,13 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Develop
 
 - `pam dashboard` — Create a private manager health dashboard.
+## Observe
+
+- `pam dashboard:start` — Start the authenticated local live dashboard.
+- `pam dashboard:status` — Inspect the local live dashboard service.
+- `pam dashboard:stop` — Stop the local live dashboard service.
+## Develop
+
 - `pam apply` — Reconcile applications from pam.toml.
 - `pam config:check` — Validate a pam.toml ecosystem contract.
 ## Ship
