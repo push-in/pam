@@ -10,6 +10,8 @@ pam up --name critical --restart-delay-ms 250 --restart-backoff-max-ms 15000 \
   --max-unstable-restarts 10 --min-uptime-ms 30000
 pam up --name production --env-file .env.production
 pam up --name production --shutdown-timeout-ms 20000
+pam up --name lean-api --workers 16 --php-extension iconv \
+  --php-extension mbstring --php-extension pdo --php-extension pdo_mysql
 pam up --name api --health-check-url http://127.0.0.1:8080/health \
   --health-check-interval-ms 5000 --health-check-timeout-ms 1000 \
   --health-check-start-period-ms 30000 --health-check-failures 3
@@ -190,6 +192,37 @@ the 16-worker critical path: concurrent PHP/application bootstrap dominates.
 The next optimization must target measured bootstrap work or safe reuse while
 retaining worker isolation and complete-generation readiness.
 
+### Explicit PHP extension isolation
+
+PAM preserves the host PHP configuration by default. For applications whose
+extension requirements are known, repeatable `--php-extension NAME` options
+disable the host's global `conf.d` scan for workers and load only the selected
+dynamic modules. `opcache` is loaded as a Zend extension; all other names use
+PHP's normal extension loader. Names are deduplicated, limited to 64 entries
+and 64 ASCII letters, digits, underscores or hyphens, so paths and injected INI
+directives are rejected. The main `php.ini` remains active. The selection is
+persisted by `pam up`, returned as `phpExtensions` by JSON inspection, accepted
+by `pam start` and `pam octane:start`, and declared in `pam.toml`:
+
+```toml
+php_extensions = ["iconv", "mbstring", "pdo", "pdo_mysql", "opcache"]
+```
+
+This is an explicit compatibility/performance tradeoff, never an automatic
+guess. Include every direct and transitive requirement and verify the exact
+production build with Composer's platform check plus application tests before
+deployment. Omitting the option retains the complete configured extension set.
+Official PHP guidance says CLI preloading is generally pointless unless the
+process persists and that preloading is unavailable on Windows, so PAM does
+not silently substitute `opcache.preload` for extension isolation.
+
+Local suite `8` used the fixture's sole dynamic requirement, `iconv`: across
+ten crash-recovery rounds per profile it reduced total p95 from 230 to 171 ms,
+readiness p95 from 142 to 83 ms and PHP-engine p95 from 77 to 10 ms. That is a
+25.65%, 41.55% and 87.01% directional improvement respectively. Both profiles
+recovered 10/10, every gate passed, and the recursive manifest verified all 14
+artifacts. Hosted evidence is required before treating the delta as portable.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`
@@ -298,6 +331,7 @@ script = "public/index.php"
 workers = 4
 cwd = "."
 arguments = ["--port=8080"]
+php_extensions = ["iconv", "mbstring", "pdo", "pdo_mysql", "opcache"]
 memory_warning_bytes = 536870912
 task_warning_count = 64
 memory_max_bytes = 805306368

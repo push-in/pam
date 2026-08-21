@@ -58,6 +58,15 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
             "7) results=benchmarks/process-manager/results/worker-matrix ;;",
             workflow,
         )
+        self.assertIn("8 extension isolation", workflow)
+        self.assertIn("- '8'", workflow)
+        self.assertIn(
+            "8) benchmarks/process-manager/extension-profile.sh ;;", workflow
+        )
+        self.assertIn(
+            "8) results=benchmarks/process-manager/results/extension-profile ;;",
+            workflow,
+        )
 
         harness = (ROOT / "benchmarks/process-manager/run.sh").read_text(
             encoding="utf-8"
@@ -87,6 +96,15 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn("matrix_status=0", matrix)
         self.assertIn("report_status=$?", matrix)
         self.assertIn("(( matrix_status == 0 && report_status == 0 ))", matrix)
+        extension_profile = (
+            ROOT / "benchmarks/process-manager/extension-profile.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("for profile in compatible isolated", extension_profile)
+        self.assertIn("PAM_RECOVERY_PHP_EXTENSIONS", extension_profile)
+        self.assertIn("extension-profile-report.php", extension_profile)
+        self.assertIn(
+            'evidence-manifest.php" "${results}" 8 --verify', extension_profile
+        )
         self.assertIn("report_status=$?", harness)
         self.assertIn('exit "${report_status}"', harness)
 

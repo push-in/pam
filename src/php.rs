@@ -8,6 +8,7 @@ use std::rc::Rc;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, ThreadId};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 
@@ -32,6 +33,34 @@ pub const NATIVE_ABI_VERSION: u32 = 1;
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
 static OWNER: OnceLock<ThreadId> = OnceLock::new();
+static PROCESS_STARTED_AT_MILLIS: OnceLock<u64> = OnceLock::new();
+static STARTUP_MILESTONES: OnceLock<StartupMilestones> = OnceLock::new();
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartupMilestones {
+    pub process_started_at_millis: u64,
+    pub engine_ready_at_millis: u64,
+    pub composer_ready_at_millis: u64,
+    pub runtime_ready_at_millis: u64,
+}
+
+pub fn mark_process_entry() {
+    let _ = PROCESS_STARTED_AT_MILLIS.set(epoch_millis());
+}
+
+pub fn startup_milestones() -> Option<StartupMilestones> {
+    STARTUP_MILESTONES.get().copied()
+}
+
+fn epoch_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
 
 unsafe extern "C" {
     fn pam_native_abi_version() -> u32;
@@ -350,6 +379,7 @@ impl PhpRuntime {
             ACTIVE.store(false, Ordering::SeqCst);
             return Err(format!("PHP initialization failed with status {status}"));
         }
+        let engine_ready_at_millis = epoch_millis();
 
         if preload_composer
             && let Some(project) = composer.as_ref()
@@ -372,6 +402,7 @@ impl PhpRuntime {
                 ));
             }
         }
+        let composer_ready_at_millis = epoch_millis();
 
         if let Err(error) = evaluate_runtime_source(ASYNC_BOOTSTRAP, b"Pam async bootstrap\0")
             .and_then(|()| evaluate_runtime_source(IO_BOOTSTRAP, b"Pam I/O bootstrap\0"))
@@ -400,6 +431,16 @@ impl PhpRuntime {
             ACTIVE.store(false, Ordering::SeqCst);
             return Err(error);
         }
+        let runtime_ready_at_millis = epoch_millis();
+        let _ = STARTUP_MILESTONES.set(StartupMilestones {
+            process_started_at_millis: PROCESS_STARTED_AT_MILLIS
+                .get()
+                .copied()
+                .unwrap_or(engine_ready_at_millis),
+            engine_ready_at_millis,
+            composer_ready_at_millis,
+            runtime_ready_at_millis,
+        });
 
         Ok(Self {
             _native_args: native_args,

@@ -232,7 +232,7 @@ fn creates_and_verifies_manager_recovery_evidence() {
     .unwrap();
     fs::write(
         results.join("worker-startup.csv"),
-        "round,workers,spawn_spread_millis,spawn_to_ready_p95_millis,spawn_to_ready_maximum_millis,success\n1,4,3,70,75,1\n2,4,4,110,115,1\n3,4,5,150,155,1\n",
+        "round,workers,spawn_spread_millis,spawn_to_ready_p95_millis,spawn_to_ready_maximum_millis,spawn_to_process_p95_millis,php_engine_p95_millis,spawn_to_engine_p95_millis,composer_p95_millis,runtime_bootstrap_p95_millis,application_p95_millis,success\n1,4,3,70,75,8,12,20,5,10,35,1\n2,4,4,110,115,12,18,30,6,11,63,1\n3,4,5,150,155,16,24,40,7,12,91,1\n",
     )
     .unwrap();
     let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -260,6 +260,14 @@ fn creates_and_verifies_manager_recovery_evidence() {
     assert_eq!(
         report["worker_startup"]["spawn_to_ready_p95_millis"]["p95"],
         150
+    );
+    assert_eq!(
+        report["worker_startup"]["spawn_to_engine_p95_millis"]["p95"],
+        40
+    );
+    assert_eq!(
+        report["worker_startup"]["application_p95_millis"]["p50"],
+        63
     );
     assert_eq!(report["gate_codes"]["success"], 1);
     assert_eq!(report["gate_codes"]["detection"], 1);
@@ -457,6 +465,91 @@ fn aggregates_and_verifies_manager_recovery_worker_matrix() {
 }
 
 #[test]
+fn compares_compatible_and_isolated_php_extension_profiles() {
+    let results = temporary_path("manager-recovery-extension-profile");
+    for (directory_name, extensions, total, readiness, engine) in [
+        ("compatible", serde_json::json!([]), 200, 130, 80),
+        ("isolated", serde_json::json!(["iconv"]), 150, 90, 20),
+    ] {
+        let directory = results.join(directory_name);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("metadata.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "source": {"commit": "abc", "dirty": false},
+                "host": {"kernel": "Linux"},
+                "tools": {"pam_sha256": "sha", "pam_native_commit": "native"},
+                "parameters": {"rounds": 10, "workers": 16, "php_extensions": extensions},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            directory.join("recovery-report.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "suite_code": 5,
+                "rounds": 10,
+                "successful_rounds": 10,
+                "recovery_millis": {"p50": total - 10, "p95": total, "maximum": total},
+                "recovery_phases": {"readiness_millis": {"p50": readiness - 10, "p95": readiness, "maximum": readiness}},
+                "worker_startup": {
+                    "workers": 16,
+                    "php_engine_p95_millis": {"p50": engine - 5, "p95": engine, "maximum": engine}
+                },
+                "daemon_rss_growth_bytes": 0,
+                "gate_codes": {"success": 1, "latency": 1, "detection": 1, "backoff": 1, "readiness": 1, "resources": 1},
+                "passed": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let report_script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/extension-profile-report.php");
+    assert!(
+        run_pam(&[report_script.to_str().unwrap(), results.to_str().unwrap()])
+            .status
+            .success()
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("extension-profile-report.json")).unwrap())
+            .unwrap();
+    assert_eq!(report["suite_code"], 8);
+    assert_eq!(report["configurations"][0]["profile_code"], 1);
+    assert_eq!(report["configurations"][1]["profile_code"], 2);
+    assert_eq!(
+        report["isolated_minus_compatible_millis"]["recovery_p95"],
+        -50
+    );
+    assert_eq!(
+        report["isolated_improvement_basis_points"]["php_engine_p95"],
+        7500
+    );
+    assert_eq!(report["gate_codes"]["isolated_engine_not_slower"], 1);
+    assert_eq!(report["passed"], true);
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "8"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "8",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
 fn records_reproducible_soak_metadata() {
     let results = temporary_path("soak-metadata");
     fs::create_dir_all(&results).unwrap();
@@ -558,6 +651,8 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "managed-smoke",
             "--workers",
             "1",
+            "--php-extension",
+            "iconv",
             "--env-file",
             environment_file.to_str().unwrap(),
             "--json",
@@ -611,7 +706,22 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             .as_u64()
             .is_some_and(|value| value > 0)
     );
+    for phase in [
+        "spawnToProcessMillis",
+        "phpEngineMillis",
+        "spawnToEngineMillis",
+        "composerMillis",
+        "runtimeBootstrapMillis",
+        "applicationMillis",
+    ] {
+        assert!(
+            recovered["workerStartup"]["phaseP95Millis"][phase]
+                .as_u64()
+                .is_some()
+        );
+    }
     assert_eq!(recovered["environmentFileConfigured"], true);
+    assert_eq!(recovered["phpExtensions"], serde_json::json!(["iconv"]));
     assert!(!recovered.to_string().contains("private-value"));
     assert!(
         !recovered
@@ -1101,6 +1211,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
+php_extensions = ["iconv"]
 memory_warning_bytes = 1
 task_warning_count = 1
 "#,
@@ -1170,6 +1281,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
+php_extensions = ["iconv"]
 memory_warning_bytes = 1099511627776
 task_warning_count = 1000000
 "#,
@@ -1192,6 +1304,7 @@ task_warning_count = 1000000
     );
     let described: serde_json::Value = serde_json::from_slice(&described.stdout).unwrap();
     assert_eq!(described["resourceAlertStateCode"], 1);
+    assert_eq!(described["phpExtensions"], serde_json::json!(["iconv"]));
     assert_eq!(described["resourcePolicy"]["taskWarningCount"], 1000000);
 
     let stopped = run_managed_pam(&root, &state, port, &["stop", "ecosystem-smoke", "--json"]);
