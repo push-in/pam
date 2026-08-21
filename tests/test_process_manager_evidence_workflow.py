@@ -26,9 +26,7 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn("if-no-files-found: error", workflow)
         self.assertIn("retention-days: 30", workflow)
         self.assertNotIn("continue-on-error", workflow)
-        self.assertEqual(
-            workflow.count("if: env.PAM_EVIDENCE_SUITE_ID == '5'"), 2
-        )
+        self.assertEqual(workflow.count("PAM_EVIDENCE_SUITE_ID == '6'"), 5)
         self.assertIn(
             "composer install --working-dir=compat/composer-smoke --dry-run --no-dev",
             workflow,
@@ -36,6 +34,16 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn(
             "composer install --working-dir=compat/composer-smoke --no-dev",
             workflow,
+        )
+        self.assertIn("6 PM2 recovery comparison", workflow)
+        self.assertIn("- '6'", workflow)
+        self.assertIn("node-version: '22.22.0'", workflow)
+        self.assertIn("npm ci --dry-run --ignore-scripts", workflow)
+        self.assertIn("npm audit --omit=dev --audit-level=high", workflow)
+        self.assertIn("npm ci --ignore-scripts", workflow)
+        self.assertIn("6) benchmarks/process-manager/compare-pm2.sh ;;", workflow)
+        self.assertIn(
+            "6) results=benchmarks/process-manager/results/comparison ;;", workflow
         )
 
         harness = (ROOT / "benchmarks/process-manager/run.sh").read_text(

@@ -295,6 +295,68 @@ fn creates_and_verifies_manager_recovery_evidence() {
 }
 
 #[test]
+fn compares_pam_and_pm2_recovery_without_conflating_topologies() {
+    let results = temporary_path("manager-recovery-comparison");
+    for system in ["pam", "pm2"] {
+        fs::create_dir_all(results.join(system)).unwrap();
+        fs::write(
+            results.join(system).join("resources.json"),
+            r#"{"daemon_rss_before_bytes":1000000,"daemon_rss_after_bytes":1250000}"#,
+        )
+        .unwrap();
+    }
+    fs::write(
+        results.join("pam/recovery.csv"),
+        "round,recovery_millis,success\n1,600,1\n2,650,1\n3,700,1\n",
+    )
+    .unwrap();
+    fs::write(
+        results.join("pm2/recovery.csv"),
+        "round,recovery_millis,success\n1,100,1\n2,110,1\n3,120,1\n",
+    )
+    .unwrap();
+    fs::write(
+        results.join("metadata.json"),
+        r#"{"source":{"commit":"abc","dirty":false},"parameters":{"rounds":3}}"#,
+    )
+    .unwrap();
+    let report = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/comparison-report.php");
+    assert!(
+        run_pam(&[report.to_str().unwrap(), results.to_str().unwrap()])
+            .status
+            .success()
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("comparison-report.json")).unwrap()).unwrap();
+    assert_eq!(report["suite_code"], 6);
+    assert_eq!(report["systems"]["pam"]["topology_code"], 1);
+    assert_eq!(report["systems"]["pm2"]["topology_code"], 2);
+    assert_eq!(report["comparison"]["p95_delta_millis"], 580);
+    assert_eq!(report["comparison"]["rss_not_directly_comparable"], true);
+    assert_eq!(report["passed"], true);
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "6"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "6",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
 fn records_reproducible_soak_metadata() {
     let results = temporary_path("soak-metadata");
     fs::create_dir_all(&results).unwrap();

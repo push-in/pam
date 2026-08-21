@@ -9,6 +9,7 @@ enum EvidenceSuite: int
     case Soak = 3;
     case Overload = 4;
     case ManagerRecovery = 5;
+    case ManagerRecoveryComparison = 6;
 }
 
 $directory = isset($argv[1]) ? rtrim($argv[1], '/') : '';
@@ -16,14 +17,14 @@ $suiteValue = filter_var($argv[2] ?? null, FILTER_VALIDATE_INT);
 $verify = ($argv[3] ?? '') === '--verify';
 
 if ($directory === '' || !is_dir($directory) || $suiteValue === false) {
-    fwrite(STDERR, "usage: php evidence-manifest.php <results-directory> <suite-id: 1|2|3|4|5> [--verify]\n");
+    fwrite(STDERR, "usage: php evidence-manifest.php <results-directory> <suite-id: 1|2|3|4|5|6> [--verify]\n");
     exit(64);
 }
 
 try {
     $suite = EvidenceSuite::from($suiteValue);
 } catch (ValueError) {
-    fwrite(STDERR, "evidence suite id must be 1 (comparison), 2 (matrix), 3 (soak), 4 (overload), or 5 (manager recovery)\n");
+    fwrite(STDERR, "evidence suite id must be 1 (comparison), 2 (matrix), 3 (soak), 4 (overload), 5 (manager recovery), or 6 (manager recovery comparison)\n");
     exit(64);
 }
 
@@ -108,6 +109,7 @@ $reportPath = match ($suite) {
     EvidenceSuite::Soak => $directory.'/soak-report.json',
     EvidenceSuite::Overload => $directory.'/overload-report.json',
     EvidenceSuite::ManagerRecovery => $directory.'/recovery-report.json',
+    EvidenceSuite::ManagerRecoveryComparison => $directory.'/comparison-report.json',
 };
 $report = is_file($reportPath)
     ? json_decode((string) file_get_contents($reportPath), true, flags: JSON_THROW_ON_ERROR)
@@ -132,6 +134,11 @@ $manifest = [
             'success' => ($report['gate_codes']['success'] ?? null) === 1,
             'latency' => ($report['gate_codes']['latency'] ?? null) === 1,
             'resources' => ($report['gate_codes']['resources'] ?? null) === 1,
+        ],
+        EvidenceSuite::ManagerRecoveryComparison => [
+            'pam_success' => ($report['gate_codes']['pam_success'] ?? null) === 1,
+            'pm2_success' => ($report['gate_codes']['pm2_success'] ?? null) === 1,
+            'equivalent_rounds' => ($report['gate_codes']['equivalent_rounds'] ?? null) === 1,
         ],
     },
     'artifacts' => $describeArtifacts($artifactFiles($directory)),
