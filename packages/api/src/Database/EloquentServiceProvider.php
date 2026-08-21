@@ -27,6 +27,7 @@ final readonly class EloquentServiceProvider implements ServiceProviderInterface
         $eloquent = new EloquentManager($resolver);
         $migrations = new MigrationManager($resolver);
         $queries = new QueryMonitor($resolver);
+        $tenancy = new TenantModelGuard($application->container());
         $application->container()
             ->instance(DatabaseConfig::class, $this->config)
             ->instance(FiberConnectionResolver::class, $resolver)
@@ -34,6 +35,7 @@ final readonly class EloquentServiceProvider implements ServiceProviderInterface
             ->instance(EloquentManager::class, $eloquent)
             ->instance(MigrationManager::class, $migrations)
             ->instance(QueryMonitor::class, $queries)
+            ->instance(TenantModelGuard::class, $tenancy)
             ->instance(TransactionManager::class, $eloquent);
         $application->middleware(new EloquentLifecycleMiddleware($eloquent));
     }

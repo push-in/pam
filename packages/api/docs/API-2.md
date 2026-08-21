@@ -82,7 +82,8 @@ The `feat/api-2-foundation` development line implements:
 
 Eloquent is the official ORM and is integrated with Fiber-local connection
 managers, events, transactions, deterministic request cleanup and per-request
-query budgets with duplicate-query detection. Redis,
+query budgets with duplicate-query detection. Tenant model guards apply
+fail-closed global scopes and prevent cross-tenant assignment. Redis,
 broker, JWT and OpenTelemetry integrations remain contract-backed ecosystem
 adapters until their production implementations complete the certification
 suite.

@@ -95,6 +95,18 @@ $app->middleware(new QueryBudgetMiddleware(
 Budgets are Fiber-local. Violations use the sequential integer-backed
 `QueryBudgetViolation` enum, making them stable for CI reports and telemetry.
 
+Tenant-owned models can be protected once during application boot:
+
+```php
+$tenancy = $app->container()->get(TenantModelGuard::class);
+$tenancy->protect(Order::class); // defaults to tenant_id
+```
+
+The guard adds an Eloquent global scope and assigns the tenant key on create.
+It fails closed when no request-scoped `TenantContext` exists and rejects a
+model explicitly assigned to another tenant. Use an unguarded administrative
+model only for deliberate cross-tenant operations.
+
 ## Route groups
 
 ```php
