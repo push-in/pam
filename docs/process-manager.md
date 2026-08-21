@@ -9,6 +9,7 @@ pam up --name billing --workers 8
 pam up --name critical --restart-delay-ms 250 --restart-backoff-max-ms 15000 \
   --max-unstable-restarts 10 --min-uptime-ms 30000
 pam up --name production --env-file .env.production
+pam up --name production --shutdown-timeout-ms 20000
 pam up --name api --health-check-url http://127.0.0.1:8080/health \
   --health-check-interval-ms 5000 --health-check-timeout-ms 1000 \
   --health-check-failures 3
@@ -79,6 +80,13 @@ stale results are discarded by PID and configuration identity. After the
 configured consecutive-failure threshold, PAM records the unhealthy event,
 kills the stuck master, and delegates restart/backoff/circuit behavior to the
 same recovery state machine. Health checks require automatic restart.
+
+`--shutdown-timeout-ms` controls how long PAM waits after `SIGTERM` during
+`stop`, `restart`, deploy activation, and rollback. The accepted range is
+100–300000 ms and the default is 20000 ms. If the master is still alive, PAM
+escalates to `SIGKILL`, verifies termination for up to five seconds, and reports
+the forced shutdown in human and JSON output. This keeps automation bounded
+while preserving graceful draining under normal operation.
 
 Log files rotate before launch or restart when they reach 10 MiB and retain
 five generations by default. `pam up --log-max-bytes N --log-retain N` stores
@@ -161,6 +169,7 @@ task_warning_count = 64
 memory_max_bytes = 805306368
 task_max_count = 96
 env_file = ".env.production"
+shutdown_timeout_millis = 20000
 health_check_url = "http://127.0.0.1:8080/health"
 health_check_interval_millis = 5000
 health_check_timeout_millis = 1000

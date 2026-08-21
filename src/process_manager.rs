@@ -41,6 +41,10 @@ const DEFAULT_MIN_UPTIME_MILLIS: u64 = 30_000;
 const DEFAULT_HEALTH_INTERVAL_MILLIS: u64 = 5_000;
 const DEFAULT_HEALTH_TIMEOUT_MILLIS: u64 = 1_000;
 const DEFAULT_HEALTH_FAILURE_THRESHOLD: u32 = 3;
+const DEFAULT_SHUTDOWN_TIMEOUT_MILLIS: u64 = 20_000;
+const MIN_SHUTDOWN_TIMEOUT_MILLIS: u64 = 100;
+const MAX_SHUTDOWN_TIMEOUT_MILLIS: u64 = 300_000;
+const FORCED_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_CONCURRENT_HEALTH_PROBES: usize = 64;
 const MAX_ENVIRONMENT_FILE_BYTES: u64 = 64 * 1024;
 const MAX_ENVIRONMENT_VARIABLES: usize = 256;
@@ -185,6 +189,8 @@ struct ApplicationRecord {
     task_max_count: Option<u64>,
     #[serde(default)]
     environment_file: Option<PathBuf>,
+    #[serde(default = "default_shutdown_timeout_millis")]
+    shutdown_timeout_millis: u64,
     #[serde(default)]
     health_check_address: Option<SocketAddr>,
     #[serde(default)]
@@ -345,6 +351,8 @@ struct EcosystemApplication {
     autostart: bool,
     #[serde(default)]
     env_file: Option<PathBuf>,
+    #[serde(default = "default_shutdown_timeout_millis")]
+    shutdown_timeout_millis: u64,
     #[serde(default)]
     health_check_url: Option<String>,
     #[serde(default = "default_health_interval_millis")]
@@ -958,6 +966,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
             application.health_check_timeout_millis,
             application.health_check_failure_threshold,
         )?;
+        validate_shutdown_policy(application.shutdown_timeout_millis)?;
         let action = if !application.autostart {
             let record_path = paths.application(&name);
             if record_path.exists() {
@@ -993,6 +1002,8 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     command.arg("--no-autorestart");
                 }
                 command
+                    .arg("--shutdown-timeout-ms")
+                    .arg(application.shutdown_timeout_millis.to_string())
                     .arg("--restart-delay-ms")
                     .arg(application.restart_delay_millis.to_string())
                     .arg("--restart-backoff-max-ms")
@@ -1048,7 +1059,8 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || record.restart_delay_millis != application.restart_delay_millis
                     || record.restart_backoff_max_millis != application.restart_backoff_max_millis
                     || record.max_unstable_restarts != application.max_unstable_restarts
-                    || record.min_uptime_millis != application.min_uptime_millis;
+                    || record.min_uptime_millis != application.min_uptime_millis
+                    || record.shutdown_timeout_millis != application.shutdown_timeout_millis;
                 if policy_updated || limit_updated || environment_updated || health_updated {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
@@ -1059,6 +1071,7 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     record.restart_backoff_max_millis = application.restart_backoff_max_millis;
                     record.max_unstable_restarts = application.max_unstable_restarts;
                     record.min_uptime_millis = application.min_uptime_millis;
+                    record.shutdown_timeout_millis = application.shutdown_timeout_millis;
                     record.environment_file = environment_file;
                     record.health_check_address =
                         health_check.as_ref().map(|(address, _)| *address);
@@ -1233,6 +1246,7 @@ fn validate_ecosystem_application(
         application.max_unstable_restarts,
         application.min_uptime_millis,
     )?;
+    validate_shutdown_policy(application.shutdown_timeout_millis)?;
     if let Some(path) = application.env_file.as_deref() {
         resolve_environment_file(root, path)?;
     }
@@ -1434,6 +1448,9 @@ const fn default_health_timeout_millis() -> u64 {
 }
 const fn default_health_failure_threshold() -> u32 {
     DEFAULT_HEALTH_FAILURE_THRESHOLD
+}
+const fn default_shutdown_timeout_millis() -> u64 {
+    DEFAULT_SHUTDOWN_TIMEOUT_MILLIS
 }
 const fn default_disabled_health_state() -> u8 {
     HealthState::Disabled as u8
@@ -2554,19 +2571,7 @@ fn stop_record(record: &ApplicationRecord) -> Result<(), String> {
     let Some(state) = running_state(record) else {
         return Ok(());
     };
-    if master_is_running(&state) {
-        signal_master(&state, STOP_SIGNAL)?;
-    }
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while master_is_running(&state) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(50));
-    }
-    if master_is_running(&state) {
-        return Err(format!(
-            "application {:?} did not stop before release activation",
-            record.name
-        ));
-    }
+    terminate_master(&state, record.shutdown_timeout_millis)?;
     Ok(())
 }
 
@@ -3101,6 +3106,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut memory_max_bytes = None;
     let mut task_max_count = None;
     let mut environment_file = None;
+    let mut shutdown_timeout_millis = DEFAULT_SHUTDOWN_TIMEOUT_MILLIS;
     let mut health_check_url = None;
     let mut health_check_interval_millis = DEFAULT_HEALTH_INTERVAL_MILLIS;
     let mut health_check_timeout_millis = DEFAULT_HEALTH_TIMEOUT_MILLIS;
@@ -3124,6 +3130,10 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     arguments.next(),
                     "--env-file",
                 )?))
+            }
+            "--shutdown-timeout-ms" => {
+                shutdown_timeout_millis =
+                    required_positive_u64(arguments.next(), "--shutdown-timeout-ms")?
             }
             "--health-check-url" => {
                 health_check_url = Some(required_utf8(arguments.next(), "--health-check-url")?)
@@ -3207,6 +3217,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         task_max_count,
         "application",
     )?;
+    validate_shutdown_policy(shutdown_timeout_millis)?;
     validate_recovery_policy(
         restart_delay_millis,
         restart_backoff_max_millis,
@@ -3368,6 +3379,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         memory_max_bytes,
         task_max_count,
         environment_file,
+        shutdown_timeout_millis,
         health_check_address: health_check.as_ref().map(|(address, _)| *address),
         health_check_path: health_check.map(|(_, path)| path),
         health_check_interval_millis,
@@ -3492,21 +3504,16 @@ fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
     let Some(state) = running_state(&record) else {
         return Ok(0);
     };
-    if master_is_running(&state) {
-        signal_master(&state, STOP_SIGNAL)?;
-    }
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while master_is_running(&state) && Instant::now() < deadline {
-        reap_daemon_children();
-        thread::sleep(Duration::from_millis(50));
-    }
-    if master_is_running(&state) {
-        return Err(format!("application {name:?} did not stop in 20 seconds"));
-    }
+    let forced = terminate_master(&state, record.shutdown_timeout_millis)?;
     if json {
         println!(
             "{}",
-            serde_json::json!({"schemaVersion":1,"name":name,"stateCode":ApplicationState::Stopped as u8})
+            serde_json::json!({"schemaVersion":1,"name":name,"stateCode":ApplicationState::Stopped as u8,"forced":forced})
+        );
+    } else if forced {
+        println!(
+            "Stopped {name} (forced after {} ms)",
+            record.shutdown_timeout_millis
         );
     } else {
         println!("Stopped {name}");
@@ -3531,19 +3538,11 @@ fn restart_record(
     emit: bool,
 ) -> Result<u8, String> {
     let name = &record.name;
-    if let Some(state) = running_state(record)
-        && master_is_running(&state)
-    {
-        signal_master(&state, STOP_SIGNAL)?;
-        let deadline = Instant::now() + Duration::from_secs(20);
-        while master_is_running(&state) && Instant::now() < deadline {
-            reap_daemon_children();
-            thread::sleep(Duration::from_millis(50));
-        }
-        if master_is_running(&state) {
-            return Err(format!("application {name:?} did not stop before restart"));
-        }
-    }
+    let forced = if let Some(state) = running_state(record) {
+        terminate_master(&state, record.shutdown_timeout_millis)?
+    } else {
+        false
+    };
     if record.command.len() < 2 {
         return Err(format!("application {name:?} has no restart command"));
     }
@@ -3602,12 +3601,47 @@ fn restart_record(
     };
     if emit {
         if json {
-            println!("{}", application_json(record, Some(&state)));
+            let mut application = application_json(record, Some(&state));
+            application["shutdownForced"] = serde_json::json!(forced);
+            println!("{application}");
+        } else if forced {
+            println!(
+                "Restarted {name} (PID {}, previous master forced after {} ms)",
+                state.pid, record.shutdown_timeout_millis
+            );
         } else {
             println!("Restarted {name} (PID {})", state.pid);
         }
     }
     Ok(0)
+}
+
+fn terminate_master(state: &MasterState, graceful_timeout_millis: u64) -> Result<bool, String> {
+    if !master_is_running(state) {
+        return Ok(false);
+    }
+    signal_master(state, STOP_SIGNAL)?;
+    let graceful_deadline = Instant::now() + Duration::from_millis(graceful_timeout_millis);
+    while master_is_running(state) && Instant::now() < graceful_deadline {
+        reap_daemon_children();
+        thread::sleep(Duration::from_millis(50));
+    }
+    if !master_is_running(state) {
+        return Ok(false);
+    }
+    signal_master(state, libc::SIGKILL)?;
+    let forced_deadline = Instant::now() + FORCED_SHUTDOWN_TIMEOUT;
+    while master_is_running(state) && Instant::now() < forced_deadline {
+        reap_daemon_children();
+        thread::sleep(Duration::from_millis(50));
+    }
+    if master_is_running(state) {
+        return Err(format!(
+            "master PID {} remained alive after SIGKILL",
+            state.pid
+        ));
+    }
+    Ok(true)
 }
 
 fn reap_daemon_children() {
@@ -3908,6 +3942,10 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
         "environmentFileConfigured": record.environment_file.is_some(),
+        "shutdownPolicy": {
+            "gracefulTimeoutMillis": record.shutdown_timeout_millis,
+            "forcedTimeoutMillis": FORCED_SHUTDOWN_TIMEOUT.as_millis(),
+        },
         "healthCheck": {
             "configured": record.health_check_address.is_some(),
             "stateCode": record.health_state_code,
@@ -4174,6 +4212,7 @@ fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
         record.max_unstable_restarts,
         record.min_uptime_millis,
     )?;
+    validate_shutdown_policy(record.shutdown_timeout_millis)?;
     if record.health_check_address.is_some() != record.health_check_path.is_some() {
         return Err(
             "application health check address and path must be configured together".to_owned(),
@@ -4277,6 +4316,15 @@ fn validate_resource_policy(
             .is_some_and(|(warning, maximum)| warning > maximum)
     {
         return Err(format!("{label} warning cannot exceed its hard limit"));
+    }
+    Ok(())
+}
+
+fn validate_shutdown_policy(timeout_millis: u64) -> Result<(), String> {
+    if !(MIN_SHUTDOWN_TIMEOUT_MILLIS..=MAX_SHUTDOWN_TIMEOUT_MILLIS).contains(&timeout_millis) {
+        return Err(format!(
+            "shutdown timeout must be between {MIN_SHUTDOWN_TIMEOUT_MILLIS} and {MAX_SHUTDOWN_TIMEOUT_MILLIS} milliseconds"
+        ));
     }
     Ok(())
 }
@@ -4484,6 +4532,7 @@ mod tests {
             memory_max_bytes: None,
             task_max_count: None,
             environment_file: None,
+            shutdown_timeout_millis: DEFAULT_SHUTDOWN_TIMEOUT_MILLIS,
             health_check_address: None,
             health_check_path: None,
             health_check_interval_millis: DEFAULT_HEALTH_INTERVAL_MILLIS,
@@ -4514,6 +4563,35 @@ mod tests {
         schedule_recovery(&mut record, 4_000);
         assert_eq!(record.recovery_state_code, RecoveryState::CircuitOpen as u8);
         assert_eq!(record.next_restart_at_millis, None);
+    }
+
+    #[test]
+    fn shutdown_escalates_when_a_master_ignores_sigterm() {
+        let mut child = Command::new("/bin/sh")
+            .args(["-c", "trap '' TERM; while :; do :; done"])
+            .spawn()
+            .expect("spawn signal-resistant master");
+        thread::sleep(Duration::from_millis(50));
+        let state = MasterState {
+            version: 1,
+            pid: child.id(),
+            process_start: crate::cluster::linux_process_start(child.id()),
+            workers: 1,
+            admin_address: None,
+            started_at_millis: epoch_millis(),
+        };
+
+        assert!(terminate_master(&state, MIN_SHUTDOWN_TIMEOUT_MILLIS).unwrap());
+        let _ = child.wait();
+        assert!(!master_is_running(&state));
+    }
+
+    #[test]
+    fn shutdown_timeout_policy_is_bounded() {
+        assert!(validate_shutdown_policy(MIN_SHUTDOWN_TIMEOUT_MILLIS).is_ok());
+        assert!(validate_shutdown_policy(MAX_SHUTDOWN_TIMEOUT_MILLIS).is_ok());
+        assert!(validate_shutdown_policy(MIN_SHUTDOWN_TIMEOUT_MILLIS - 1).is_err());
+        assert!(validate_shutdown_policy(MAX_SHUTDOWN_TIMEOUT_MILLIS + 1).is_err());
     }
 
     #[test]
