@@ -88,6 +88,9 @@ PM2 package integrity and shared parameters.
 The isolated benchmark lock overrides PM2's vulnerable `js-yaml` 4.3.0 with the
 compatible 4.3.1 security release, and CI rejects high-severity production-tree
 advisories before running the comparison.
+Evidence provenance defines `source.dirty` over tracked files, so the pinned
+auxiliary `pam-native` checkout does not create a false dirty result; its exact
+40-character commit is recorded separately as `tools.pam_native_commit`.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
