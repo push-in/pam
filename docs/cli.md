@@ -99,6 +99,19 @@ pam dashboard manager-health.html
 This is a local point-in-time flight recorder, not a network service. Review it
 before sharing and use a new filename whenever fresh evidence is needed.
 
+While `pamd` is running, it records one private resource sample per managed
+application every 60 seconds. `pam monit:history [NAME] [--limit N] [--json]`
+reads the newest samples; `--record` captures an explicit sample for incident
+response and deterministic automation. Each application retains at most 120
+samples in its own owner-only JSON record, so a busy or long-lived manager cannot
+grow one unbounded history file. Deleting an application deletes this history.
+
+History contains timestamps, integer state and alert codes, workers, aggregate
+RSS, and task counts. It contains no commands, paths, environment values,
+network data, or logs. The dashboard summarizes sample count, peak RSS, and the
+RSS direction in text; exact samples remain available through the CLI table or
+versioned JSON contract.
+
 ## Machine interfaces
 
 These commands emit JSON without terminal decoration:

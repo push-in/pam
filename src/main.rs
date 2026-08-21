@@ -648,6 +648,7 @@ fn run() -> Result<u8, CliError> {
             | "resurrect"
             | "startup"
             | "monit"
+            | "monit:history"
             | "dashboard"
             | "apply"
             | "config:check"

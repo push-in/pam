@@ -288,6 +288,10 @@ pub fn print_help(executable: &OsStr) {
                 "dashboard [output.html]",
                 "Create a private manager health dashboard",
             ),
+            (
+                "monit:history [name] [--json]",
+                "Inspect bounded process resource history",
+            ),
             ("benchmark <url>", "Measure throughput and latency"),
         ],
     );

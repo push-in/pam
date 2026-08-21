@@ -128,6 +128,8 @@ impl CommandSpec {
                 | "doctor"
                 | "info"
                 | "logs"
+                | "monit"
+                | "monit:history"
                 | "packages"
                 | "top"
         )
@@ -178,6 +180,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "monit",
             "Show managed process health and capacity",
             "Develop",
+        ),
+        command(
+            "monit:history",
+            "Inspect bounded process resource history",
+            "Observe",
         ),
         command(
             "dashboard",
