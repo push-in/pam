@@ -17,7 +17,10 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
             "5) results=benchmarks/process-manager/results ;;", workflow
         )
         self.assertIn("PAM_RECOVERY_ROUNDS: '10'", workflow)
-        self.assertIn("PAM_RECOVERY_MAX_P95_MILLIS: '300'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_P95_MILLIS: '200'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_DETECTION_P95_MILLIS: '10'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS: '20'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_READINESS_P95_MILLIS: '150'", workflow)
         self.assertIn(
             "PAM_RECOVERY_MAX_RSS_GROWTH_BYTES: '16777216'", workflow
         )

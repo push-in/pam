@@ -64,7 +64,9 @@ SHA-256 and detects later modification. The `Performance evidence` workflow
 accepts manual suite ID `5`, builds the measured release binary on Ubuntu 24.04,
 runs ten recovery rounds, verifies the manifest before upload, and retains the
 clean-host artifact for 30 days. Its default gates require 100% recovery,
-p95 at most 300 ms, and daemon RSS growth at most 16 MiB. A launch failure
+total p95 at most 200 ms, detection p95 at most 10 ms, effective backoff p95 at
+most 20 ms, readiness p95 at most 150 ms, and daemon RSS growth at most 16 MiB.
+A launch failure
 keeps the workflow red but retains at most 64 KiB of CLI diagnostics and 1 MiB
 of application stderr so clean-host failures remain actionable after cleanup.
 
@@ -102,13 +104,22 @@ downloaded eight-artifact bundle passed independent offline verification. The
 RSS values remain intentionally excluded from comparison because the daemon
 topologies and responsibilities differ.
 
-On Linux, `pamd` watches the exact registered master processes with `pidfd` and
-wakes supervision as soon as a master exits. Restart backoff deadlines also
-schedule an exact bounded wake-up, while a 250 ms scan remains as a compatibility
+On Linux, `pamd` watches the exact registered master processes with `pidfd`.
+One allocation-stable `poll()` set covers those descriptors and the private Unix
+command socket, with a timeout aligned to the earliest restart deadline. It wakes
+immediately for crashes and commands, while the 250 ms scan remains a compatibility
 fallback when the running kernel cannot provide a descriptor. This avoids both
 the former two-pass recovery delay and aggressive idle polling across large
-application catalogs. A controlled local 10-round run after this change measured
-PAM p50/p95 193/199 ms versus PM2 103/108 ms.
+application catalogs.
+
+Each application status now exposes monotonic timestamps for last exit detection,
+recovery start and recovery readiness. Suite 5 derives a separately bound
+`recovery-phases.csv` and aggregates detection, effective backoff, master/worker
+readiness and accounted time without changing the original recovery CSV contract.
+A controlled local 10-round run measured total p50/p95 131/137 ms: detection
+p95 1 ms, backoff p95 12 ms and readiness p95 72 ms. The comparison measured
+PM2 p95 127 ms, leaving a 10 ms directional total gap; hosted confirmation is
+required before replacing the published optimized baseline below.
 
 The [hosted optimized suite-6 run](https://github.com/push-in/pam/actions/runs/32501406324)
 confirmed the result on clean Linux commit `795a20c`: PAM recovered 10/10 with

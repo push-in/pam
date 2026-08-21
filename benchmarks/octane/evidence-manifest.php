@@ -133,6 +133,9 @@ $manifest = [
         EvidenceSuite::ManagerRecovery => [
             'success' => ($report['gate_codes']['success'] ?? null) === 1,
             'latency' => ($report['gate_codes']['latency'] ?? null) === 1,
+            'detection' => ($report['gate_codes']['detection'] ?? null) === 1,
+            'backoff' => ($report['gate_codes']['backoff'] ?? null) === 1,
+            'readiness' => ($report['gate_codes']['readiness'] ?? null) === 1,
             'resources' => ($report['gate_codes']['resources'] ?? null) === 1,
         ],
         EvidenceSuite::ManagerRecoveryComparison => [

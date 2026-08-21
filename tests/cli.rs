@@ -221,6 +221,11 @@ fn creates_and_verifies_manager_recovery_evidence() {
     )
     .unwrap();
     fs::write(
+        results.join("recovery-phases.csv"),
+        "round,detection_millis,backoff_millis,readiness_millis,accounted_millis,success\n1,10,10,70,90,1\n2,15,10,110,135,1\n3,20,10,150,180,1\n",
+    )
+    .unwrap();
+    fs::write(
         results.join("resources.json"),
         r#"{"daemon_rss_before_bytes":1000000,"daemon_rss_after_bytes":2000000}"#,
     )
@@ -232,6 +237,9 @@ fn creates_and_verifies_manager_recovery_evidence() {
         results.to_str().unwrap(),
         "500",
         "2000000",
+        "25",
+        "20",
+        "160",
     ]);
     assert!(reported.status.success());
     let report: serde_json::Value =
@@ -239,25 +247,51 @@ fn creates_and_verifies_manager_recovery_evidence() {
     assert_eq!(report["suite_code"], 5);
     assert_eq!(report["recovery_millis"]["p50"], 150);
     assert_eq!(report["recovery_millis"]["p95"], 200);
+    assert_eq!(report["recovery_phases"]["detection_millis"]["p95"], 20);
+    assert_eq!(report["recovery_phases"]["backoff_millis"]["p50"], 10);
+    assert_eq!(report["recovery_phases"]["readiness_millis"]["p95"], 150);
     assert_eq!(report["gate_codes"]["success"], 1);
+    assert_eq!(report["gate_codes"]["detection"], 1);
+    assert_eq!(report["gate_codes"]["backoff"], 1);
+    assert_eq!(report["gate_codes"]["readiness"], 1);
     assert_eq!(report["passed"], true);
     let failed_gate = run_pam(&[
         report_path.to_str().unwrap(),
         results.to_str().unwrap(),
         "100",
         "2000000",
+        "25",
+        "20",
+        "160",
     ]);
     assert!(!failed_gate.status.success());
     let failed_report: serde_json::Value =
         serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
     assert_eq!(failed_report["gate_codes"]["latency"], 2);
     assert_eq!(failed_report["passed"], false);
+    let failed_phase_gate = run_pam(&[
+        report_path.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "500",
+        "2000000",
+        "15",
+        "20",
+        "160",
+    ]);
+    assert!(!failed_phase_gate.status.success());
+    let failed_phase_report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
+    assert_eq!(failed_phase_report["gate_codes"]["detection"], 2);
+    assert_eq!(failed_phase_report["passed"], false);
     assert!(
         run_pam(&[
             report_path.to_str().unwrap(),
             results.to_str().unwrap(),
             "500",
             "2000000",
+            "25",
+            "20",
+            "160",
         ])
         .status
         .success()
@@ -490,6 +524,16 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         .expect("pamd should recover an unexpectedly killed master");
     assert_eq!(recovered["desiredStateCode"], 1);
     assert_eq!(recovered["recovery"]["stateCode"], 3);
+    let detected = recovered["recovery"]["lastExitDetectedAtMillis"]
+        .as_u64()
+        .unwrap();
+    let recovery_started = recovered["recovery"]["lastRecoveryStartedAtMillis"]
+        .as_u64()
+        .unwrap();
+    let recovery_ready = recovered["recovery"]["lastRecoveryReadyAtMillis"]
+        .as_u64()
+        .unwrap();
+    assert!(detected <= recovery_started && recovery_started <= recovery_ready);
     assert_eq!(recovered["environmentFileConfigured"], true);
     assert!(!recovered.to_string().contains("private-value"));
     assert!(
