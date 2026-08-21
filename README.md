@@ -328,6 +328,9 @@ replacement. It is the systems layer beneath your application:
 
 ## Start exploring
 
+The [PAM Supremacy delivery contract](docs/pam-supremacy.md) defines the
+evidence required before PAM 2.0 can be called mature or stable.
+
 | I want to… | Start here |
 | --- | --- |
 | Understand the whole platform | **[Introduction](https://push-in.github.io/pam-docs/introduction/)** |
