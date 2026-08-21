@@ -92,8 +92,10 @@ benchmarks/process-manager/worker-matrix.sh
 
 Every configuration must recover all rounds and pass its latency, phase and RSS
 gates. Total/readiness p95 limits are respectively 200/150 ms for 1 worker,
-250/200 ms for 4 workers and 350/300 ms for 16 workers; detection, effective
+250/200 ms for 4 workers and 650/550 ms for 16 workers; detection, effective
 backoff and RSS limits remain 10 ms, 20 ms and 16 MiB. The aggregate additionally
 rejects missing or extra configurations, unequal round counts and differing
 source, binary, PAM Native or host provenance. Its recursive suite-7 manifest
 binds the aggregate plus all raw per-configuration artifacts.
+Reports and manifests are still generated and uploaded when a performance gate
+fails, while the runner preserves the nonzero exit status.

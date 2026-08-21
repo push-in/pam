@@ -145,9 +145,13 @@ printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s,"dirty_scope":"tr
     "${maximum_backoff_p95_millis}" "${maximum_readiness_p95_millis}" \
     "${maximum_rss_growth_bytes}" >"${results}/metadata.json"
 
+set +e
 "${pam_binary}" "${root}/benchmarks/process-manager/recovery-report.php" \
     "${results}" "${maximum_p95_millis}" "${maximum_rss_growth_bytes}" \
     "${maximum_detection_p95_millis}" "${maximum_backoff_p95_millis}" \
     "${maximum_readiness_p95_millis}"
+report_status=$?
+set -e
 "${pam_binary}" "${root}/benchmarks/octane/evidence-manifest.php" "${results}" 5 >/dev/null
 "${pam_binary}" "${root}/benchmarks/octane/evidence-manifest.php" "${results}" 5 --verify
+exit "${report_status}"
