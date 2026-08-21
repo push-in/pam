@@ -34,6 +34,36 @@ fn temporary_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pam-{name}-{}-{unique}", std::process::id()))
 }
 
+#[test]
+fn generates_pam_api_architecture_without_overwriting() {
+    let project = temporary_path("api-generators");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":1,"name":"generated-api"}"#,
+    )
+    .unwrap();
+
+    let controller = run_pam_in(&project, &["make:controller", "LoginController"]);
+    assert!(
+        controller.status.success(),
+        "{}",
+        String::from_utf8_lossy(&controller.stderr)
+    );
+    let source =
+        fs::read_to_string(project.join("src/Http/Controllers/LoginController.php")).unwrap();
+    assert!(source.contains("public function index("));
+
+    let overwrite = run_pam_in(&project, &["make:controller", "LoginController"]);
+    assert!(!overwrite.status.success());
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("without overwriting"));
+
+    let traversal = run_pam_in(&project, &["make:model", "../Secret"]);
+    assert!(!traversal.status.success());
+    assert!(!project.join("Secret.php").exists());
+    fs::remove_dir_all(project).unwrap();
+}
+
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")

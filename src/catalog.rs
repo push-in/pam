@@ -184,6 +184,16 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Generate",
         ),
         command("make:migration", "Generate a Laravel migration", "Generate"),
+        command(
+            "make:service",
+            "Generate an application service",
+            "Generate",
+        ),
+        command(
+            "make:repository",
+            "Generate a persistence repository",
+            "Generate",
+        ),
         command("make:test", "Generate a Laravel test", "Generate"),
         command(
             "make:command",

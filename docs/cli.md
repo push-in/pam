@@ -154,5 +154,22 @@ pam make:model Post --migration
 pam console
 ```
 
+PAM API projects have native generators for Eloquent models, controllers,
+Form Requests, Resources, migrations, services and repositories:
+
+```bash
+pam make:model User
+pam make:controller UserController
+pam make:request StoreUserRequest
+pam make:resource UserResource
+pam make:service CreateUserService
+pam make:repository UserRepository
+pam make:migration CreateUsersTable
+```
+
+Generators require a bounded PascalCase name, create missing application
+directories and refuse to overwrite existing files. Generated controllers use
+named methods, ready for `[UserController::class, 'index']` route handlers.
+
 See the generated [complete command catalog](cli-reference.md) and
 [CLI extension contract](extending-cli.md).

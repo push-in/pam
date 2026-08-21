@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 mod admin_auth;
+mod api_generator;
 mod catalog;
 mod cluster;
 mod commands;
@@ -1390,6 +1391,14 @@ fn run() -> Result<u8, CliError> {
                 env::set_var("APP_RUNNING_IN_CONSOLE", "true");
             }
             return run_script(&executable, &script, arguments);
+        }
+        if context.kind == project::ProjectKind::Api {
+            return api_generator::run(
+                &script_arg.to_string_lossy(),
+                &context.root,
+                raw_args.collect(),
+            )
+            .map_err(CliError::Commands);
         }
         let command_name = script_arg.to_string_lossy();
         if let Some(command) = project::registered_commands(&context)
