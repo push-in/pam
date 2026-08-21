@@ -8,6 +8,7 @@ final readonly class HmacTokenCodec
 {
     private \Closure $clock;
 
+    /** @param array<array-key, mixed> $verificationKeys */
     public function __construct(
         #[\SensitiveParameter]
         private string $secret,
@@ -15,12 +16,26 @@ final readonly class HmacTokenCodec
         private string $audience,
         private int $leewaySeconds = 5,
         ?callable $clock = null,
+        private string $keyIdentifier = 'primary',
+        #[\SensitiveParameter]
+        private array $verificationKeys = [],
     ) {
         if (strlen($secret) < 32) {
             throw new \InvalidArgumentException('The token signing secret must contain at least 32 bytes.');
         }
         if ($issuer === '' || $audience === '' || $leewaySeconds < 0 || $leewaySeconds > 300) {
             throw new \InvalidArgumentException('Token issuer, audience and leeway configuration are invalid.');
+        }
+        if (!self::validKeyIdentifier($keyIdentifier) || count($verificationKeys) > 4) {
+            throw new \InvalidArgumentException('Token key identifiers or keyring size are invalid.');
+        }
+        foreach ($verificationKeys as $identifier => $verificationSecret) {
+            if (!is_string($identifier) || !self::validKeyIdentifier($identifier)
+                || !is_string($verificationSecret) || strlen($verificationSecret) < 32
+                || $identifier === $keyIdentifier
+            ) {
+                throw new \InvalidArgumentException('Every verification key needs a unique identifier and 32-byte secret.');
+            }
         }
         $this->clock = $clock === null
             ? static fn (): int => time()
@@ -39,7 +54,7 @@ final readonly class HmacTokenCodec
             }
         }
         $now = ($this->clock)();
-        $header = self::encodeJson(['alg' => 'HS256', 'typ' => 'JWT']);
+        $header = self::encodeJson(['alg' => 'HS256', 'typ' => 'JWT', 'kid' => $this->keyIdentifier]);
         $payload = self::encodeJson([
             'iss' => $this->issuer,
             'aud' => $this->audience,
@@ -64,16 +79,29 @@ final readonly class HmacTokenCodec
             return null;
         }
         [$encodedHeader, $encodedPayload, $encodedSignature] = $segments;
+        $header = self::decodeJson($encodedHeader);
+        if ($header === null || ($header['alg'] ?? null) !== 'HS256' || ($header['typ'] ?? null) !== 'JWT') {
+            return null;
+        }
+        $keyIdentifier = $header['kid'] ?? null;
+        if (!is_string($keyIdentifier) || !self::validKeyIdentifier($keyIdentifier)) {
+            return null;
+        }
+        $verificationSecret = $keyIdentifier === $this->keyIdentifier
+            ? $this->secret
+            : ($this->verificationKeys[$keyIdentifier] ?? null);
+        if (!is_string($verificationSecret)) {
+            return null;
+        }
         $signature = self::decode($encodedSignature);
         if ($signature === null || !hash_equals(
-            hash_hmac('sha256', "{$encodedHeader}.{$encodedPayload}", $this->secret, true),
+            hash_hmac('sha256', "{$encodedHeader}.{$encodedPayload}", $verificationSecret, true),
             $signature,
         )) {
             return null;
         }
-        $header = self::decodeJson($encodedHeader);
         $claims = self::decodeJson($encodedPayload);
-        if ($header === null || $claims === null || ($header['alg'] ?? null) !== 'HS256' || ($header['typ'] ?? null) !== 'JWT') {
+        if ($claims === null) {
             return null;
         }
         if (!self::validStringClaim($claims, 'iss', $this->issuer)
@@ -160,5 +188,10 @@ final readonly class HmacTokenCodec
     private static function validStringClaim(array $claims, string $name, string $expected): bool
     {
         return isset($claims[$name]) && is_string($claims[$name]) && hash_equals($expected, $claims[$name]);
+    }
+
+    private static function validKeyIdentifier(string $identifier): bool
+    {
+        return preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/D', $identifier) === 1;
     }
 }

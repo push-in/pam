@@ -224,9 +224,16 @@ $app->middleware(new AuthenticateMiddleware(
 ));
 ```
 
+Set `keyIdentifier` on the active signing key and pass at most four retiring
+keys through `verificationKeys` for bounded zero-downtime rotation. Unknown
+`kid` values fail closed before claims are trusted. `BearerTokenAuthenticator`
+also accepts a `TokenRevocationStore`; `MemoryTokenRevocationStore` is bounded
+and intended for development/tests, while clustered applications should back
+the contract with an atomic shared store.
+
 Signing secrets must contain at least 32 bytes and must not be stored in source
 control. Access tokens are capped at 24 hours. Refresh-token rotation,
-revocation and OAuth/OIDC authorization-server duties belong to the application
+OAuth/OIDC authorization-server duties belong to the application
 or a dedicated identity provider; they must not be simulated with long-lived
 access tokens.
 
