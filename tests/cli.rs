@@ -207,6 +207,94 @@ fn creates_and_verifies_benchmark_evidence_manifests() {
 }
 
 #[test]
+fn creates_and_verifies_manager_recovery_evidence() {
+    let results = temporary_path("manager-recovery-evidence");
+    fs::create_dir_all(&results).unwrap();
+    fs::write(
+        results.join("metadata.json"),
+        r#"{"source":{"commit":"abc","dirty":false},"parameters":{"rounds":3}}"#,
+    )
+    .unwrap();
+    fs::write(
+        results.join("recovery.csv"),
+        "round,recovery_millis,success\n1,100,1\n2,150,1\n3,200,1\n",
+    )
+    .unwrap();
+    fs::write(
+        results.join("resources.json"),
+        r#"{"daemon_rss_before_bytes":1000000,"daemon_rss_after_bytes":2000000}"#,
+    )
+    .unwrap();
+    let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/recovery-report.php");
+    let reported = run_pam(&[
+        report_path.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "500",
+        "2000000",
+    ]);
+    assert!(reported.status.success());
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
+    assert_eq!(report["suite_code"], 5);
+    assert_eq!(report["recovery_millis"]["p50"], 150);
+    assert_eq!(report["recovery_millis"]["p95"], 200);
+    assert_eq!(report["gate_codes"]["success"], 1);
+    assert_eq!(report["passed"], true);
+    let failed_gate = run_pam(&[
+        report_path.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "100",
+        "2000000",
+    ]);
+    assert!(!failed_gate.status.success());
+    let failed_report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
+    assert_eq!(failed_report["gate_codes"]["latency"], 2);
+    assert_eq!(failed_report["passed"], false);
+    assert!(
+        run_pam(&[
+            report_path.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "500",
+            "2000000",
+        ])
+        .status
+        .success()
+    );
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "5"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "5",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::write(results.join("recovery.csv"), "tampered\n").unwrap();
+    assert!(
+        !run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "5",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
 fn records_reproducible_soak_metadata() {
     let results = temporary_path("soak-metadata");
     fs::create_dir_all(&results).unwrap();

@@ -53,6 +53,10 @@ uptime. After `--max-unstable-restarts`, PAM opens a circuit and requires an
 explicit `pam restart NAME` to retry. `--no-autorestart` disables this policy.
 `status`, `describe`, and `ps --json` expose desired state, recovery state,
 attempt counters, total automatic restarts, and the next retry deadline.
+The reproducible `benchmarks/process-manager/run.sh` harness repeatedly kills
+an isolated managed master and records raw recovery latency, success rate and
+daemon RSS growth. Its suite-5 evidence manifest binds every artifact by
+SHA-256 and detects later modification.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
