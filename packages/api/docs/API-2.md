@@ -1,5 +1,11 @@
 # PAM API 2 design and delivery contract
 
+PAM API 2 has an independent release line. It does not require the native PAM
+runtime or unrelated Composer packages to adopt major version 2. A release is
+cut from a commit integrated into the monorepo `main` branch, verified as an
+isolated split, and published as `v2.x.y` in `push-in/pam-api` with provenance
+retained by GitHub Actions.
+
 PAM API combines Express-style route ergonomics with Laravel-style application
 boundaries. Small applications may use closures. Product applications can use
 controllers, request objects, services, repositories and resources without
@@ -59,27 +65,44 @@ and route parameters by name.
 The `feat/api-2-foundation` development line implements:
 
 - class-and-method controller handlers;
+- boot-time typed configuration with deterministic secret redaction;
 - constructor and method dependency injection;
 - transient, singleton and request-scoped container lifetimes;
 - named routes, built-in/custom constraints and per-route middleware;
+- explicit and automatic HEAD/OPTIONS semantics with deterministic Allow headers;
+- bounded route tables, paths and custom constraints with per-pattern PCRE
+  match/depth budgets;
 - composable prefixes and route groups;
 - API resource route registration;
 - Form Request authorization/validation and integer enum validation;
 - Problem Details validation responses;
 - JSON Resources and Resource Collections;
 - PHPUnit and PHPStan level 9 verification;
+- a committed 118-symbol public API baseline with executable SemVer checks;
 - pluggable rate-limit stores with a bounded in-memory token bucket fallback;
 - authenticators, request-scoped principals, abilities and authorization;
+- strict signed bearer access tokens with temporal, issuer/audience checks,
+  bounded signing-key rotation and pluggable revocation;
 - idempotency and response-cache stores with bounded memory implementations;
 - route model binding and custom binding resolvers;
 - OpenAPI 3.1, compatibility checks and TypeScript/Kotlin/Swift clients;
 - request-scoped tenancy and normalized request observations;
-- transactions, events, bounded jobs, retry and circuit-breaker primitives;
+- deterministic request lifecycle observers with failure-aware reverse cleanup;
+- a bounded opt-in development profiler that never retains headers or payloads;
+- transactions, events, lease-based at-least-once jobs with retry/dead-letter
+  transitions and allowlisted bounded JSON serialization, retry and
+  circuit-breaker primitives;
 - strict CORS, trusted-proxy IP resolution and cooperative deadlines;
 - composable health checks and container-scope diagnostics;
 - an in-memory test client with fluent response assertions;
+- a canonical structured starter embedded by `pam init` and exercised through
+  a clean dependency install and Embed SAPI smoke test;
 - a reproducible router benchmark.
 
-Redis, database, queue, JWT and OpenTelemetry adapters intentionally remain
-application/ecosystem integrations. The core defines their contracts and ships
-bounded memory implementations only where safe for development and tests.
+Eloquent is the official ORM and is integrated with Fiber-local connection
+managers, events, transactions, deterministic request cleanup and per-request
+query budgets with duplicate-query detection. Tenant model guards apply
+fail-closed global scopes and prevent cross-tenant assignment. Redis,
+broker, JWT and OpenTelemetry integrations remain contract-backed ecosystem
+adapters until their production implementations complete the certification
+suite.

@@ -1,0 +1,52 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+use App\Providers\AppServiceProvider;
+use Pam\Api\Database\DatabaseConfig;
+use Pam\Api\Database\EloquentServiceProvider;
+use Pam\Api\Database\MigrationManager;
+use Pam\App;
+
+$root = dirname(__DIR__);
+$autoloaders = [
+    $root . '/vendor/autoload.php',
+    dirname(__DIR__, 2) . '/api/vendor/autoload.php',
+];
+$loaded = false;
+foreach ($autoloaders as $autoloader) {
+    if (is_file($autoloader)) {
+        require $autoloader;
+        $loaded = true;
+        break;
+    }
+}
+if (!$loaded) {
+    throw new RuntimeException('Composer dependencies are missing; run pam composer install.');
+}
+spl_autoload_register(static function (string $class) use ($root): void {
+    $prefix = 'App\\';
+    if (!str_starts_with($class, $prefix)) {
+        return;
+    }
+    $path = $root . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+    if (is_file($path)) {
+        require $path;
+    }
+});
+
+$app = new App(discoverPackages: false);
+$app->provider(new EloquentServiceProvider(DatabaseConfig::fromEnvironment()));
+$app->provider(new AppServiceProvider());
+$app->boot();
+
+$migrations = $app->container()->get(MigrationManager::class);
+if (!$migrations instanceof MigrationManager) {
+    throw new LogicException('Migration manager binding is invalid.');
+}
+
+$completed = $migrations->migrate(dirname(__DIR__) . '/database/migrations');
+fwrite(STDOUT, $completed === []
+    ? "Database is already up to date.\n"
+    : 'Migrated: ' . implode(', ', $completed) . "\n");

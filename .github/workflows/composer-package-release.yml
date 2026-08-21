@@ -1,0 +1,259 @@
+name: Independent Composer package release
+
+on:
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: Composer package name, for example pushinbr/pam-api
+        required: true
+        type: string
+      package_tag:
+        description: Package SemVer tag, for example v2.0.0
+        required: true
+        type: string
+      source_ref:
+        description: Monorepo commit or tag to split; must belong to main
+        required: true
+        default: main
+        type: string
+      publish:
+        description: Push the verified split and immutable tag to its mirror
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: composer-package-${{ inputs.package_name }}-${{ inputs.package_tag }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Validate independent package release
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.package.outputs.matrix }}
+      source_sha: ${{ steps.source.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.source_ref }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Require a source commit integrated into main
+        id: source
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          source_sha=$(git rev-parse --verify 'HEAD^{commit}')
+          git merge-base --is-ancestor "${source_sha}" origin/main
+          printf 'sha=%s\n' "${source_sha}" >>"${GITHUB_OUTPUT}"
+      - name: Validate package metadata and version
+        env:
+          PACKAGE_NAME: ${{ inputs.package_name }}
+          PACKAGE_TAG: ${{ inputs.package_tag }}
+        run: |
+          set -euo pipefail
+          scripts/package-release.sh validate
+          scripts/package-release.sh validate-package-tag \
+            "${PACKAGE_NAME}" "${PACKAGE_TAG}"
+      - name: Select exactly one known package
+        id: package
+        env:
+          PACKAGE_NAME: ${{ inputs.package_name }}
+        run: |
+          printf 'matrix=%s\n' \
+            "$(scripts/package-release.sh package-matrix "${PACKAGE_NAME}")" \
+            >>"${GITHUB_OUTPUT}"
+
+  verify:
+    name: Verify ${{ matrix.name }} ${{ inputs.package_tag }}
+    needs: prepare
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Build and verify isolated history
+        id: split
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          split_sha=$(scripts/package-release.sh split \
+            "${PACKAGE_NAME}" "${SOURCE_SHA}")
+          scripts/package-release.sh verify-split "${PACKAGE_NAME}" "${split_sha}"
+          printf 'sha=%s\n' "${split_sha}" >>"${GITHUB_OUTPUT}"
+      - name: Write release provenance
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          PACKAGE_PATH: ${{ matrix.path }}
+          PACKAGE_TAG: ${{ inputs.package_tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          SPLIT_SHA: ${{ steps.split.outputs.sha }}
+        run: |
+          set -euo pipefail
+          manifest_sha=$(sha256sum "${PACKAGE_PATH}/composer.json" | awk '{print $1}')
+          lock_sha=''
+          if [ -f "${PACKAGE_PATH}/composer.lock" ]; then
+            lock_sha=$(sha256sum "${PACKAGE_PATH}/composer.lock" | awk '{print $1}')
+          fi
+          jq -n \
+            --arg package "${PACKAGE_NAME}" \
+            --arg tag "${PACKAGE_TAG}" \
+            --arg sourceSha "${SOURCE_SHA}" \
+            --arg splitSha "${SPLIT_SHA}" \
+            --arg composerJsonSha256 "${manifest_sha}" \
+            --arg composerLockSha256 "${lock_sha}" \
+            '{schemaVersion: 1, package: $package, tag: $tag, sourceSha: $sourceSha, splitSha: $splitSha, composerJsonSha256: $composerJsonSha256, composerLockSha256: (if $composerLockSha256 == "" then null else $composerLockSha256 end)}' \
+            > independent-package-release.json
+      - uses: actions/upload-artifact@v5
+        with:
+          name: composer-package-${{ matrix.repository }}-${{ inputs.package_tag }}
+          path: independent-package-release.json
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish ${{ matrix.name }} ${{ inputs.package_tag }}
+    needs:
+      - prepare
+      - verify
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ needs.prepare.outputs.source_sha }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Configure the package-scoped mirror key
+        env:
+          DEPLOY_KEY: ${{ secrets[matrix.deploySecret] }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          test -n "${DEPLOY_KEY}" || {
+            printf 'Missing Actions secret: %s\n' '${{ matrix.deploySecret }}' >&2
+            exit 1
+          }
+          install -d -m 0700 "${RUNNER_TEMP}/pam-ssh"
+          install -m 0600 /dev/null "${RUNNER_TEMP}/pam-ssh/deploy-key"
+          printf '%s\n' "${DEPLOY_KEY}" >"${RUNNER_TEMP}/pam-ssh/deploy-key"
+          gh api meta --jq '.ssh_keys[] | "github.com " + .' \
+            >"${RUNNER_TEMP}/pam-ssh/known-hosts"
+      - name: Publish immutable package branch and tag
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          PACKAGE_TAG: ${{ inputs.package_tag }}
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+          REPOSITORY_NAME: ${{ matrix.repository }}
+          GIT_SSH_COMMAND: >-
+            ssh -i ${{ runner.temp }}/pam-ssh/deploy-key
+            -o IdentitiesOnly=yes
+            -o UserKnownHostsFile=${{ runner.temp }}/pam-ssh/known-hosts
+            -o StrictHostKeyChecking=yes
+        run: |
+          set -euo pipefail
+          split_sha=$(scripts/package-release.sh split \
+            "${PACKAGE_NAME}" "${SOURCE_SHA}")
+          scripts/package-release.sh verify-split "${PACKAGE_NAME}" "${split_sha}"
+          remote="git@github.com:push-in/${REPOSITORY_NAME}.git"
+          remote_tag=$(git ls-remote "${remote}" "refs/tags/${PACKAGE_TAG}^{}" |
+            awk 'NR == 1 { print $1 }')
+          if [ -z "${remote_tag}" ]; then
+            remote_tag=$(git ls-remote "${remote}" "refs/tags/${PACKAGE_TAG}" |
+              awk 'NR == 1 { print $1 }')
+          fi
+          if [ -n "${remote_tag}" ]; then
+            test "${remote_tag}" = "${split_sha}" || {
+              printf 'Remote tag %s points to %s, expected %s\n' \
+                "${PACKAGE_TAG}" "${remote_tag}" "${split_sha}" >&2
+              exit 1
+            }
+            git push "${remote}" "${split_sha}:refs/heads/main"
+            exit 0
+          fi
+          git push --atomic "${remote}" \
+            "${split_sha}:refs/heads/main" \
+            "${split_sha}:refs/tags/${PACKAGE_TAG}"
+
+  public-install:
+    name: Verify public installation
+    needs:
+      - prepare
+      - verify
+      - publish
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
+    steps:
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+      - name: Wait for the immutable Packagist version
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          PACKAGE_TAG: ${{ inputs.package_tag }}
+        run: |
+          set -euo pipefail
+          metadata="https://repo.packagist.org/p2/${PACKAGE_NAME}.json"
+          for attempt in $(seq 1 20); do
+            if curl --fail --silent --show-error "${metadata}" |
+              jq -e --arg tag "${PACKAGE_TAG}" \
+                '.packages[][] | select(.version == $tag)' >/dev/null; then
+              exit 0
+            fi
+            sleep 30
+          done
+          printf 'Packagist did not expose %s %s within 10 minutes.\n' \
+            "${PACKAGE_NAME}" "${PACKAGE_TAG}" >&2
+          exit 1
+      - name: Preflight and install from public Packagist
+        env:
+          PACKAGE_NAME: ${{ matrix.name }}
+          PACKAGE_TAG: ${{ inputs.package_tag }}
+        run: |
+          set -euo pipefail
+          version=${PACKAGE_TAG#v}
+          mkdir consumer
+          jq -n \
+            --arg package "${PACKAGE_NAME}" \
+            --arg version "${version}" \
+            '{name: "pam/release-smoke", type: "project", require: {php: "^8.4", ($package): $version}, config: {"allow-plugins": false, "sort-packages": true}}' \
+            > consumer/composer.json
+          composer validate --strict --no-check-publish consumer/composer.json
+          composer show "${PACKAGE_NAME}" "${version}" --all
+          composer update --working-dir=consumer --dry-run \
+            --no-interaction --no-plugins --no-scripts --prefer-dist
+          composer update --working-dir=consumer \
+            --no-interaction --no-plugins --no-scripts --prefer-dist
+          composer show --working-dir=consumer "${PACKAGE_NAME}" \
+            --format=json | jq -e --arg tag "${PACKAGE_TAG}" \
+              '.versions | index($tag) != null'

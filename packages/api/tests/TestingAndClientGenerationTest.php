@@ -17,11 +17,14 @@ final class TestingAndClientGenerationTest extends TestCase
     {
         $app = new App(discoverPackages: false);
         $app->post('/login', static fn (Request $request, Response $response): Response =>
-            $response->json(['data' => ['status' => 1]], 201));
+            $response->header('x-auth-state', 'created')->json(['data' => ['status' => 1]], 201));
 
         $result = (new TestClient($app))
             ->postJson('/login', ['email' => 'dev@pam.dev'])
             ->assertStatus(201)
+            ->assertSuccessful()
+            ->assertHeader('x-auth-state', 'created')
+            ->assertJson(['data' => ['status' => 1]])
             ->assertJsonPath('data.status', 1);
 
         self::assertSame(201, $result->status());

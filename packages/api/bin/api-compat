@@ -1,0 +1,523 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+const SCHEMA_VERSION = 1;
+const MAXIMUM_SOURCE_FILES = 10_000;
+const MAXIMUM_BASELINE_BYTES = 4_194_304;
+
+enum PublicApiChangeCode: int
+{
+    case MissingSymbol = 1;
+    case ChangedSymbol = 2;
+    case MissingMember = 3;
+    case ChangedMember = 4;
+    case AddedSymbol = 5;
+    case AddedMember = 6;
+}
+
+$root = dirname(__DIR__);
+require $root . '/vendor/autoload.php';
+
+$mode = $argv[1] ?? 'check';
+if (!in_array($mode, ['check', 'update'], true) || count($argv) > 3) {
+    fwrite(STDERR, "Usage: bin/api-compat [check|update] [baseline.json]\n");
+    exit(2);
+}
+
+try {
+    $current = snapshot($root . '/src');
+    $baselinePath = $argv[2] ?? $root . '/api-surface.json';
+    if ($baselinePath === '' || strlen($baselinePath) > 4_096) {
+        throw new RuntimeException('Public API baseline path is invalid.');
+    }
+    if ($mode === 'update') {
+        $encoded = json_encode(
+            $current,
+            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR,
+        ) . "\n";
+        if (file_put_contents($baselinePath, $encoded, LOCK_EX) !== strlen($encoded)) {
+            throw new RuntimeException('Could not update the public API baseline.');
+        }
+        fwrite(STDOUT, 'Updated api-surface.json with ' . count($current['symbols']) . " symbols.\n");
+        exit(0);
+    }
+    $baseline = readBaseline($baselinePath);
+    $changes = compareSnapshots($baseline, $current);
+    if ($changes !== []) {
+        fwrite(STDERR, "Public API compatibility check failed:\n");
+        foreach ($changes as $change) {
+            fwrite(STDERR, "- [{$change['code']}] {$change['path']}: {$change['message']}\n");
+        }
+        fwrite(STDERR, "Review additions before updating the baseline; breaking changes require a major version.\n");
+        exit(1);
+    }
+    fwrite(STDOUT, 'Public API compatible: ' . count($current['symbols']) . " symbols checked.\n");
+} catch (Throwable $error) {
+    fwrite(STDERR, 'Public API check error: ' . $error->getMessage() . "\n");
+    exit(2);
+}
+
+/** @return array{schema: int, symbols: array<string, array<string, mixed>>} */
+function snapshot(string $source): array
+{
+    $files = [];
+    $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator(
+        $source,
+        FilesystemIterator::SKIP_DOTS,
+    ));
+    foreach ($iterator as $file) {
+        if ($file instanceof SplFileInfo && $file->isFile() && $file->getExtension() === 'php') {
+            $files[] = $file->getPathname();
+        }
+    }
+    sort($files, SORT_STRING);
+    if (count($files) > MAXIMUM_SOURCE_FILES) {
+        throw new RuntimeException('Public API source file limit exceeded.');
+    }
+
+    $symbols = [];
+    foreach ($files as $file) {
+        foreach (declaredSymbols($file) as $symbol) {
+            if (!class_exists($symbol) && !interface_exists($symbol) && !enum_exists($symbol)) {
+                throw new RuntimeException("Could not load {$symbol}.");
+            }
+            $reflection = new ReflectionClass($symbol);
+            if ($reflection->isTrait() || str_contains((string) $reflection->getDocComment(), '@internal')) {
+                continue;
+            }
+            $symbols[$symbol] = reflectSymbol($reflection);
+        }
+    }
+    ksort($symbols, SORT_STRING);
+    return ['schema' => SCHEMA_VERSION, 'symbols' => $symbols];
+}
+
+/** @return list<class-string> */
+function declaredSymbols(string $file): array
+{
+    $source = file_get_contents($file);
+    if (!is_string($source)) {
+        throw new RuntimeException("Could not read {$file}.");
+    }
+    $tokens = token_get_all($source);
+    $namespace = '';
+    $symbols = [];
+    $count = count($tokens);
+    for ($index = 0; $index < $count; ++$index) {
+        $token = $tokens[$index];
+        if (!is_array($token)) {
+            continue;
+        }
+        if ($token[0] === T_NAMESPACE) {
+            $namespace = '';
+            for (++$index; $index < $count; ++$index) {
+                $part = $tokens[$index];
+                if ($part === ';' || $part === '{') {
+                    break;
+                }
+                if (is_array($part) && in_array($part[0], [T_STRING, T_NAME_QUALIFIED, T_NS_SEPARATOR], true)) {
+                    $namespace .= $part[1];
+                }
+            }
+            continue;
+        }
+        if (!in_array($token[0], [T_CLASS, T_INTERFACE, T_ENUM], true)) {
+            continue;
+        }
+        $previous = previousSignificantToken($tokens, $index);
+        if (is_array($previous) && in_array($previous[0], [T_NEW, T_DOUBLE_COLON], true)) {
+            continue;
+        }
+        for (++$index; $index < $count; ++$index) {
+            $name = $tokens[$index];
+            if (is_array($name) && $name[0] === T_STRING) {
+                /** @var class-string $qualified */
+                $qualified = $namespace === '' ? $name[1] : $namespace . '\\' . $name[1];
+                $symbols[] = $qualified;
+                break;
+            }
+        }
+    }
+    return $symbols;
+}
+
+/**
+ * @param list<array{int, string, int}|string> $tokens
+ * @return array{int, string, int}|string|null
+ */
+function previousSignificantToken(array $tokens, int $index): array|string|null
+{
+    for (--$index; $index >= 0; --$index) {
+        $token = $tokens[$index];
+        if (is_array($token) && in_array($token[0], [T_WHITESPACE, T_COMMENT, T_DOC_COMMENT], true)) {
+            continue;
+        }
+        return $token;
+    }
+    return null;
+}
+
+/**
+ * @param ReflectionClass<object> $symbol
+ * @return array<string, mixed>
+ */
+function reflectSymbol(ReflectionClass $symbol): array
+{
+    $kind = $symbol->isEnum() ? 'enum' : ($symbol->isInterface() ? 'interface' : 'class');
+    $methods = [];
+    foreach ($symbol->getMethods(ReflectionMethod::IS_PUBLIC) as $method) {
+        if ($method->getDeclaringClass()->getName() !== $symbol->getName()) {
+            continue;
+        }
+        $parameters = [];
+        foreach ($method->getParameters() as $parameter) {
+            $parameters[] = [
+                'name' => $parameter->getName(),
+                'type' => reflectionType($parameter->getType()),
+                'byReference' => $parameter->isPassedByReference(),
+                'variadic' => $parameter->isVariadic(),
+                'optional' => $parameter->isOptional(),
+                'default' => $parameter->isDefaultValueAvailable()
+                    ? normalizeValue($parameter->getDefaultValue())
+                    : null,
+                'hasDefault' => $parameter->isDefaultValueAvailable(),
+            ];
+        }
+        $methods[$method->getName()] = [
+            'static' => $method->isStatic(),
+            'final' => $method->isFinal(),
+            'abstract' => $method->isAbstract(),
+            'returnsReference' => $method->returnsReference(),
+            'return' => reflectionType($method->getReturnType()),
+            'parameters' => $parameters,
+        ];
+    }
+    ksort($methods, SORT_STRING);
+
+    $properties = [];
+    foreach ($symbol->getProperties(ReflectionProperty::IS_PUBLIC) as $property) {
+        if ($property->getDeclaringClass()->getName() !== $symbol->getName()) {
+            continue;
+        }
+        $properties[$property->getName()] = [
+            'static' => $property->isStatic(),
+            'readonly' => $property->isReadOnly(),
+            'type' => reflectionType($property->getType()),
+        ];
+    }
+    ksort($properties, SORT_STRING);
+
+    $constants = [];
+    foreach ($symbol->getReflectionConstants(ReflectionClassConstant::IS_PUBLIC) as $constant) {
+        if ($constant->getDeclaringClass()->getName() === $symbol->getName()) {
+            $constants[$constant->getName()] = normalizeValue($constant->getValue());
+        }
+    }
+    ksort($constants, SORT_STRING);
+
+    $interfaces = $symbol->getInterfaceNames();
+    sort($interfaces, SORT_STRING);
+    $parent = $symbol->getParentClass();
+    $surface = [
+        'kind' => $kind,
+        'final' => $symbol->isFinal(),
+        'readonly' => $symbol->isReadOnly(),
+        'abstract' => $symbol->isAbstract(),
+        'parent' => $parent === false ? null : $parent->getName(),
+        'interfaces' => $interfaces,
+        'constants' => $constants,
+        'properties' => $properties,
+        'methods' => $methods,
+    ];
+    if ($symbol->isEnum()) {
+        $enumName = $symbol->getName();
+        if (!enum_exists($enumName)) {
+            throw new RuntimeException("Reflected enum {$enumName} is unavailable.");
+        }
+        $enum = new ReflectionEnum($enumName);
+        $surface['backingType'] = $enum->getBackingType()?->getName();
+        $cases = [];
+        foreach ($enum->getCases() as $case) {
+            $cases[$case->getName()] = $case instanceof ReflectionEnumBackedCase
+                ? normalizeValue($case->getBackingValue())
+                : null;
+        }
+        $surface['cases'] = $cases;
+    }
+    return $surface;
+}
+
+function reflectionType(?ReflectionType $type): ?string
+{
+    if ($type === null) {
+        return null;
+    }
+    if ($type instanceof ReflectionNamedType) {
+        return ($type->allowsNull() && $type->getName() !== 'mixed' && $type->getName() !== 'null' ? '?' : '')
+            . $type->getName();
+    }
+    if (!$type instanceof ReflectionUnionType && !$type instanceof ReflectionIntersectionType) {
+        throw new RuntimeException('Unsupported reflection type.');
+    }
+    $types = array_map(static fn (ReflectionType $nested): string => reflectionType($nested) ?? '', $type->getTypes());
+    sort($types, SORT_STRING);
+    return implode($type instanceof ReflectionIntersectionType ? '&' : '|', $types);
+}
+
+/** @return bool|float|int|string|null|array<mixed> */
+function normalizeValue(mixed $value): bool|float|int|string|null|array
+{
+    if ($value === null || is_scalar($value)) {
+        return $value;
+    }
+    if (is_array($value)) {
+        return array_map(normalizeValue(...), $value);
+    }
+    if ($value instanceof UnitEnum) {
+        return $value instanceof BackedEnum ? $value->value : $value->name;
+    }
+    if (is_object($value)) {
+        $properties = get_object_vars($value);
+        ksort($properties, SORT_STRING);
+        return [
+            '@object' => $value::class,
+            'properties' => normalizeValue($properties),
+        ];
+    }
+    throw new RuntimeException('Public API contains an unsupported constant/default value.');
+}
+
+/** @return array{schema: int, symbols: array<string, array<string, mixed>>} */
+function readBaseline(string $path): array
+{
+    if (!is_file($path) || filesize($path) === false || filesize($path) > MAXIMUM_BASELINE_BYTES) {
+        throw new RuntimeException('Public API baseline is missing or exceeds 4 MiB.');
+    }
+    $json = file_get_contents($path);
+    $decoded = is_string($json) ? json_decode($json, true, 64, JSON_THROW_ON_ERROR) : null;
+    if (!is_array($decoded) || ($decoded['schema'] ?? null) !== SCHEMA_VERSION || !is_array($decoded['symbols'] ?? null)) {
+        throw new RuntimeException('Public API baseline schema is invalid.');
+    }
+    /** @var array{schema: int, symbols: array<string, array<string, mixed>>} $decoded */
+    return $decoded;
+}
+
+/**
+ * @param array{schema: int, symbols: array<string, array<string, mixed>>} $baseline
+ * @param array{schema: int, symbols: array<string, array<string, mixed>>} $current
+ * @return list<array{code: int, path: string, message: string}>
+ */
+function compareSnapshots(array $baseline, array $current): array
+{
+    $changes = [];
+    foreach ($baseline['symbols'] as $name => $before) {
+        $after = $current['symbols'][$name] ?? null;
+        if (!is_array($after)) {
+            $changes[] = change(PublicApiChangeCode::MissingSymbol, $name, 'public symbol was removed');
+            continue;
+        }
+        foreach (['kind', 'parent', 'readonly'] as $field) {
+            if (($before[$field] ?? null) !== ($after[$field] ?? null)) {
+                $changes[] = change(PublicApiChangeCode::ChangedSymbol, $name, "{$field} changed");
+            }
+        }
+        if (($before['final'] ?? false) === false && ($after['final'] ?? false) === true) {
+            $changes[] = change(PublicApiChangeCode::ChangedSymbol, $name, 'class became final');
+        }
+        if (($before['abstract'] ?? false) === false && ($after['abstract'] ?? false) === true) {
+            $changes[] = change(PublicApiChangeCode::ChangedSymbol, $name, 'class became abstract');
+        }
+        $beforeInterfaces = stringListField($before, 'interfaces');
+        $afterInterfaces = stringListField($after, 'interfaces');
+        foreach ($beforeInterfaces as $interface) {
+            if (!in_array($interface, $afterInterfaces, true)) {
+                $changes[] = change(PublicApiChangeCode::ChangedSymbol, $name, "implemented interface {$interface} was removed");
+            }
+        }
+        if (
+            ($before['kind'] ?? null) === 'interface'
+            && $beforeInterfaces !== $afterInterfaces
+        ) {
+            $changes[] = change(PublicApiChangeCode::ChangedSymbol, $name, 'parent interface set changed');
+        }
+        compareMembers($changes, $name, 'constants', $before, $after);
+        compareMembers($changes, $name, 'properties', $before, $after);
+        compareMethods($changes, $name, $before, $after);
+        if (($before['kind'] ?? null) === 'enum') {
+            foreach (['backingType', 'cases'] as $field) {
+                if (($before[$field] ?? null) !== ($after[$field] ?? null)) {
+                    $changes[] = change(PublicApiChangeCode::ChangedSymbol, $name, "enum {$field} changed");
+                }
+            }
+        }
+        $beforeMethods = namedMapField($before, 'methods');
+        $afterMethods = namedMapField($after, 'methods');
+        $addedMethods = array_diff_key($afterMethods, $beforeMethods);
+        if (($before['kind'] ?? null) === 'interface' && $addedMethods !== []) {
+            foreach (array_keys($addedMethods) as $method) {
+                $changes[] = change(PublicApiChangeCode::MissingMember, "{$name}::{$method}()", 'method was added to an interface');
+            }
+        }
+        foreach ($addedMethods as $method => $definition) {
+            if (($before['kind'] ?? null) === 'interface') {
+                continue;
+            }
+            if (($definition['abstract'] ?? false) === true && ($before['abstract'] ?? false) === true) {
+                $changes[] = change(PublicApiChangeCode::MissingMember, "{$name}::{$method}()", 'abstract method was added');
+            } else {
+                $changes[] = change(PublicApiChangeCode::AddedMember, "{$name}::{$method}()", 'public method is not in the baseline');
+            }
+        }
+    }
+    foreach (array_diff_key($current['symbols'], $baseline['symbols']) as $name => $_definition) {
+        $changes[] = change(PublicApiChangeCode::AddedSymbol, $name, 'public symbol is not in the baseline');
+    }
+    return $changes;
+}
+
+/**
+ * @param list<array{code: int, path: string, message: string}> $changes
+ * @param array<string, mixed> $before
+ * @param array<string, mixed> $after
+ */
+function compareMembers(array &$changes, string $symbol, string $field, array $before, array $after): void
+{
+    $beforeMembers = namedMixedMapField($before, $field);
+    $afterMembers = namedMixedMapField($after, $field);
+    foreach ($beforeMembers as $name => $definition) {
+        if (!array_key_exists($name, $afterMembers)) {
+            $changes[] = change(PublicApiChangeCode::MissingMember, "{$symbol}::{$name}", "public {$field} member was removed");
+        } elseif ($definition !== $afterMembers[$name]) {
+            $changes[] = change(PublicApiChangeCode::ChangedMember, "{$symbol}::{$name}", "public {$field} member changed");
+        }
+    }
+    foreach (array_diff_key($afterMembers, $beforeMembers) as $name => $_definition) {
+        $changes[] = change(PublicApiChangeCode::AddedMember, "{$symbol}::{$name}", "public {$field} member is not in the baseline");
+    }
+}
+
+/**
+ * @param list<array{code: int, path: string, message: string}> $changes
+ * @param array<string, mixed> $before
+ * @param array<string, mixed> $after
+ */
+function compareMethods(array &$changes, string $symbol, array $before, array $after): void
+{
+    $beforeMethods = namedMapField($before, 'methods');
+    $afterMethods = namedMapField($after, 'methods');
+    foreach ($beforeMethods as $name => $oldMethod) {
+        $newMethod = $afterMethods[$name] ?? null;
+        $path = "{$symbol}::{$name}()";
+        if (!is_array($newMethod)) {
+            $changes[] = change(PublicApiChangeCode::MissingMember, $path, 'public method was removed');
+            continue;
+        }
+        foreach (['static', 'abstract', 'returnsReference', 'return'] as $field) {
+            if (($oldMethod[$field] ?? null) !== ($newMethod[$field] ?? null)) {
+                $changes[] = change(PublicApiChangeCode::ChangedMember, $path, "method {$field} changed");
+            }
+        }
+        if (($oldMethod['final'] ?? false) === false && ($newMethod['final'] ?? false) === true) {
+            $changes[] = change(PublicApiChangeCode::ChangedMember, $path, 'method became final');
+        }
+        $oldParameters = parameterListField($oldMethod);
+        $newParameters = parameterListField($newMethod);
+        foreach ($oldParameters as $index => $parameter) {
+            if (!isset($newParameters[$index]) || $parameter !== $newParameters[$index]) {
+                $changes[] = change(PublicApiChangeCode::ChangedMember, $path, 'existing parameter signature changed');
+                continue 2;
+            }
+        }
+        foreach (array_slice($newParameters, count($oldParameters)) as $parameter) {
+            if (($parameter['optional'] ?? false) !== true) {
+                $changes[] = change(PublicApiChangeCode::ChangedMember, $path, 'required parameter was added');
+                break;
+            }
+        }
+    }
+}
+
+/**
+ * @param array<string, mixed> $value
+ * @return list<string>
+ */
+function stringListField(array $value, string $field): array
+{
+    $items = $value[$field] ?? null;
+    if (!is_array($items) || !array_is_list($items)) {
+        throw new RuntimeException("Public API {$field} field must be a list.");
+    }
+    $result = [];
+    foreach ($items as $item) {
+        if (!is_string($item)) {
+            throw new RuntimeException("Public API {$field} entries must be strings.");
+        }
+        $result[] = $item;
+    }
+    return $result;
+}
+
+/**
+ * @param array<string, mixed> $value
+ * @return array<string, mixed>
+ */
+function namedMixedMapField(array $value, string $field): array
+{
+    $items = $value[$field] ?? null;
+    if (!is_array($items)) {
+        throw new RuntimeException("Public API {$field} field must be an object.");
+    }
+    $result = [];
+    foreach ($items as $name => $item) {
+        if (!is_string($name)) {
+            throw new RuntimeException("Public API {$field} keys must be strings.");
+        }
+        $result[$name] = $item;
+    }
+    return $result;
+}
+
+/**
+ * @param array<string, mixed> $value
+ * @return array<string, array<string, mixed>>
+ */
+function namedMapField(array $value, string $field): array
+{
+    $items = namedMixedMapField($value, $field);
+    $result = [];
+    foreach ($items as $name => $item) {
+        if (!is_array($item)) {
+            throw new RuntimeException("Public API {$field}.{$name} must be an object.");
+        }
+        $result[$name] = $item;
+    }
+    return $result;
+}
+
+/**
+ * @param array<string, mixed> $method
+ * @return list<array<string, mixed>>
+ */
+function parameterListField(array $method): array
+{
+    $parameters = $method['parameters'] ?? null;
+    if (!is_array($parameters) || !array_is_list($parameters)) {
+        throw new RuntimeException('Public API method parameters must be a list.');
+    }
+    $result = [];
+    foreach ($parameters as $parameter) {
+        if (!is_array($parameter)) {
+            throw new RuntimeException('Public API method parameter must be an object.');
+        }
+        $result[] = $parameter;
+    }
+    return $result;
+}
+
+/** @return array{code: int, path: string, message: string} */
+function change(PublicApiChangeCode $code, string $path, string $message): array
+{
+    return ['code' => $code->value, 'path' => $path, 'message' => $message];
+}

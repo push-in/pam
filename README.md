@@ -75,11 +75,19 @@ $ cd my-api && pam dev
 ↻ Hot reload enabled
 
 $ curl http://127.0.0.1:3000/api/ping
-{"message":"pong"}
+{"data":{"status":1,"message":"pong","requestId":null}}
 ```
 
 Your application is now warm and persistent. Composer loaded once. The runtime
-stays alive. Requests execute in isolated Fibers.
+stays alive. Requests execute in isolated Fibers. The generated API is already
+split into a named controller action, application service, readonly snapshot,
+JSON Resource and integer-backed readiness enum; `index.php` validates typed
+configuration and enables security headers before listening. The same starter
+also contains an executable Eloquent product flow with `ProductController`
+method mapping, Form Request, typed DTO, service, repository, migration,
+integer-backed status enum, Resource collection, and `201 Created` response.
+Schema changes remain explicit through `pam composer migrate`, avoiding
+multi-worker migration races during application startup.
 
 Choose another target without learning another platform CLI:
 
@@ -330,6 +338,9 @@ replacement. It is the systems layer beneath your application:
   `libphp`, and a SHA-256 manifest.
 
 ## Start exploring
+
+The [PAM Supremacy delivery contract](docs/pam-supremacy.md) defines the
+evidence required before PAM 2.0 can be called mature or stable.
 
 | I want to… | Start here |
 | --- | --- |

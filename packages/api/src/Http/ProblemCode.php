@@ -14,5 +14,5 @@ enum ProblemCode: int
     case RateLimited = 6;
     case Timeout = 7;
     case InternalError = 8;
+    case MethodNotAllowed = 9;
 }
-

@@ -2,23 +2,31 @@
 
 declare(strict_types=1);
 
-use Pam\App;
+use App\Http\Controllers\PingController;
+use App\Http\Controllers\ProductController;
+use App\Providers\AppServiceProvider;
+use Pam\Api\Config\ConfigDefinition;
+use Pam\Api\Config\Configuration;
+use Pam\Api\Config\ConfigType;
 use Pam\Api\Middleware\SecurityHeadersMiddleware;
-use Pam\Http\Request;
-use Pam\Http\Response;
+use Pam\Api\Database\DatabaseConfig;
+use Pam\Api\Database\EloquentServiceProvider;
+use Pam\App;
 
+$config = Configuration::fromEnvironment([
+    new ConfigDefinition(
+        key: 'app.port',
+        environment: 'PAM_PORT',
+        type: ConfigType::Integer,
+        required: false,
+        default: 3000,
+    ),
+]);
 $app = new App();
+$app->provider(new EloquentServiceProvider(DatabaseConfig::fromEnvironment()));
+$app->provider(new AppServiceProvider());
 $app->middleware(new SecurityHeadersMiddleware());
-
-$app->get('/api/ping', static fn (Request $request, Response $response): Response =>
-    $response->json([
-        'message' => 'pong',
-        'requestId' => $_SERVER['PAM_REQUEST_ID'] ?? null,
-    ]));
-
-$app->get('/api/users/{id}', static fn (Request $request, Response $response): Response =>
-    $response->json([
-        'id' => $request->route('id'),
-    ]));
-
-$app->listen((int) (getenv('PAM_PORT') ?: 3000));
+$app->get('/api/ping', [PingController::class, 'show']);
+$app->get('/api/products', [ProductController::class, 'index']);
+$app->post('/api/products', [ProductController::class, 'store']);
+$app->listen($config->integer('app.port'));

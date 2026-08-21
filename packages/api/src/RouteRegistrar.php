@@ -77,6 +77,18 @@ final class RouteRegistrar
         return $this->decorate($this->app->delete(self::join($this->prefix, $path), $handler));
     }
 
+    /** @param callable|class-string|array{class-string, non-empty-string} $handler */
+    public function head(string $path, callable|string|array $handler): PendingRoute
+    {
+        return $this->decorate($this->app->head(self::join($this->prefix, $path), $handler));
+    }
+
+    /** @param callable|class-string|array{class-string, non-empty-string} $handler */
+    public function options(string $path, callable|string|array $handler): PendingRoute
+    {
+        return $this->decorate($this->app->options(self::join($this->prefix, $path), $handler));
+    }
+
     /** @param class-string $controller */
     public function apiResource(string $path, string $controller): void
     {

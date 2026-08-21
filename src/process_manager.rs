@@ -3342,6 +3342,7 @@ fn read_daemon_request(stream: &mut UnixStream) -> Result<DaemonRequest, String>
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid daemon request: {error}"))
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn peer_uid(stream: &UnixStream) -> Result<libc::uid_t, String> {
     let mut credentials = libc::ucred {
         pid: 0,
@@ -3362,6 +3363,24 @@ fn peer_uid(stream: &UnixStream) -> Result<libc::uid_t, String> {
         return Err(std::io::Error::last_os_error().to_string());
     }
     Ok(credentials.uid)
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+fn peer_uid(stream: &UnixStream) -> Result<libc::uid_t, String> {
+    let mut uid: libc::uid_t = 0;
+    let mut gid: libc::gid_t = 0;
+    let result = unsafe { libc::getpeereid(stream.as_raw_fd(), &raw mut uid, &raw mut gid) };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(uid)
 }
 
 fn daemon_socket_path() -> Result<PathBuf, String> {
@@ -4031,6 +4050,7 @@ fn watch_running_masters(paths: &ManagerPaths, listener: &UnixListener) -> Maste
     }
 }
 
+#[cfg(target_os = "linux")]
 fn open_pidfd(pid: u32) -> Option<OwnedFd> {
     let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as libc::c_int };
     if descriptor < 0 {
@@ -4038,6 +4058,11 @@ fn open_pidfd(pid: u32) -> Option<OwnedFd> {
     } else {
         Some(unsafe { OwnedFd::from_raw_fd(descriptor) })
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_pidfd(_pid: u32) -> Option<OwnedFd> {
+    None
 }
 
 fn delete(arguments: Vec<OsString>) -> Result<u8, String> {
@@ -5073,6 +5098,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn pidfd_reports_the_registered_master_exit_without_pid_polling() {
         let mut child = Command::new("/bin/sleep").arg("10").spawn().unwrap();

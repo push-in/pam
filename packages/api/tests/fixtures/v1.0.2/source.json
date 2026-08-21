@@ -1,0 +1,9 @@
+{
+    "schemaVersion": 1,
+    "package": "pushinbr/pam-api",
+    "version": "1.0.2",
+    "tag": "v1.0.2",
+    "sourceRepository": "https://github.com/push-in/pam-api",
+    "sourceCommit": "2b99c19782ff3c88e9b7484aa13a5960088fcccb",
+    "readmeSha256": "8d994547efcecfaeddfd82dabef238c6705da94100070b6d0ae6a817e615d600"
+}
