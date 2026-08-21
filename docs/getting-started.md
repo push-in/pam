@@ -106,7 +106,8 @@ Resource, typed port configuration, security headers and an executable
 in-memory test. It also includes a complete Eloquent product flow with named
 `index`/`store` controller methods, Form Request validation, typed DTO, service,
 repository, migration, JSON Resource, `201 Created`, and a sequential
-integer-backed product-status enum. Run `pam composer test` immediately after creation. During the
+integer-backed product-status enum. Run `pam composer migrate` and then
+`pam composer test` immediately after creation. During the
 2.0 development line, `--no-install` may be used before the corresponding
 Packagist prerelease exists.
 

@@ -6,6 +6,7 @@
 ```bash
 pam composer install
 mkdir -p storage && touch storage/database.sqlite
+pam composer migrate
 pam composer dev
 ```
 
@@ -54,9 +55,9 @@ database/migrations/
 tests/{ApplicationTest.php,bootstrap.php}
 ```
 
-`index.php` validates typed configuration before listening and installs secure
-response headers. It boots Eloquent from environment configuration and runs the
-starter migration before serving the first request.
+`index.php` validates typed configuration before listening, installs secure
+response headers, and boots Eloquent from environment configuration. Migrations
+are explicit so concurrent production workers never race schema changes.
 
 ## License
 

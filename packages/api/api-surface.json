@@ -9393,8 +9393,7 @@
             "abstract": false,
             "parent": null,
             "interfaces": [
-                "Pam\\Contracts\\Http\\ApplicationInterface",
-                "Pam\\Contracts\\Transport\\TransportApplicationInterface"
+                "Pam\\Contracts\\Http\\ApplicationInterface"
             ],
             "constants": [],
             "properties": [],
@@ -9425,6 +9424,14 @@
                             "hasDefault": true
                         }
                     ]
+                },
+                "boot": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": []
                 },
                 "container": {
                     "static": false,

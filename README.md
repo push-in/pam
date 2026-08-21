@@ -86,6 +86,8 @@ configuration and enables security headers before listening. The same starter
 also contains an executable Eloquent product flow with `ProductController`
 method mapping, Form Request, typed DTO, service, repository, migration,
 integer-backed status enum, Resource collection, and `201 Created` response.
+Schema changes remain explicit through `pam composer migrate`, avoiding
+multi-worker migration races during application startup.
 
 Choose another target without learning another platform CLI:
 

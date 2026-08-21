@@ -1915,12 +1915,13 @@ abstract interface Pam\Api\Validation\ValidationRule
 ## `Pam\App`
 
 ```php
-final class Pam\App implements Pam\Contracts\Http\ApplicationInterface, Pam\Contracts\Transport\TransportApplicationInterface
+final class Pam\App implements Pam\Contracts\Http\ApplicationInterface
 ```
 
 ### Methods
 
 - `public __construct(bool $discoverPackages = true, ?Pam\Api\Container\Container $container = null): mixed`
+- `public boot(): self`
 - `public container(): Pam\Api\Container\Container`
 - `public delete(string $path, array|callable|string $handler): Pam\Api\PendingRoute`
 - `public get(string $path, array|callable|string $handler): Pam\Api\PendingRoute`

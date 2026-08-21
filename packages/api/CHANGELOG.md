@@ -9,6 +9,11 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 
 - let JSON Resources select a validated HTTP response status, including clean
   `201 Created` responses, while preserving the standard data envelope;
+- expose an idempotent application `boot()` boundary for console tools that
+  need registered providers without dispatching a synthetic HTTP request;
+- keep the HTTP application loadable with the published core 1.x contracts;
+  transport methods remain available without forcing an unreleased interface
+  during class loading;
 - class-and-method controller handlers and structured route groups;
 - transient, singleton and Fiber-local request-scoped container lifetimes;
 - Form Requests, DTO hydration, Resources and integer enum validation;

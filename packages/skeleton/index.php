@@ -24,7 +24,7 @@ $config = Configuration::fromEnvironment([
 ]);
 $app = new App();
 $app->provider(new EloquentServiceProvider(DatabaseConfig::fromEnvironment()));
-$app->provider(new AppServiceProvider(__DIR__ . '/database/migrations'));
+$app->provider(new AppServiceProvider());
 $app->middleware(new SecurityHeadersMiddleware());
 $app->get('/api/ping', [PingController::class, 'show']);
 $app->get('/api/products', [ProductController::class, 'index']);

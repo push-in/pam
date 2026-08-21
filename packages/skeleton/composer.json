@@ -33,6 +33,7 @@
     },
     "scripts": {
         "dev": "pam dev index.php",
+        "migrate": "pam bin/migrate",
         "start": "pam start index.php",
         "test": "pam test . --phpunit -c phpunit.xml"
     }

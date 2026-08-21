@@ -7,7 +7,6 @@ namespace Pam;
 use Pam\Contracts\Http\ApplicationInterface;
 use Pam\Contracts\Http\MiddlewareInterface;
 use Pam\Contracts\Package\ServiceProviderInterface;
-use Pam\Contracts\Transport\TransportApplicationInterface;
 use Pam\Contracts\Transport\TransportCapability;
 use Pam\Contracts\Transport\TransportProviderInterface;
 use Pam\Api\CallableRequestHandler;
@@ -27,7 +26,7 @@ use Pam\Http\Response;
 use Pam\Http\Server as HttpServer;
 use Pam\Internal\Runtime;
 
-final class App implements ApplicationInterface, TransportApplicationInterface
+final class App implements ApplicationInterface
 {
     private readonly Router $router;
 
@@ -144,6 +143,13 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         return $this->container;
     }
 
+    /** Boot providers and freeze application configuration without serving a request. */
+    public function boot(): self
+    {
+        $this->freeze();
+        return $this;
+    }
+
     public function prefix(string $prefix): RouteRegistrar
     {
         return new RouteRegistrar($this, $prefix);
@@ -216,6 +222,7 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         return $this;
     }
 
+    /** @return array<string, TransportProviderInterface> */
     public function transports(): array
     {
         return $this->transports;

@@ -14,4 +14,6 @@ skeleton follows Semantic Versioning independently from the PAM runtime.
 - include a tested Eloquent product vertical slice with Form Request, typed DTO,
   thin named controller actions, service, repository interface, JSON Resource,
   migration, and sequential integer-backed domain enum;
+- expose an explicit `pam composer migrate` command instead of racing schema
+  changes during multi-worker application boot;
 - keep the published project and `pam init --template api` byte-for-byte aligned.

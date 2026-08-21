@@ -2457,6 +2457,7 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join(".env.example").is_file());
     assert!(directory.join("phpunit.xml").is_file());
     assert!(directory.join("tests/ApplicationTest.php").is_file());
+    assert!(directory.join("bin/migrate").is_file());
     assert!(
         directory
             .join("src/Http/Controllers/PingController.php")
@@ -2509,6 +2510,7 @@ fn initializes_a_project_without_overwriting_files() {
     assert_eq!(manifest_json["license"], "proprietary");
     assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^2.0");
     assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
+    assert_eq!(manifest_json["scripts"]["migrate"], "pam bin/migrate");
     assert!(
         manifest_json["require-dev"]
             .get("pushinbr/pam-testing")

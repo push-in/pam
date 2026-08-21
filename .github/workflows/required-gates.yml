@@ -70,7 +70,7 @@ jobs:
         run: |
           vendor/bin/phpstan analyse --configuration=phpstan.neon --level=9 \
             ../skeleton/src ../skeleton/tests ../skeleton/database/migrations \
-            ../skeleton/index.php --memory-limit=1G
+            ../skeleton/bin ../skeleton/index.php --memory-limit=1G
           vendor/bin/phpunit --configuration=../skeleton/phpunit.xml
 
   composer_packages:

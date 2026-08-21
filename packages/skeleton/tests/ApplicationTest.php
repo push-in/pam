@@ -10,6 +10,7 @@ use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Api\Database\DatabaseConfig;
 use Pam\Api\Database\EloquentServiceProvider;
+use Pam\Api\Database\MigrationManager;
 use Pam\Api\Testing\TestClient;
 use PHPUnit\Framework\TestCase;
 
@@ -72,9 +73,15 @@ final class ApplicationTest extends TestCase
         $app->provider(new EloquentServiceProvider(new DatabaseConfig('default', [
             'default' => ['driver' => 'sqlite', 'database' => $this->database, 'prefix' => ''],
         ])));
-        $app->provider(new AppServiceProvider(dirname(__DIR__) . '/database/migrations'));
+        $app->provider(new AppServiceProvider());
         $app->get('/api/products', [ProductController::class, 'index']);
         $app->post('/api/products', [ProductController::class, 'store']);
+        $app->boot();
+        $migrations = $app->container()->get(MigrationManager::class);
+        if (!$migrations instanceof MigrationManager) {
+            throw new \LogicException('Migration manager binding is invalid.');
+        }
+        $migrations->migrate(dirname(__DIR__) . '/database/migrations');
 
         return $app;
     }

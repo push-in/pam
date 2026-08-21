@@ -1024,6 +1024,7 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
         "config": {"platform-check": true, "sort-packages": true},
         "scripts": {
             "dev": "pam dev index.php",
+            "migrate": "pam bin/migrate",
             "start": "pam start index.php",
             "test": "pam test . --phpunit -c phpunit.xml"
         }
@@ -1143,6 +1144,10 @@ const API_STARTER_FILES: &[(&str, &str)] = &[
     (
         "tests/bootstrap.php",
         include_str!("../packages/skeleton/tests/bootstrap.php"),
+    ),
+    (
+        "bin/migrate",
+        include_str!("../packages/skeleton/bin/migrate"),
     ),
     (
         "database/migrations/2026_08_21_000000_create_products.php",
