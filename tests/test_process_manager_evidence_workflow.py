@@ -70,6 +70,9 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
             "PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS=250", extension_script
         )
         self.assertIn(
+            "PAM_RECOVERY_MAX_DETECTION_P95_MILLIS=25", extension_script
+        )
+        self.assertIn(
             "8) results=benchmarks/process-manager/results/extension-profile ;;",
             workflow,
         )
