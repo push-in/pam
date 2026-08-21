@@ -251,8 +251,18 @@ fn creates_and_verifies_manager_recovery_evidence() {
     )
     .unwrap();
     fs::write(
+        results.join("recovery-phases.csv"),
+        "round,detection_millis,backoff_millis,readiness_millis,accounted_millis,success\n1,10,10,70,90,1\n2,15,10,110,135,1\n3,20,10,150,180,1\n",
+    )
+    .unwrap();
+    fs::write(
         results.join("resources.json"),
         r#"{"daemon_rss_before_bytes":1000000,"daemon_rss_after_bytes":2000000}"#,
+    )
+    .unwrap();
+    fs::write(
+        results.join("worker-startup.csv"),
+        "round,workers,spawn_spread_millis,spawn_to_ready_p95_millis,spawn_to_ready_maximum_millis,spawn_to_process_p95_millis,php_engine_p95_millis,spawn_to_engine_p95_millis,composer_p95_millis,runtime_bootstrap_p95_millis,application_p95_millis,success\n1,4,3,70,75,8,12,20,5,10,35,1\n2,4,4,110,115,12,18,30,6,11,63,1\n3,4,5,150,155,16,24,40,7,12,91,1\n",
     )
     .unwrap();
     let report_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -262,6 +272,9 @@ fn creates_and_verifies_manager_recovery_evidence() {
         results.to_str().unwrap(),
         "500",
         "2000000",
+        "25",
+        "20",
+        "160",
     ]);
     assert!(reported.status.success());
     let report: serde_json::Value =
@@ -269,25 +282,65 @@ fn creates_and_verifies_manager_recovery_evidence() {
     assert_eq!(report["suite_code"], 5);
     assert_eq!(report["recovery_millis"]["p50"], 150);
     assert_eq!(report["recovery_millis"]["p95"], 200);
+    assert_eq!(report["recovery_phases"]["detection_millis"]["p95"], 20);
+    assert_eq!(report["recovery_phases"]["backoff_millis"]["p50"], 10);
+    assert_eq!(report["recovery_phases"]["readiness_millis"]["p95"], 150);
+    assert_eq!(report["worker_startup"]["workers"], 4);
+    assert_eq!(report["worker_startup"]["spawn_spread_millis"]["p95"], 5);
+    assert_eq!(
+        report["worker_startup"]["spawn_to_ready_p95_millis"]["p95"],
+        150
+    );
+    assert_eq!(
+        report["worker_startup"]["spawn_to_engine_p95_millis"]["p95"],
+        40
+    );
+    assert_eq!(
+        report["worker_startup"]["application_p95_millis"]["p50"],
+        63
+    );
     assert_eq!(report["gate_codes"]["success"], 1);
+    assert_eq!(report["gate_codes"]["detection"], 1);
+    assert_eq!(report["gate_codes"]["backoff"], 1);
+    assert_eq!(report["gate_codes"]["readiness"], 1);
     assert_eq!(report["passed"], true);
     let failed_gate = run_pam(&[
         report_path.to_str().unwrap(),
         results.to_str().unwrap(),
         "100",
         "2000000",
+        "25",
+        "20",
+        "160",
     ]);
     assert!(!failed_gate.status.success());
     let failed_report: serde_json::Value =
         serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
     assert_eq!(failed_report["gate_codes"]["latency"], 2);
     assert_eq!(failed_report["passed"], false);
+    let failed_phase_gate = run_pam(&[
+        report_path.to_str().unwrap(),
+        results.to_str().unwrap(),
+        "500",
+        "2000000",
+        "15",
+        "20",
+        "160",
+    ]);
+    assert!(!failed_phase_gate.status.success());
+    let failed_phase_report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("recovery-report.json")).unwrap()).unwrap();
+    assert_eq!(failed_phase_report["gate_codes"]["detection"], 2);
+    assert_eq!(failed_phase_report["passed"], false);
     assert!(
         run_pam(&[
             report_path.to_str().unwrap(),
             results.to_str().unwrap(),
             "500",
             "2000000",
+            "25",
+            "20",
+            "160",
         ])
         .status
         .success()
@@ -387,6 +440,178 @@ fn compares_pam_and_pm2_recovery_without_conflating_topologies() {
 }
 
 #[test]
+fn aggregates_and_verifies_manager_recovery_worker_matrix() {
+    let results = temporary_path("manager-recovery-worker-matrix");
+    for (index, workers) in [1, 4, 16].iter().enumerate() {
+        let directory = results.join(format!("workers-{workers}"));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("metadata.json"),
+            format!(r#"{{"source":{{"commit":"abc","dirty":false}},"host":{{"kernel":"Linux"}},"tools":{{"pam_sha256":"sha","pam_native_commit":"native"}},"parameters":{{"rounds":3,"workers":{workers}}}}}"#),
+        )
+        .unwrap();
+        fs::write(
+            directory.join("recovery-report.json"),
+            format!(r#"{{"schema_version":1,"suite_code":5,"rounds":3,"successful_rounds":3,"recovery_millis":{{"p50":{},"p95":{},"maximum":{}}},"recovery_phases":{{"readiness_millis":{{"p50":50,"p95":60,"maximum":70}}}},"worker_startup":{{"workers":{workers},"spawn_spread_millis":{{"p50":2,"p95":3,"maximum":3}},"spawn_to_ready_p95_millis":{{"p50":50,"p95":60,"maximum":60}},"spawn_to_ready_maximum_millis":{{"p50":55,"p95":65,"maximum":65}}}},"daemon_rss_growth_bytes":0,"thresholds":{{"maximum_p95_millis":500}},"gate_codes":{{"success":1,"latency":1,"detection":1,"backoff":1,"readiness":1,"resources":1}},"passed":true}}"#, 100 + index, 110 + index, 120 + index),
+        )
+        .unwrap();
+    }
+    let report_script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/worker-matrix-report.php");
+    assert!(
+        run_pam(&[report_script.to_str().unwrap(), results.to_str().unwrap(),])
+            .status
+            .success()
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("worker-matrix-report.json")).unwrap())
+            .unwrap();
+    assert_eq!(report["suite_code"], 7);
+    assert_eq!(report["configurations"][0]["configuration_code"], 1);
+    assert_eq!(report["configurations"][1]["workers"], 4);
+    assert_eq!(report["configurations"][2]["workers"], 16);
+    assert_eq!(report["gate_codes"]["all_configurations"], 1);
+    assert_eq!(report["gate_codes"]["equivalent_rounds"], 1);
+    assert_eq!(report["passed"], true);
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "7"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "7",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn compares_compatible_and_isolated_php_extension_profiles() {
+    let results = temporary_path("manager-recovery-extension-profile");
+    fs::create_dir_all(&results).unwrap();
+    fs::write(
+        results.join("composer-extension-profile.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 1,
+            "stateCode": 1,
+            "ready": true,
+            "includeDev": false,
+            "manifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lockSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "lockContentHash": "cccccccccccccccccccccccccccccccc",
+            "selectedExtensions": ["iconv"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        results.join("declarative-profile-check.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 1,
+            "valid": true,
+            "applications": 1
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    for (directory_name, extensions, total, readiness, engine) in [
+        ("compatible", serde_json::json!([]), 200, 130, 80),
+        ("isolated", serde_json::json!(["iconv"]), 150, 90, 20),
+    ] {
+        let directory = results.join(directory_name);
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("metadata.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "source": {"commit": "abc", "dirty": false},
+                "host": {"kernel": "Linux"},
+                "tools": {"pam_sha256": "sha", "pam_native_commit": "native"},
+                "parameters": {"rounds": 10, "workers": 16, "php_extensions": extensions},
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            directory.join("recovery-report.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "schema_version": 1,
+                "suite_code": 5,
+                "rounds": 10,
+                "successful_rounds": 10,
+                "recovery_millis": {"p50": total - 10, "p95": total, "maximum": total},
+                "recovery_phases": {"readiness_millis": {"p50": readiness - 10, "p95": readiness, "maximum": readiness}},
+                "worker_startup": {
+                    "workers": 16,
+                    "php_engine_p95_millis": {"p50": engine - 5, "p95": engine, "maximum": engine}
+                },
+                "daemon_rss_growth_bytes": 0,
+                "gate_codes": {"success": 1, "latency": 1, "detection": 1, "backoff": 1, "readiness": 1, "resources": 1},
+                "passed": true,
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+    }
+    let report_script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/extension-profile-report.php");
+    assert!(
+        run_pam(&[report_script.to_str().unwrap(), results.to_str().unwrap()])
+            .status
+            .success()
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("extension-profile-report.json")).unwrap())
+            .unwrap();
+    assert_eq!(report["suite_code"], 8);
+    assert_eq!(report["gate_codes"]["declarative_profile"], 1);
+    assert_eq!(
+        report["composer_profile"]["selected_extensions"][0],
+        "iconv"
+    );
+    assert_eq!(report["gate_codes"]["composer_profile"], 1);
+    assert_eq!(report["configurations"][0]["profile_code"], 1);
+    assert_eq!(report["configurations"][1]["profile_code"], 2);
+    assert_eq!(
+        report["isolated_minus_compatible_millis"]["recovery_p95"],
+        -50
+    );
+    assert_eq!(
+        report["isolated_improvement_basis_points"]["php_engine_p95"],
+        7500
+    );
+    assert_eq!(report["gate_codes"]["isolated_engine_not_slower"], 1);
+    assert_eq!(report["passed"], true);
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "8"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "8",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
 fn records_reproducible_soak_metadata() {
     let results = temporary_path("soak-metadata");
     fs::create_dir_all(&results).unwrap();
@@ -433,6 +658,141 @@ fn records_reproducible_soak_metadata() {
         33_554_432
     );
     fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn derives_a_bounded_explainable_composer_extension_profile() {
+    let project = temporary_path("composer-extension-profile");
+    fs::create_dir(&project).unwrap();
+    fs::write(
+        project.join("composer.json"),
+        r#"{"require":{"ext-json":"*"},"require-dev":{"ext-pam_missing_test":"*"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("composer.lock"),
+        r#"{"content-hash":"ff17aa792baa38e4862573aa737743c0","packages":[],"packages-dev":[]}"#,
+    )
+    .unwrap();
+
+    let production = run_pam(&[
+        "extensions",
+        project.to_str().unwrap(),
+        "--no-dev",
+        "--json",
+    ]);
+    assert!(
+        production.status.success(),
+        "{}",
+        String::from_utf8_lossy(&production.stderr)
+    );
+    let production: serde_json::Value = serde_json::from_slice(&production.stdout).unwrap();
+    assert_eq!(production["schemaVersion"], 1);
+    assert_eq!(production["stateCode"], 3);
+    assert_eq!(production["ready"], true);
+    assert_eq!(production["includeDev"], false);
+    assert_eq!(production["builtinExtensions"], serde_json::json!(["json"]));
+    assert_eq!(production["selectedExtensions"], serde_json::json!([]));
+    assert_eq!(production["requirements"][0]["sources"][0]["sourceCode"], 1);
+    assert_eq!(production["manifestSha256"].as_str().unwrap().len(), 64);
+    assert_eq!(production["lockSha256"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        production["lockContentHash"],
+        "ff17aa792baa38e4862573aa737743c0"
+    );
+    let toml = run_pam(&[
+        "extensions",
+        project.to_str().unwrap(),
+        "--no-dev",
+        "--toml",
+    ]);
+    assert!(toml.status.success());
+    let toml = String::from_utf8(toml.stdout).unwrap();
+    assert!(toml.contains("[applications.APP.php_extension_profile]"));
+    assert!(toml.contains("kind_code = 1"));
+    assert!(toml.contains("extensions = []"));
+    assert!(toml.contains(production["manifestSha256"].as_str().unwrap()));
+
+    fs::copy(fixture("server.php"), project.join("index.php")).unwrap();
+    let config = project.join("pam.toml");
+    fs::write(
+        &config,
+        format!(
+            r#"schema_version = 1
+
+[applications.profiled]
+kind_code = 1
+script = "index.php"
+cwd = "."
+
+[applications.profiled.php_extension_profile]
+kind_code = 1
+manifest_sha256 = "{}"
+lock_sha256 = "{}"
+lock_content_hash = "{}"
+extensions = []
+"#,
+            production["manifestSha256"].as_str().unwrap(),
+            production["lockSha256"].as_str().unwrap(),
+            production["lockContentHash"].as_str().unwrap(),
+        ),
+    )
+    .unwrap();
+    let checked = run_pam_in(
+        &project,
+        &["config:check", config.to_str().unwrap(), "--json"],
+    );
+    assert!(
+        checked.status.success(),
+        "{}",
+        String::from_utf8_lossy(&checked.stderr)
+    );
+    fs::write(
+        project.join("composer.json"),
+        "{\n  \"require\": {\"ext-json\": \"*\"},\n  \"require-dev\": {\"ext-pam_missing_test\": \"*\"}\n}\n",
+    )
+    .unwrap();
+    let drifted = run_pam_in(
+        &project,
+        &["config:check", config.to_str().unwrap(), "--json"],
+    );
+    assert!(!drifted.status.success());
+    assert!(String::from_utf8_lossy(&drifted.stderr).contains("drifted at manifest_sha256"));
+
+    // Restore the original locked content before checking semantic lock staleness.
+    fs::write(
+        project.join("composer.json"),
+        r#"{"require":{"ext-json":"*"},"require-dev":{"ext-pam_missing_test":"*"}}"#,
+    )
+    .unwrap();
+
+    let development = run_pam(&["extensions", project.to_str().unwrap(), "--json"]);
+    assert_eq!(development.status.code(), Some(1));
+    let development: serde_json::Value = serde_json::from_slice(&development.stdout).unwrap();
+    assert_eq!(development["stateCode"], 2);
+    assert_eq!(development["ready"], false);
+    assert_eq!(
+        development["missingExtensions"],
+        serde_json::json!(["pam_missing_test"])
+    );
+    assert_eq!(
+        development["requirements"][1]["sources"][0]["sourceCode"],
+        2
+    );
+    fs::write(
+        project.join("composer.json"),
+        r#"{"require":{"ext-json":"*","ext-filter":"*"},"require-dev":{"ext-pam_missing_test":"*"}}"#,
+    )
+    .unwrap();
+    let stale = run_pam(&[
+        "extensions",
+        project.to_str().unwrap(),
+        "--no-dev",
+        "--json",
+    ]);
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("composer.lock is stale"));
+    fs::remove_dir_all(project).unwrap();
 }
 
 #[test]
@@ -488,6 +848,8 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "managed-smoke",
             "--workers",
             "1",
+            "--php-extension",
+            "iconv",
             "--env-file",
             environment_file.to_str().unwrap(),
             "--json",
@@ -520,7 +882,43 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         .expect("pamd should recover an unexpectedly killed master");
     assert_eq!(recovered["desiredStateCode"], 1);
     assert_eq!(recovered["recovery"]["stateCode"], 3);
+    let detected = recovered["recovery"]["lastExitDetectedAtMillis"]
+        .as_u64()
+        .unwrap();
+    let recovery_started = recovered["recovery"]["lastRecoveryStartedAtMillis"]
+        .as_u64()
+        .unwrap();
+    let recovery_ready = recovered["recovery"]["lastRecoveryReadyAtMillis"]
+        .as_u64()
+        .unwrap();
+    assert!(detected <= recovery_started && recovery_started <= recovery_ready);
+    assert_eq!(recovered["workerStartup"]["spawnSpreadMillis"], 0);
+    assert!(
+        recovered["workerStartup"]["spawnToReadyP95Millis"]
+            .as_u64()
+            .is_some_and(|value| value > 0)
+    );
+    assert!(
+        recovered["workerStartup"]["spawnToReadyMaximumMillis"]
+            .as_u64()
+            .is_some_and(|value| value > 0)
+    );
+    for phase in [
+        "spawnToProcessMillis",
+        "phpEngineMillis",
+        "spawnToEngineMillis",
+        "composerMillis",
+        "runtimeBootstrapMillis",
+        "applicationMillis",
+    ] {
+        assert!(
+            recovered["workerStartup"]["phaseP95Millis"][phase]
+                .as_u64()
+                .is_some()
+        );
+    }
     assert_eq!(recovered["environmentFileConfigured"], true);
+    assert_eq!(recovered["phpExtensions"], serde_json::json!(["iconv"]));
     assert!(!recovered.to_string().contains("private-value"));
     assert!(
         !recovered
@@ -1010,6 +1408,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
+php_extensions = ["iconv"]
 memory_warning_bytes = 1
 task_warning_count = 1
 "#,
@@ -1079,6 +1478,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
+php_extensions = ["iconv"]
 memory_warning_bytes = 1099511627776
 task_warning_count = 1000000
 "#,
@@ -1101,6 +1501,8 @@ task_warning_count = 1000000
     );
     let described: serde_json::Value = serde_json::from_slice(&described.stdout).unwrap();
     assert_eq!(described["resourceAlertStateCode"], 1);
+    assert_eq!(described["phpExtensions"], serde_json::json!(["iconv"]));
+    assert_eq!(described["phpExtensionIsolation"], true);
     assert_eq!(described["resourcePolicy"]["taskWarningCount"], 1000000);
 
     let stopped = run_managed_pam(&root, &state, port, &["stop", "ecosystem-smoke", "--json"]);
@@ -2005,6 +2407,11 @@ fn exposes_the_authoritative_machine_readable_cli_catalog() {
     }));
     assert!(commands.iter().any(|command| {
         command["name"] == "dev" && command["groupCode"] == 2 && command["supportsJson"] == false
+    }));
+    assert!(commands.iter().any(|command| {
+        command["name"] == "extensions"
+            && command["groupCode"] == 4
+            && command["supportsJson"] == true
     }));
     assert!(commands.iter().all(|command| {
         command["groupCode"]

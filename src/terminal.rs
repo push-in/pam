@@ -257,6 +257,10 @@ pub fn print_help(executable: &OsStr) {
             ("octane:stop", "Gracefully stop PAM Octane"),
             ("exec <script.php>", "Execute a PHP script explicitly"),
             ("composer [args...]", "Run the embedded Composer toolchain"),
+            (
+                "extensions [path]",
+                "Explain a locked Composer PHP extension profile",
+            ),
             ("test [path]", "Run Pest or PHPUnit inside Pam"),
         ],
     );
@@ -403,6 +407,14 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("--workers N", "Worker process count"),
                 ("--max-requests N", "Recycle a worker after N requests"),
                 (
+                    "--php-extension NAME",
+                    "Repeatable isolated PHP extension allowlist",
+                ),
+                (
+                    "--isolate-php-extensions",
+                    "Isolate even when the explicit allowlist is empty",
+                ),
+                (
                     "--admin-address IP:PORT",
                     "Expose health and metrics control plane",
                 ),
@@ -421,15 +433,24 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &[
                 "start index.php --workers 4",
+                "start index.php --workers 16 --php-extension iconv --php-extension mbstring",
                 "start index.php --workers 8 --admin-address 127.0.0.1:3010",
             ],
         ),
         "octane:start" => (
             "Start Laravel Octane on PAM's Rust and Tokio runtime.",
-            "octane:start [--workers N | --pool SPEC...] [--host ADDRESS] [--port PORT]",
+            "octane:start [--workers N | --pool SPEC...] [--php-extension NAME...] [--host ADDRESS] [--port PORT]",
             &[
                 ("--workers N", "Number of isolated Laravel workers"),
                 ("--max-requests N", "Recycle workers after N requests"),
+                (
+                    "--php-extension NAME",
+                    "Repeatable isolated PHP extension allowlist",
+                ),
+                (
+                    "--isolate-php-extensions",
+                    "Isolate even when the explicit allowlist is empty",
+                ),
                 ("--admin-address IP:PORT", "Control-plane address"),
                 (
                     "--ingress-address IP:PORT",
@@ -534,6 +555,24 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "doctor --json",
                 "doctor --schema",
                 "doctor --validate doctor-report.json",
+            ],
+        ),
+        "extensions" => (
+            "Derive explicit PHP extension arguments from bounded, locked Composer requirements without applying them.",
+            "extensions [path] [--no-dev] [--json | --toml]",
+            &[
+                (
+                    "--no-dev",
+                    "Exclude root and locked development requirements",
+                ),
+                ("--json", "Emit a versioned explainable profile"),
+                ("--toml", "Emit a copy-ready pinned pam.toml profile"),
+            ],
+            &[
+                "extensions",
+                "extensions . --no-dev",
+                "extensions . --no-dev --json",
+                "extensions . --no-dev --toml",
             ],
         ),
         "distribution:verify" => (

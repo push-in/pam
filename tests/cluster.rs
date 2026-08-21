@@ -373,6 +373,31 @@ impl Drop for ClusterProcess {
     }
 }
 
+#[cfg(target_os = "linux")]
+#[test]
+fn kills_workers_when_the_master_is_killed() {
+    let mut cluster = ClusterProcess::start_with(1_000, 2, None, None);
+    let workers = cluster.children();
+    assert_eq!(workers.len(), 2);
+    cluster.signal(SIGKILL);
+    cluster.child.wait().unwrap();
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline
+        && workers
+            .iter()
+            .any(|pid| PathBuf::from(format!("/proc/{pid}")).exists())
+    {
+        thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        workers
+            .iter()
+            .all(|pid| !PathBuf::from(format!("/proc/{pid}")).exists()),
+        "workers survived their killed PAM master: {workers:?}"
+    );
+}
+
 fn request_identity(response: &str) -> (String, String) {
     let request_id = response
         .lines()

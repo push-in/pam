@@ -81,6 +81,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam remove` — Remove an official capability.
 - `pam outdated` — Inspect available dependency updates.
 - `pam composer` — Run Composer inside PAM.
+- `pam extensions` — Derive an explainable PHP extension profile from Composer.
 - `pam artisan` — Run Laravel Artisan inside PAM.
 ## Quality
 

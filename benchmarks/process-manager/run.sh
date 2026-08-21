@@ -5,22 +5,54 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 results=${PAM_RECOVERY_RESULTS:-"${root}/benchmarks/process-manager/results"}
 pam_binary=${PAM_BENCH_BINARY:-"${root}/target/release/pam"}
 rounds=${PAM_RECOVERY_ROUNDS:-10}
-maximum_p95_millis=${PAM_RECOVERY_MAX_P95_MILLIS:-300}
+workers=${PAM_RECOVERY_WORKERS:-1}
+maximum_p95_millis=${PAM_RECOVERY_MAX_P95_MILLIS:-200}
+maximum_detection_p95_millis=${PAM_RECOVERY_MAX_DETECTION_P95_MILLIS:-10}
+maximum_backoff_p95_millis=${PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS:-20}
+maximum_readiness_p95_millis=${PAM_RECOVERY_MAX_READINESS_P95_MILLIS:-150}
 maximum_rss_growth_bytes=${PAM_RECOVERY_MAX_RSS_GROWTH_BYTES:-16777216}
+php_extensions=${PAM_RECOVERY_PHP_EXTENSIONS:-}
 
 [[ ${rounds} =~ ^[0-9]+$ ]] && (( rounds >= 3 && rounds <= 100 )) || {
     printf 'PAM_RECOVERY_ROUNDS must be an integer from 3 to 100\n' >&2
     exit 64
 }
-for value in "${maximum_p95_millis}" "${maximum_rss_growth_bytes}"; do
+[[ ${workers} =~ ^[0-9]+$ ]] && (( workers >= 1 && workers <= 64 )) || {
+    printf 'PAM_RECOVERY_WORKERS must be an integer from 1 to 64\n' >&2
+    exit 64
+}
+for value in "${maximum_p95_millis}" "${maximum_detection_p95_millis}" \
+    "${maximum_backoff_p95_millis}" "${maximum_readiness_p95_millis}" \
+    "${maximum_rss_growth_bytes}"; do
     [[ ${value} =~ ^[0-9]+$ ]] || {
         printf 'recovery thresholds must be non-negative integers\n' >&2
         exit 64
     }
 done
+php_extension_args=()
+php_extension_json='[]'
+if [[ -n ${php_extensions} ]]; then
+    IFS=',' read -r -a selected_php_extensions <<<"${php_extensions}"
+    (( ${#selected_php_extensions[@]} <= 64 )) || {
+        printf 'PAM_RECOVERY_PHP_EXTENSIONS cannot select more than 64 extensions\n' >&2
+        exit 64
+    }
+    for extension in "${selected_php_extensions[@]}"; do
+        [[ ${extension} =~ ^[A-Za-z0-9_-]{1,64}$ ]] || {
+            printf 'PAM_RECOVERY_PHP_EXTENSIONS contains an invalid module name\n' >&2
+            exit 64
+        }
+        php_extension_args+=(--php-extension "${extension}")
+    done
+    php_extension_json=$(php -r '
+        $values = explode(",", (string) getenv("PAM_RECOVERY_PHP_EXTENSIONS"));
+        sort($values, SORT_STRING);
+        echo json_encode(array_values(array_unique($values)), JSON_THROW_ON_ERROR);
+    ')
+fi
 [[ ! -L ${results} ]] || { printf 'refusing symlink results directory\n' >&2; exit 1; }
 mkdir -p "${results}"
-for artifact in recovery.csv resources.json metadata.json recovery-report.json evidence-manifest.json launch-error.log application-error.log; do
+for artifact in recovery.csv recovery-phases.csv resources.json metadata.json recovery-report.json evidence-manifest.json launch-error.log application-error.log; do
     [[ ! -e ${results}/${artifact} ]] || {
         printf 'refusing to overwrite recovery artifact: %s\n' "${results}/${artifact}" >&2
         exit 1
@@ -53,7 +85,8 @@ rss_before=$(rss_bytes)
 set +e
 launch_output=$(
     cd "${root}"
-    "${pam_binary}" up tests/fixtures/server.php --name "${name}" --workers 1 \
+    "${pam_binary}" up tests/fixtures/server.php --name "${name}" --workers "${workers}" \
+        "${php_extension_args[@]}" \
         --restart-delay-ms 10 --restart-backoff-max-ms 100 \
         --max-unstable-restarts 100 --min-uptime-ms 1000 2>&1
 )
@@ -71,6 +104,10 @@ if (( launch_status != 0 )); then
 fi
 
 printf 'round,recovery_millis,success\n' >"${results}/recovery.csv"
+printf 'round,detection_millis,backoff_millis,readiness_millis,accounted_millis,success\n' \
+    >"${results}/recovery-phases.csv"
+printf 'round,workers,spawn_spread_millis,spawn_to_ready_p95_millis,spawn_to_ready_maximum_millis,spawn_to_process_p95_millis,php_engine_p95_millis,spawn_to_engine_p95_millis,composer_p95_millis,runtime_bootstrap_p95_millis,application_p95_millis,success\n' \
+    >"${results}/worker-startup.csv"
 for (( round = 1; round <= rounds; round++ )); do
     "${pam_binary}" restart "${name}" >/dev/null
     original_pid=$("${pam_binary}" status "${name}" --json | php -r '$value = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR); echo $value["pid"];')
@@ -90,6 +127,57 @@ for (( round = 1; round <= rounds; round++ )); do
         sleep 0.01
     done
     printf '%d,%d,%d\n' "${round}" "$(( recovered_at - started ))" "${success}" >>"${results}/recovery.csv"
+    if (( success == 1 )); then
+        phase_row=$(php -r '
+            $value = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR);
+            $recovery = $value["recovery"] ?? null;
+            $detected = $recovery["lastExitDetectedAtMillis"] ?? null;
+            $restarted = $recovery["lastRecoveryStartedAtMillis"] ?? null;
+            $ready = $recovery["lastRecoveryReadyAtMillis"] ?? null;
+            $started = filter_var($argv[2], FILTER_VALIDATE_INT);
+            if (!is_array($recovery) || !is_int($detected) || !is_int($restarted)
+                || !is_int($ready) || $started === false || $detected < $started
+                || $restarted < $detected || $ready < $restarted) { exit(1); }
+            printf("%d,%d,%d,%d,%d,1", (int) $argv[1], $detected - $started,
+                $restarted - $detected, $ready - $restarted, $ready - $started);
+        ' "${round}" "${started}" <<<"${snapshot}") || {
+            printf 'recovery phase contract is missing or invalid in round %d\n' "${round}" >&2
+            exit 1
+        }
+        printf '%s\n' "${phase_row}" >>"${results}/recovery-phases.csv"
+        startup_row=$(php -r '
+            $value = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR);
+            $startup = $value["workerStartup"] ?? null;
+            $workers = $value["workers"] ?? null;
+            $spread = $startup["spawnSpreadMillis"] ?? null;
+            $p95 = $startup["spawnToReadyP95Millis"] ?? null;
+            $maximum = $startup["spawnToReadyMaximumMillis"] ?? null;
+            $phases = $startup["phaseP95Millis"] ?? null;
+            $process = $phases["spawnToProcessMillis"] ?? null;
+            $phpEngine = $phases["phpEngineMillis"] ?? null;
+            $engine = $phases["spawnToEngineMillis"] ?? null;
+            $composer = $phases["composerMillis"] ?? null;
+            $runtime = $phases["runtimeBootstrapMillis"] ?? null;
+            $application = $phases["applicationMillis"] ?? null;
+            if (!is_array($startup) || !is_int($workers) || $workers !== (int) $argv[2]
+                || !is_int($spread) || !is_int($p95) || !is_int($maximum)
+                || !is_array($phases) || !is_int($process) || !is_int($phpEngine)
+                || !is_int($engine) || !is_int($composer)
+                || !is_int($runtime) || !is_int($application)
+                || min($spread, $p95, $process, $phpEngine, $engine, $composer, $runtime, $application) < 0
+                || $maximum < $p95) { exit(1); }
+            printf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,1", (int) $argv[1], $workers,
+                $spread, $p95, $maximum, $process, $phpEngine, $engine, $composer,
+                $runtime, $application);
+        ' "${round}" "${workers}" <<<"${snapshot}") || {
+            printf 'worker startup diagnostics are missing or invalid in round %d\n' "${round}" >&2
+            exit 1
+        }
+        printf '%s\n' "${startup_row}" >>"${results}/worker-startup.csv"
+    else
+        printf '%d,0,0,0,0,0\n' "${round}" >>"${results}/recovery-phases.csv"
+        printf '%d,%d,0,0,0,0,0,0,0,0,0,0\n' "${round}" "${workers}" >>"${results}/worker-startup.csv"
+    fi
 done
 rss_after=$(rss_bytes)
 printf '{"daemon_rss_before_bytes":%d,"daemon_rss_after_bytes":%d}\n' \
@@ -105,11 +193,20 @@ native_commit=$(git -C "${root}/pam-native" rev-parse HEAD)
 }
 kernel=$(uname -srmo | php -r 'echo json_encode(trim(stream_get_contents(STDIN)), JSON_THROW_ON_ERROR);')
 binary_sha=$(sha256sum "${pam_binary}" | awk '{print $1}')
-printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s,"dirty_scope":"tracked_files"},"host":{"kernel":%s},"tools":{"pam_sha256":"%s","pam_native_commit":"%s"},"parameters":{"rounds":%d,"restart_delay_millis":10,"poll_interval_millis":10,"maximum_p95_millis":%d,"maximum_rss_growth_bytes":%d}}\n' \
+printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s,"dirty_scope":"tracked_files"},"host":{"kernel":%s},"tools":{"pam_sha256":"%s","pam_native_commit":"%s"},"parameters":{"rounds":%d,"workers":%d,"php_extensions":%s,"restart_delay_millis":10,"poll_interval_millis":10,"maximum_p95_millis":%d,"maximum_detection_p95_millis":%d,"maximum_backoff_p95_millis":%d,"maximum_readiness_p95_millis":%d,"maximum_rss_growth_bytes":%d}}\n' \
     "${commit}" "${dirty}" "${kernel}" "${binary_sha}" "${native_commit}" "${rounds}" \
-    "${maximum_p95_millis}" "${maximum_rss_growth_bytes}" >"${results}/metadata.json"
+    "${workers}" "${php_extension_json}" \
+    "${maximum_p95_millis}" "${maximum_detection_p95_millis}" \
+    "${maximum_backoff_p95_millis}" "${maximum_readiness_p95_millis}" \
+    "${maximum_rss_growth_bytes}" >"${results}/metadata.json"
 
+set +e
 "${pam_binary}" "${root}/benchmarks/process-manager/recovery-report.php" \
-    "${results}" "${maximum_p95_millis}" "${maximum_rss_growth_bytes}"
+    "${results}" "${maximum_p95_millis}" "${maximum_rss_growth_bytes}" \
+    "${maximum_detection_p95_millis}" "${maximum_backoff_p95_millis}" \
+    "${maximum_readiness_p95_millis}"
+report_status=$?
+set -e
 "${pam_binary}" "${root}/benchmarks/octane/evidence-manifest.php" "${results}" 5 >/dev/null
 "${pam_binary}" "${root}/benchmarks/octane/evidence-manifest.php" "${results}" 5 --verify
+exit "${report_status}"

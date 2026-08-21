@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -34,6 +34,7 @@ const MAX_DASHBOARD_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RESOURCE_HISTORY: usize = 120;
 const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 const SUPERVISION_INTERVAL: Duration = Duration::from_millis(250);
+const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const DEFAULT_RESTART_DELAY_MILLIS: u64 = 250;
 const DEFAULT_RESTART_BACKOFF_MAX_MILLIS: u64 = 15_000;
 const DEFAULT_MAX_UNSTABLE_RESTARTS: u32 = 10;
@@ -174,6 +175,10 @@ struct ApplicationRecord {
     kind_code: u8,
     working_directory: PathBuf,
     command: Vec<String>,
+    #[serde(default)]
+    php_extensions: Vec<String>,
+    #[serde(default)]
+    php_extension_isolation: bool,
     master_state_file: PathBuf,
     stdout_log: PathBuf,
     stderr_log: PathBuf,
@@ -232,6 +237,12 @@ struct ApplicationRecord {
     #[serde(default)]
     total_auto_restart_count: u64,
     #[serde(default)]
+    last_exit_detected_at_millis: Option<u64>,
+    #[serde(default)]
+    last_recovery_started_at_millis: Option<u64>,
+    #[serde(default)]
+    last_recovery_ready_at_millis: Option<u64>,
+    #[serde(default)]
     next_restart_at_millis: Option<u64>,
     #[serde(default = "default_disabled_recovery_state")]
     recovery_state_code: u8,
@@ -255,24 +266,40 @@ struct MasterWatchers {
 }
 
 impl MasterWatchers {
-    fn exit_ready(&mut self) -> bool {
-        if self.poll_descriptors.is_empty() {
-            return false;
+    fn for_listener(listener: &UnixListener) -> Self {
+        Self {
+            _descriptors: Vec::new(),
+            poll_descriptors: vec![libc::pollfd {
+                fd: listener.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            }],
         }
+    }
+
+    fn poll(&mut self, timeout: Duration) -> libc::c_int {
         for descriptor in &mut self.poll_descriptors {
             descriptor.revents = 0;
         }
-        let ready = unsafe {
+        unsafe {
             libc::poll(
                 self.poll_descriptors.as_mut_ptr(),
                 self.poll_descriptors.len() as _,
-                0,
+                timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int,
             )
-        };
+        }
+    }
+
+    fn exit_ready(&mut self) -> bool {
+        if self.poll_descriptors.len() <= 1 {
+            return false;
+        }
+        let ready = self.poll(Duration::ZERO);
         ready > 0
             && self
                 .poll_descriptors
                 .iter()
+                .skip(1)
                 .any(|descriptor| descriptor.revents & libc::POLLIN != 0)
     }
 }
@@ -380,6 +407,10 @@ struct EcosystemApplication {
     cwd: PathBuf,
     #[serde(default)]
     arguments: Vec<String>,
+    #[serde(default)]
+    php_extensions: Vec<String>,
+    #[serde(default)]
+    php_extension_profile: Option<EcosystemPhpExtensionProfile>,
     #[serde(default = "default_true")]
     autostart: bool,
     #[serde(default)]
@@ -414,6 +445,17 @@ struct EcosystemApplication {
     memory_max_bytes: Option<u64>,
     #[serde(default)]
     task_max_count: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EcosystemPhpExtensionProfile {
+    kind_code: u8,
+    manifest_sha256: String,
+    lock_sha256: String,
+    lock_content_hash: String,
+    #[serde(default)]
+    extensions: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -472,7 +514,7 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "dashboard:status" => live_dashboard_status(arguments),
         "dashboard:stop" => live_dashboard_stop(arguments),
         "apply" => apply_ecosystem(executable, arguments),
-        "config:check" => check_ecosystem(arguments),
+        "config:check" => check_ecosystem(executable, arguments),
         "deploy" => deploy(executable, arguments),
         "deploy:history" => deployment_history(arguments),
         "rollback" => rollback(executable, arguments),
@@ -988,8 +1030,15 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
     let (config, root) = load_ecosystem(&path)?;
     let paths = ManagerPaths::load()?;
     let mut results = Vec::new();
+    let mut profile_cache = BTreeMap::new();
     for (name, application) in config.applications {
-        validate_ecosystem_application(&root, &name, &application)?;
+        let (effective_php_extensions, php_extension_isolation) = validate_ecosystem_application(
+            executable,
+            &root,
+            &name,
+            &application,
+            &mut profile_cache,
+        )?;
         let environment_file = application
             .env_file
             .as_deref()
@@ -1023,6 +1072,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     .current_dir(cwd)
                     .args(["up", "--name", &name, "--workers"]);
                 command.arg(application.workers.to_string());
+                if php_extension_isolation {
+                    command.arg("--isolate-php-extensions");
+                }
+                for extension in &effective_php_extensions {
+                    command.args(["--php-extension", extension]);
+                }
                 if let Some(path) = environment_file.as_deref() {
                     command.arg("--env-file").arg(path);
                 }
@@ -1083,6 +1138,10 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 let limit_updated = record.memory_max_bytes != application.memory_max_bytes
                     || record.task_max_count != application.task_max_count;
                 let environment_updated = record.environment_file != environment_file;
+                let expected_php_extensions = effective_php_extensions;
+                let extensions_updated = record.php_extensions != expected_php_extensions;
+                let extension_isolation_updated =
+                    record.php_extension_isolation != php_extension_isolation;
                 let health_updated = record.health_check_address
                     != health_check.as_ref().map(|(address, _)| *address)
                     || record.health_check_path
@@ -1104,7 +1163,13 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || record.max_unstable_restarts != application.max_unstable_restarts
                     || record.min_uptime_millis != application.min_uptime_millis
                     || record.shutdown_timeout_millis != application.shutdown_timeout_millis;
-                if policy_updated || limit_updated || environment_updated || health_updated {
+                if policy_updated
+                    || limit_updated
+                    || environment_updated
+                    || health_updated
+                    || extensions_updated
+                    || extension_isolation_updated
+                {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
                     record.memory_max_bytes = application.memory_max_bytes;
@@ -1116,6 +1181,18 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     record.min_uptime_millis = application.min_uptime_millis;
                     record.shutdown_timeout_millis = application.shutdown_timeout_millis;
                     record.environment_file = environment_file;
+                    record.php_extensions = expected_php_extensions.clone();
+                    record.php_extension_isolation = php_extension_isolation;
+                    set_command_flag(
+                        &mut record.command,
+                        "--isolate-php-extensions",
+                        php_extension_isolation,
+                    );
+                    set_command_options(
+                        &mut record.command,
+                        "--php-extension",
+                        &expected_php_extensions,
+                    );
                     record.health_check_address =
                         health_check.as_ref().map(|(address, _)| *address);
                     record.health_check_path = health_check.map(|(_, path)| path);
@@ -1138,7 +1215,11 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
-                if (limit_updated || environment_updated || health_updated)
+                if (limit_updated
+                    || environment_updated
+                    || health_updated
+                    || extensions_updated
+                    || extension_isolation_updated)
                     && state.as_ref().is_some_and(master_is_running)
                 {
                     restart_record(executable, &record, false, false)?;
@@ -1191,11 +1272,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
     Ok(0)
 }
 
-fn check_ecosystem(arguments: Vec<OsString>) -> Result<u8, String> {
+fn check_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let (path, json) = parse_config_arguments(arguments, "config:check")?;
     let (config, root) = load_ecosystem(&path)?;
+    let mut profile_cache = BTreeMap::new();
     for (name, application) in &config.applications {
-        validate_ecosystem_application(&root, name, application)?;
+        validate_ecosystem_application(executable, &root, name, application, &mut profile_cache)?;
     }
     if json {
         println!(
@@ -1266,10 +1348,12 @@ fn load_ecosystem(path: &Path) -> Result<(EcosystemConfig, PathBuf), String> {
 }
 
 fn validate_ecosystem_application(
+    executable: &OsStr,
     root: &Path,
     name: &str,
     application: &EcosystemApplication,
-) -> Result<(), String> {
+    profile_cache: &mut BTreeMap<(PathBuf, u8), crate::extension_profile::ExtensionProfileReport>,
+) -> Result<(Vec<String>, bool), String> {
     validate_name(name)?;
     if !matches!(application.kind_code, 1 | 2) {
         return Err(format!("application {name:?} kind_code must be 1 or 2"));
@@ -1331,7 +1415,111 @@ fn validate_ecosystem_application(
             "application {name:?} contains invalid argument controls"
         ));
     }
-    Ok(())
+    if application.php_extensions.len() > 64 {
+        return Err(format!(
+            "application {name:?} cannot select more than 64 PHP extensions"
+        ));
+    }
+    for extension in &application.php_extensions {
+        crate::cluster::validate_php_extension(extension)?;
+    }
+    if application.php_extension_profile.is_some() && !application.php_extensions.is_empty() {
+        return Err(format!(
+            "application {name:?} cannot combine php_extensions with php_extension_profile"
+        ));
+    }
+    let Some(reference) = application.php_extension_profile.as_ref() else {
+        let extensions = normalized_php_extensions(&application.php_extensions);
+        return Ok((extensions.clone(), !extensions.is_empty()));
+    };
+    if !matches!(reference.kind_code, 1 | 2) {
+        return Err(format!(
+            "application {name:?} php_extension_profile kind_code must be 1 or 2"
+        ));
+    }
+    for (field, value, length) in [
+        ("manifest_sha256", &reference.manifest_sha256, 64),
+        ("lock_sha256", &reference.lock_sha256, 64),
+        ("lock_content_hash", &reference.lock_content_hash, 32),
+    ] {
+        if value.len() != length
+            || !value
+                .bytes()
+                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        {
+            return Err(format!(
+                "application {name:?} php_extension_profile {field} must be {length} lowercase hexadecimal characters"
+            ));
+        }
+    }
+    if reference.extensions.len() > 64 {
+        return Err(format!(
+            "application {name:?} php_extension_profile cannot select more than 64 extensions"
+        ));
+    }
+    for extension in &reference.extensions {
+        crate::cluster::validate_php_extension(extension)?;
+    }
+    let expected_extensions = normalized_php_extensions(&reference.extensions);
+    if expected_extensions != reference.extensions {
+        return Err(format!(
+            "application {name:?} php_extension_profile extensions must be sorted and unique"
+        ));
+    }
+    let key = (cwd, reference.kind_code);
+    let profile = if let Some(profile) = profile_cache.get(&key) {
+        profile.clone()
+    } else {
+        let profile =
+            crate::extension_profile::derive(executable, &key.0, reference.kind_code == 2)
+                .map_err(|error| {
+                    format!("application {name:?} PHP extension profile failed: {error}")
+                })?;
+        profile_cache.insert(key.clone(), profile.clone());
+        profile
+    };
+    if !profile.ready {
+        return Err(format!(
+            "application {name:?} PHP extension profile is not ready; missing: {}",
+            profile.missing_extensions.join(", ")
+        ));
+    }
+    for (field, pinned, actual) in [
+        (
+            "manifest_sha256",
+            reference.manifest_sha256.as_str(),
+            profile.manifest_sha256.as_str(),
+        ),
+        (
+            "lock_sha256",
+            reference.lock_sha256.as_str(),
+            profile.lock_sha256.as_str(),
+        ),
+        (
+            "lock_content_hash",
+            reference.lock_content_hash.as_str(),
+            profile.lock_content_hash.as_str(),
+        ),
+    ] {
+        if pinned != actual {
+            return Err(format!(
+                "application {name:?} PHP extension profile drifted at {field}; run `pam extensions {} {}--toml`, review the result, and update pam.toml explicitly",
+                key.0.display(),
+                if reference.kind_code == 1 {
+                    "--no-dev "
+                } else {
+                    ""
+                },
+            ));
+        }
+    }
+    if reference.extensions != profile.selected_extensions {
+        return Err(format!(
+            "application {name:?} PHP extension profile drifted at extensions; pinned {:?}, derived {:?}",
+            reference.extensions, profile.selected_extensions
+        ));
+    }
+    Ok((profile.selected_extensions, true))
 }
 
 fn scoped_cwd(root: &Path, cwd: &Path) -> Result<PathBuf, String> {
@@ -1793,6 +1981,9 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<Op
         if record.recovery_state_code != RecoveryState::Backoff as u8
             || record.next_restart_at_millis.is_none()
         {
+            record.last_exit_detected_at_millis = Some(now);
+            record.last_recovery_started_at_millis = None;
+            record.last_recovery_ready_at_millis = None;
             schedule_recovery(&mut record, now);
             earliest_restart = earliest_deadline(earliest_restart, record.next_restart_at_millis);
             write_record(&path, &record)?;
@@ -1805,8 +1996,10 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<Op
             earliest_restart = earliest_deadline(earliest_restart, record.next_restart_at_millis);
             continue;
         }
+        record.last_recovery_started_at_millis = Some(epoch_millis());
         match restart_record(executable, &record, false, false) {
             Ok(_) => {
+                record.last_recovery_ready_at_millis = Some(epoch_millis());
                 record.total_auto_restart_count = record.total_auto_restart_count.saturating_add(1);
                 record.next_restart_at_millis = None;
                 record.recovery_state_code = RecoveryState::Stabilizing as u8;
@@ -2871,7 +3064,7 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
     }
     let mut next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
     let mut next_supervision = Instant::now();
-    let mut master_watchers = MasterWatchers::default();
+    let mut master_watchers = MasterWatchers::for_listener(&listener);
     let (health_sender, health_receiver) = mpsc::channel();
     let mut health_probes_in_flight = HashSet::new();
     let own_uid = unsafe { libc::geteuid() };
@@ -2897,7 +3090,7 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
             }
             next_supervision =
                 Instant::now() + next_supervision_delay(epoch_millis(), earliest_restart);
-            master_watchers = watch_running_masters(&paths);
+            master_watchers = watch_running_masters(&paths, &listener);
         }
         if Instant::now() >= next_sample {
             if let Err(error) = record_resource_history(&paths) {
@@ -2908,7 +3101,10 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
         let mut stream = match listener.accept() {
             Ok((stream, _)) => stream,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(25));
+                let wait = next_supervision
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(25));
+                master_watchers.poll(wait);
                 continue;
             }
             Err(error) => {
@@ -3215,6 +3411,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut memory_max_bytes = None;
     let mut task_max_count = None;
     let mut environment_file = None;
+    let mut php_extensions = Vec::new();
+    let mut php_extension_isolation = false;
     let mut shutdown_timeout_millis = DEFAULT_SHUTDOWN_TIMEOUT_MILLIS;
     let mut health_check_url = None;
     let mut health_check_interval_millis = DEFAULT_HEALTH_INTERVAL_MILLIS;
@@ -3241,6 +3439,11 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     "--env-file",
                 )?))
             }
+            "--php-extension" => {
+                php_extension_isolation = true;
+                php_extensions.push(required_utf8(arguments.next(), "--php-extension")?)
+            }
+            "--isolate-php-extensions" => php_extension_isolation = true,
             "--shutdown-timeout-ms" => {
                 shutdown_timeout_millis =
                     required_positive_u64(arguments.next(), "--shutdown-timeout-ms")?
@@ -3331,6 +3534,13 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         task_max_count,
         "application",
     )?;
+    if php_extensions.len() > 64 {
+        return Err("--php-extension cannot select more than 64 extensions".to_owned());
+    }
+    for extension in &php_extensions {
+        crate::cluster::validate_php_extension(extension)?;
+    }
+    php_extensions = normalized_php_extensions(&php_extensions);
     validate_shutdown_policy(shutdown_timeout_millis)?;
     validate_recovery_policy(
         restart_delay_millis,
@@ -3398,6 +3608,12 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             OsString::from("--workers"),
             OsString::from(workers.to_string()),
         ]);
+    }
+    if php_extension_isolation {
+        launch_arguments.push(OsString::from("--isolate-php-extensions"));
+    }
+    for extension in &php_extensions {
+        launch_arguments.extend([OsString::from("--php-extension"), OsString::from(extension)]);
     }
     if !application_arguments.is_empty() {
         launch_arguments.push(OsString::from("--"));
@@ -3484,6 +3700,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     .map(|argument| argument.to_string_lossy().into_owned()),
             )
             .collect(),
+        php_extensions,
+        php_extension_isolation,
         master_state_file: effective_state,
         stdout_log,
         stderr_log,
@@ -3517,6 +3735,9 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         min_uptime_millis,
         unstable_restart_count: 0,
         total_auto_restart_count: 0,
+        last_exit_detected_at_millis: None,
+        last_recovery_started_at_millis: None,
+        last_recovery_ready_at_millis: None,
         next_restart_at_millis: None,
         recovery_state_code: if auto_restart {
             RecoveryState::Healthy as u8
@@ -3712,7 +3933,7 @@ fn restart_record(
                 "application {name:?} did not become ready after restart"
             ));
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(READINESS_POLL_INTERVAL);
     };
     if emit {
         if json {
@@ -3771,7 +3992,7 @@ fn reap_daemon_children() -> bool {
     reaped
 }
 
-fn watch_running_masters(paths: &ManagerPaths) -> MasterWatchers {
+fn watch_running_masters(paths: &ManagerPaths, listener: &UnixListener) -> MasterWatchers {
     let descriptors = read_all_records(paths)
         .unwrap_or_default()
         .into_iter()
@@ -3779,14 +4000,17 @@ fn watch_running_masters(paths: &ManagerPaths) -> MasterWatchers {
         .filter(master_is_running)
         .filter_map(|state| open_pidfd(state.pid))
         .collect::<Vec<_>>();
-    let poll_descriptors = descriptors
-        .iter()
-        .map(|descriptor| libc::pollfd {
-            fd: descriptor.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        })
-        .collect();
+    let poll_descriptors = std::iter::once(libc::pollfd {
+        fd: listener.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    })
+    .chain(descriptors.iter().map(|descriptor| libc::pollfd {
+        fd: descriptor.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    }))
+    .collect();
     MasterWatchers {
         _descriptors: descriptors,
         poll_descriptors,
@@ -4093,6 +4317,14 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "pid": state.map(|state| state.pid),
         "workers": state.map(|state| state.workers),
         "startedAtMillis": state.map(|state| state.started_at_millis),
+        "workerStartup": state.map(|state| serde_json::json!({
+            "spawnSpreadMillis": state.worker_spawn_spread_millis,
+            "spawnToReadyP95Millis": state.worker_startup_p95_millis,
+            "spawnToReadyMaximumMillis": state.worker_startup_max_millis,
+            "phaseP95Millis": state.worker_startup_phase_p95_millis,
+        })),
+        "phpExtensions": record.php_extensions,
+        "phpExtensionIsolation": record.php_extension_isolation,
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
@@ -4131,6 +4363,9 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
             "minUptimeMillis": record.min_uptime_millis,
             "unstableRestartCount": record.unstable_restart_count,
             "totalAutoRestartCount": record.total_auto_restart_count,
+            "lastExitDetectedAtMillis": record.last_exit_detected_at_millis,
+            "lastRecoveryStartedAtMillis": record.last_recovery_started_at_millis,
+            "lastRecoveryReadyAtMillis": record.last_recovery_ready_at_millis,
             "nextRestartAtMillis": record.next_restart_at_millis,
         },
     })
@@ -4238,6 +4473,57 @@ fn set_command_option(command: &mut Vec<String>, option: &str, value: &str) {
         .position(|argument| argument == "--")
         .unwrap_or(command.len());
     command.splice(separator..separator, [option.to_owned(), value.to_owned()]);
+}
+
+fn set_command_flag(command: &mut Vec<String>, option: &str, enabled: bool) {
+    let mut separator = command
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(command.len());
+    let mut index = 0;
+    while index < separator {
+        if command[index] == option {
+            command.remove(index);
+            separator -= 1;
+        } else {
+            index += 1;
+        }
+    }
+    if enabled {
+        command.insert(separator, option.to_owned());
+    }
+}
+
+fn normalized_php_extensions(extensions: &[String]) -> Vec<String> {
+    extensions
+        .iter()
+        .cloned()
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn set_command_options(command: &mut Vec<String>, option: &str, values: &[String]) {
+    let separator = command
+        .iter()
+        .position(|argument| argument == "--")
+        .unwrap_or(command.len());
+    let suffix = command.split_off(separator);
+    let mut index = 0;
+    while index < command.len() {
+        if command[index] == option {
+            command.remove(index);
+            if index < command.len() {
+                command.remove(index);
+            }
+        } else {
+            index += 1;
+        }
+    }
+    for value in values {
+        command.extend([option.to_owned(), value.clone()]);
+    }
+    command.extend(suffix);
 }
 
 fn systemd_unit(executable: &Path) -> Result<String, String> {
@@ -4703,6 +4989,8 @@ mod tests {
             kind_code: 1,
             working_directory: PathBuf::from("/srv/api"),
             command: vec!["pam".to_owned(), "start".to_owned()],
+            php_extensions: Vec::new(),
+            php_extension_isolation: false,
             master_state_file: PathBuf::from("state.json"),
             stdout_log: PathBuf::from("out.log"),
             stderr_log: PathBuf::from("error.log"),
@@ -4733,6 +5021,9 @@ mod tests {
             min_uptime_millis: 1_000,
             unstable_restart_count: 0,
             total_auto_restart_count: 0,
+            last_exit_detected_at_millis: None,
+            last_recovery_started_at_millis: None,
+            last_recovery_ready_at_millis: None,
             next_restart_at_millis: None,
             recovery_state_code: RecoveryState::Healthy as u8,
             created_at_millis: 1,
@@ -4773,11 +5064,18 @@ mod tests {
         let mut child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
         let descriptor = open_pidfd(child.id()).expect("Linux pidfd support");
         let mut watchers = MasterWatchers {
-            poll_descriptors: vec![libc::pollfd {
-                fd: descriptor.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            }],
+            poll_descriptors: vec![
+                libc::pollfd {
+                    fd: -1,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: descriptor.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ],
             _descriptors: vec![descriptor],
         };
         assert!(!watchers.exit_ready());
@@ -4800,6 +5098,10 @@ mod tests {
             workers: 1,
             admin_address: None,
             started_at_millis: epoch_millis(),
+            worker_spawn_spread_millis: None,
+            worker_startup_p95_millis: None,
+            worker_startup_max_millis: None,
+            worker_startup_phase_p95_millis: None,
         };
 
         assert!(terminate_master(&state, MIN_SHUTDOWN_TIMEOUT_MILLIS).unwrap());
@@ -4824,6 +5126,10 @@ mod tests {
             workers: 1,
             admin_address: None,
             started_at_millis: 10_000,
+            worker_spawn_spread_millis: None,
+            worker_startup_p95_millis: None,
+            worker_startup_max_millis: None,
+            worker_startup_phase_p95_millis: None,
         };
         assert!(!health_start_period_elapsed(&state, 30_000, 39_999));
         assert!(health_start_period_elapsed(&state, 30_000, 40_000));
@@ -4907,6 +5213,63 @@ mod tests {
             missing,
             ["pam", "start", "--workers", "2", "--", "--port=1"]
         );
+    }
+
+    #[test]
+    fn extension_allowlist_is_replaced_before_application_arguments() {
+        let mut command = vec![
+            "pam".to_owned(),
+            "start".to_owned(),
+            "--php-extension".to_owned(),
+            "redis".to_owned(),
+            "--php-extension".to_owned(),
+            "mbstring".to_owned(),
+            "--".to_owned(),
+            "--port=1".to_owned(),
+        ];
+
+        set_command_options(
+            &mut command,
+            "--php-extension",
+            &["iconv".to_owned(), "pdo".to_owned()],
+        );
+
+        assert_eq!(
+            command,
+            [
+                "pam",
+                "start",
+                "--php-extension",
+                "iconv",
+                "--php-extension",
+                "pdo",
+                "--",
+                "--port=1",
+            ]
+        );
+    }
+
+    #[test]
+    fn extension_isolation_flag_is_reconciled_before_application_arguments() {
+        let mut command = vec![
+            "pam".to_owned(),
+            "start".to_owned(),
+            "--".to_owned(),
+            "--isolate-php-extensions".to_owned(),
+        ];
+        set_command_flag(&mut command, "--isolate-php-extensions", true);
+        assert_eq!(
+            command,
+            [
+                "pam",
+                "start",
+                "--isolate-php-extensions",
+                "--",
+                "--isolate-php-extensions"
+            ]
+        );
+        set_command_flag(&mut command, "--isolate-php-extensions", false);
+        assert_eq!(command, ["pam", "start", "--", "--isolate-php-extensions"]);
     }
 
     #[test]

@@ -17,7 +17,10 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
             "5) results=benchmarks/process-manager/results ;;", workflow
         )
         self.assertIn("PAM_RECOVERY_ROUNDS: '10'", workflow)
-        self.assertIn("PAM_RECOVERY_MAX_P95_MILLIS: '300'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_P95_MILLIS: '200'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_DETECTION_P95_MILLIS: '10'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS: '20'", workflow)
+        self.assertIn("PAM_RECOVERY_MAX_READINESS_P95_MILLIS: '150'", workflow)
         self.assertIn(
             "PAM_RECOVERY_MAX_RSS_GROWTH_BYTES: '16777216'", workflow
         )
@@ -45,6 +48,34 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn(
             "6) results=benchmarks/process-manager/results/comparison ;;", workflow
         )
+        self.assertIn("7 manager recovery worker matrix", workflow)
+        self.assertIn("- '7'", workflow)
+        self.assertIn("PAM_RECOVERY_MATRIX_ROUNDS: '10'", workflow)
+        self.assertIn(
+            "7) benchmarks/process-manager/worker-matrix.sh ;;", workflow
+        )
+        self.assertIn(
+            "7) results=benchmarks/process-manager/results/worker-matrix ;;",
+            workflow,
+        )
+        self.assertIn("8 extension isolation", workflow)
+        self.assertIn("- '8'", workflow)
+        self.assertIn(
+            "8) benchmarks/process-manager/extension-profile.sh ;;", workflow
+        )
+        extension_script = (
+            ROOT / "benchmarks/process-manager/extension-profile.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS=250", extension_script
+        )
+        self.assertIn(
+            "PAM_RECOVERY_MAX_DETECTION_P95_MILLIS=25", extension_script
+        )
+        self.assertIn(
+            "8) results=benchmarks/process-manager/results/extension-profile ;;",
+            workflow,
+        )
 
         harness = (ROOT / "benchmarks/process-manager/run.sh").read_text(
             encoding="utf-8"
@@ -61,6 +92,32 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn('tail -c 65536 >"${results}/launch-error.log"', harness)
         self.assertIn('tail -c 1048576 "${application_error}"', harness)
         self.assertIn("launch_status", harness)
+        self.assertIn('workers=${PAM_RECOVERY_WORKERS:-1}', harness)
+        self.assertIn('--workers "${workers}"', harness)
+
+        matrix = (
+            ROOT / "benchmarks/process-manager/worker-matrix.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("for workers in 1 4 16", matrix)
+        self.assertIn("PAM_RECOVERY_WORKERS=\"${workers}\"", matrix)
+        self.assertIn("worker-matrix-report.php", matrix)
+        self.assertIn('evidence-manifest.php" "${results}" 7 --verify', matrix)
+        self.assertIn("matrix_status=0", matrix)
+        self.assertIn("report_status=$?", matrix)
+        self.assertIn("(( matrix_status == 0 && report_status == 0 ))", matrix)
+        extension_profile = (
+            ROOT / "benchmarks/process-manager/extension-profile.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("for profile in compatible isolated", extension_profile)
+        self.assertIn("PAM_RECOVERY_PHP_EXTENSIONS", extension_profile)
+        self.assertIn("composer-extension-profile.json", extension_profile)
+        self.assertIn('extensions "${composer_project}" --no-dev --json', extension_profile)
+        self.assertIn("extension-profile-report.php", extension_profile)
+        self.assertIn(
+            'evidence-manifest.php" "${results}" 8 --verify', extension_profile
+        )
+        self.assertIn("report_status=$?", harness)
+        self.assertIn('exit "${report_status}"', harness)
 
 
 if __name__ == "__main__":

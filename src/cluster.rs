@@ -2,6 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
+#[cfg(target_os = "linux")]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, RwLock};
@@ -13,7 +15,8 @@ use crate::admin_auth::{self, ADMIN_TOKEN_ENV, ADMIN_TOKEN_FILE_ENV};
 use crate::control_plane::{ClusterSnapshot, ControlPlane, SharedClusterSnapshot};
 use crate::ingress::{Ingress, Route as IngressRoute};
 use crate::worker_state::{
-    WORKER_STATE_PATH_ENV, WorkerLifecycle, WorkerRuntimeRecord, epoch_millis, read,
+    WORKER_STATE_PATH_ENV, WorkerLifecycle, WorkerRuntimeRecord, WorkerStartupPhases, epoch_millis,
+    read,
 };
 
 const SIGTERM: i32 = 15;
@@ -40,6 +43,7 @@ pub struct StartOptions {
     pub state_file: Option<PathBuf>,
     pub ingress_address: Option<SocketAddr>,
     pub pools: Vec<PoolSpec>,
+    pub php_extensions: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -68,6 +72,8 @@ impl StartOptions {
         let mut state_file = None;
         let mut ingress_address = None;
         let mut pools = Vec::new();
+        let mut php_extensions = Vec::new();
+        let mut isolate_php_extensions = false;
         let mut script_args = Vec::new();
 
         while let Some(argument) = arguments.next() {
@@ -111,6 +117,11 @@ impl StartOptions {
                 "--pool" => {
                     pools.push(parse_pool(arguments.next())?);
                 }
+                "--php-extension" => {
+                    isolate_php_extensions = true;
+                    php_extensions.push(parse_php_extension(arguments.next())?);
+                }
+                "--isolate-php-extensions" => isolate_php_extensions = true,
                 "--" => {
                     script_args.extend(arguments);
                     break;
@@ -143,6 +154,11 @@ impl StartOptions {
             }
             workers = total;
         }
+        php_extensions.sort_unstable();
+        php_extensions.dedup();
+        if php_extensions.len() > 64 {
+            return Err("--php-extension cannot select more than 64 extensions".to_owned());
+        }
         let admin_token_digest = if admin_address.is_some() {
             admin_auth::load()?.map(|credential| credential.digest())
         } else {
@@ -170,6 +186,7 @@ impl StartOptions {
             state_file,
             ingress_address,
             pools,
+            php_extensions: isolate_php_extensions.then_some(php_extensions),
         })
     }
 }
@@ -183,6 +200,14 @@ pub struct MasterState {
     pub workers: usize,
     pub admin_address: Option<String>,
     pub started_at_millis: u64,
+    #[serde(default)]
+    pub worker_spawn_spread_millis: Option<u64>,
+    #[serde(default)]
+    pub worker_startup_p95_millis: Option<u64>,
+    #[serde(default)]
+    pub worker_startup_max_millis: Option<u64>,
+    #[serde(default)]
+    pub worker_startup_phase_p95_millis: Option<WorkerStartupPhases>,
 }
 
 pub fn read_master_state(path: &Path) -> Result<MasterState, String> {
@@ -237,6 +262,7 @@ struct Worker {
     generation: u64,
     child: Child,
     state_path: PathBuf,
+    spawned_at_millis: u64,
     started: Instant,
     consecutive_failures: u32,
     pool: Option<RuntimePool>,
@@ -356,7 +382,7 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
     let _state_file = options
         .state_file
         .as_deref()
-        .map(|path| MasterStateFile::create(path, &options, control_plane.as_ref()))
+        .map(|path| MasterStateFile::create(path, &options, control_plane.as_ref(), &workers))
         .transpose()?;
     let mut checks = tokio::time::interval(Duration::from_millis(200));
     checks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -472,6 +498,7 @@ impl MasterStateFile {
         path: &Path,
         options: &StartOptions,
         control_plane: Option<&ControlPlane>,
+        workers: &[Worker],
     ) -> Result<Self, String> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|error| {
@@ -493,6 +520,9 @@ impl MasterStateFile {
                 path.display()
             ));
         }
+        let (worker_spawn_spread_millis, worker_startup_p95_millis, worker_startup_max_millis) =
+            generation_startup_summary(workers);
+        let worker_startup_phase_p95_millis = generation_startup_phase_p95(workers);
         let state = MasterState {
             version: 1,
             pid: std::process::id(),
@@ -500,6 +530,10 @@ impl MasterStateFile {
             workers: options.workers,
             admin_address: control_plane.map(|control| control.address().to_string()),
             started_at_millis: epoch_millis(),
+            worker_spawn_spread_millis,
+            worker_startup_p95_millis,
+            worker_startup_max_millis,
+            worker_startup_phase_p95_millis,
         };
         let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
         let bytes = serde_json::to_vec_pretty(&state)
@@ -598,6 +632,7 @@ fn spawn_worker(
         ));
     }
     let max_requests = staggered_max_requests(options, id);
+    let spawned_at_millis = epoch_millis();
     let mut command = Command::new(executable);
     command
         .arg("__worker")
@@ -606,6 +641,10 @@ fn spawn_worker(
         .env("PAM_WORKER_ID", id.to_string())
         .env("PAM_WORKER_GENERATION", generation.to_string())
         .env("PAM_MAX_REQUESTS", max_requests.to_string())
+        .env(
+            "PAM_WORKER_SPAWNED_AT_MILLIS",
+            spawned_at_millis.to_string(),
+        )
         .env_remove(ADMIN_TOKEN_ENV)
         .env_remove(ADMIN_TOKEN_FILE_ENV)
         .env(
@@ -616,10 +655,34 @@ fn spawn_worker(
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+    if let Some(extensions) = options.php_extensions.as_deref() {
+        command
+            .env("PHP_INI_SCAN_DIR", "")
+            .env("PAM_INI_ENTRIES", php_extension_ini_entries(extensions));
+    }
     if let Some(pool) = &pool {
         command
             .env("PAM_WORKER_POOL", &pool.name)
             .env("PAM_INTERNAL_LISTEN_ADDRESS", pool.address.to_string());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let master_pid = std::process::id();
+        // SAFETY: this closure runs in the single-threaded child after fork and before exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() as u32 != master_pid {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "PAM master exited while spawning a worker",
+                    ));
+                }
+                Ok(())
+            });
+        }
     }
     let child = command
         .spawn()
@@ -629,6 +692,7 @@ fn spawn_worker(
         generation,
         child,
         state_path,
+        spawned_at_millis,
         started: Instant::now(),
         consecutive_failures,
         pool,
@@ -699,8 +763,120 @@ async fn wait_generation_ready(workers: &mut [Worker], timeout: Duration) -> Res
                 timeout.as_millis()
             ));
         }
-        tokio::time::sleep(Duration::from_millis(20)).await;
+        tokio::time::sleep(Duration::from_millis(5)).await;
     }
+}
+
+fn generation_startup_summary(workers: &[Worker]) -> (Option<u64>, Option<u64>, Option<u64>) {
+    let timings = workers
+        .iter()
+        .filter_map(|worker| {
+            worker_record(worker).map(|record| (worker.spawned_at_millis, record.updated_at_millis))
+        })
+        .collect::<Vec<_>>();
+    if timings.len() != workers.len() {
+        return (None, None, None);
+    }
+    summarize_startup_timings(&timings)
+}
+
+fn summarize_startup_timings(timings: &[(u64, u64)]) -> (Option<u64>, Option<u64>, Option<u64>) {
+    if timings.is_empty() {
+        return (None, None, None);
+    }
+    let mut startup = timings
+        .iter()
+        .map(|(spawned, ready)| ready.saturating_sub(*spawned))
+        .collect::<Vec<_>>();
+    startup.sort_unstable();
+    let first_spawn = timings.iter().map(|(spawned, _)| *spawned).min();
+    let last_spawn = timings.iter().map(|(spawned, _)| *spawned).max();
+    let spread = first_spawn
+        .zip(last_spawn)
+        .map(|(first, last)| last.saturating_sub(first));
+    let p95_index = (startup.len() * 95).div_ceil(100).saturating_sub(1);
+    (spread, Some(startup[p95_index]), startup.last().copied())
+}
+
+fn generation_startup_phase_p95(workers: &[Worker]) -> Option<WorkerStartupPhases> {
+    let phases = workers
+        .iter()
+        .filter_map(|worker| worker_record(worker)?.startup_phases)
+        .collect::<Vec<_>>();
+    if phases.len() != workers.len() {
+        return None;
+    }
+    summarize_startup_phases(&phases)
+}
+
+fn summarize_startup_phases(phases: &[WorkerStartupPhases]) -> Option<WorkerStartupPhases> {
+    if phases.is_empty() {
+        return None;
+    }
+    Some(WorkerStartupPhases {
+        spawn_to_process_millis: p95(phases
+            .iter()
+            .map(|phase| phase.spawn_to_process_millis)
+            .collect()),
+        php_engine_millis: p95(phases.iter().map(|phase| phase.php_engine_millis).collect()),
+        spawn_to_engine_millis: p95(phases
+            .iter()
+            .map(|phase| phase.spawn_to_engine_millis)
+            .collect()),
+        composer_millis: p95(phases.iter().map(|phase| phase.composer_millis).collect()),
+        runtime_bootstrap_millis: p95(phases
+            .iter()
+            .map(|phase| phase.runtime_bootstrap_millis)
+            .collect()),
+        application_millis: p95(phases
+            .iter()
+            .map(|phase| phase.application_millis)
+            .collect()),
+    })
+}
+
+fn p95(mut values: Vec<u64>) -> u64 {
+    values.sort_unstable();
+    let index = (values.len() * 95).div_ceil(100).saturating_sub(1);
+    values[index]
+}
+
+fn parse_php_extension(value: Option<OsString>) -> Result<String, String> {
+    let value = value
+        .ok_or_else(|| "--php-extension requires a module name".to_owned())?
+        .into_string()
+        .map_err(|_| "--php-extension requires valid UTF-8".to_owned())?;
+    validate_php_extension(&value)?;
+    Ok(value)
+}
+
+pub(crate) fn validate_php_extension(value: &str) -> Result<(), String> {
+    if value.is_empty()
+        || value.len() > 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+    {
+        return Err(
+            "--php-extension requires a 1-64 character module name containing only letters, digits, '_' or '-'"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+fn php_extension_ini_entries(extensions: &[String]) -> String {
+    let mut entries = std::env::var("PAM_INI_ENTRIES").unwrap_or_default();
+    for extension in extensions {
+        if extension == "opcache" {
+            entries.push_str("zend_extension=opcache\n");
+        } else {
+            entries.push_str("extension=");
+            entries.push_str(extension);
+            entries.push('\n');
+        }
+    }
+    entries
 }
 
 fn worker_record(worker: &Worker) -> Option<WorkerRuntimeRecord> {
@@ -850,6 +1026,89 @@ mod tests {
         let options = StartOptions::parse(std::iter::empty()).unwrap();
 
         assert_eq!(options.max_requests, DEFAULT_MAX_REQUESTS);
+        assert!(options.php_extensions.is_none());
+    }
+
+    #[test]
+    fn parses_a_bounded_deduplicated_php_extension_allowlist() {
+        let options = StartOptions::parse(
+            [
+                "--php-extension",
+                "mbstring",
+                "--php-extension",
+                "opcache",
+                "--php-extension",
+                "mbstring",
+            ]
+            .into_iter()
+            .map(OsString::from),
+        )
+        .unwrap();
+
+        assert_eq!(
+            options.php_extensions,
+            Some(vec!["mbstring".to_owned(), "opcache".to_owned()])
+        );
+        let entries = php_extension_ini_entries(options.php_extensions.as_deref().unwrap());
+        assert!(entries.contains("extension=mbstring\n"));
+        assert!(entries.contains("zend_extension=opcache\n"));
+        assert!(
+            StartOptions::parse(
+                ["--php-extension", "../../unsafe"]
+                    .into_iter()
+                    .map(OsString::from)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn explicitly_isolates_an_empty_php_extension_profile() {
+        let options =
+            StartOptions::parse(["--isolate-php-extensions"].into_iter().map(OsString::from))
+                .unwrap();
+        assert_eq!(options.php_extensions, Some(Vec::new()));
+    }
+
+    #[test]
+    fn older_master_state_defaults_additive_startup_diagnostics() {
+        let state: MasterState = serde_json::from_value(serde_json::json!({
+            "version": 1,
+            "pid": 42,
+            "processStart": null,
+            "workers": 4,
+            "adminAddress": null,
+            "startedAtMillis": 1
+        }))
+        .unwrap();
+
+        assert_eq!(state.worker_spawn_spread_millis, None);
+        assert_eq!(state.worker_startup_p95_millis, None);
+        assert_eq!(state.worker_startup_max_millis, None);
+        assert!(state.worker_startup_phase_p95_millis.is_none());
+    }
+
+    #[test]
+    fn startup_phase_summary_uses_nearest_rank_p95_for_each_phase() {
+        let phases = (1..=20)
+            .map(|value| WorkerStartupPhases {
+                spawn_to_process_millis: value / 2,
+                php_engine_millis: value - (value / 2),
+                spawn_to_engine_millis: value,
+                composer_millis: value * 2,
+                runtime_bootstrap_millis: value * 3,
+                application_millis: value * 4,
+            })
+            .collect::<Vec<_>>();
+
+        let summary = summarize_startup_phases(&phases).unwrap();
+
+        assert_eq!(summary.spawn_to_process_millis, 9);
+        assert_eq!(summary.php_engine_millis, 10);
+        assert_eq!(summary.spawn_to_engine_millis, 19);
+        assert_eq!(summary.composer_millis, 38);
+        assert_eq!(summary.runtime_bootstrap_millis, 57);
+        assert_eq!(summary.application_millis, 76);
     }
 
     #[test]
@@ -859,6 +1118,19 @@ mod tests {
 
         assert_eq!(staggered_max_requests(&options, 1), 10_000_000);
         assert_eq!(staggered_max_requests(&options, 4), 12_500_000);
+    }
+
+    #[test]
+    fn startup_summary_separates_spawn_spread_from_worker_bootstrap() {
+        let timings = (0_u64..20)
+            .map(|index| (1_000 + index * 2, 1_100 + index * 3))
+            .collect::<Vec<_>>();
+        let (spread, p95, maximum) = summarize_startup_timings(&timings);
+
+        assert_eq!(spread, Some(38));
+        assert_eq!(p95, Some(118));
+        assert_eq!(maximum, Some(119));
+        assert_eq!(summarize_startup_timings(&[]), (None, None, None));
     }
 
     #[test]

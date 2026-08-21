@@ -126,6 +126,7 @@ impl CommandSpec {
                 | "commands"
                 | "distribution:verify"
                 | "doctor"
+                | "extensions"
                 | "info"
                 | "logs"
                 | "monit"
@@ -296,6 +297,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Ecosystem",
         ),
         command("composer", "Run Composer inside PAM", "Ecosystem"),
+        command(
+            "extensions",
+            "Derive an explainable PHP extension profile from Composer",
+            "Ecosystem",
+        ),
         command("artisan", "Run Laravel Artisan inside PAM", "Ecosystem"),
         command("format", "Format project source", "Quality"),
         command(

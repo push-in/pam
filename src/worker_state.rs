@@ -77,11 +77,26 @@ pub struct WorkerRuntimeRecord {
     pub pid: u32,
     #[serde(default)]
     pub pool: Option<String>,
+    #[serde(default)]
+    pub spawned_at_millis: u64,
+    #[serde(default)]
+    pub startup_phases: Option<WorkerStartupPhases>,
     pub started_at_millis: u64,
     pub updated_at_millis: u64,
     pub deadline_at_millis: Option<u64>,
     pub request_id: Option<String>,
     pub metrics: WorkerMetricsSnapshot,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerStartupPhases {
+    pub spawn_to_process_millis: u64,
+    pub php_engine_millis: u64,
+    pub spawn_to_engine_millis: u64,
+    pub composer_millis: u64,
+    pub runtime_bootstrap_millis: u64,
+    pub application_millis: u64,
 }
 
 impl WorkerRuntimeRecord {
@@ -111,7 +126,9 @@ struct ReporterInner {
     worker_id: usize,
     generation: u64,
     pool: Option<String>,
+    spawned_at_millis: u64,
     started_at_millis: u64,
+    startup_milestones: Option<crate::php::StartupMilestones>,
     pending: Mutex<PendingRecord>,
     background_writer: AtomicBool,
 }
@@ -122,6 +139,7 @@ struct PendingRecord {
     deadline_at_millis: Option<u64>,
     request_id: Option<String>,
     metrics: WorkerMetricsSnapshot,
+    startup_phases: Option<WorkerStartupPhases>,
     revision: u64,
 }
 
@@ -141,7 +159,12 @@ impl WorkerStateReporter {
                 .and_then(|value| value.parse().ok())
                 .unwrap_or(1),
             pool: std::env::var("PAM_WORKER_POOL").ok(),
+            spawned_at_millis: std::env::var("PAM_WORKER_SPAWNED_AT_MILLIS")
+                .ok()
+                .and_then(|value| value.parse().ok())
+                .unwrap_or_else(epoch_millis),
             started_at_millis: epoch_millis(),
+            startup_milestones: crate::php::startup_milestones(),
             pending: Mutex::new(PendingRecord::default()),
             background_writer: AtomicBool::new(false),
         });
@@ -179,6 +202,9 @@ impl WorkerStateReporter {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             pending.lifecycle = Some(lifecycle);
+            if lifecycle == WorkerLifecycle::Ready && pending.startup_phases.is_none() {
+                pending.startup_phases = inner.startup_phases(epoch_millis());
+            }
             pending.deadline_at_millis = deadline_at_millis;
             pending.request_id = request_id.map(str::to_owned);
             pending.revision = pending.revision.wrapping_add(1);
@@ -227,12 +253,48 @@ impl ReporterInner {
             generation: self.generation,
             pid: std::process::id(),
             pool: self.pool.clone(),
+            spawned_at_millis: self.spawned_at_millis,
+            startup_phases: pending.startup_phases,
             started_at_millis: self.started_at_millis,
             updated_at_millis: epoch_millis(),
             deadline_at_millis: pending.deadline_at_millis,
             request_id: pending.request_id.clone(),
             metrics: pending.metrics.clone(),
         })
+    }
+
+    fn startup_phases(&self, ready_at_millis: u64) -> Option<WorkerStartupPhases> {
+        let milestones = self.startup_milestones?;
+        Some(startup_phases(
+            self.spawned_at_millis,
+            milestones,
+            ready_at_millis,
+        ))
+    }
+}
+
+fn startup_phases(
+    spawned_at_millis: u64,
+    milestones: crate::php::StartupMilestones,
+    ready_at_millis: u64,
+) -> WorkerStartupPhases {
+    WorkerStartupPhases {
+        spawn_to_process_millis: milestones
+            .process_started_at_millis
+            .saturating_sub(spawned_at_millis),
+        php_engine_millis: milestones
+            .engine_ready_at_millis
+            .saturating_sub(milestones.process_started_at_millis),
+        spawn_to_engine_millis: milestones
+            .engine_ready_at_millis
+            .saturating_sub(spawned_at_millis),
+        composer_millis: milestones
+            .composer_ready_at_millis
+            .saturating_sub(milestones.engine_ready_at_millis),
+        runtime_bootstrap_millis: milestones
+            .runtime_ready_at_millis
+            .saturating_sub(milestones.composer_ready_at_millis),
+        application_millis: ready_at_millis.saturating_sub(milestones.runtime_ready_at_millis),
     }
 }
 
@@ -336,9 +398,32 @@ mod tests {
             }
         });
         let record: WorkerRuntimeRecord = serde_json::from_value(source).unwrap();
+        assert_eq!(record.spawned_at_millis, 0);
+        assert!(record.startup_phases.is_none());
         assert_eq!(record.metrics.event_loop_lag_micros, 1_250);
         assert_eq!(record.metrics.event_loop_lag_max_micros, 0);
         assert_eq!(record.metrics.event_loop_lag_total_micros, 0);
         assert_eq!(record.metrics.event_loop_lag_samples, 0);
+    }
+
+    #[test]
+    fn startup_phases_partition_the_worker_critical_path() {
+        let phases = startup_phases(
+            100,
+            crate::php::StartupMilestones {
+                process_started_at_millis: 115,
+                engine_ready_at_millis: 130,
+                composer_ready_at_millis: 145,
+                runtime_ready_at_millis: 165,
+            },
+            210,
+        );
+
+        assert_eq!(phases.spawn_to_process_millis, 15);
+        assert_eq!(phases.php_engine_millis, 15);
+        assert_eq!(phases.spawn_to_engine_millis, 30);
+        assert_eq!(phases.composer_millis, 15);
+        assert_eq!(phases.runtime_bootstrap_millis, 20);
+        assert_eq!(phases.application_millis, 45);
     }
 }
