@@ -796,7 +796,7 @@ pam index.php [arguments...]                       run a PHP script or server
 pam -r <code> [arguments...]                       execute inline PHP
 pam exec index.php [arguments...]                  explicitly run a PHP script
 pam composer [arguments...]                        run verified Composer inside Pam
-pam extensions [path] [--no-dev] [--json]         explain locked PHP extension requirements
+pam extensions [path] [--no-dev] [--json|--toml]  explain or pin locked PHP extension requirements
 pam dev [index.php] [arguments...]                 recursive hot reload
 pam start [index.php] --workers N                  supervised production cluster
 pam up [index.php] --name api --workers N          start and detach a managed application

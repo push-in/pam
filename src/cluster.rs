@@ -73,6 +73,7 @@ impl StartOptions {
         let mut ingress_address = None;
         let mut pools = Vec::new();
         let mut php_extensions = Vec::new();
+        let mut isolate_php_extensions = false;
         let mut script_args = Vec::new();
 
         while let Some(argument) = arguments.next() {
@@ -117,8 +118,10 @@ impl StartOptions {
                     pools.push(parse_pool(arguments.next())?);
                 }
                 "--php-extension" => {
+                    isolate_php_extensions = true;
                     php_extensions.push(parse_php_extension(arguments.next())?);
                 }
+                "--isolate-php-extensions" => isolate_php_extensions = true,
                 "--" => {
                     script_args.extend(arguments);
                     break;
@@ -183,7 +186,7 @@ impl StartOptions {
             state_file,
             ingress_address,
             pools,
-            php_extensions: (!php_extensions.is_empty()).then_some(php_extensions),
+            php_extensions: isolate_php_extensions.then_some(php_extensions),
         })
     }
 }
@@ -1057,6 +1060,14 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn explicitly_isolates_an_empty_php_extension_profile() {
+        let options =
+            StartOptions::parse(["--isolate-php-extensions"].into_iter().map(OsString::from))
+                .unwrap();
+        assert_eq!(options.php_extensions, Some(Vec::new()));
     }
 
     #[test]

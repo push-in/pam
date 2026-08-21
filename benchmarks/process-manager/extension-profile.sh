@@ -13,6 +13,15 @@ mkdir -p "${results}"
 composer_project=${PAM_RECOVERY_EXTENSION_PROJECT:-"${root}/compat/composer-smoke"}
 composer_profile="${results}/composer-extension-profile.json"
 "${pam_binary}" extensions "${composer_project}" --no-dev --json >"${composer_profile}"
+declarative_config=$(mktemp "${composer_project}/.pam-extension-profile.XXXXXX.toml")
+trap 'rm -f -- "${declarative_config}"' EXIT
+php -r '
+    $profile = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+    $extensions = array_map(static fn (string $value): string => json_encode($value, JSON_THROW_ON_ERROR), $profile["selectedExtensions"]);
+    printf("schema_version = 1\n\n[applications.evidence]\nkind_code = 1\nscript = \"../../tests/fixtures/server.php\"\ncwd = \".\"\n\n[applications.evidence.php_extension_profile]\nkind_code = 1\nmanifest_sha256 = \"%s\"\nlock_sha256 = \"%s\"\nlock_content_hash = \"%s\"\nextensions = [%s]\n",
+        $profile["manifestSha256"], $profile["lockSha256"], $profile["lockContentHash"], implode(", ", $extensions));
+' "${composer_profile}" >"${declarative_config}"
+"${pam_binary}" config:check "${declarative_config}" --json >"${results}/declarative-profile-check.json"
 derived_extensions=$(php -r '
     $profile = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
     $extensions = $profile["selectedExtensions"] ?? null;
