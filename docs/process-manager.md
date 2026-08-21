@@ -434,8 +434,26 @@ configuration directory, worker counts are bounded to 1–256, unknown fields
 fail validation, and configuration files are limited to regular non-symlink
 files of at most 1 MiB. Relative environment-file paths resolve from the
 `pam.toml` directory and changes restart a running application so the new
-environment is effective. Use `pam config:check --json` in CI and `pam apply
---json` for a stable action-coded reconciliation report.
+environment is effective. Use `pam config:check --json` for syntax and contract
+validation, `pam plan --json` for a live-state preview, and `pam apply --json`
+for execution. Plan and apply share the same decision path and return schema 1,
+mode code `1` (plan) or `2` (apply), an `applied` boolean and the existing
+integer action codes. Each result binds the exact configuration bytes with
+`configurationSha256` and reports `changeCount`, making CI previews reviewable.
+Planning does not start `pamd`, create manager directories,
+write records, send signals, or spawn applications. Apply always recomputes the
+decision because manager state may change after a speculative plan:
+
+```bash
+pam config:check pam.toml --json
+pam plan pam.toml --json
+pam apply pam.toml --json
+```
+
+This follows the official [Terraform plan](https://developer.hashicorp.com/terraform/cli/commands/plan)
+model of reading current state, comparing desired configuration and proposing
+actions without carrying them out. Like Terraform's speculative plans, PAM's
+preview is intentionally not a stale executable artifact.
 
 Generate the nested table with `pam extensions PATH --no-dev --toml` and replace
 `APP` with the application name. Profile kind code `1` excludes development

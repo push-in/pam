@@ -1399,6 +1399,28 @@ task_warning_count = 1
         "{}",
         String::from_utf8_lossy(&checked.stderr)
     );
+    let planned_create = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["plan", config.to_str().unwrap(), "--json"],
+    );
+    assert!(
+        planned_create.status.success(),
+        "{}",
+        String::from_utf8_lossy(&planned_create.stderr)
+    );
+    let planned_create: serde_json::Value = serde_json::from_slice(&planned_create.stdout).unwrap();
+    assert_eq!(planned_create["modeCode"], 1);
+    assert_eq!(planned_create["applied"], false);
+    assert_eq!(planned_create["changeCount"], 1);
+    assert_eq!(
+        planned_create["configurationSha256"],
+        format!("{:x}", Sha256::digest(fs::read(&config).unwrap()))
+    );
+    assert_eq!(planned_create["results"][0]["actionCode"], 1);
+    assert!(!state.exists(), "pam plan must not create manager state");
+
     let applied = run_managed_pam(
         &root,
         &state,
@@ -1420,7 +1442,10 @@ task_warning_count = 1
     let applied: serde_json::Value = serde_json::from_slice(&applied.stdout).unwrap();
     let converged: serde_json::Value = serde_json::from_slice(&converged.stdout).unwrap();
     assert_eq!(applied["results"][0]["actionCode"], 1);
+    assert_eq!(applied["modeCode"], 2);
+    assert_eq!(applied["applied"], true);
     assert_eq!(converged["results"][0]["actionCode"], 2);
+    assert_eq!(converged["changeCount"], 0);
     let monitored = run_managed_pam(&root, &state, port, &["monit", "--json"]);
     assert!(monitored.status.success());
     let monitored: serde_json::Value = serde_json::from_slice(&monitored.stdout).unwrap();
@@ -1454,6 +1479,36 @@ task_warning_count = 1000000
 "#,
     )
     .unwrap();
+    let record_path = state.join("applications/ecosystem-smoke.json");
+    let record_before_plan = fs::read(&record_path).unwrap();
+    let described_before_plan = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["describe", "ecosystem-smoke", "--json"],
+    );
+    let described_before_plan: serde_json::Value =
+        serde_json::from_slice(&described_before_plan.stdout).unwrap();
+    let planned_update = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["plan", config.to_str().unwrap(), "--json"],
+    );
+    assert!(planned_update.status.success());
+    let planned_update: serde_json::Value = serde_json::from_slice(&planned_update.stdout).unwrap();
+    assert_eq!(planned_update["results"][0]["actionCode"], 6);
+    assert_eq!(fs::read(&record_path).unwrap(), record_before_plan);
+    let described_after_plan = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["describe", "ecosystem-smoke", "--json"],
+    );
+    let described_after_plan: serde_json::Value =
+        serde_json::from_slice(&described_after_plan.stdout).unwrap();
+    assert_eq!(described_after_plan["pid"], described_before_plan["pid"]);
+
     let updated = run_managed_pam(
         &root,
         &state,
@@ -1474,6 +1529,63 @@ task_warning_count = 1000000
     assert_eq!(described["phpExtensions"], serde_json::json!(["iconv"]));
     assert_eq!(described["phpExtensionIsolation"], true);
     assert_eq!(described["resourcePolicy"]["taskWarningCount"], 1000000);
+
+    fs::write(
+        &config,
+        r#"schema_version = 1
+
+[applications.ecosystem-smoke]
+kind_code = 1
+script = "tests/fixtures/server.php"
+workers = 2
+cwd = "."
+autostart = true
+php_extensions = ["iconv"]
+memory_warning_bytes = 1099511627776
+task_warning_count = 1000000
+"#,
+    )
+    .unwrap();
+    let planned_scale = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["plan", config.to_str().unwrap(), "--json"],
+    );
+    let planned_scale: serde_json::Value = serde_json::from_slice(&planned_scale.stdout).unwrap();
+    assert_eq!(planned_scale["results"][0]["actionCode"], 3);
+    let still_running = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["describe", "ecosystem-smoke", "--json"],
+    );
+    let still_running: serde_json::Value = serde_json::from_slice(&still_running.stdout).unwrap();
+    assert_eq!(still_running["pid"], described["pid"]);
+    assert_eq!(still_running["workers"], 1);
+
+    let disabled_config = fs::read_to_string(&config)
+        .unwrap()
+        .replace("autostart = true", "autostart = false");
+    fs::write(&config, disabled_config).unwrap();
+    let planned_stop = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["plan", config.to_str().unwrap(), "--json"],
+    );
+    let planned_stop: serde_json::Value = serde_json::from_slice(&planned_stop.stdout).unwrap();
+    assert_eq!(planned_stop["results"][0]["actionCode"], 5);
+    let after_stop_plan = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["describe", "ecosystem-smoke", "--json"],
+    );
+    let after_stop_plan: serde_json::Value =
+        serde_json::from_slice(&after_stop_plan.stdout).unwrap();
+    assert_eq!(after_stop_plan["pid"], described["pid"]);
+    assert_eq!(after_stop_plan["stateCode"], 1);
 
     let stopped = run_managed_pam(&root, &state, port, &["stop", "ecosystem-smoke", "--json"]);
     assert!(stopped.status.success());
@@ -2383,6 +2495,9 @@ fn exposes_the_authoritative_machine_readable_cli_catalog() {
             && command["groupCode"] == 4
             && command["supportsJson"] == true
     }));
+    assert!(commands.iter().any(|command| {
+        command["name"] == "plan" && command["groupCode"] == 2 && command["supportsJson"] == true
+    }));
     assert!(commands.iter().all(|command| {
         command["groupCode"]
             .as_u64()
@@ -2689,6 +2804,12 @@ fn exposes_inspect_routes_exec_help_and_version_commands() {
     let octane_help = String::from_utf8_lossy(&octane_help.stderr);
     assert!(octane_help.contains("PAM / OCTANE:START"));
     assert!(octane_help.contains("--host ADDRESS"));
+
+    let plan_help = run_pam(&["help", "plan"]);
+    assert!(plan_help.status.success());
+    let plan_help = String::from_utf8_lossy(&plan_help.stderr);
+    assert!(plan_help.contains("PAM / PLAN"));
+    assert!(plan_help.contains("without starting the daemon"));
 
     let init_help = run_pam(&["init", "--help"]);
     assert!(init_help.status.success());
