@@ -257,6 +257,10 @@ pub fn print_help(executable: &OsStr) {
             ("octane:stop", "Gracefully stop PAM Octane"),
             ("exec <script.php>", "Execute a PHP script explicitly"),
             ("composer [args...]", "Run the embedded Composer toolchain"),
+            (
+                "extensions [path]",
+                "Explain a locked Composer PHP extension profile",
+            ),
             ("test [path]", "Run Pest or PHPUnit inside Pam"),
         ],
     );
@@ -543,6 +547,22 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "doctor --json",
                 "doctor --schema",
                 "doctor --validate doctor-report.json",
+            ],
+        ),
+        "extensions" => (
+            "Derive explicit PHP extension arguments from bounded, locked Composer requirements without applying them.",
+            "extensions [path] [--no-dev] [--json]",
+            &[
+                (
+                    "--no-dev",
+                    "Exclude root and locked development requirements",
+                ),
+                ("--json", "Emit a versioned explainable profile"),
+            ],
+            &[
+                "extensions",
+                "extensions . --no-dev",
+                "extensions . --no-dev --json",
             ],
         ),
         "distribution:verify" => (

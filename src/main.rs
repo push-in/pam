@@ -19,6 +19,7 @@ mod doctor;
 mod doctor_contract;
 mod ecosystem;
 mod editor;
+mod extension_profile;
 mod ingress;
 mod manager_dashboard;
 mod mobile;
@@ -1037,6 +1038,10 @@ fn run() -> Result<u8, CliError> {
     if script_arg == "composer" {
         let arguments = raw_args.collect::<Vec<_>>();
         return composer::run(&executable, &arguments).map_err(CliError::Commands);
+    }
+
+    if script_arg == "extensions" {
+        return extension_profile::run(&executable, raw_args.collect()).map_err(CliError::Commands);
     }
 
     if script_arg == "console" {

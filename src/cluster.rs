@@ -2,6 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
+#[cfg(target_os = "linux")]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, RwLock};
@@ -659,6 +661,25 @@ fn spawn_worker(
         command
             .env("PAM_WORKER_POOL", &pool.name)
             .env("PAM_INTERNAL_LISTEN_ADDRESS", pool.address.to_string());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let master_pid = std::process::id();
+        // SAFETY: this closure runs in the single-threaded child after fork and before exec.
+        unsafe {
+            command.pre_exec(move || {
+                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                if libc::getppid() as u32 != master_pid {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "PAM master exited while spawning a worker",
+                    ));
+                }
+                Ok(())
+            });
+        }
     }
     let child = command
         .spawn()

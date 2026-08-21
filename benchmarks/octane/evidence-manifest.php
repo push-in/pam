@@ -167,6 +167,7 @@ $manifest = [
             'equivalent_rounds' => ($gateCodes['equivalent_rounds'] ?? null) === 1,
         ],
         EvidenceSuite::ManagerRecoveryExtensionProfile => [
+            'composer_profile' => ($gateCodes['composer_profile'] ?? null) === 1,
             'both_profiles' => ($gateCodes['both_profiles'] ?? null) === 1,
             'equivalent_rounds' => ($gateCodes['equivalent_rounds'] ?? null) === 1,
             'isolated_engine_not_slower' => ($gateCodes['isolated_engine_not_slower'] ?? null) === 1,

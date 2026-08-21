@@ -58,9 +58,38 @@ if ($directory === '' || !is_dir($directory) || is_link($directory)) {
     exit(64);
 }
 
+$composerProfilePath = $directory.'/composer-extension-profile.json';
+if (!is_file($composerProfilePath) || is_link($composerProfilePath)
+    || filesize($composerProfilePath) > 256 * 1024) {
+    fwrite(STDERR, "Composer extension profile evidence is missing or unsafe\n");
+    exit(1);
+}
+$composerProfile = decodeJsonObject($composerProfilePath);
+$selectedExtensions = $composerProfile['selectedExtensions'] ?? null;
+if (($composerProfile['schemaVersion'] ?? null) !== 1
+    || ($composerProfile['stateCode'] ?? null) !== 1
+    || ($composerProfile['ready'] ?? null) !== true
+    || ($composerProfile['includeDev'] ?? null) !== false
+    || !is_string($composerProfile['manifestSha256'] ?? null)
+    || preg_match('/^[0-9a-f]{64}$/D', $composerProfile['manifestSha256']) !== 1
+    || !is_string($composerProfile['lockSha256'] ?? null)
+    || preg_match('/^[0-9a-f]{64}$/D', $composerProfile['lockSha256']) !== 1
+    || !is_string($composerProfile['lockContentHash'] ?? null)
+    || preg_match('/^[0-9a-f]{32}$/D', $composerProfile['lockContentHash']) !== 1
+    || !is_array($selectedExtensions) || $selectedExtensions === []) {
+    fwrite(STDERR, "Composer extension profile evidence contract is invalid\n");
+    exit(1);
+}
+foreach ($selectedExtensions as $extension) {
+    if (!is_string($extension) || preg_match('/^[A-Za-z0-9_-]{1,64}$/D', $extension) !== 1) {
+        fwrite(STDERR, "Composer extension profile contains an invalid module\n");
+        exit(1);
+    }
+}
+
 $profiles = [
     ExtensionProfileCode::Compatible->value => ['directory' => 'compatible', 'extensions' => []],
-    ExtensionProfileCode::Isolated->value => ['directory' => 'isolated', 'extensions' => ['iconv']],
+    ExtensionProfileCode::Isolated->value => ['directory' => 'isolated', 'extensions' => $selectedExtensions],
 ];
 $configurations = [];
 $source = null;
@@ -134,6 +163,13 @@ $report = [
     'schema_version' => 1,
     'suite_code' => 8,
     'workers' => $workers,
+    'composer_profile' => [
+        'state_code' => $composerProfile['stateCode'],
+        'manifest_sha256' => $composerProfile['manifestSha256'],
+        'lock_sha256' => $composerProfile['lockSha256'],
+        'lock_content_hash' => $composerProfile['lockContentHash'],
+        'selected_extensions' => $selectedExtensions,
+    ],
     'configurations' => array_values($configurations),
     'isolated_minus_compatible_millis' => [
         'recovery_p95' => $isolatedTotal - $compatibleTotal,
@@ -146,6 +182,7 @@ $report = [
         'php_engine_p95' => $improvement($compatibleEngine, $isolatedEngine),
     ],
     'gate_codes' => [
+        'composer_profile' => ExtensionProfileGate::Passed->value,
         'both_profiles' => ($bothPassed ? ExtensionProfileGate::Passed : ExtensionProfileGate::Failed)->value,
         'equivalent_rounds' => ($equivalentRounds ? ExtensionProfileGate::Passed : ExtensionProfileGate::Failed)->value,
         'isolated_engine_not_slower' => ($isolatedEngineNotSlower ? ExtensionProfileGate::Passed : ExtensionProfileGate::Failed)->value,
