@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs;
+use std::path::{Component, Path, PathBuf};
 
 use serde::Serialize;
 
@@ -12,6 +13,8 @@ pub struct ResourceSnapshot {
     pub tasks: u64,
     pub processes: u64,
     pub observed: bool,
+    pub cgroup_memory_max_bytes: Option<u64>,
+    pub cgroup_task_max_count: Option<u64>,
 }
 
 pub fn process_tree(root_pid: u32) -> ResourceSnapshot {
@@ -62,7 +65,30 @@ fn process_tree_at(root_pid: u32, proc_root: &std::path::Path) -> ResourceSnapsh
                 .saturating_add(status_value(&status, "Threads:"));
         }
     }
+    if let Some(cgroup) = cgroup_directory(root_pid, proc_root) {
+        snapshot.cgroup_memory_max_bytes = read_cgroup_limit(&cgroup.join("memory.max"));
+        snapshot.cgroup_task_max_count = read_cgroup_limit(&cgroup.join("pids.max"));
+    }
     snapshot
+}
+
+fn cgroup_directory(pid: u32, proc_root: &Path) -> Option<PathBuf> {
+    let contract = fs::read_to_string(proc_root.join(pid.to_string()).join("cgroup")).ok()?;
+    let relative = contract
+        .lines()
+        .find_map(|line| line.strip_prefix("0::/"))?;
+    let relative = Path::new(relative);
+    if relative
+        .components()
+        .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return None;
+    }
+    Some(Path::new("/sys/fs/cgroup").join(relative))
+}
+
+fn read_cgroup_limit(path: &Path) -> Option<u64> {
+    fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
 fn stat_parent(stat: &str) -> Option<u32> {
