@@ -112,6 +112,18 @@ final class App implements ApplicationInterface, TransportApplicationInterface
     }
 
     /** @param callable|class-string|array{class-string, non-empty-string} $handler */
+    public function head(string $path, callable|string|array $handler): PendingRoute
+    {
+        return $this->registerRoute('HEAD', $path, $handler);
+    }
+
+    /** @param callable|class-string|array{class-string, non-empty-string} $handler */
+    public function options(string $path, callable|string|array $handler): PendingRoute
+    {
+        return $this->registerRoute('OPTIONS', $path, $handler);
+    }
+
+    /** @param callable|class-string|array{class-string, non-empty-string} $handler */
     public function route(string $method, string $path, callable|string|array $handler): self
     {
         $this->registerRoute($method, $path, $handler);
@@ -262,6 +274,11 @@ final class App implements ApplicationInterface, TransportApplicationInterface
             return $response->json(['error' => 'Route not found'], 404);
         }
         if ($result->type === RoutingResultType::MethodNotAllowed) {
+            if ($request->method === 'OPTIONS') {
+                return $response
+                    ->status(204)
+                    ->header('allow', implode(', ', $result->allowedMethods));
+            }
             return $response
                 ->header('allow', implode(', ', $result->allowedMethods))
                 ->json(['error' => 'Method Not Allowed'], 405);

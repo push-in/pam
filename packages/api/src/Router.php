@@ -119,6 +119,10 @@ final class Router
         }
 
         if ($allowedMethods !== []) {
+            if (in_array('GET', $allowedMethods, true)) {
+                $allowedMethods[] = 'HEAD';
+            }
+            $allowedMethods[] = 'OPTIONS';
             $allowedMethods = array_values(array_unique($allowedMethods));
             sort($allowedMethods);
             return new RoutingResult(

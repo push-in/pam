@@ -63,6 +63,7 @@ The `feat/api-2-foundation` development line implements:
 - constructor and method dependency injection;
 - transient, singleton and request-scoped container lifetimes;
 - named routes, built-in/custom constraints and per-route middleware;
+- explicit and automatic HEAD/OPTIONS semantics with deterministic Allow headers;
 - composable prefixes and route groups;
 - API resource route registration;
 - Form Request authorization/validation and integer enum validation;

@@ -120,6 +120,11 @@ $app->prefix('/api/v1')
 
 Global, group and route middleware use the same PAM middleware contract.
 
+`head()` and `options()` are available on both `App` and `RouteRegistrar`.
+When no explicit `OPTIONS` route exists, PAM returns `204` with a deterministic
+`Allow` header; every `GET` route automatically advertises and matches `HEAD`.
+An explicit `OPTIONS` or `HEAD` handler always takes precedence.
+
 ## Container lifetimes
 
 ```php
