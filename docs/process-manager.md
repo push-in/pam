@@ -175,6 +175,15 @@ The extension optimization itself remains guarded by equal successful round
 counts and by requiring the isolated PHP-engine p95 to be no slower. The normal
 suite-5 and suite-7 backoff gate remains 20 ms.
 
+The [first passing hosted suite-8 run](https://github.com/push-in/pam/actions/runs/32515500047)
+on clean Linux commit `38e0781` recovered both profiles 10/10. Compatible versus
+isolated p95 was 595/373 ms total, 493/252 ms readiness, 467/226 ms
+spawn-to-ready and 416/60 ms PHP engine: improvements of 37.31%, 48.88% and
+85.58% for the three gated comparison metrics. Detection p95 was 1 ms for both,
+effective-backoff p95 was 16/15 ms and daemon RSS growth stayed below 1 MiB.
+Every per-profile and aggregate gate returned code `1`; the downloaded bundle
+independently verified all 14 bound artifacts with `dirty=false`.
+
 `status`, `describe` and `ps --json` expose additive `workerStartup`
 diagnostics for each ready generation: the time between spawning the first and
 last worker, plus p95 and maximum spawn-to-ready latency across every worker.
