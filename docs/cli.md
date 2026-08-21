@@ -51,11 +51,17 @@ report to standard output. It does not read application file contents, copy
 environment variables, capture network data, or create a cache. Absolute project
 and home paths are replaced with `$PROJECT` and `$HOME`; the embedded diagnostic
 payload has a SHA-256 digest so a support recipient can detect accidental changes.
+`--manager` explicitly adds the versioned `pam monit --json` snapshot with its
+own SHA-256 digest after the same path redaction. The privacy contract then marks
+process metadata as included while continuing to exclude environment values,
+network data and log contents. Failure to collect requested manager evidence
+makes the overall report unsuccessful instead of silently omitting it.
 
 Persistence is opt-in:
 
 ```bash
 pam support . --output pam-support.json
+pam support . --manager --output pam-support-manager.json
 ```
 
 The output path must end in `.json`, must not already exist, and is created with

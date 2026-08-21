@@ -15,6 +15,7 @@ pub fn run(executable: &OsStr, arguments: impl Iterator<Item = OsString>) -> Res
     let mut target = OsString::from(".");
     let mut target_seen = false;
     let mut output = None::<PathBuf>;
+    let mut include_manager = false;
     let mut arguments = arguments.peekable();
 
     while let Some(argument) = arguments.next() {
@@ -25,6 +26,7 @@ pub fn run(executable: &OsStr, arguments: impl Iterator<Item = OsString>) -> Res
                     .ok_or_else(|| "--output requires a new JSON file path".to_owned())?;
                 output = Some(PathBuf::from(value));
             }
+            "--manager" => include_manager = true,
             option if option.starts_with('-') => {
                 return Err(format!("unknown support option: {option}"));
             }
@@ -55,15 +57,37 @@ pub fn run(executable: &OsStr, arguments: impl Iterator<Item = OsString>) -> Res
     }
     redact(&mut diagnostics, &secrets);
 
+    let (manager, manager_ok) = if include_manager {
+        let snapshot = Command::new(executable)
+            .args(["monit", "--json"])
+            .output()
+            .map_err(|error| format!("cannot run manager diagnostics: {error}"))?;
+        if snapshot.stdout.len() > MAX_DOCTOR_BYTES || snapshot.stderr.len() > MAX_DOCTOR_BYTES {
+            return Err("manager diagnostics exceed the 256 KiB safety limit".to_owned());
+        }
+        let mut value: Value = serde_json::from_slice(&snapshot.stdout)
+            .map_err(|error| format!("manager returned invalid structured diagnostics: {error}"))?;
+        redact(&mut value, &secrets);
+        (Some(value), snapshot.status.success())
+    } else {
+        (None, true)
+    };
+
     let generated_at = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|error| format!("system clock is before Unix epoch: {error}"))?
         .as_millis();
     let diagnostics_bytes = serde_json::to_vec(&diagnostics).map_err(|error| error.to_string())?;
     let digest = format!("{:x}", Sha256::digest(&diagnostics_bytes));
+    let manager_digest = manager
+        .as_ref()
+        .map(|value| serde_json::to_vec(value).map_err(|error| error.to_string()))
+        .transpose()?
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)));
+    let success = doctor.status.success() && manager_ok;
     let report = json!({
         "schemaVersion": 1,
-        "resultCode": if doctor.status.success() { 1 } else { 2 },
+        "resultCode": if success { 1 } else { 2 },
         "surfaceCode": 1,
         "generatedAtUnixMs": generated_at,
         "pamVersion": env!("CARGO_PKG_VERSION"),
@@ -73,10 +97,14 @@ pub fn run(executable: &OsStr, arguments: impl Iterator<Item = OsString>) -> Res
             "includesEnvironment": false,
             "includesFileContents": false,
             "includesNetworkData": false,
+            "includesProcessMetadata": include_manager,
+            "includesLogContents": false,
             "pathToken": "$PROJECT"
         },
         "diagnosticsSha256": digest,
-        "diagnostics": diagnostics
+        "diagnostics": diagnostics,
+        "managerSha256": manager_digest,
+        "manager": manager
     });
     let bytes = serde_json::to_vec_pretty(&report).map_err(|error| error.to_string())?;
     if bytes.len() > MAX_REPORT_BYTES {
@@ -89,7 +117,7 @@ pub fn run(executable: &OsStr, arguments: impl Iterator<Item = OsString>) -> Res
     } else {
         println!("{}", String::from_utf8_lossy(&bytes));
     }
-    Ok(if doctor.status.success() { 0 } else { 1 })
+    Ok(if success { 0 } else { 1 })
 }
 
 fn host_contract() -> Result<Value, String> {
