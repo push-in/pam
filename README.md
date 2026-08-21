@@ -810,7 +810,7 @@ pam apply [pam.toml] [--json]                       reconcile all declared appli
 pam deploy api /srv/api/releases/2026-08-21         activate a readiness-gated release
 pam deploy:history api [--json]                     inspect bounded release history
 pam rollback api [--steps N]                        restore a previous healthy release
-pam traffic:start edge --listen IP:PORT --stable IP:PORT
+pam traffic:start edge --listen IP:PORT --stable IP:PORT [--tls-cert FILE --tls-key FILE]
 pam traffic:set edge --candidate IP:PORT --weight-bps N
 pam traffic:status edge [--json]                     inspect per-version rollout evidence
 pam traffic:abort|traffic:promote edge               atomically finish a rollout

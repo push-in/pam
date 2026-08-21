@@ -89,6 +89,15 @@ specialized worker groups from one release and requires one fallback. A separate
 version-ingress authority is required so PAM cannot market capacity routing as
 blue-green delivery.
 
+**Shipped on Linux:** the separate version ingress now provides atomic weighted
+stable/candidate routing, deterministic affinity, streaming HTTP and WebSocket
+proxying, per-version evidence, explicit abort/promote, and certificate-backed
+TLS termination. Its TLS contract requires bounded regular non-symlink PEM files,
+does not disclose key paths through status, and preserves HTTP/2 externally while
+normalizing the explicit HTTP upstream hop. Remaining acceptance work is
+candidate lifecycle orchestration, persisted rollout phases/deadlines, preview
+selection, automatic evidence gates, draining, and surge accounting.
+
 For Linux resource governance, systemd's official
 [`pam_systemd` documentation](https://www.freedesktop.org/software/systemd/man/pam_systemd.html)
 maps session limits to `MemoryMax=`, `TasksMax=` and CPU weight controls, while

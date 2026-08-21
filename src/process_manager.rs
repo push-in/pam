@@ -265,6 +265,8 @@ fn traffic_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, Str
     let mut stable = None;
     let mut candidate = None;
     let mut weight = 0_u16;
+    let mut tls_certificate = None;
+    let mut tls_private_key = None;
     let mut json = false;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -273,6 +275,15 @@ fn traffic_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, Str
             "--stable" => stable = Some(parse_socket(arguments.next(), "--stable")?),
             "--candidate" => candidate = Some(parse_socket(arguments.next(), "--candidate")?),
             "--weight-bps" => weight = parse_basis_points(arguments.next())?,
+            "--tls-cert" => {
+                tls_certificate = Some(PathBuf::from(required_utf8(
+                    arguments.next(),
+                    "--tls-cert",
+                )?))
+            }
+            "--tls-key" => {
+                tls_private_key = Some(PathBuf::from(required_utf8(arguments.next(), "--tls-key")?))
+            }
             "--json" => json = true,
             option if option.starts_with('-') => {
                 return Err(format!("unknown traffic:start option: {option}"));
@@ -300,6 +311,20 @@ fn traffic_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, Str
         stable: stable.ok_or_else(|| "traffic:start requires --stable".to_owned())?,
         candidate,
         candidate_weight_basis_points: weight,
+        tls_certificate: tls_certificate
+            .map(|path| {
+                fs::canonicalize(&path).map_err(|error| {
+                    format!("cannot resolve TLS certificate {}: {error}", path.display())
+                })
+            })
+            .transpose()?,
+        tls_private_key: tls_private_key
+            .map(|path| {
+                fs::canonicalize(&path).map_err(|error| {
+                    format!("cannot resolve TLS private key {}: {error}", path.display())
+                })
+            })
+            .transpose()?,
     };
     crate::traffic::validate_config(&config)?;
     write_private_json(&config_path, &config)?;
@@ -492,7 +517,7 @@ fn print_traffic(config: &crate::traffic::TrafficConfig, state: Option<&MasterSt
         });
         println!(
             "{}",
-            serde_json::json!({"schemaVersion":1,"name":config.name,"stateCode":if online { ApplicationState::Online as u8 } else { ApplicationState::Stopped as u8 },"pid":state.map(|value| value.pid),"listen":config.listen,"stable":config.stable,"candidate":config.candidate,"candidateWeightBasisPoints":config.candidate_weight_basis_points,"generation":config.generation,"metrics":metrics})
+            serde_json::json!({"schemaVersion":1,"name":config.name,"stateCode":if online { ApplicationState::Online as u8 } else { ApplicationState::Stopped as u8 },"pid":state.map(|value| value.pid),"listen":config.listen,"stable":config.stable,"candidate":config.candidate,"candidateWeightBasisPoints":config.candidate_weight_basis_points,"generation":config.generation,"tlsEnabled":config.tls_certificate.is_some(),"metrics":metrics})
         );
     } else {
         println!(

@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, State};
-use axum::http::{HeaderName, HeaderValue, Request, Response, StatusCode, Uri};
+use axum::http::{HeaderName, HeaderValue, Request, Response, StatusCode, Uri, Version};
 use http_body_util::BodyExt;
 use hyper_util::client::legacy::Client;
 use hyper_util::client::legacy::connect::HttpConnector;
@@ -20,6 +20,7 @@ use sha2::{Digest, Sha256};
 use crate::cluster::{MasterState, linux_process_start};
 
 const MAX_CONFIG_BYTES: u64 = 64 * 1024;
+const MAX_TLS_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -31,6 +32,10 @@ pub struct TrafficConfig {
     pub stable: SocketAddr,
     pub candidate: Option<SocketAddr>,
     pub candidate_weight_basis_points: u16,
+    #[serde(default)]
+    pub tls_certificate: Option<PathBuf>,
+    #[serde(default)]
+    pub tls_private_key: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -77,9 +82,11 @@ async fn serve(
 ) -> Result<u8, String> {
     let config = read_config(&config_path)?;
     validate_config(&config)?;
-    let listener = tokio::net::TcpListener::bind(config.listen)
-        .await
+    let listener = std::net::TcpListener::bind(config.listen)
         .map_err(|error| format!("cannot bind PAM traffic ingress {}: {error}", config.listen))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("cannot configure PAM traffic listener: {error}"))?;
     let shared = Arc::new(RwLock::new(config.clone()));
     let watcher = Arc::clone(&shared);
     let watched_path = config_path.clone();
@@ -118,15 +125,37 @@ async fn serve(
     let app = Router::new().fallback(proxy).with_state(state);
     let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .map_err(|error| format!("cannot install traffic stop signal: {error}"))?;
-    let result = axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<SocketAddr>(),
-    )
-    .with_graceful_shutdown(async move {
-        terminate.recv().await;
-    })
-    .await
-    .map_err(|error| format!("traffic ingress failed: {error}"));
+    let result = if let (Some(certificate), Some(private_key)) =
+        (&config.tls_certificate, &config.tls_private_key)
+    {
+        let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(certificate, private_key)
+            .await
+            .map_err(|error| format!("cannot load traffic TLS identity: {error}"))?;
+        let handle = axum_server::Handle::new();
+        let shutdown = handle.clone();
+        tokio::spawn(async move {
+            terminate.recv().await;
+            shutdown.graceful_shutdown(Some(Duration::from_secs(30)));
+        });
+        axum_server::from_tcp_rustls(listener, tls)
+            .map_err(|error| format!("cannot configure traffic TLS listener: {error}"))?
+            .handle(handle)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .map_err(|error| format!("traffic TLS ingress failed: {error}"))
+    } else {
+        let listener = tokio::net::TcpListener::from_std(listener)
+            .map_err(|error| format!("cannot configure PAM traffic listener: {error}"))?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .with_graceful_shutdown(async move {
+            terminate.recv().await;
+        })
+        .await
+        .map_err(|error| format!("traffic ingress failed: {error}"))
+    };
     watch_task.abort();
     metric_task.abort();
     let _ = write_metrics(&metrics_path, &metrics.snapshot());
@@ -158,6 +187,7 @@ async fn proxy(
         return unavailable("invalid PAM release target");
     };
     *request.uri_mut() = uri;
+    *request.version_mut() = Version::HTTP_11;
     request.headers_mut().insert(
         HeaderName::from_static("x-forwarded-for"),
         HeaderValue::from_str(&peer.ip().to_string())
@@ -165,7 +195,11 @@ async fn proxy(
     );
     request.headers_mut().insert(
         HeaderName::from_static("x-forwarded-proto"),
-        HeaderValue::from_static("http"),
+        if config.tls_certificate.is_some() {
+            HeaderValue::from_static("https")
+        } else {
+            HeaderValue::from_static("http")
+        },
     );
     request.headers_mut().remove("x-pam-release");
     let client_upgrade = hyper::upgrade::on(&mut request);
@@ -306,6 +340,19 @@ pub fn validate_config(config: &TrafficConfig) -> Result<(), String> {
     if config.listen == config.stable || config.candidate == Some(config.listen) {
         return Err("traffic ingress cannot proxy to its own listener".to_owned());
     }
+    match (&config.tls_certificate, &config.tls_private_key) {
+        (Some(certificate), Some(private_key)) => {
+            validate_tls_file(certificate, "certificate")?;
+            validate_tls_file(private_key, "private key")?;
+            if certificate == private_key {
+                return Err(
+                    "traffic TLS certificate and private key must be different files".to_owned(),
+                );
+            }
+        }
+        (None, None) => {}
+        _ => return Err("traffic TLS requires both certificate and private key".to_owned()),
+    }
     if !config.listen.ip().is_loopback()
         && (config.stable.ip().is_unspecified()
             || config
@@ -313,6 +360,22 @@ pub fn validate_config(config: &TrafficConfig) -> Result<(), String> {
                 .is_some_and(|value| value.ip().is_unspecified()))
     {
         return Err("public traffic ingress requires explicit upstream addresses".to_owned());
+    }
+    Ok(())
+}
+
+fn validate_tls_file(path: &Path, label: &str) -> Result<(), String> {
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "cannot inspect traffic TLS {label} {}: {error}",
+            path.display()
+        )
+    })?;
+    if !metadata.file_type().is_file() || metadata.len() == 0 || metadata.len() > MAX_TLS_FILE_BYTES
+    {
+        return Err(format!(
+            "traffic TLS {label} must be a non-empty regular file up to 4 MiB"
+        ));
     }
     Ok(())
 }
@@ -370,6 +433,8 @@ mod tests {
             stable: "127.0.0.1:8081".parse().unwrap(),
             candidate: None,
             candidate_weight_basis_points: 1,
+            tls_certificate: None,
+            tls_private_key: None,
         };
         assert!(validate_config(&config).is_err());
     }

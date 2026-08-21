@@ -2,7 +2,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::sync::{
     Arc,
     atomic::{AtomicBool, Ordering},
@@ -683,6 +683,97 @@ fn shifts_aborts_and_promotes_weighted_release_traffic() {
     stable_thread.join().unwrap();
     candidate_thread.join().unwrap();
     fs::remove_dir_all(state).unwrap();
+}
+
+#[test]
+fn terminates_tls_for_release_traffic_without_exposing_key_paths() {
+    let (stable_port, stable_running, stable_thread) = fixed_http_server("secure-stable");
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let ingress_port = probe.local_addr().unwrap().port();
+    drop(probe);
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let state = temporary_path("traffic-tls-state");
+    let identity = temporary_path("traffic-tls-identity");
+    fs::create_dir_all(&identity).unwrap();
+    let certificate = identity.join("certificate.pem");
+    let private_key = identity.join("private-key.pem");
+    let generated = Command::new("openssl")
+        .args(["req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout"])
+        .arg(&private_key)
+        .arg("-out")
+        .arg(&certificate)
+        .args([
+            "-subj",
+            "/CN=localhost",
+            "-addext",
+            "subjectAltName=DNS:localhost",
+            "-addext",
+            "basicConstraints=critical,CA:FALSE",
+            "-days",
+            "1",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .expect("openssl should be installed for TLS integration tests");
+    assert!(generated.success());
+    let started = run_managed_pam(
+        &root,
+        &state,
+        ingress_port,
+        &[
+            "traffic:start",
+            "secure-edge",
+            "--listen",
+            &format!("127.0.0.1:{ingress_port}"),
+            "--stable",
+            &format!("127.0.0.1:{stable_port}"),
+            "--tls-cert",
+            certificate.to_str().unwrap(),
+            "--tls-key",
+            private_key.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let status: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    assert_eq!(status["tlsEnabled"], true);
+    assert!(!String::from_utf8_lossy(&started.stdout).contains(private_key.to_str().unwrap()));
+    let response = Command::new("curl")
+        .args(["--silent", "--show-error", "--fail", "--cacert"])
+        .arg(&certificate)
+        .arg(format!("https://localhost:{ingress_port}/tls"))
+        .output()
+        .expect("curl should be installed for TLS integration tests");
+    assert!(
+        response.status.success(),
+        "{}",
+        String::from_utf8_lossy(&response.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&response.stdout), "secure-stable");
+    assert!(
+        run_managed_pam(
+            &root,
+            &state,
+            ingress_port,
+            &["traffic:stop", "secure-edge"]
+        )
+        .status
+        .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, ingress_port, &["daemon", "stop"])
+            .status
+            .success()
+    );
+    stable_running.store(false, Ordering::Relaxed);
+    stable_thread.join().unwrap();
+    fs::remove_dir_all(state).unwrap();
+    fs::remove_dir_all(identity).unwrap();
 }
 
 #[test]
