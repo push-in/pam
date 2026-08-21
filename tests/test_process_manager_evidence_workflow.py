@@ -48,6 +48,16 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn(
             "6) results=benchmarks/process-manager/results/comparison ;;", workflow
         )
+        self.assertIn("7 manager recovery worker matrix", workflow)
+        self.assertIn("- '7'", workflow)
+        self.assertIn("PAM_RECOVERY_MATRIX_ROUNDS: '10'", workflow)
+        self.assertIn(
+            "7) benchmarks/process-manager/worker-matrix.sh ;;", workflow
+        )
+        self.assertIn(
+            "7) results=benchmarks/process-manager/results/worker-matrix ;;",
+            workflow,
+        )
 
         harness = (ROOT / "benchmarks/process-manager/run.sh").read_text(
             encoding="utf-8"
@@ -64,6 +74,16 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn('tail -c 65536 >"${results}/launch-error.log"', harness)
         self.assertIn('tail -c 1048576 "${application_error}"', harness)
         self.assertIn("launch_status", harness)
+        self.assertIn('workers=${PAM_RECOVERY_WORKERS:-1}', harness)
+        self.assertIn('--workers "${workers}"', harness)
+
+        matrix = (
+            ROOT / "benchmarks/process-manager/worker-matrix.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("for workers in 1 4 16", matrix)
+        self.assertIn("PAM_RECOVERY_WORKERS=\"${workers}\"", matrix)
+        self.assertIn("worker-matrix-report.php", matrix)
+        self.assertIn('evidence-manifest.php" "${results}" 7 --verify', matrix)
 
 
 if __name__ == "__main__":

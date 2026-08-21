@@ -391,6 +391,61 @@ fn compares_pam_and_pm2_recovery_without_conflating_topologies() {
 }
 
 #[test]
+fn aggregates_and_verifies_manager_recovery_worker_matrix() {
+    let results = temporary_path("manager-recovery-worker-matrix");
+    for (index, workers) in [1, 4, 16].iter().enumerate() {
+        let directory = results.join(format!("workers-{workers}"));
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(
+            directory.join("metadata.json"),
+            format!(r#"{{"source":{{"commit":"abc","dirty":false}},"host":{{"kernel":"Linux"}},"tools":{{"pam_sha256":"sha","pam_native_commit":"native"}},"parameters":{{"rounds":3,"workers":{workers}}}}}"#),
+        )
+        .unwrap();
+        fs::write(
+            directory.join("recovery-report.json"),
+            format!(r#"{{"schema_version":1,"suite_code":5,"rounds":3,"successful_rounds":3,"recovery_millis":{{"p50":{},"p95":{},"maximum":{}}},"recovery_phases":{{"readiness_millis":{{"p50":50,"p95":60,"maximum":70}}}},"daemon_rss_growth_bytes":0,"thresholds":{{"maximum_p95_millis":500}},"gate_codes":{{"success":1,"latency":1,"detection":1,"backoff":1,"readiness":1,"resources":1}},"passed":true}}"#, 100 + index, 110 + index, 120 + index),
+        )
+        .unwrap();
+    }
+    let report_script = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("benchmarks/process-manager/worker-matrix-report.php");
+    assert!(
+        run_pam(&[report_script.to_str().unwrap(), results.to_str().unwrap(),])
+            .status
+            .success()
+    );
+    let report: serde_json::Value =
+        serde_json::from_slice(&fs::read(results.join("worker-matrix-report.json")).unwrap())
+            .unwrap();
+    assert_eq!(report["suite_code"], 7);
+    assert_eq!(report["configurations"][0]["configuration_code"], 1);
+    assert_eq!(report["configurations"][1]["workers"], 4);
+    assert_eq!(report["configurations"][2]["workers"], 16);
+    assert_eq!(report["gate_codes"]["all_configurations"], 1);
+    assert_eq!(report["gate_codes"]["equivalent_rounds"], 1);
+    assert_eq!(report["passed"], true);
+
+    let manifest =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("benchmarks/octane/evidence-manifest.php");
+    assert!(
+        run_pam(&[manifest.to_str().unwrap(), results.to_str().unwrap(), "7"])
+            .status
+            .success()
+    );
+    assert!(
+        run_pam(&[
+            manifest.to_str().unwrap(),
+            results.to_str().unwrap(),
+            "7",
+            "--verify",
+        ])
+        .status
+        .success()
+    );
+    fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
 fn records_reproducible_soak_metadata() {
     let results = temporary_path("soak-metadata");
     fs::create_dir_all(&results).unwrap();

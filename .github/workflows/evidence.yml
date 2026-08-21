@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       suite_id:
-        description: 1 comparison, 2 worker matrix, 3 runtime soak, 4 overload, 5 manager recovery, 6 PM2 recovery comparison
+        description: 1 comparison, 2 worker matrix, 3 runtime soak, 4 overload, 5 manager recovery, 6 PM2 recovery comparison, 7 manager recovery worker matrix
         required: true
         default: '1'
         type: choice
@@ -17,6 +17,7 @@ on:
           - '4'
           - '5'
           - '6'
+          - '7'
 
 permissions:
   contents: read
@@ -43,6 +44,7 @@ jobs:
       PAM_BENCH_WORKER_MATRIX: 1 4 8
       PAM_SOAK_DURATION: 30m
       PAM_RECOVERY_ROUNDS: '10'
+      PAM_RECOVERY_MATRIX_ROUNDS: '10'
       PAM_RECOVERY_MAX_P95_MILLIS: '200'
       PAM_RECOVERY_MAX_DETECTION_P95_MILLIS: '10'
       PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS: '20'
@@ -84,10 +86,10 @@ jobs:
       - name: Install locked benchmark dependencies
         run: composer install --working-dir=packages/octane --no-interaction --prefer-dist
       - name: Preflight locked manager fixture dependencies
-        if: env.PAM_EVIDENCE_SUITE_ID == '5' || env.PAM_EVIDENCE_SUITE_ID == '6'
+        if: env.PAM_EVIDENCE_SUITE_ID == '5' || env.PAM_EVIDENCE_SUITE_ID == '6' || env.PAM_EVIDENCE_SUITE_ID == '7'
         run: composer install --working-dir=compat/composer-smoke --dry-run --no-dev --no-interaction --prefer-dist
       - name: Install locked manager fixture dependencies
-        if: env.PAM_EVIDENCE_SUITE_ID == '5' || env.PAM_EVIDENCE_SUITE_ID == '6'
+        if: env.PAM_EVIDENCE_SUITE_ID == '5' || env.PAM_EVIDENCE_SUITE_ID == '6' || env.PAM_EVIDENCE_SUITE_ID == '7'
         run: composer install --working-dir=compat/composer-smoke --no-dev --no-interaction --prefer-dist
       - name: Preflight locked PM2 comparison dependencies
         if: env.PAM_EVIDENCE_SUITE_ID == '6'
@@ -111,6 +113,7 @@ jobs:
             4) benchmarks/octane/overload.sh ;;
             5) benchmarks/process-manager/run.sh ;;
             6) benchmarks/process-manager/compare-pm2.sh ;;
+            7) benchmarks/process-manager/worker-matrix.sh ;;
             *) printf 'unknown evidence suite id: %s\n' "${PAM_EVIDENCE_SUITE_ID}" >&2; exit 64 ;;
           esac
       - name: Verify evidence before publication
@@ -122,6 +125,7 @@ jobs:
             4) results=benchmarks/octane/results/overload ;;
             5) results=benchmarks/process-manager/results ;;
             6) results=benchmarks/process-manager/results/comparison ;;
+            7) results=benchmarks/process-manager/results/worker-matrix ;;
           esac
           php benchmarks/octane/evidence-manifest.php \
             "${results}" "${PAM_EVIDENCE_SUITE_ID}" --verify
