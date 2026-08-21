@@ -72,6 +72,7 @@ The `feat/api-2-foundation` development line implements:
 - Problem Details validation responses;
 - JSON Resources and Resource Collections;
 - PHPUnit and PHPStan level 9 verification;
+- a committed 118-symbol public API baseline with executable SemVer checks;
 - pluggable rate-limit stores with a bounded in-memory token bucket fallback;
 - authenticators, request-scoped principals, abilities and authorization;
 - strict signed bearer access tokens with temporal, issuer/audience checks,

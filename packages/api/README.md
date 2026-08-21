@@ -195,7 +195,19 @@ composer verify
 ```
 
 The verification gate runs PHPStan at level 9 and the PHPUnit suite on every
-supported PHP version.
+supported PHP version. It also compares all public classes, interfaces, enums,
+methods, parameters, properties and constants against `api-surface.json`:
+
+```bash
+composer api:compat
+```
+
+The gate rejects unreviewed additions as baseline drift and rejects removed
+symbols/members, signature changes, new interface methods, newly abstract/final
+contracts and enum changes as incompatibilities. Run `bin/api-compat update`
+after approving a compatible public addition. A breaking baseline update is
+reserved for an intentional major version whose migration guide and changelog
+are ready.
 
 See the [PAM API 2 design and delivery contract](docs/API-2.md) for the complete
 15-track implementation plan and current delivery status.

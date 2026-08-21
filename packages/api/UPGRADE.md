@@ -14,6 +14,14 @@ Deprecations must identify the replacement, first deprecated version and
 earliest removal version. A removal requires an upgrade recipe and automated
 compatibility evidence.
 
+`composer api:compat` compares the reflection-derived public surface against
+`api-surface.json`. Unreviewed additions fail as baseline drift; breaking
+symbol, member, signature, inheritance, interface and enum changes fail as
+incompatibilities. All results use sequential integer change codes. Refresh the
+baseline after approving compatible additions. Refreshing it for a breaking
+change is allowed only on an intentional major-version branch after documenting
+every reported break; normal `composer verify` never regenerates it.
+
 ## From 1.x to 2.0
 
 1. Upgrade the PAM runtime and PHP to supported versions before changing the
@@ -35,4 +43,3 @@ compatibility evidence.
 The 2.0 release candidate will add an executable upgrade fixture from the
 greatest stable 1.x release. Until that fixture is green, this guide is a
 development migration contract rather than final upgrade certification.
-

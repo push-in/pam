@@ -1,8 +1,8 @@
 parameters:
     level: 9
     paths:
+        - bin/api-compat
         - src
         - tests
     tmpDir: .build/phpstan
     treatPhpDocTypesAsCertain: true
-
