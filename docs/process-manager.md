@@ -26,7 +26,8 @@ pam apply pam.toml
 pam deploy billing /srv/billing/releases/2026-08-21
 pam deploy:history billing --json
 pam rollback billing
-pam traffic:start billing-edge --listen 127.0.0.1:8080 --stable 127.0.0.1:8081
+pam traffic:start billing-edge --listen 127.0.0.1:8080 --stable 127.0.0.1:8081 \
+  --tls-cert /etc/pam/billing.pem --tls-key /etc/pam/billing.key
 pam traffic:set billing-edge --candidate 127.0.0.1:8082 --weight-bps 500
 pam traffic:status billing-edge --json
 pam traffic:promote billing-edge
@@ -158,10 +159,12 @@ latency-microsecond counters for stable and candidate. Metrics are private,
 bounded, periodically persisted, and contain no URLs, cookies or client
 identifiers. Use those counters as rollout evidence before an explicit promote.
 
-The ingress currently speaks HTTP to explicit upstream `IP:port` addresses. TLS
-should terminate at the existing PAM/edge TLS boundary until certificate-backed
-version-ingress listeners are shipped. PAM rejects self-referential listeners,
-invalid weights and weight without a candidate.
+The ingress accepts HTTPS with `--tls-cert FILE --tls-key FILE` while continuing
+to proxy over HTTP to explicit upstream `IP:port` addresses. PAM requires both
+PEM files, resolves them before detaching, rejects symlinks, empty or oversized
+files, and never includes their paths in status output. Certificate rotation
+currently requires restarting the traffic ingress. PAM rejects self-referential
+listeners, invalid weights and weight without a candidate.
 
 Without `XDG_STATE_HOME`, PAM uses `$HOME/.local/state/pam`. Directories are
 mode `0700`; records and logs are mode `0600`. Application names are limited to
