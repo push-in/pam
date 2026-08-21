@@ -3793,6 +3793,7 @@ fn watch_running_masters(paths: &ManagerPaths) -> MasterWatchers {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn open_pidfd(pid: u32) -> Option<OwnedFd> {
     let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as libc::c_int };
     if descriptor < 0 {
@@ -3800,6 +3801,11 @@ fn open_pidfd(pid: u32) -> Option<OwnedFd> {
     } else {
         Some(unsafe { OwnedFd::from_raw_fd(descriptor) })
     }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn open_pidfd(_pid: u32) -> Option<OwnedFd> {
+    None
 }
 
 fn delete(arguments: Vec<OsString>) -> Result<u8, String> {
@@ -4761,6 +4767,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "linux")]
     #[test]
     fn pidfd_reports_the_registered_master_exit_without_pid_polling() {
         let mut child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
