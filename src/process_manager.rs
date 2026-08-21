@@ -34,6 +34,7 @@ const MAX_DASHBOARD_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RESOURCE_HISTORY: usize = 120;
 const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 const SUPERVISION_INTERVAL: Duration = Duration::from_millis(250);
+const READINESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const DEFAULT_RESTART_DELAY_MILLIS: u64 = 250;
 const DEFAULT_RESTART_BACKOFF_MAX_MILLIS: u64 = 15_000;
 const DEFAULT_MAX_UNSTABLE_RESTARTS: u32 = 10;
@@ -232,6 +233,12 @@ struct ApplicationRecord {
     #[serde(default)]
     total_auto_restart_count: u64,
     #[serde(default)]
+    last_exit_detected_at_millis: Option<u64>,
+    #[serde(default)]
+    last_recovery_started_at_millis: Option<u64>,
+    #[serde(default)]
+    last_recovery_ready_at_millis: Option<u64>,
+    #[serde(default)]
     next_restart_at_millis: Option<u64>,
     #[serde(default = "default_disabled_recovery_state")]
     recovery_state_code: u8,
@@ -255,24 +262,40 @@ struct MasterWatchers {
 }
 
 impl MasterWatchers {
-    fn exit_ready(&mut self) -> bool {
-        if self.poll_descriptors.is_empty() {
-            return false;
+    fn for_listener(listener: &UnixListener) -> Self {
+        Self {
+            _descriptors: Vec::new(),
+            poll_descriptors: vec![libc::pollfd {
+                fd: listener.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            }],
         }
+    }
+
+    fn poll(&mut self, timeout: Duration) -> libc::c_int {
         for descriptor in &mut self.poll_descriptors {
             descriptor.revents = 0;
         }
-        let ready = unsafe {
+        unsafe {
             libc::poll(
                 self.poll_descriptors.as_mut_ptr(),
                 self.poll_descriptors.len() as _,
-                0,
+                timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int,
             )
-        };
+        }
+    }
+
+    fn exit_ready(&mut self) -> bool {
+        if self.poll_descriptors.len() <= 1 {
+            return false;
+        }
+        let ready = self.poll(Duration::ZERO);
         ready > 0
             && self
                 .poll_descriptors
                 .iter()
+                .skip(1)
                 .any(|descriptor| descriptor.revents & libc::POLLIN != 0)
     }
 }
@@ -1793,6 +1816,9 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<Op
         if record.recovery_state_code != RecoveryState::Backoff as u8
             || record.next_restart_at_millis.is_none()
         {
+            record.last_exit_detected_at_millis = Some(now);
+            record.last_recovery_started_at_millis = None;
+            record.last_recovery_ready_at_millis = None;
             schedule_recovery(&mut record, now);
             earliest_restart = earliest_deadline(earliest_restart, record.next_restart_at_millis);
             write_record(&path, &record)?;
@@ -1805,8 +1831,10 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<Op
             earliest_restart = earliest_deadline(earliest_restart, record.next_restart_at_millis);
             continue;
         }
+        record.last_recovery_started_at_millis = Some(epoch_millis());
         match restart_record(executable, &record, false, false) {
             Ok(_) => {
+                record.last_recovery_ready_at_millis = Some(epoch_millis());
                 record.total_auto_restart_count = record.total_auto_restart_count.saturating_add(1);
                 record.next_restart_at_millis = None;
                 record.recovery_state_code = RecoveryState::Stabilizing as u8;
@@ -2871,7 +2899,7 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
     }
     let mut next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
     let mut next_supervision = Instant::now();
-    let mut master_watchers = MasterWatchers::default();
+    let mut master_watchers = MasterWatchers::for_listener(&listener);
     let (health_sender, health_receiver) = mpsc::channel();
     let mut health_probes_in_flight = HashSet::new();
     let own_uid = unsafe { libc::geteuid() };
@@ -2897,7 +2925,7 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
             }
             next_supervision =
                 Instant::now() + next_supervision_delay(epoch_millis(), earliest_restart);
-            master_watchers = watch_running_masters(&paths);
+            master_watchers = watch_running_masters(&paths, &listener);
         }
         if Instant::now() >= next_sample {
             if let Err(error) = record_resource_history(&paths) {
@@ -2908,7 +2936,10 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
         let mut stream = match listener.accept() {
             Ok((stream, _)) => stream,
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                thread::sleep(Duration::from_millis(25));
+                let wait = next_supervision
+                    .saturating_duration_since(Instant::now())
+                    .min(Duration::from_millis(25));
+                master_watchers.poll(wait);
                 continue;
             }
             Err(error) => {
@@ -3498,6 +3529,9 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         min_uptime_millis,
         unstable_restart_count: 0,
         total_auto_restart_count: 0,
+        last_exit_detected_at_millis: None,
+        last_recovery_started_at_millis: None,
+        last_recovery_ready_at_millis: None,
         next_restart_at_millis: None,
         recovery_state_code: if auto_restart {
             RecoveryState::Healthy as u8
@@ -3693,7 +3727,7 @@ fn restart_record(
                 "application {name:?} did not become ready after restart"
             ));
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(READINESS_POLL_INTERVAL);
     };
     if emit {
         if json {
@@ -3752,7 +3786,7 @@ fn reap_daemon_children() -> bool {
     reaped
 }
 
-fn watch_running_masters(paths: &ManagerPaths) -> MasterWatchers {
+fn watch_running_masters(paths: &ManagerPaths, listener: &UnixListener) -> MasterWatchers {
     let descriptors = read_all_records(paths)
         .unwrap_or_default()
         .into_iter()
@@ -3760,14 +3794,17 @@ fn watch_running_masters(paths: &ManagerPaths) -> MasterWatchers {
         .filter(master_is_running)
         .filter_map(|state| open_pidfd(state.pid))
         .collect::<Vec<_>>();
-    let poll_descriptors = descriptors
-        .iter()
-        .map(|descriptor| libc::pollfd {
-            fd: descriptor.as_raw_fd(),
-            events: libc::POLLIN,
-            revents: 0,
-        })
-        .collect();
+    let poll_descriptors = std::iter::once(libc::pollfd {
+        fd: listener.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    })
+    .chain(descriptors.iter().map(|descriptor| libc::pollfd {
+        fd: descriptor.as_raw_fd(),
+        events: libc::POLLIN,
+        revents: 0,
+    }))
+    .collect();
     MasterWatchers {
         _descriptors: descriptors,
         poll_descriptors,
@@ -4106,6 +4143,9 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
             "minUptimeMillis": record.min_uptime_millis,
             "unstableRestartCount": record.unstable_restart_count,
             "totalAutoRestartCount": record.total_auto_restart_count,
+            "lastExitDetectedAtMillis": record.last_exit_detected_at_millis,
+            "lastRecoveryStartedAtMillis": record.last_recovery_started_at_millis,
+            "lastRecoveryReadyAtMillis": record.last_recovery_ready_at_millis,
             "nextRestartAtMillis": record.next_restart_at_millis,
         },
     })
@@ -4708,6 +4748,9 @@ mod tests {
             min_uptime_millis: 1_000,
             unstable_restart_count: 0,
             total_auto_restart_count: 0,
+            last_exit_detected_at_millis: None,
+            last_recovery_started_at_millis: None,
+            last_recovery_ready_at_millis: None,
             next_restart_at_millis: None,
             recovery_state_code: RecoveryState::Healthy as u8,
             created_at_millis: 1,
@@ -4747,11 +4790,18 @@ mod tests {
         let mut child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
         let descriptor = open_pidfd(child.id()).expect("Linux pidfd support");
         let mut watchers = MasterWatchers {
-            poll_descriptors: vec![libc::pollfd {
-                fd: descriptor.as_raw_fd(),
-                events: libc::POLLIN,
-                revents: 0,
-            }],
+            poll_descriptors: vec![
+                libc::pollfd {
+                    fd: -1,
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: descriptor.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ],
             _descriptors: vec![descriptor],
         };
         assert!(!watchers.exit_ready());
