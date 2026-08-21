@@ -107,6 +107,8 @@ script = "public/index.php"
 workers = 4
 cwd = "."
 arguments = ["--port=8080"]
+memory_warning_bytes = 536870912
+task_warning_count = 64
 
 [applications.web]
 kind_code = 2
@@ -121,6 +123,14 @@ configuration directory, worker counts are bounded to 1–256, unknown fields
 fail validation, and configuration files are limited to regular non-symlink
 files of at most 1 MiB. Use `pam config:check --json` in CI and `pam apply
 --json` for a stable action-coded reconciliation report.
+
+`memory_warning_bytes` and `task_warning_count` are optional positive alert
+thresholds. On Linux, `status`, `describe` and `monit` inspect the complete
+descendant process tree under the recorded supervisor and report aggregate RSS,
+threads and process count. Alert state codes are healthy `1`, memory `2`, tasks
+`3`, both `4`, unavailable `5`; applying threshold-only changes uses reconcile
+action `6` without restarting a healthy application. These are observation
+thresholds, not cgroup enforcement limits.
 
 ## Transactional releases
 

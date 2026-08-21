@@ -30,6 +30,7 @@ mod project;
 mod prometheus;
 mod protocol;
 mod quality;
+mod resource_monitor;
 mod self_update;
 mod server;
 mod ship;

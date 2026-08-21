@@ -107,6 +107,13 @@ isolation. The target is one transient scope/service per managed application (or
 a delegated cgroup-v2 subtree), with requested and observed limits shown in
 `describe`, and fail-closed behavior when a mandatory limit cannot be applied.
 
+**Shipped observation baseline on Linux:** `status`, `describe` and `monit` now
+aggregate RSS, threads and process count across each supervisor's descendant
+tree, compare them with declarative positive warning thresholds, and expose
+stable sequential alert codes. Threshold-only reconciliation is live and does
+not restart a healthy process. This establishes observed evidence; hard
+MemoryMax/TasksMax/CPU enforcement and cgroup event counters remain required.
+
 ### Competitive research refresh — 2026-08-20 Windows Runtime architecture
 
 PHP's official [Embed SAPI documentation](https://github.com/php/php-src/blob/master/sapi/embed/README.md)

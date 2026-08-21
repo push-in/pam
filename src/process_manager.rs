@@ -78,6 +78,16 @@ enum ApplicationState {
     Stopped = 2,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum ResourceAlertState {
+    Healthy = 1,
+    MemoryWarning = 2,
+    TaskWarning = 3,
+    MemoryAndTaskWarning = 4,
+    Unavailable = 5,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApplicationRecord {
@@ -93,6 +103,10 @@ struct ApplicationRecord {
     log_max_bytes: u64,
     #[serde(default = "default_log_retain")]
     log_retain: usize,
+    #[serde(default)]
+    memory_warning_bytes: Option<u64>,
+    #[serde(default)]
+    task_warning_count: Option<u64>,
     created_at_millis: u64,
 }
 
@@ -163,6 +177,10 @@ struct EcosystemApplication {
     arguments: Vec<String>,
     #[serde(default = "default_true")]
     autostart: bool,
+    #[serde(default)]
+    memory_warning_bytes: Option<u64>,
+    #[serde(default)]
+    task_warning_count: Option<u64>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -173,6 +191,7 @@ enum ReconcileAction {
     Scaled = 3,
     Restarted = 4,
     Disabled = 5,
+    PolicyUpdated = 6,
 }
 
 pub fn run(
@@ -562,6 +581,12 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     .current_dir(cwd)
                     .args(["up", "--name", &name, "--workers"]);
                 command.arg(application.workers.to_string());
+                if let Some(value) = application.memory_warning_bytes {
+                    command.args(["--memory-warning-bytes", &value.to_string()]);
+                }
+                if let Some(value) = application.task_warning_count {
+                    command.args(["--task-warning-count", &value.to_string()]);
+                }
                 if application.kind_code == ApplicationKind::Runtime as u8 {
                     command.arg(
                         application
@@ -576,7 +601,15 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                 run_reconcile_command(command, &name)?;
                 ReconcileAction::Created
             } else {
-                let record = read_record(&record_path)?;
+                let mut record = read_record(&record_path)?;
+                let policy_updated = record.memory_warning_bytes
+                    != application.memory_warning_bytes
+                    || record.task_warning_count != application.task_warning_count;
+                if policy_updated {
+                    record.memory_warning_bytes = application.memory_warning_bytes;
+                    record.task_warning_count = application.task_warning_count;
+                    write_record(&record_path, &record)?;
+                }
                 let state = running_state(&record);
                 if !state.as_ref().is_some_and(master_is_running) {
                     let mut command = Command::new(executable);
@@ -591,6 +624,8 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     command.args(["scale", &name, &application.workers.to_string()]);
                     run_reconcile_command(command, &name)?;
                     ReconcileAction::Scaled
+                } else if policy_updated {
+                    ReconcileAction::PolicyUpdated
                 } else {
                     ReconcileAction::Unchanged
                 }
@@ -705,6 +740,11 @@ fn validate_ecosystem_application(
     }
     if application.workers == 0 || application.workers > 256 {
         return Err(format!("application {name:?} workers must be 1-256"));
+    }
+    if application.memory_warning_bytes == Some(0) || application.task_warning_count == Some(0) {
+        return Err(format!(
+            "application {name:?} resource warning thresholds must be positive"
+        ));
     }
     if application.kind_code == ApplicationKind::LaravelOctane as u8 && application.script.is_some()
     {
@@ -892,16 +932,25 @@ fn monit(arguments: Vec<OsString>) -> Result<u8, String> {
             serde_json::json!({"schemaVersion":1,"applications":records.iter().map(|record| application_json(record, running_state(record).as_ref())).collect::<Vec<_>>() })
         );
     } else {
-        println!("PAM MONIT\nNAME\tSTATE\tPID\tWORKERS");
+        println!("PAM MONIT\nNAME\tSTATE\tPID\tWORKERS\tRSS_BYTES\tTASKS\tALERT");
         for record in records {
             let state = running_state(&record);
             let online = state.as_ref().is_some_and(master_is_running);
+            let resources = state
+                .as_ref()
+                .filter(|_| online)
+                .map(|value| crate::resource_monitor::process_tree(value.pid))
+                .unwrap_or_default();
+            let alert = resource_alert_state(&record, &resources);
             println!(
-                "{}\t{}\t{}\t{}",
+                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
                 record.name,
                 if online { "online" } else { "stopped" },
                 state.as_ref().map_or(0, |value| value.pid),
-                state.as_ref().map_or(0, |value| value.workers)
+                state.as_ref().map_or(0, |value| value.workers),
+                resources.rss_bytes,
+                resources.tasks,
+                alert as u8,
             );
         }
     }
@@ -1494,6 +1543,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut json = false;
     let mut log_max_bytes = DEFAULT_LOG_MAX_BYTES;
     let mut log_retain = DEFAULT_LOG_RETAIN;
+    let mut memory_warning_bytes = None;
+    let mut task_warning_count = None;
     let mut application_arguments = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -1510,6 +1561,18 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                 if log_retain > MAX_LOG_RETAIN {
                     return Err(format!("--log-retain cannot exceed {MAX_LOG_RETAIN}"));
                 }
+            }
+            "--memory-warning-bytes" => {
+                memory_warning_bytes = Some(required_positive_u64(
+                    arguments.next(),
+                    "--memory-warning-bytes",
+                )?)
+            }
+            "--task-warning-count" => {
+                task_warning_count = Some(required_positive_u64(
+                    arguments.next(),
+                    "--task-warning-count",
+                )?)
             }
             "--" => {
                 application_arguments.extend(arguments);
@@ -1644,6 +1707,8 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         stderr_log,
         log_max_bytes,
         log_retain,
+        memory_warning_bytes,
+        task_warning_count,
         created_at_millis: epoch_millis(),
     };
     write_record(&record_path, &record)?;
@@ -1990,6 +2055,11 @@ fn print_tail(path: &Path, lines: usize) -> Result<(), String> {
 
 fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> serde_json::Value {
     let online = state.is_some_and(master_is_running);
+    let resources = state
+        .filter(|_| online)
+        .map(|state| crate::resource_monitor::process_tree(state.pid))
+        .unwrap_or_default();
+    let resource_alert_state = resource_alert_state(record, &resources);
     serde_json::json!({
         "schemaVersion": 1,
         "name": record.name,
@@ -2001,7 +2071,34 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
+        "resources": resources,
+        "resourcePolicy": {
+            "memoryWarningBytes": record.memory_warning_bytes,
+            "taskWarningCount": record.task_warning_count,
+        },
+        "resourceAlertStateCode": resource_alert_state as u8,
     })
+}
+
+fn resource_alert_state(
+    record: &ApplicationRecord,
+    resources: &crate::resource_monitor::ResourceSnapshot,
+) -> ResourceAlertState {
+    if !resources.observed {
+        return ResourceAlertState::Unavailable;
+    }
+    let memory = record
+        .memory_warning_bytes
+        .is_some_and(|limit| resources.rss_bytes >= limit);
+    let tasks = record
+        .task_warning_count
+        .is_some_and(|limit| resources.tasks >= limit);
+    match (memory, tasks) {
+        (false, false) => ResourceAlertState::Healthy,
+        (true, false) => ResourceAlertState::MemoryWarning,
+        (false, true) => ResourceAlertState::TaskWarning,
+        (true, true) => ResourceAlertState::MemoryAndTaskWarning,
+    }
 }
 
 struct ManagerPaths {
@@ -2304,8 +2401,9 @@ mod tests {
                 ReconcileAction::Scaled as u8,
                 ReconcileAction::Restarted as u8,
                 ReconcileAction::Disabled as u8,
+                ReconcileAction::PolicyUpdated as u8,
             ],
-            [1, 2, 3, 4, 5]
+            [1, 2, 3, 4, 5, 6]
         );
         assert_eq!(
             [
@@ -2329,6 +2427,16 @@ mod tests {
                 ApplicationState::Stopped as u8
             ],
             [1, 2]
+        );
+        assert_eq!(
+            [
+                ResourceAlertState::Healthy as u8,
+                ResourceAlertState::MemoryWarning as u8,
+                ResourceAlertState::TaskWarning as u8,
+                ResourceAlertState::MemoryAndTaskWarning as u8,
+                ResourceAlertState::Unavailable as u8,
+            ],
+            [1, 2, 3, 4, 5]
         );
     }
     #[test]
