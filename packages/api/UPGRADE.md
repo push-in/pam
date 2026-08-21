@@ -40,6 +40,9 @@ every reported break; normal `composer verify` never regenerates it.
 6. Run `composer verify`, the real-network suite and the public API
    compatibility gate before deployment.
 
-The 2.0 release candidate will add an executable upgrade fixture from the
-greatest stable 1.x release. Until that fixture is green, this guide is a
-development migration contract rather than final upgrade certification.
+The executable `tests/fixtures/v1.0.2/application.php` preserves the route and
+middleware forms published by the greatest stable 1.x release at the 2.0 cut.
+`UpgradeFromV1Test` runs that application unchanged on 2.0 and binds the fixture
+to the public mirror tag, commit and README digest recorded in `source.json`.
+This proves the documented 1.x application path while the reflection-derived
+surface gate protects the complete supported 2.x API after release.

@@ -1,5 +1,11 @@
 # PAM API 2 design and delivery contract
 
+PAM API 2 has an independent release line. It does not require the native PAM
+runtime or unrelated Composer packages to adopt major version 2. A release is
+cut from a commit integrated into the monorepo `main` branch, verified as an
+isolated split, and published as `v2.x.y` in `push-in/pam-api` with provenance
+retained by GitHub Actions.
+
 PAM API combines Express-style route ergonomics with Laravel-style application
 boundaries. Small applications may use closures. Product applications can use
 controllers, request objects, services, repositories and resources without

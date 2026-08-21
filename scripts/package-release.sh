@@ -145,6 +145,43 @@ validate_release_tag() {
         fail "packages/octane/CHANGELOG.md does not contain a dated ${runtime_version} release"
 }
 
+validate_package_tag() {
+    local package_name=$1
+    local release_tag=$2
+
+    validate_map
+    [[ "${release_tag}" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-[0-9A-Za-z.-]+)?$ ]] ||
+        fail "package release tag must use SemVer with a v prefix: ${release_tag}"
+
+    local package_path
+    package_path=$(package_field "${package_name}" path)
+    local changelog="${repository_root}/${package_path}/CHANGELOG.md"
+    test -f "${changelog}" ||
+        fail "${package_name} requires ${package_path}/CHANGELOG.md for an independent release"
+
+    local version=${release_tag#v}
+    local heading="## ${version} - "
+    local release_line
+    release_line=$(grep -F "${heading}" "${changelog}" || true)
+    test "$(printf '%s\n' "${release_line}" | grep -c . || true)" -eq 1 ||
+        fail "${package_name} changelog must contain one ${version} release"
+    test "${release_line#"${heading}"}" != "${release_line}" ||
+        fail "${package_name} changelog release heading is invalid"
+    local release_date=${release_line#"${heading}"}
+    [[ "${release_date}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] ||
+        fail "${package_name} changelog does not contain a dated ${version} release"
+}
+
+package_matrix() {
+    local package_name=$1
+
+    validate_map
+    jq -ce \
+        --arg package_name "${package_name}" \
+        '[.packages[] | select(.name == $package_name)] | if length == 1 then . else error("unknown package") end' \
+        "${package_map}" || fail "unknown package: ${package_name}"
+}
+
 split_package() {
     require_command git
 
@@ -169,7 +206,7 @@ verify_split() (
     local package_name=$1
     local split_ref=$2
     local expected_files
-    expected_files='^(LICENSE|README\.md|CHANGELOG\.md|UPGRADE\.md|CONTRIBUTING\.md|CODE_OF_CONDUCT\.md|SECURITY\.md|PROTOCOL\.md|api-surface\.json|composer\.json|composer\.lock|config/|docs/|src/|tests/|benchmarks/|resources/|bin/|\.github/|phpstan\.neon|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
+    expected_files='^(LICENSE|README\.md|CHANGELOG\.md|UPGRADE\.md|RELEASE\.md|CONTRIBUTING\.md|CODE_OF_CONDUCT\.md|SECURITY\.md|PROTOCOL\.md|api-surface\.json|composer\.json|composer\.lock|config/|docs/|src/|tests/|benchmarks/|resources/|bin/|\.github/|phpstan\.neon|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
 
     local temporary_directory
     temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/pam-package.XXXXXX")
@@ -209,12 +246,23 @@ case "${command_name}" in
         validate_map
         jq -c '.packages' "${package_map}"
         ;;
+    package-matrix)
+        test "$#" -eq 2 || fail "usage: $0 package-matrix <composer-package>"
+        require_command jq
+        package_matrix "$2"
+        ;;
     validate)
         validate_packages
         ;;
     validate-tag)
         test "$#" -eq 2 || fail "usage: $0 validate-tag <vX.Y.Z>"
         validate_release_tag "$2"
+        ;;
+    validate-package-tag)
+        test "$#" -eq 3 ||
+            fail "usage: $0 validate-package-tag <composer-package> <vX.Y.Z>"
+        require_command jq
+        validate_package_tag "$2" "$3"
         ;;
     split)
         test "$#" -ge 2 && test "$#" -le 3 ||
@@ -226,6 +274,6 @@ case "${command_name}" in
         verify_split "$2" "$3"
         ;;
     *)
-        fail "usage: $0 {matrix|validate|validate-tag|split|verify-split}"
+        fail "usage: $0 {matrix|package-matrix|validate|validate-tag|validate-package-tag|split|verify-split}"
         ;;
 esac

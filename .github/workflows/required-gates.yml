@@ -80,7 +80,12 @@ jobs:
           tools: composer:v2
           coverage: none
       - name: Validate package publication metadata and splits
-        run: scripts/package-release.sh validate
+        run: |
+          scripts/package-release.sh validate
+          scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
+          scripts/package-release.sh validate-package-tag pushinbr/pam-skeleton v2.0.0
+          test "$(scripts/package-release.sh package-matrix pushinbr/pam-api | jq 'length')" -eq 1
+          ! scripts/package-release.sh package-matrix pushinbr/not-a-package
 
   security:
     name: Required security

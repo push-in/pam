@@ -81,6 +81,8 @@ jobs:
             composer validate --strict --no-check-lock --no-check-publish "$package"
           done
           scripts/package-release.sh validate
+          scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
+          scripts/package-release.sh validate-package-tag pushinbr/pam-skeleton v2.0.0
       - name: Install locked Composer dependencies
         run: |
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist

@@ -3,7 +3,7 @@
 All notable PAM API changes are documented here. The package follows Semantic
 Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 
-## 2.0.0 - Unreleased
+## 2.0.0 - 2026-08-21
 
 ### Added
 
@@ -19,6 +19,7 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - bounded route configuration and PCRE match/depth budgets;
 - an executable reflection-derived public API compatibility baseline enforced
   by Composer and required CI;
+- an executable upgrade fixture bound to the published 1.0.2 source commit;
 - built-in fluent test assertions for successful responses, headers and exact
   JSON payloads, used by the canonical structured starter;
 - request lifecycle observers and a bounded privacy-safe development profiler;
@@ -35,8 +36,9 @@ Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 - Eloquent/Illuminate 13 is part of the default PAM API installation;
 - persistent-worker request isolation is a public correctness contract.
 
-The final release entry will include upgrade evidence, supported dependency
-matrix and exact comparison against the latest stable 1.x tag.
+Release evidence includes the executable public API baseline, PHPStan level 9,
+the locked PHPUnit suite, isolated package split verification and the generated
+starter installation smoke in required CI.
 
 ## 1.0.2 - 2026-08-20
 
