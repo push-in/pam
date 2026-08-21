@@ -16,6 +16,11 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam run` — Build and launch the active application.
 - `pam logs` — Stream logs from the active application.
 - `pam daemon` — Manage the per-user PAM supervisor.
+- `pam scale` — Change a managed application's worker count.
+- `pam save` — Save the desired managed process list.
+- `pam resurrect` — Restore the saved managed process list.
+- `pam startup` — Generate or install the Linux user service.
+- `pam monit` — Show managed process health and capacity.
 - `pam devices` — List connected development targets.
 - `pam devtools` — Toggle contextual development tools.
 - `pam console` — Open the application console.

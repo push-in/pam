@@ -801,6 +801,10 @@ pam reload api                                      zero-downtime generational r
 pam logs api --errors --lines 200                   inspect retained manager logs
 pam logs api --both --follow                        follow stdout and stderr across rotation
 pam daemon start|status|stop                        control the private per-user supervisor
+pam scale api 8                                     persist and apply a new worker count
+pam save && pam resurrect                           save and restore the desired process list
+pam startup --print|--install                       configure the systemd user service
+pam monit [--json]                                  inspect process health and capacity
 pam test [directory] [--pest|--phpunit]            test inside the Embed SAPI
 pam routes [index.php]                              inspect registered routes
 pam inspect [index.php]                             inspect PHP, INI, ABI, and extensions

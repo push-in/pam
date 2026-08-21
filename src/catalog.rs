@@ -153,6 +153,27 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("run", "Build and launch the active application", "Develop"),
         command("logs", "Stream logs from the active application", "Develop"),
         command("daemon", "Manage the per-user PAM supervisor", "Develop"),
+        command(
+            "scale",
+            "Change a managed application's worker count",
+            "Develop",
+        ),
+        command("save", "Save the desired managed process list", "Develop"),
+        command(
+            "resurrect",
+            "Restore the saved managed process list",
+            "Develop",
+        ),
+        command(
+            "startup",
+            "Generate or install the Linux user service",
+            "Develop",
+        ),
+        command(
+            "monit",
+            "Show managed process health and capacity",
+            "Develop",
+        ),
         command("devices", "List connected development targets", "Develop"),
         command("devtools", "Toggle contextual development tools", "Develop"),
         command("console", "Open the application console", "Develop"),

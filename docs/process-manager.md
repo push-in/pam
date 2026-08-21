@@ -15,6 +15,12 @@ pam daemon start
 pam daemon status
 pam reload billing
 pam restart billing
+pam scale billing 12
+pam monit
+pam save
+pam resurrect
+pam startup --print
+pam startup --install
 pam stop billing
 pam delete billing
 ```
@@ -38,6 +44,10 @@ continues across rotation; `--errors` selects stderr and `--both` follows both.
   It has a downtime window and receives a new PID.
 - `stop` retains registration and logs.
 - `delete` accepts only stopped applications and preserves their logs.
+- `scale` persists a new worker target and performs a readiness-gated restart.
+- `save` records online/stopped intent in a bounded schema; `resurrect` starts
+  only applications saved as online and skips healthy processes.
+- `monit --json` emits a one-shot automation-friendly health/capacity snapshot.
 
 All lifecycle commands accept `--json`. Public kind and state values are
 sequential integer enums: Runtime kind `1`, Laravel Octane kind `2`, online
@@ -58,6 +68,13 @@ $XDG_STATE_HOME/pam/
 fallback), mode `0600` inside a `0700` directory. The server accepts only the
 same effective UID, verified from Linux `SO_PEERCRED`, and bounds each request
 to 16 KiB. Start, inspect, and stop it with `pam daemon start|status|stop`.
+When `pamd` starts, it restores a saved process list if present.
+
+`pam startup --print` generates a hardened foreground systemd user unit.
+`pam startup --install` writes it atomically to
+`~/.config/systemd/user/pamd.service` without changing unrelated configuration.
+Enable it explicitly with `systemctl --user enable --now pamd.service`. Run
+`pam save` first to select which applications return after login or reboot.
 
 Without `XDG_STATE_HOME`, PAM uses `$HOME/.local/state/pam`. Directories are
 mode `0700`; records and logs are mode `0600`. Application names are limited to
@@ -76,7 +93,7 @@ operators should prefer the XDG location and must not share it between users.
 
 This contract supplies detached application management, durable rotating logs,
 and the authenticated per-user `pamd` control-plane foundation. Compatible
-additions include moving lifecycle ownership into the daemon, multi-service
-`pam.toml`, live scaling, systemd boot integration, deployment history, and
-rollback. Existing Runtime, Native, Desktop, and Octane commands remain
-independent while that authority is expanded.
+additions include moving every lifecycle mutation through the daemon,
+multi-service `pam.toml`, deployment history, and rollback. Existing Runtime,
+Native, Desktop, and Octane commands remain independent while that authority is
+expanded.

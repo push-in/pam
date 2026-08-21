@@ -638,8 +638,13 @@ fn run() -> Result<u8, CliError> {
             | "describe"
             | "reload"
             | "restart"
+            | "scale"
             | "stop"
             | "delete"
+            | "save"
+            | "resurrect"
+            | "startup"
+            | "monit"
             | "daemon"
             | "__pamd"
     ) || managed_logs
