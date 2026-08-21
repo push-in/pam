@@ -140,6 +140,17 @@ comparison gates. The downloaded nine-artifact bundle passed independent offline
 verification with `dirty=false` and the pinned PAM, PAM Native, PHP and PM2
 identities.
 
+Suite `7` tests whether PAM's stronger master/worker recovery contract remains
+bounded as the application grows from 1 to 4 and 16 workers. Each configuration
+runs ten independent `SIGKILL` rounds and must pass 100% recovery, 10 ms
+detection p95, 20 ms effective-backoff p95 and 16 MiB daemon RSS growth. The
+total/readiness p95 budgets are 200/150 ms, 250/200 ms and 350/300 ms for 1, 4
+and 16 workers respectively. The aggregate fails if any configuration is
+missing, an unexpected one is present, round counts differ, or source, host,
+binary and PAM Native provenance are not identical. A recursive SHA-256
+manifest binds the aggregate report and every raw suite-5 artifact, and the
+hosted workflow retains the complete Linux evidence for 30 days.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`

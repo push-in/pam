@@ -5,6 +5,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 results=${PAM_RECOVERY_RESULTS:-"${root}/benchmarks/process-manager/results"}
 pam_binary=${PAM_BENCH_BINARY:-"${root}/target/release/pam"}
 rounds=${PAM_RECOVERY_ROUNDS:-10}
+workers=${PAM_RECOVERY_WORKERS:-1}
 maximum_p95_millis=${PAM_RECOVERY_MAX_P95_MILLIS:-200}
 maximum_detection_p95_millis=${PAM_RECOVERY_MAX_DETECTION_P95_MILLIS:-10}
 maximum_backoff_p95_millis=${PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS:-20}
@@ -13,6 +14,10 @@ maximum_rss_growth_bytes=${PAM_RECOVERY_MAX_RSS_GROWTH_BYTES:-16777216}
 
 [[ ${rounds} =~ ^[0-9]+$ ]] && (( rounds >= 3 && rounds <= 100 )) || {
     printf 'PAM_RECOVERY_ROUNDS must be an integer from 3 to 100\n' >&2
+    exit 64
+}
+[[ ${workers} =~ ^[0-9]+$ ]] && (( workers >= 1 && workers <= 64 )) || {
+    printf 'PAM_RECOVERY_WORKERS must be an integer from 1 to 64\n' >&2
     exit 64
 }
 for value in "${maximum_p95_millis}" "${maximum_detection_p95_millis}" \
@@ -58,7 +63,7 @@ rss_before=$(rss_bytes)
 set +e
 launch_output=$(
     cd "${root}"
-    "${pam_binary}" up tests/fixtures/server.php --name "${name}" --workers 1 \
+    "${pam_binary}" up tests/fixtures/server.php --name "${name}" --workers "${workers}" \
         --restart-delay-ms 10 --restart-backoff-max-ms 100 \
         --max-unstable-restarts 100 --min-uptime-ms 1000 2>&1
 )
@@ -133,8 +138,9 @@ native_commit=$(git -C "${root}/pam-native" rev-parse HEAD)
 }
 kernel=$(uname -srmo | php -r 'echo json_encode(trim(stream_get_contents(STDIN)), JSON_THROW_ON_ERROR);')
 binary_sha=$(sha256sum "${pam_binary}" | awk '{print $1}')
-printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s,"dirty_scope":"tracked_files"},"host":{"kernel":%s},"tools":{"pam_sha256":"%s","pam_native_commit":"%s"},"parameters":{"rounds":%d,"restart_delay_millis":10,"poll_interval_millis":10,"maximum_p95_millis":%d,"maximum_detection_p95_millis":%d,"maximum_backoff_p95_millis":%d,"maximum_readiness_p95_millis":%d,"maximum_rss_growth_bytes":%d}}\n' \
+printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s,"dirty_scope":"tracked_files"},"host":{"kernel":%s},"tools":{"pam_sha256":"%s","pam_native_commit":"%s"},"parameters":{"rounds":%d,"workers":%d,"restart_delay_millis":10,"poll_interval_millis":10,"maximum_p95_millis":%d,"maximum_detection_p95_millis":%d,"maximum_backoff_p95_millis":%d,"maximum_readiness_p95_millis":%d,"maximum_rss_growth_bytes":%d}}\n' \
     "${commit}" "${dirty}" "${kernel}" "${binary_sha}" "${native_commit}" "${rounds}" \
+    "${workers}" \
     "${maximum_p95_millis}" "${maximum_detection_p95_millis}" \
     "${maximum_backoff_p95_millis}" "${maximum_readiness_p95_millis}" \
     "${maximum_rss_growth_bytes}" >"${results}/metadata.json"
