@@ -810,6 +810,9 @@ pam startup --print|--install                       configure the systemd user s
 pam monit [--json]                                  inspect process health and capacity
 pam config:check [pam.toml] [--json]                validate declarative multi-service config
 pam apply [pam.toml] [--json]                       reconcile all declared applications
+pam deploy api /srv/api/releases/2026-08-21         activate a readiness-gated release
+pam deploy:history api [--json]                     inspect bounded release history
+pam rollback api [--steps N]                        restore a previous healthy release
 pam test [directory] [--pest|--phpunit]            test inside the Embed SAPI
 pam routes [index.php]                              inspect registered routes
 pam inspect [index.php]                             inspect PHP, INI, ABI, and extensions

@@ -180,6 +180,13 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Validate a pam.toml ecosystem contract",
             "Develop",
         ),
+        command("deploy", "Activate a readiness-gated release", "Ship"),
+        command(
+            "deploy:history",
+            "Inspect bounded deployment history",
+            "Ship",
+        ),
+        command("rollback", "Restore a previous healthy release", "Ship"),
         command("devices", "List connected development targets", "Develop"),
         command("devtools", "Toggle contextual development tools", "Develop"),
         command("console", "Open the application console", "Develop"),

@@ -450,6 +450,118 @@ autostart = true
 }
 
 #[test]
+fn deploys_idempotently_and_rolls_back_to_a_healthy_release() {
+    let root = temporary_path("deploy-releases");
+    let release_one = root.join("release-1");
+    let release_two = root.join("release-2");
+    fs::create_dir_all(&release_one).unwrap();
+    fs::create_dir_all(&release_two).unwrap();
+    let repository = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let autoload = repository.join("compat/composer-smoke/vendor/autoload.php");
+    let fixture = fs::read_to_string(fixture("server.php")).unwrap();
+    let fixture = fixture.replace(
+        "__DIR__ . '/../../compat/composer-smoke/vendor/autoload.php'",
+        &format!("'{}'", autoload.display()),
+    );
+    fs::write(release_one.join("server.php"), &fixture).unwrap();
+    fs::write(release_two.join("server.php"), &fixture).unwrap();
+    let state = root.join("state");
+    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let port = probe.local_addr().unwrap().port();
+    drop(probe);
+
+    let started = run_managed_pam(
+        &release_one,
+        &state,
+        port,
+        &[
+            "up",
+            "server.php",
+            "--name",
+            "deploy-smoke",
+            "--workers",
+            "1",
+            "--json",
+        ],
+    );
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let deployed = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "deploy",
+            "deploy-smoke",
+            release_two.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        deployed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&deployed.stderr)
+    );
+    let unchanged = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &[
+            "deploy",
+            "deploy-smoke",
+            release_two.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    let history = run_managed_pam(
+        &root,
+        &state,
+        port,
+        &["deploy:history", "deploy-smoke", "--json"],
+    );
+    let rolled_back = run_managed_pam(&root, &state, port, &["rollback", "deploy-smoke", "--json"]);
+    assert!(unchanged.status.success());
+    assert!(history.status.success());
+    assert!(
+        rolled_back.status.success(),
+        "{}",
+        String::from_utf8_lossy(&rolled_back.stderr)
+    );
+    let deployed: serde_json::Value = serde_json::from_slice(&deployed.stdout).unwrap();
+    let unchanged: serde_json::Value = serde_json::from_slice(&unchanged.stdout).unwrap();
+    let history: serde_json::Value = serde_json::from_slice(&history.stdout).unwrap();
+    let rolled_back: serde_json::Value = serde_json::from_slice(&rolled_back.stdout).unwrap();
+    assert_eq!(deployed["actionCode"], 1);
+    assert_eq!(unchanged["actionCode"], 3);
+    assert_eq!(history["entries"].as_array().unwrap().len(), 2);
+    assert_eq!(rolled_back["actionCode"], 2);
+    assert_eq!(
+        rolled_back["releaseDirectory"],
+        release_one.to_str().unwrap()
+    );
+
+    assert!(
+        run_managed_pam(&root, &state, port, &["stop", "deploy-smoke"])
+            .status
+            .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, port, &["delete", "deploy-smoke"])
+            .status
+            .success()
+    );
+    assert!(
+        run_managed_pam(&root, &state, port, &["daemon", "stop"])
+            .status
+            .success()
+    );
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn evaluates_bounded_overload_evidence() {
     let results = temporary_path("overload-evidence");
     fs::create_dir_all(&results).unwrap();

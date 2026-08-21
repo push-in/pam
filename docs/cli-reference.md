@@ -23,6 +23,13 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam monit` — Show managed process health and capacity.
 - `pam apply` — Reconcile applications from pam.toml.
 - `pam config:check` — Validate a pam.toml ecosystem contract.
+## Ship
+
+- `pam deploy` — Activate a readiness-gated release.
+- `pam deploy:history` — Inspect bounded deployment history.
+- `pam rollback` — Restore a previous healthy release.
+## Develop
+
 - `pam devices` — List connected development targets.
 - `pam devtools` — Toggle contextual development tools.
 - `pam console` — Open the application console.
