@@ -12,7 +12,7 @@ pam up --name production --env-file .env.production
 pam up --name production --shutdown-timeout-ms 20000
 pam up --name api --health-check-url http://127.0.0.1:8080/health \
   --health-check-interval-ms 5000 --health-check-timeout-ms 1000 \
-  --health-check-failures 3
+  --health-check-start-period-ms 30000 --health-check-failures 3
 pam ps
 pam status billing
 pam describe billing
@@ -80,6 +80,11 @@ stale results are discarded by PID and configuration identity. After the
 configured consecutive-failure threshold, PAM records the unhealthy event,
 kills the stuck master, and delegates restart/backoff/circuit behavior to the
 same recovery state machine. Health checks require automatic restart.
+`--health-check-start-period-ms` defers liveness probes for 0–3600000 ms after
+each master start. It defaults to zero for compatibility and uses the new
+master's recorded start time after every manual or automatic restart. This
+prevents a slow but valid warmup from consuming the failure threshold; status
+JSON exposes the effective value as `healthCheck.startPeriodMillis`.
 
 `--shutdown-timeout-ms` controls how long PAM waits after `SIGTERM` during
 `stop`, `restart`, deploy activation, and rollback. The accepted range is
@@ -119,6 +124,7 @@ sequential integer enums: Runtime kind `1`, Laravel Octane kind `2`, online
 state `1`, and stopped state `2`. Recovery states are healthy `1`, backoff `2`,
 stabilizing `3`, circuit open `4`, and disabled `5`.
 Health states are disabled `1`, healthy `2`, failing `3`, and unhealthy `4`.
+The bounded pre-liveness startup period is starting `5`.
 
 ## Linux state and security
 
@@ -173,6 +179,7 @@ shutdown_timeout_millis = 20000
 health_check_url = "http://127.0.0.1:8080/health"
 health_check_interval_millis = 5000
 health_check_timeout_millis = 1000
+health_check_start_period_millis = 30000
 health_check_failure_threshold = 3
 auto_restart = true
 restart_delay_millis = 250
