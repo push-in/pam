@@ -72,6 +72,12 @@ same effective UID, verified from Linux `SO_PEERCRED`, and bounds each request
 to 16 KiB. Start, inspect, and stop it with `pam daemon start|status|stop`.
 When `pamd` starts, it restores a saved process list if present.
 
+Non-interactive manager commands auto-start `pamd` and execute through its
+serialized, allowlisted RPC authority. Responses preserve stdout, stderr, and
+exit status and are bounded to 2 MiB. Malformed clients receive an error without
+terminating the daemon. Interactive `pam up --attach` and `pam logs --follow`
+remain attached directly to the invoking terminal by design.
+
 `pam startup --print` generates a hardened foreground systemd user unit.
 `pam startup --install` writes it atomically to
 `~/.config/systemd/user/pamd.service` without changing unrelated configuration.
