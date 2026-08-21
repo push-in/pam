@@ -7,6 +7,7 @@
 /artifacts/
 /tests/__pycache__/
 /benchmarks/octane/results/
+/benchmarks/process-manager/results/
 /fuzz/artifacts/
 /fuzz/coverage/
 /fuzz/target/
