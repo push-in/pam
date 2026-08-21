@@ -8,6 +8,8 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Builder;
 use Illuminate\Events\Dispatcher;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Pam\Api\Transactions\TransactionManager;
 
 final readonly class EloquentManager implements TransactionManager
@@ -20,6 +22,8 @@ final readonly class EloquentManager implements TransactionManager
     {
         Model::setConnectionResolver($this->connections);
         Model::setEventDispatcher($this->connections->eventDispatcher());
+        DB::swap(new FiberDatabaseProxy($this->connections));
+        Schema::swap(new FiberSchemaProxy($this->connections));
     }
 
     public function connection(?string $name = null): Connection

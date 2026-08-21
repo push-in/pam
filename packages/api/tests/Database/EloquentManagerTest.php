@@ -9,6 +9,7 @@ use Pam\Api\Database\DatabaseConfig;
 use Pam\Api\Database\DatabaseHealthCheck;
 use Pam\Api\Database\EloquentManager;
 use Pam\Api\Database\FiberConnectionResolver;
+use Pam\Api\Database\MigrationManager;
 use Pam\Api\Health\HealthState;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -17,6 +18,7 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(DatabaseHealthCheck::class)]
 #[CoversClass(EloquentManager::class)]
 #[CoversClass(FiberConnectionResolver::class)]
+#[CoversClass(MigrationManager::class)]
 final class EloquentManagerTest extends TestCase
 {
     public function testItUsesRealEloquentWithTransactions(): void
@@ -86,14 +88,41 @@ final class EloquentManagerTest extends TestCase
         $manager->releaseCurrentRequest();
     }
 
+    public function testItRunsAndRollsBackLaravelMigrations(): void
+    {
+        $config = self::config();
+        $connections = new FiberConnectionResolver($config);
+        $manager = new EloquentManager($connections);
+        $manager->boot();
+        $migrations = new MigrationManager($connections);
+        $path = dirname(__DIR__) . '/Fixtures/migrations';
+
+        self::assertSame(
+            ['2026_08_20_000000_create_community_posts'],
+            $migrations->migrate($path),
+        );
+        self::assertTrue($manager->schema()->hasTable('community_posts'));
+        self::assertSame(
+            ['2026_08_20_000000_create_community_posts'],
+            $migrations->rollback($path, steps: 1),
+        );
+        self::assertFalse($manager->schema()->hasTable('community_posts'));
+        $manager->releaseCurrentRequest();
+    }
+
     private static function manager(): EloquentManager
     {
-        $config = new DatabaseConfig('default', [
-            'default' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''],
-        ]);
+        $config = self::config();
         $manager = new EloquentManager(new FiberConnectionResolver($config));
         $manager->boot();
         return $manager;
+    }
+
+    private static function config(): DatabaseConfig
+    {
+        return new DatabaseConfig('default', [
+            'default' => ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => ''],
+        ]);
     }
 }
 

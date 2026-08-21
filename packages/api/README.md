@@ -72,6 +72,11 @@ transactions and disconnects every configured connection. Register
 `DatabaseHealthCheck` in a `HealthRegistry` for readiness checks; its result
 reports latency and failure class without exposing credentials.
 
+Laravel-compatible anonymous-class migrations work through
+`MigrationManager::migrate()` and `rollback()`. The manager creates the
+migration repository on first use and supports dry-run execution, named
+connections and bounded step rollbacks.
+
 ## Route groups
 
 ```php
