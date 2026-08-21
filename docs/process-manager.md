@@ -10,6 +10,9 @@ pam ps
 pam status billing
 pam describe billing
 pam logs billing --errors --lines 200
+pam logs billing --both --follow
+pam daemon start
+pam daemon status
 pam reload billing
 pam restart billing
 pam stop billing
@@ -19,6 +22,13 @@ pam delete billing
 `pam up` starts `index.php` by default. Inside a Laravel project containing an
 `artisan` file, it starts PAM Octane automatically. An explicit script selects
 the raw Runtime path. Arguments after `--` belong to the application.
+`--attach` keeps standard input, output, and error connected to the terminal.
+Detached applications write separate output and error logs.
+
+Log files rotate before launch or restart when they reach 10 MiB and retain
+five generations by default. `pam up --log-max-bytes N --log-retain N` stores
+per-application limits. `pam logs NAME --follow` streams appended bytes and
+continues across rotation; `--errors` selects stderr and `--both` follows both.
 
 ## Lifecycle semantics
 
@@ -44,6 +54,11 @@ $XDG_STATE_HOME/pam/
 └── logs/           stdout and stderr streams
 ```
 
+`pamd` uses `$XDG_RUNTIME_DIR/pam/pamd.sock` (with a private state-directory
+fallback), mode `0600` inside a `0700` directory. The server accepts only the
+same effective UID, verified from Linux `SO_PEERCRED`, and bounds each request
+to 16 KiB. Start, inspect, and stop it with `pam daemon start|status|stop`.
+
 Without `XDG_STATE_HOME`, PAM uses `$HOME/.local/state/pam`. Directories are
 mode `0700`; records and logs are mode `0600`. Application names are limited to
 64 ASCII letters, digits, dots, hyphens, or underscores. PAM rejects symlink
@@ -59,8 +74,9 @@ operators should prefer the XDG location and must not share it between users.
 
 ## Delivery boundary
 
-This initial contract supplies detached application management and durable
-logs. Compatible additions include the authenticated per-user `pamd` socket,
-log following and rotation, multi-service `pam.toml`, live scaling, systemd boot
-integration, deployment history, and rollback. Existing Runtime, Native,
-Desktop, and Octane commands remain independent while that authority is added.
+This contract supplies detached application management, durable rotating logs,
+and the authenticated per-user `pamd` control-plane foundation. Compatible
+additions include moving lifecycle ownership into the daemon, multi-service
+`pam.toml`, live scaling, systemd boot integration, deployment history, and
+rollback. Existing Runtime, Native, Desktop, and Octane commands remain
+independent while that authority is expanded.

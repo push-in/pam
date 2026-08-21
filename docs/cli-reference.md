@@ -15,6 +15,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam dev` — Start the contextual development session.
 - `pam run` — Build and launch the active application.
 - `pam logs` — Stream logs from the active application.
+- `pam daemon` — Manage the per-user PAM supervisor.
 - `pam devices` — List connected development targets.
 - `pam devtools` — Toggle contextual development tools.
 - `pam console` — Open the application console.

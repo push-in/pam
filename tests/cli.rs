@@ -41,6 +41,15 @@ fn run_managed_pam(
         .expect("managed PAM command should start")
 }
 
+fn run_manager_daemon(state: &std::path::Path, runtime: &std::path::Path, action: &str) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_pam"))
+        .env("PAM_MANAGER_STATE_DIR", state)
+        .env("PAM_MANAGER_RUNTIME_DIR", runtime)
+        .args(["daemon", action])
+        .output()
+        .expect("pamd command should start")
+}
+
 fn temporary_path(name: &str) -> PathBuf {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -254,6 +263,42 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     assert_ne!(started["pid"], restarted["pid"]);
     assert!(!state.join("applications/managed-smoke.json").exists());
     fs::remove_dir_all(state).unwrap();
+}
+
+#[test]
+fn manages_a_private_per_user_daemon() {
+    let root = temporary_path("manager-daemon");
+    let state = root.join("state");
+    let runtime = root.join("runtime");
+    let started = run_manager_daemon(&state, &runtime, "start");
+    assert!(
+        started.status.success(),
+        "{}",
+        String::from_utf8_lossy(&started.stderr)
+    );
+    let status = run_manager_daemon(&state, &runtime, "status");
+    assert!(status.status.success());
+    assert!(String::from_utf8_lossy(&status.stdout).contains("pamd is online"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&runtime).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(runtime.join("pamd.sock"))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777,
+            0o600
+        );
+    }
+    let stopped = run_manager_daemon(&state, &runtime, "stop");
+    assert!(stopped.status.success());
+    assert!(!runtime.join("pamd.sock").exists());
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]
