@@ -32,6 +32,11 @@ const MAX_DEPLOY_HISTORY: usize = 50;
 const MAX_DASHBOARD_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RESOURCE_HISTORY: usize = 120;
 const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
+const SUPERVISION_INTERVAL: Duration = Duration::from_millis(250);
+const DEFAULT_RESTART_DELAY_MILLIS: u64 = 250;
+const DEFAULT_RESTART_BACKOFF_MAX_MILLIS: u64 = 15_000;
+const DEFAULT_MAX_UNSTABLE_RESTARTS: u32 = 10;
+const DEFAULT_MIN_UPTIME_MILLIS: u64 = 30_000;
 const MAX_DASHBOARD_REQUEST_BYTES: usize = 16 * 1024;
 static LIVE_DASHBOARD_RUNNING: std::sync::atomic::AtomicBool =
     std::sync::atomic::AtomicBool::new(true);
@@ -129,6 +134,16 @@ enum ResourceEnforcementState {
     Unverified = 3,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum RecoveryState {
+    Healthy = 1,
+    Backoff = 2,
+    Stabilizing = 3,
+    CircuitOpen = 4,
+    Disabled = 5,
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApplicationRecord {
@@ -152,6 +167,26 @@ struct ApplicationRecord {
     memory_max_bytes: Option<u64>,
     #[serde(default)]
     task_max_count: Option<u64>,
+    #[serde(default = "default_stopped_state")]
+    desired_state_code: u8,
+    #[serde(default)]
+    auto_restart: bool,
+    #[serde(default = "default_restart_delay_millis")]
+    restart_delay_millis: u64,
+    #[serde(default = "default_restart_backoff_max_millis")]
+    restart_backoff_max_millis: u64,
+    #[serde(default = "default_max_unstable_restarts")]
+    max_unstable_restarts: u32,
+    #[serde(default = "default_min_uptime_millis")]
+    min_uptime_millis: u64,
+    #[serde(default)]
+    unstable_restart_count: u32,
+    #[serde(default)]
+    total_auto_restart_count: u64,
+    #[serde(default)]
+    next_restart_at_millis: Option<u64>,
+    #[serde(default = "default_disabled_recovery_state")]
+    recovery_state_code: u8,
     created_at_millis: u64,
 }
 
@@ -260,6 +295,16 @@ struct EcosystemApplication {
     arguments: Vec<String>,
     #[serde(default = "default_true")]
     autostart: bool,
+    #[serde(default = "default_true")]
+    auto_restart: bool,
+    #[serde(default = "default_restart_delay_millis")]
+    restart_delay_millis: u64,
+    #[serde(default = "default_restart_backoff_max_millis")]
+    restart_backoff_max_millis: u64,
+    #[serde(default = "default_max_unstable_restarts")]
+    max_unstable_restarts: u32,
+    #[serde(default = "default_min_uptime_millis")]
+    min_uptime_millis: u64,
     #[serde(default)]
     memory_warning_bytes: Option<u64>,
     #[serde(default)]
@@ -799,15 +844,9 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
         let action = if !application.autostart {
             let record_path = paths.application(&name);
             if record_path.exists() {
-                let record = read_record(&record_path)?;
-                if running_state(&record)
-                    .as_ref()
-                    .is_some_and(master_is_running)
-                {
-                    let mut command = Command::new(executable);
-                    command.args(["stop", &name]);
-                    run_reconcile_command(command, &name)?;
-                }
+                let mut command = Command::new(executable);
+                command.args(["stop", &name]);
+                run_reconcile_command(command, &name)?;
             }
             ReconcileAction::Disabled
         } else {
@@ -819,6 +858,18 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     .current_dir(cwd)
                     .args(["up", "--name", &name, "--workers"]);
                 command.arg(application.workers.to_string());
+                if !application.auto_restart {
+                    command.arg("--no-autorestart");
+                }
+                command
+                    .arg("--restart-delay-ms")
+                    .arg(application.restart_delay_millis.to_string())
+                    .arg("--restart-backoff-max-ms")
+                    .arg(application.restart_backoff_max_millis.to_string())
+                    .arg("--max-unstable-restarts")
+                    .arg(application.max_unstable_restarts.to_string())
+                    .arg("--min-uptime-ms")
+                    .arg(application.min_uptime_millis.to_string());
                 if let Some(value) = application.memory_warning_bytes {
                     command.args(["--memory-warning-bytes", &value.to_string()]);
                 }
@@ -850,12 +901,26 @@ fn apply_ecosystem(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, S
                     || record.task_max_count != application.task_max_count;
                 let policy_updated = record.memory_warning_bytes
                     != application.memory_warning_bytes
-                    || record.task_warning_count != application.task_warning_count;
+                    || record.task_warning_count != application.task_warning_count
+                    || record.auto_restart != application.auto_restart
+                    || record.restart_delay_millis != application.restart_delay_millis
+                    || record.restart_backoff_max_millis != application.restart_backoff_max_millis
+                    || record.max_unstable_restarts != application.max_unstable_restarts
+                    || record.min_uptime_millis != application.min_uptime_millis;
                 if policy_updated || limit_updated {
                     record.memory_warning_bytes = application.memory_warning_bytes;
                     record.task_warning_count = application.task_warning_count;
                     record.memory_max_bytes = application.memory_max_bytes;
                     record.task_max_count = application.task_max_count;
+                    record.auto_restart = application.auto_restart;
+                    record.restart_delay_millis = application.restart_delay_millis;
+                    record.restart_backoff_max_millis = application.restart_backoff_max_millis;
+                    record.max_unstable_restarts = application.max_unstable_restarts;
+                    record.min_uptime_millis = application.min_uptime_millis;
+                    if !record.auto_restart {
+                        record.recovery_state_code = RecoveryState::Disabled as u8;
+                        record.next_restart_at_millis = None;
+                    }
                     write_record(&record_path, &record)?;
                 }
                 let state = running_state(&record);
@@ -999,6 +1064,12 @@ fn validate_ecosystem_application(
         application.task_max_count,
         &format!("application {name:?}"),
     )?;
+    validate_recovery_policy(
+        application.restart_delay_millis,
+        application.restart_backoff_max_millis,
+        application.max_unstable_restarts,
+        application.min_uptime_millis,
+    )?;
     if application.kind_code == ApplicationKind::LaravelOctane as u8 && application.script.is_some()
     {
         return Err(format!("Laravel application {name:?} cannot set script"));
@@ -1055,6 +1126,24 @@ fn default_current_directory() -> PathBuf {
 const fn default_true() -> bool {
     true
 }
+const fn default_stopped_state() -> u8 {
+    ApplicationState::Stopped as u8
+}
+const fn default_restart_delay_millis() -> u64 {
+    DEFAULT_RESTART_DELAY_MILLIS
+}
+const fn default_restart_backoff_max_millis() -> u64 {
+    DEFAULT_RESTART_BACKOFF_MAX_MILLIS
+}
+const fn default_max_unstable_restarts() -> u32 {
+    DEFAULT_MAX_UNSTABLE_RESTARTS
+}
+const fn default_min_uptime_millis() -> u64 {
+    DEFAULT_MIN_UPTIME_MILLIS
+}
+const fn default_disabled_recovery_state() -> u8 {
+    RecoveryState::Disabled as u8
+}
 
 fn scale(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut arguments = arguments.into_iter();
@@ -1088,14 +1177,7 @@ fn save(arguments: Vec<OsString>) -> Result<u8, String> {
             .iter()
             .map(|record| SavedApplication {
                 name: record.name.clone(),
-                desired_state_code: if running_state(record)
-                    .as_ref()
-                    .is_some_and(master_is_running)
-                {
-                    ApplicationState::Online as u8
-                } else {
-                    ApplicationState::Stopped as u8
-                },
+                desired_state_code: record.desired_state_code,
             })
             .collect(),
     };
@@ -1138,7 +1220,10 @@ fn resurrect_saved(executable: &OsStr) -> Result<Vec<String>, String> {
         if saved.desired_state_code != ApplicationState::Online as u8 {
             continue;
         }
-        let record = read_record(&paths.application(&saved.name))?;
+        let path = paths.application(&saved.name);
+        let mut record = read_record(&path)?;
+        reset_recovery(&mut record);
+        write_record(&path, &record)?;
         if running_state(&record)
             .as_ref()
             .is_some_and(master_is_running)
@@ -1149,6 +1234,84 @@ fn resurrect_saved(executable: &OsStr) -> Result<Vec<String>, String> {
         restarted.push(saved.name);
     }
     Ok(restarted)
+}
+
+fn reset_recovery(record: &mut ApplicationRecord) {
+    record.desired_state_code = ApplicationState::Online as u8;
+    record.unstable_restart_count = 0;
+    record.next_restart_at_millis = None;
+    record.recovery_state_code = if record.auto_restart {
+        RecoveryState::Healthy as u8
+    } else {
+        RecoveryState::Disabled as u8
+    };
+}
+
+fn schedule_recovery(record: &mut ApplicationRecord, now: u64) {
+    record.unstable_restart_count = record.unstable_restart_count.saturating_add(1);
+    if record.unstable_restart_count > record.max_unstable_restarts {
+        record.recovery_state_code = RecoveryState::CircuitOpen as u8;
+        record.next_restart_at_millis = None;
+        return;
+    }
+    let exponent = record.unstable_restart_count.saturating_sub(1).min(20);
+    let multiplier = 1_u64 << exponent;
+    let delay = record
+        .restart_delay_millis
+        .saturating_mul(multiplier)
+        .min(record.restart_backoff_max_millis);
+    record.recovery_state_code = RecoveryState::Backoff as u8;
+    record.next_restart_at_millis = Some(now.saturating_add(delay));
+}
+
+fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<(), String> {
+    let now = epoch_millis();
+    for mut record in read_all_records(paths)? {
+        if record.desired_state_code != ApplicationState::Online as u8 || !record.auto_restart {
+            continue;
+        }
+        let path = paths.application(&record.name);
+        if let Some(state) = running_state(&record).filter(master_is_running) {
+            if record.recovery_state_code == RecoveryState::Stabilizing as u8
+                && now.saturating_sub(state.started_at_millis) >= record.min_uptime_millis
+            {
+                record.unstable_restart_count = 0;
+                record.next_restart_at_millis = None;
+                record.recovery_state_code = RecoveryState::Healthy as u8;
+                write_record(&path, &record)?;
+            }
+            continue;
+        }
+        if record.recovery_state_code == RecoveryState::CircuitOpen as u8 {
+            continue;
+        }
+        if record.recovery_state_code != RecoveryState::Backoff as u8
+            || record.next_restart_at_millis.is_none()
+        {
+            schedule_recovery(&mut record, now);
+            write_record(&path, &record)?;
+            continue;
+        }
+        if record
+            .next_restart_at_millis
+            .is_some_and(|deadline| deadline > now)
+        {
+            continue;
+        }
+        match restart_record(executable, &record, false, false) {
+            Ok(_) => {
+                record.total_auto_restart_count = record.total_auto_restart_count.saturating_add(1);
+                record.next_restart_at_millis = None;
+                record.recovery_state_code = RecoveryState::Stabilizing as u8;
+            }
+            Err(error) => {
+                eprintln!("pamd could not recover {:?}: {error}", record.name);
+                schedule_recovery(&mut record, epoch_millis());
+            }
+        }
+        write_record(&path, &record)?;
+    }
+    Ok(())
 }
 
 fn startup(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -2194,8 +2357,16 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
         eprintln!("pamd could not record initial resource history: {error}");
     }
     let mut next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
+    let mut next_supervision = Instant::now();
     let own_uid = unsafe { libc::geteuid() };
     loop {
+        reap_daemon_children();
+        if Instant::now() >= next_supervision {
+            if let Err(error) = supervise_applications(executable, &paths) {
+                eprintln!("pamd supervision error: {error}");
+            }
+            next_supervision = Instant::now() + SUPERVISION_INTERVAL;
+        }
         if Instant::now() >= next_sample {
             if let Err(error) = record_resource_history(&paths) {
                 eprintln!("pamd could not record resource history: {error}");
@@ -2492,6 +2663,11 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut task_warning_count = None;
     let mut memory_max_bytes = None;
     let mut task_max_count = None;
+    let mut auto_restart = true;
+    let mut restart_delay_millis = DEFAULT_RESTART_DELAY_MILLIS;
+    let mut restart_backoff_max_millis = DEFAULT_RESTART_BACKOFF_MAX_MILLIS;
+    let mut max_unstable_restarts = DEFAULT_MAX_UNSTABLE_RESTARTS;
+    let mut min_uptime_millis = DEFAULT_MIN_UPTIME_MILLIS;
     let mut application_arguments = Vec::new();
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
@@ -2500,6 +2676,24 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             "--workers" => workers = Some(required_positive(arguments.next(), "--workers")?),
             "--attach" => attach = true,
             "--json" => json = true,
+            "--no-autorestart" => auto_restart = false,
+            "--restart-delay-ms" => {
+                restart_delay_millis =
+                    required_positive_u64(arguments.next(), "--restart-delay-ms")?
+            }
+            "--restart-backoff-max-ms" => {
+                restart_backoff_max_millis =
+                    required_positive_u64(arguments.next(), "--restart-backoff-max-ms")?
+            }
+            "--max-unstable-restarts" => {
+                max_unstable_restarts =
+                    required_positive(arguments.next(), "--max-unstable-restarts")?
+                        .try_into()
+                        .map_err(|_| "--max-unstable-restarts is too large".to_owned())?;
+            }
+            "--min-uptime-ms" => {
+                min_uptime_millis = required_positive_u64(arguments.next(), "--min-uptime-ms")?
+            }
             "--log-max-bytes" => {
                 log_max_bytes = required_positive_u64(arguments.next(), "--log-max-bytes")?
             }
@@ -2547,6 +2741,12 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         memory_max_bytes,
         task_max_count,
         "application",
+    )?;
+    validate_recovery_policy(
+        restart_delay_millis,
+        restart_backoff_max_millis,
+        max_unstable_restarts,
+        min_uptime_millis,
     )?;
 
     let cwd = fs::canonicalize(std::env::current_dir().map_err(|error| error.to_string())?)
@@ -2664,7 +2864,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         thread::sleep(Duration::from_millis(50));
     };
     let record = ApplicationRecord {
-        schema_version: 1,
+        schema_version: 2,
         name: name.clone(),
         kind_code: if laravel {
             ApplicationKind::LaravelOctane as u8
@@ -2688,6 +2888,20 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         task_warning_count,
         memory_max_bytes,
         task_max_count,
+        desired_state_code: ApplicationState::Online as u8,
+        auto_restart,
+        restart_delay_millis,
+        restart_backoff_max_millis,
+        max_unstable_restarts,
+        min_uptime_millis,
+        unstable_restart_count: 0,
+        total_auto_restart_count: 0,
+        next_restart_at_millis: None,
+        recovery_state_code: if auto_restart {
+            RecoveryState::Healthy as u8
+        } else {
+            RecoveryState::Disabled as u8
+        },
         created_at_millis: epoch_millis(),
     };
     write_record(&record_path, &record)?;
@@ -2771,7 +2985,14 @@ fn signal(arguments: Vec<OsString>, signal: i32, action: &str) -> Result<u8, Str
 
 fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
     let (name, json) = parse_name_json(arguments, "stop")?;
-    let record = record(&name)?;
+    let paths = ManagerPaths::load()?;
+    let path = paths.application(&name);
+    let mut record = read_record(&path)?;
+    record.desired_state_code = ApplicationState::Stopped as u8;
+    record.recovery_state_code = RecoveryState::Disabled as u8;
+    record.unstable_restart_count = 0;
+    record.next_restart_at_millis = None;
+    write_record(&path, &record)?;
     let Some(state) = running_state(&record) else {
         return Ok(0);
     };
@@ -2780,6 +3001,7 @@ fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
     }
     let deadline = Instant::now() + Duration::from_secs(20);
     while master_is_running(&state) && Instant::now() < deadline {
+        reap_daemon_children();
         thread::sleep(Duration::from_millis(50));
     }
     if master_is_running(&state) {
@@ -2798,7 +3020,11 @@ fn stop(arguments: Vec<OsString>) -> Result<u8, String> {
 
 fn restart(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let (name, json) = parse_name_json(arguments, "restart")?;
-    let record = record(&name)?;
+    let paths = ManagerPaths::load()?;
+    let path = paths.application(&name);
+    let mut record = read_record(&path)?;
+    reset_recovery(&mut record);
+    write_record(&path, &record)?;
     restart_record(executable, &record, json, true)
 }
 
@@ -2815,6 +3041,7 @@ fn restart_record(
         signal_master(&state, STOP_SIGNAL)?;
         let deadline = Instant::now() + Duration::from_secs(20);
         while master_is_running(&state) && Instant::now() < deadline {
+            reap_daemon_children();
             thread::sleep(Duration::from_millis(50));
         }
         if master_is_running(&state) {
@@ -2884,6 +3111,15 @@ fn restart_record(
         }
     }
     Ok(0)
+}
+
+fn reap_daemon_children() {
+    loop {
+        let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+        if result <= 0 {
+            break;
+        }
+    }
 }
 
 fn delete(arguments: Vec<OsString>) -> Result<u8, String> {
@@ -3167,6 +3403,7 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         "name": record.name,
         "kindCode": record.kind_code,
         "stateCode": if online { ApplicationState::Online as u8 } else { ApplicationState::Stopped as u8 },
+        "desiredStateCode": record.desired_state_code,
         "pid": state.map(|state| state.pid),
         "workers": state.map(|state| state.workers),
         "startedAtMillis": state.map(|state| state.started_at_millis),
@@ -3182,6 +3419,17 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
             "enforcementCode": resource_enforcement_state as u8,
         },
         "resourceAlertStateCode": resource_alert_state as u8,
+        "recovery": {
+            "stateCode": record.recovery_state_code,
+            "autoRestart": record.auto_restart,
+            "restartDelayMillis": record.restart_delay_millis,
+            "restartBackoffMaxMillis": record.restart_backoff_max_millis,
+            "maxUnstableRestarts": record.max_unstable_restarts,
+            "minUptimeMillis": record.min_uptime_millis,
+            "unstableRestartCount": record.unstable_restart_count,
+            "totalAutoRestartCount": record.total_auto_restart_count,
+            "nextRestartAtMillis": record.next_restart_at_millis,
+        },
     })
 }
 
@@ -3381,13 +3629,40 @@ fn read_record(path: &Path) -> Result<ApplicationRecord, String> {
     if !metadata.file_type().is_file() || metadata.len() > MAX_RECORD_BYTES {
         return Err(format!("invalid application record {}", path.display()));
     }
-    let record: ApplicationRecord =
+    let mut record: ApplicationRecord =
         serde_json::from_slice(&fs::read(path).map_err(|error| error.to_string())?)
             .map_err(|error| format!("invalid application record: {error}"))?;
-    if record.schema_version != 1 || record.kind_code == 0 || record.kind_code > 2 {
+    if !matches!(record.schema_version, 1 | 2) || record.kind_code == 0 || record.kind_code > 2 {
         return Err("unsupported application record contract".to_owned());
     }
     validate_name(&record.name)?;
+    if record.schema_version == 1 {
+        let online = running_state(&record)
+            .as_ref()
+            .is_some_and(master_is_running);
+        record.schema_version = 2;
+        record.desired_state_code = if online {
+            ApplicationState::Online as u8
+        } else {
+            ApplicationState::Stopped as u8
+        };
+        record.auto_restart = online;
+        record.recovery_state_code = if online {
+            RecoveryState::Healthy as u8
+        } else {
+            RecoveryState::Disabled as u8
+        };
+    }
+    if !matches!(record.desired_state_code, 1 | 2) || !(1..=5).contains(&record.recovery_state_code)
+    {
+        return Err("invalid application recovery state".to_owned());
+    }
+    validate_recovery_policy(
+        record.restart_delay_millis,
+        record.restart_backoff_max_millis,
+        record.max_unstable_restarts,
+        record.min_uptime_millis,
+    )?;
     Ok(record)
 }
 fn read_all_records(paths: &ManagerPaths) -> Result<Vec<ApplicationRecord>, String> {
@@ -3470,6 +3745,30 @@ fn validate_resource_policy(
             .is_some_and(|(warning, maximum)| warning > maximum)
     {
         return Err(format!("{label} warning cannot exceed its hard limit"));
+    }
+    Ok(())
+}
+
+fn validate_recovery_policy(
+    delay_millis: u64,
+    maximum_delay_millis: u64,
+    maximum_restarts: u32,
+    minimum_uptime_millis: u64,
+) -> Result<(), String> {
+    if !(10..=60_000).contains(&delay_millis) {
+        return Err("restart delay must be 10-60000 milliseconds".to_owned());
+    }
+    if !(delay_millis..=300_000).contains(&maximum_delay_millis) {
+        return Err(
+            "restart backoff maximum must be at least the delay and at most 300000 milliseconds"
+                .to_owned(),
+        );
+    }
+    if !(1..=100).contains(&maximum_restarts) {
+        return Err("maximum unstable restarts must be 1-100".to_owned());
+    }
+    if !(1_000..=3_600_000).contains(&minimum_uptime_millis) {
+        return Err("minimum stable uptime must be 1000-3600000 milliseconds".to_owned());
     }
     Ok(())
 }
@@ -3614,6 +3913,55 @@ mod tests {
             ],
             [1, 2, 3]
         );
+        assert_eq!(
+            [
+                RecoveryState::Healthy as u8,
+                RecoveryState::Backoff as u8,
+                RecoveryState::Stabilizing as u8,
+                RecoveryState::CircuitOpen as u8,
+                RecoveryState::Disabled as u8,
+            ],
+            [1, 2, 3, 4, 5]
+        );
+    }
+
+    #[test]
+    fn recovery_backoff_is_exponential_bounded_and_opens_the_circuit() {
+        let mut record = ApplicationRecord {
+            schema_version: 2,
+            name: "api".to_owned(),
+            kind_code: 1,
+            working_directory: PathBuf::from("/srv/api"),
+            command: vec!["pam".to_owned(), "start".to_owned()],
+            master_state_file: PathBuf::from("state.json"),
+            stdout_log: PathBuf::from("out.log"),
+            stderr_log: PathBuf::from("error.log"),
+            log_max_bytes: DEFAULT_LOG_MAX_BYTES,
+            log_retain: DEFAULT_LOG_RETAIN,
+            memory_warning_bytes: None,
+            task_warning_count: None,
+            memory_max_bytes: None,
+            task_max_count: None,
+            desired_state_code: ApplicationState::Online as u8,
+            auto_restart: true,
+            restart_delay_millis: 100,
+            restart_backoff_max_millis: 250,
+            max_unstable_restarts: 3,
+            min_uptime_millis: 1_000,
+            unstable_restart_count: 0,
+            total_auto_restart_count: 0,
+            next_restart_at_millis: None,
+            recovery_state_code: RecoveryState::Healthy as u8,
+            created_at_millis: 1,
+        };
+        for (now, deadline) in [(1_000, 1_100), (2_000, 2_200), (3_000, 3_250)] {
+            schedule_recovery(&mut record, now);
+            assert_eq!(record.recovery_state_code, RecoveryState::Backoff as u8);
+            assert_eq!(record.next_restart_at_millis, Some(deadline));
+        }
+        schedule_recovery(&mut record, 4_000);
+        assert_eq!(record.recovery_state_code, RecoveryState::CircuitOpen as u8);
+        assert_eq!(record.next_restart_at_millis, None);
     }
     #[test]
     fn rotated_log_names_are_stable() {

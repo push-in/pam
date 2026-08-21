@@ -6,6 +6,8 @@ readiness gate, crash recovery, worker recycling, and generational reload.
 
 ```bash
 pam up --name billing --workers 8
+pam up --name critical --restart-delay-ms 250 --restart-backoff-max-ms 15000 \
+  --max-unstable-restarts 10 --min-uptime-ms 30000
 pam ps
 pam status billing
 pam describe billing
@@ -43,6 +45,14 @@ the raw Runtime path. Arguments after `--` belong to the application.
 `--attach` keeps standard input, output, and error connected to the terminal.
 Detached applications write separate output and error logs.
 
+Detached applications automatically recover an unexpectedly exited master.
+The delay doubles after each unstable restart, is capped by
+`--restart-backoff-max-ms`, and resets only after `--min-uptime-ms` of stable
+uptime. After `--max-unstable-restarts`, PAM opens a circuit and requires an
+explicit `pam restart NAME` to retry. `--no-autorestart` disables this policy.
+`status`, `describe`, and `ps --json` expose desired state, recovery state,
+attempt counters, total automatic restarts, and the next retry deadline.
+
 Log files rotate before launch or restart when they reach 10 MiB and retain
 five generations by default. `pam up --log-max-bytes N --log-retain N` stores
 per-application limits. `pam logs NAME --follow` streams appended bytes and
@@ -59,9 +69,10 @@ cannot be combined with the unbounded interactive `--follow` mode.
 
 - `reload` starts a new generation, waits for readiness, activates it, and then
   drains the old generation. Failed readiness keeps the healthy generation.
-- `restart` gracefully stops the master and executes its recorded command again.
+- `restart` resets an open recovery circuit, gracefully stops the master, and executes its recorded command again.
   It has a downtime window and receives a new PID.
-- `stop` retains registration and logs.
+- `stop` persists stopped intent before signaling, retains registration and
+  logs, and is never undone by automatic recovery.
 - `delete` accepts only stopped applications and preserves their logs.
 - `scale` persists a new worker target and performs a readiness-gated restart.
 - `save` records online/stopped intent in a bounded schema; `resurrect` starts
@@ -70,7 +81,8 @@ cannot be combined with the unbounded interactive `--follow` mode.
 
 All lifecycle commands accept `--json`. Public kind and state values are
 sequential integer enums: Runtime kind `1`, Laravel Octane kind `2`, online
-state `1`, and stopped state `2`.
+state `1`, and stopped state `2`. Recovery states are healthy `1`, backoff `2`,
+stabilizing `3`, circuit open `4`, and disabled `5`.
 
 ## Linux state and security
 
@@ -78,7 +90,7 @@ The default root follows the XDG base-directory convention:
 
 ```text
 $XDG_STATE_HOME/pam/
-├── applications/   bounded schema-1 registrations
+├── applications/   bounded schema-2 registrations
 ├── runtime/        master state and PID fingerprints
 └── logs/           stdout and stderr streams
 ```
@@ -120,6 +132,11 @@ memory_warning_bytes = 536870912
 task_warning_count = 64
 memory_max_bytes = 805306368
 task_max_count = 96
+auto_restart = true
+restart_delay_millis = 250
+restart_backoff_max_millis = 15000
+max_unstable_restarts = 10
+min_uptime_millis = 30000
 
 [applications.web]
 kind_code = 2

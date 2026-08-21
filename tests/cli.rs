@@ -287,6 +287,28 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&started.stderr)
     );
+    let started_snapshot: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let original_pid = started_snapshot["pid"].as_u64().unwrap() as i32;
+    unsafe {
+        libc::kill(original_pid, libc::SIGKILL);
+    }
+    let recovered = (0..60)
+        .find_map(|_| {
+            thread::sleep(Duration::from_millis(100));
+            let output =
+                run_managed_pam(&root, &state, port, &["status", "managed-smoke", "--json"]);
+            let snapshot: serde_json::Value = serde_json::from_slice(&output.stdout).ok()?;
+            (output.status.success()
+                && snapshot["pid"].as_u64() != Some(original_pid as u64)
+                && snapshot["recovery"]["totalAutoRestartCount"]
+                    .as_u64()
+                    .unwrap_or(0)
+                    >= 1)
+                .then_some(snapshot)
+        })
+        .expect("pamd should recover an unexpectedly killed master");
+    assert_eq!(recovered["desiredStateCode"], 1);
+    assert_eq!(recovered["recovery"]["stateCode"], 3);
     fs::write(
         state.join("logs/managed-smoke.out.log.1"),
         "needle-old-output\n",
@@ -438,6 +460,9 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     };
     let saved = run_managed_pam(&root, &state, port, &["save", "--json"]);
     let stopped = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
+    thread::sleep(Duration::from_millis(600));
+    let intentionally_stopped =
+        run_managed_pam(&root, &state, port, &["status", "managed-smoke", "--json"]);
     let resurrected = run_managed_pam(&root, &state, port, &["resurrect", "--json"]);
     let stopped_again = run_managed_pam(&root, &state, port, &["stop", "managed-smoke", "--json"]);
     let deleted = run_managed_pam(&root, &state, port, &["delete", "managed-smoke", "--json"]);
@@ -562,6 +587,12 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&stopped.stderr)
     );
+    assert!(!intentionally_stopped.status.success());
+    let intentionally_stopped: serde_json::Value =
+        serde_json::from_slice(&intentionally_stopped.stdout).unwrap();
+    assert_eq!(intentionally_stopped["stateCode"], 2);
+    assert_eq!(intentionally_stopped["desiredStateCode"], 2);
+    assert_eq!(intentionally_stopped["recovery"]["stateCode"], 5);
     assert!(
         resurrected.status.success(),
         "{}",
@@ -573,7 +604,7 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         "{}",
         String::from_utf8_lossy(&deleted.stderr)
     );
-    let started: serde_json::Value = serde_json::from_slice(&started.stdout).unwrap();
+    let started = started_snapshot;
     let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
     let scaled: serde_json::Value = serde_json::from_slice(&scaled.stdout).unwrap();
     let restarted: serde_json::Value = serde_json::from_slice(&restarted.stdout).unwrap();
