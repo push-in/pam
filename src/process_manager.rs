@@ -1427,6 +1427,7 @@ fn read_daemon_request(stream: &mut UnixStream) -> Result<DaemonRequest, String>
     serde_json::from_slice(&bytes).map_err(|error| format!("invalid daemon request: {error}"))
 }
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn peer_uid(stream: &UnixStream) -> Result<libc::uid_t, String> {
     let mut credentials = libc::ucred {
         pid: 0,
@@ -1447,6 +1448,24 @@ fn peer_uid(stream: &UnixStream) -> Result<libc::uid_t, String> {
         return Err(std::io::Error::last_os_error().to_string());
     }
     Ok(credentials.uid)
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "ios",
+    target_os = "freebsd",
+    target_os = "netbsd",
+    target_os = "openbsd",
+    target_os = "dragonfly"
+))]
+fn peer_uid(stream: &UnixStream) -> Result<libc::uid_t, String> {
+    let mut uid: libc::uid_t = 0;
+    let mut gid: libc::gid_t = 0;
+    let result = unsafe { libc::getpeereid(stream.as_raw_fd(), &raw mut uid, &raw mut gid) };
+    if result != 0 {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+    Ok(uid)
 }
 
 fn daemon_socket_path() -> Result<PathBuf, String> {
