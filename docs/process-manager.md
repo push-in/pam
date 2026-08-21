@@ -21,6 +21,8 @@ pam save
 pam resurrect
 pam startup --print
 pam startup --install
+pam config:check pam.toml
+pam apply pam.toml
 pam stop billing
 pam delete billing
 ```
@@ -75,6 +77,36 @@ When `pamd` starts, it restores a saved process list if present.
 `~/.config/systemd/user/pamd.service` without changing unrelated configuration.
 Enable it explicitly with `systemctl --user enable --now pamd.service`. Run
 `pam save` first to select which applications return after login or reboot.
+
+## Declarative multi-service configuration
+
+`pam apply` reconciles a strict, versioned `pam.toml`. Missing applications are
+created, stopped applications restart, worker drift is scaled, converged
+applications stay untouched, and `autostart = false` stops an existing process.
+
+```toml
+schema_version = 1
+
+[applications.api]
+kind_code = 1
+script = "public/index.php"
+workers = 4
+cwd = "."
+arguments = ["--port=8080"]
+
+[applications.web]
+kind_code = 2
+workers = 8
+cwd = "apps/web"
+autostart = true
+```
+
+Kind `1` is raw PAM Runtime; kind `2` is Laravel Octane and requires `artisan`
+in its working directory. Working directories must remain beneath the
+configuration directory, worker counts are bounded to 1–256, unknown fields
+fail validation, and configuration files are limited to regular non-symlink
+files of at most 1 MiB. Use `pam config:check --json` in CI and `pam apply
+--json` for a stable action-coded reconciliation report.
 
 Without `XDG_STATE_HOME`, PAM uses `$HOME/.local/state/pam`. Directories are
 mode `0700`; records and logs are mode `0600`. Application names are limited to

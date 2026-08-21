@@ -645,6 +645,8 @@ fn run() -> Result<u8, CliError> {
             | "resurrect"
             | "startup"
             | "monit"
+            | "apply"
+            | "config:check"
             | "daemon"
             | "__pamd"
     ) || managed_logs
