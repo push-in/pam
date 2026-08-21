@@ -118,8 +118,7 @@ recovery start and recovery readiness. Suite 5 derives a separately bound
 readiness and accounted time without changing the original recovery CSV contract.
 A controlled local 10-round run measured total p50/p95 131/137 ms: detection
 p95 1 ms, backoff p95 12 ms and readiness p95 72 ms. The comparison measured
-PM2 p95 127 ms, leaving a 10 ms directional total gap; hosted confirmation is
-required before replacing the published optimized baseline below.
+PM2 p95 127 ms, leaving a 10 ms directional total gap.
 
 The [hosted optimized suite-6 run](https://github.com/push-in/pam/actions/runs/32501406324)
 confirmed the result on clean Linux commit `795a20c`: PAM recovered 10/10 with
@@ -129,6 +128,17 @@ p50 197 ms and p95/maximum 201 ms, down 70% from the previous hosted p95 of
 from cross-topology comparison. The stricter 300 ms PAM p95 gate and every other
 gate passed with code `1`; the downloaded eight-artifact bundle passed independent
 offline verification with `dirty=false` and the expected pinned tool identities.
+
+The [hosted event-driven suite-6 run](https://github.com/push-in/pam/actions/runs/32504298849)
+confirmed the phase model on clean Linux commit `d79b0ec`. PAM recovered 10/10
+with p50 167 ms and p95/maximum 169 ms; PM2 recovered 10/10 with p50 138 ms and
+p95/maximum 146 ms, leaving a 23 ms directional p95 gap. PAM phase p95 values
+were 1 ms detection, 12 ms effective backoff, 92 ms readiness and 104 ms
+accounted time. Its daemon RSS grew 819200 bytes. Total, detection, backoff,
+readiness, success and resource gates all returned code `1`, as did all three
+comparison gates. The downloaded nine-artifact bundle passed independent offline
+verification with `dirty=false` and the pinned PAM, PAM Native, PHP and PM2
+identities.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
