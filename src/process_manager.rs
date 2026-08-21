@@ -80,6 +80,24 @@ enum ApplicationState {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
+enum RolloutPhase {
+    Stable = 1,
+    Evaluating = 2,
+    Promoted = 3,
+    Aborted = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+enum RolloutDecision {
+    Pending = 1,
+    Promoted = 2,
+    Aborted = 3,
+    DeadlineAborted = 4,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 enum ResourceAlertState {
     Healthy = 1,
     MemoryWarning = 2,
@@ -259,6 +277,7 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "traffic:promote" => traffic_promote(arguments),
         "traffic:abort" => traffic_abort(arguments),
         "traffic:status" => traffic_status(arguments),
+        "traffic:evaluate" => traffic_evaluate(arguments),
         "traffic:stop" => traffic_stop(arguments),
         "__traffic_proxy" => traffic_proxy(arguments),
         "daemon" => daemon(executable, arguments),
@@ -291,6 +310,7 @@ fn daemon_managed_command(command: &str) -> bool {
             | "traffic:promote"
             | "traffic:abort"
             | "traffic:status"
+            | "traffic:evaluate"
             | "traffic:stop"
     )
 }
@@ -301,6 +321,7 @@ fn traffic_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, Str
     let mut stable = None;
     let mut candidate = None;
     let mut weight = 0_u16;
+    let mut deadline_seconds = 300_u64;
     let mut tls_certificate = None;
     let mut tls_private_key = None;
     let mut json = false;
@@ -311,6 +332,7 @@ fn traffic_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, Str
             "--stable" => stable = Some(parse_socket(arguments.next(), "--stable")?),
             "--candidate" => candidate = Some(parse_socket(arguments.next(), "--candidate")?),
             "--weight-bps" => weight = parse_basis_points(arguments.next())?,
+            "--deadline-seconds" => deadline_seconds = parse_rollout_deadline(arguments.next())?,
             "--tls-cert" => {
                 tls_certificate = Some(PathBuf::from(required_utf8(
                     arguments.next(),
@@ -347,6 +369,17 @@ fn traffic_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, Str
         stable: stable.ok_or_else(|| "traffic:start requires --stable".to_owned())?,
         candidate,
         candidate_weight_basis_points: weight,
+        rollout_phase_code: if candidate.is_some() && weight > 0 {
+            RolloutPhase::Evaluating as u8
+        } else {
+            RolloutPhase::Stable as u8
+        },
+        rollout_deadline_millis: (candidate.is_some() && weight > 0)
+            .then(|| epoch_millis().saturating_add(deadline_seconds.saturating_mul(1000))),
+        last_rollout_decision_code: None,
+        last_evaluated_at_millis: None,
+        last_evaluated_candidate_requests: None,
+        last_evaluated_candidate_errors: None,
         tls_certificate: tls_certificate
             .map(|path| {
                 fs::canonicalize(&path).map_err(|error| {
@@ -407,12 +440,14 @@ fn traffic_set(arguments: Vec<OsString>) -> Result<u8, String> {
     let mut name = None;
     let mut candidate = None;
     let mut weight = None;
+    let mut deadline_seconds = 300_u64;
     let mut json = false;
     let mut arguments = arguments.into_iter();
     while let Some(argument) = arguments.next() {
         match argument.to_string_lossy().as_ref() {
             "--candidate" => candidate = Some(parse_socket(arguments.next(), "--candidate")?),
             "--weight-bps" => weight = Some(parse_basis_points(arguments.next())?),
+            "--deadline-seconds" => deadline_seconds = parse_rollout_deadline(arguments.next())?,
             "--json" => json = true,
             option if option.starts_with('-') => {
                 return Err(format!("unknown traffic:set option: {option}"));
@@ -430,6 +465,15 @@ fn traffic_set(arguments: Vec<OsString>) -> Result<u8, String> {
     }
     if let Some(weight) = weight {
         config.candidate_weight_basis_points = weight;
+    }
+    if config.candidate.is_some() && config.candidate_weight_basis_points > 0 {
+        config.rollout_phase_code = RolloutPhase::Evaluating as u8;
+        config.rollout_deadline_millis =
+            Some(epoch_millis().saturating_add(deadline_seconds.saturating_mul(1000)));
+        config.last_rollout_decision_code = None;
+        config.last_evaluated_at_millis = None;
+        config.last_evaluated_candidate_requests = None;
+        config.last_evaluated_candidate_errors = None;
     }
     config.generation = config
         .generation
@@ -471,6 +515,17 @@ fn update_traffic_terminal(arguments: Vec<OsString>, promote: bool) -> Result<u8
     }
     config.candidate = None;
     config.candidate_weight_basis_points = 0;
+    config.rollout_phase_code = if promote {
+        RolloutPhase::Promoted as u8
+    } else {
+        RolloutPhase::Aborted as u8
+    };
+    config.rollout_deadline_millis = None;
+    config.last_rollout_decision_code = Some(if promote {
+        RolloutDecision::Promoted as u8
+    } else {
+        RolloutDecision::Aborted as u8
+    });
     config.generation = config
         .generation
         .checked_add(1)
@@ -492,6 +547,100 @@ fn traffic_status(arguments: Vec<OsString>) -> Result<u8, String> {
     let online = state.as_ref().is_some_and(master_is_running);
     print_traffic(&config, state.as_ref(), json);
     Ok(if online { 0 } else { 1 })
+}
+
+fn traffic_evaluate(arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut name = None;
+    let mut minimum_requests = None;
+    let mut maximum_error_basis_points = None;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--min-candidate-requests" => {
+                minimum_requests = Some(required_positive_u64(
+                    arguments.next(),
+                    "--min-candidate-requests",
+                )?)
+            }
+            "--max-candidate-error-bps" => {
+                maximum_error_basis_points = Some(parse_basis_points(arguments.next())?)
+            }
+            "--json" => json = true,
+            option if option.starts_with('-') => {
+                return Err(format!("unknown traffic:evaluate option: {option}"));
+            }
+            _ if name.is_none() => name = Some(argument.to_string_lossy().into_owned()),
+            _ => return Err("traffic:evaluate accepts one name".to_owned()),
+        }
+    }
+    let name = name.ok_or_else(|| "traffic:evaluate requires a name".to_owned())?;
+    validate_name(&name)?;
+    let minimum_requests = minimum_requests
+        .ok_or_else(|| "traffic:evaluate requires --min-candidate-requests".to_owned())?;
+    let maximum_error_basis_points = maximum_error_basis_points
+        .ok_or_else(|| "traffic:evaluate requires --max-candidate-error-bps".to_owned())?;
+    let paths = ManagerPaths::load()?;
+    let config_path = paths.traffic_config(&name);
+    let mut config = crate::traffic::read_config(&config_path)?;
+    if config.candidate.is_none() || config.rollout_phase_code != RolloutPhase::Evaluating as u8 {
+        return Err("traffic ingress has no rollout under evaluation".to_owned());
+    }
+    let metrics = crate::traffic::read_metrics(&paths.traffic_metrics(&name))?;
+    if metrics.generation != config.generation {
+        return Err("rollout metrics have not reached the active generation".to_owned());
+    }
+    let expired = config
+        .rollout_deadline_millis
+        .is_some_and(|deadline| epoch_millis() >= deadline);
+    let error_basis_points = if metrics.candidate_requests == 0 {
+        0
+    } else {
+        let requests = u128::from(metrics.candidate_requests);
+        (u128::from(metrics.candidate_errors) * 10_000).div_ceil(requests) as u16
+    };
+    let decision = if expired {
+        RolloutDecision::DeadlineAborted
+    } else if metrics.candidate_requests < minimum_requests {
+        RolloutDecision::Pending
+    } else if error_basis_points <= maximum_error_basis_points {
+        RolloutDecision::Promoted
+    } else {
+        RolloutDecision::Aborted
+    };
+    config.last_rollout_decision_code = Some(decision as u8);
+    config.last_evaluated_at_millis = Some(epoch_millis());
+    config.last_evaluated_candidate_requests = Some(metrics.candidate_requests);
+    config.last_evaluated_candidate_errors = Some(metrics.candidate_errors);
+    if decision != RolloutDecision::Pending {
+        if decision == RolloutDecision::Promoted {
+            config.stable = config.candidate.expect("candidate checked above");
+            config.rollout_phase_code = RolloutPhase::Promoted as u8;
+        } else {
+            config.rollout_phase_code = RolloutPhase::Aborted as u8;
+        }
+        config.candidate = None;
+        config.candidate_weight_basis_points = 0;
+        config.rollout_deadline_millis = None;
+        config.generation = config
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| "traffic generation exhausted".to_owned())?;
+    }
+    write_private_json(&config_path, &config)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"name":name,"decisionCode":decision as u8,"candidateRequests":metrics.candidate_requests,"candidateErrors":metrics.candidate_errors,"candidateErrorBasisPoints":error_basis_points,"generation":config.generation})
+        );
+    } else {
+        println!("Rollout {name}: decision {}", decision as u8);
+    }
+    Ok(if decision == RolloutDecision::Pending {
+        1
+    } else {
+        0
+    })
 }
 
 fn traffic_stop(arguments: Vec<OsString>) -> Result<u8, String> {
@@ -545,6 +694,14 @@ fn parse_basis_points(value: Option<OsString>) -> Result<u16, String> {
         .ok_or_else(|| "--weight-bps requires an integer from 0 to 10000".to_owned())
 }
 
+fn parse_rollout_deadline(value: Option<OsString>) -> Result<u64, String> {
+    required_utf8(value, "--deadline-seconds")?
+        .parse::<u64>()
+        .ok()
+        .filter(|value| (1..=604_800).contains(value))
+        .ok_or_else(|| "--deadline-seconds requires an integer from 1 to 604800".to_owned())
+}
+
 fn print_traffic(config: &crate::traffic::TrafficConfig, state: Option<&MasterState>, json: bool) {
     let online = state.is_some_and(master_is_running);
     if json {
@@ -553,7 +710,7 @@ fn print_traffic(config: &crate::traffic::TrafficConfig, state: Option<&MasterSt
         });
         println!(
             "{}",
-            serde_json::json!({"schemaVersion":1,"name":config.name,"stateCode":if online { ApplicationState::Online as u8 } else { ApplicationState::Stopped as u8 },"pid":state.map(|value| value.pid),"listen":config.listen,"stable":config.stable,"candidate":config.candidate,"candidateWeightBasisPoints":config.candidate_weight_basis_points,"generation":config.generation,"tlsEnabled":config.tls_certificate.is_some(),"metrics":metrics})
+            serde_json::json!({"schemaVersion":1,"name":config.name,"stateCode":if online { ApplicationState::Online as u8 } else { ApplicationState::Stopped as u8 },"pid":state.map(|value| value.pid),"listen":config.listen,"stable":config.stable,"candidate":config.candidate,"candidateWeightBasisPoints":config.candidate_weight_basis_points,"generation":config.generation,"rolloutPhaseCode":config.rollout_phase_code,"rolloutDeadlineMillis":config.rollout_deadline_millis,"lastRolloutDecisionCode":config.last_rollout_decision_code,"lastEvaluatedAtMillis":config.last_evaluated_at_millis,"lastEvaluatedCandidateRequests":config.last_evaluated_candidate_requests,"lastEvaluatedCandidateErrors":config.last_evaluated_candidate_errors,"tlsEnabled":config.tls_certificate.is_some(),"metrics":metrics})
         );
     } else {
         println!(
@@ -2586,6 +2743,24 @@ mod tests {
                 ApplicationState::Stopped as u8
             ],
             [1, 2]
+        );
+        assert_eq!(
+            [
+                RolloutPhase::Stable as u8,
+                RolloutPhase::Evaluating as u8,
+                RolloutPhase::Promoted as u8,
+                RolloutPhase::Aborted as u8,
+            ],
+            [1, 2, 3, 4]
+        );
+        assert_eq!(
+            [
+                RolloutDecision::Pending as u8,
+                RolloutDecision::Promoted as u8,
+                RolloutDecision::Aborted as u8,
+                RolloutDecision::DeadlineAborted as u8,
+            ],
+            [1, 2, 3, 4]
         );
         assert_eq!(
             [
