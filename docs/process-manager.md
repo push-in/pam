@@ -92,6 +92,16 @@ Evidence provenance defines `source.dirty` over tracked files, so the pinned
 auxiliary `pam-native` checkout does not create a false dirty result; its exact
 40-character commit is recorded separately as `tools.pam_native_commit`.
 
+The [first clean hosted suite-6 run](https://github.com/push-in/pam/actions/runs/32472443364)
+on Linux commit `44a0304` recovered 10/10 processes for both systems. PAM's
+master/worker recovery measured p50 616 ms and p95/maximum 668 ms; PM2's direct
+single-process recovery measured p50 112 ms and p95/maximum 122 ms, a directional
+p95 delta of 546 ms. The evidence records `dirty=false`, PAM Native commit
+`26a768c`, PM2 7.0.3 and its package integrity. All gate codes were `1`, and the
+downloaded eight-artifact bundle passed independent offline verification. The
+RSS values remain intentionally excluded from comparison because the daemon
+topologies and responsibilities differ.
+
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the
 file again on every launch and restart, so an explicit `pam restart NAME`
