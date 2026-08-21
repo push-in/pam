@@ -83,14 +83,19 @@ printf '{"daemon_rss_before_bytes":%d,"daemon_rss_after_bytes":%d}\n' \
 
 commit=$(git -C "${root}" rev-parse HEAD)
 dirty=false
-[[ -z $(git -C "${root}" status --porcelain) ]] || dirty=true
+git -C "${root}" diff --quiet --ignore-submodules HEAD -- || dirty=true
+native_commit=$(git -C "${root}/pam-native" rev-parse HEAD)
+[[ ${native_commit} =~ ^[0-9a-f]{40}$ ]] || {
+    printf 'cannot resolve pinned PAM Native commit\n' >&2
+    exit 1
+}
 kernel=$(uname -srmo | php -r 'echo json_encode(trim(stream_get_contents(STDIN)), JSON_THROW_ON_ERROR);')
 pm2_version=$("${pm2}" --version | tail -n 1)
 pm2_integrity=$(php -r '$v=json_decode(file_get_contents($argv[1]),true,flags:JSON_THROW_ON_ERROR); echo $v["packages"]["node_modules/pm2"]["integrity"];' "${pm2_root}/package-lock.json")
-printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s},"host":{"kernel":%s},"tools":{"pam_sha256":"%s","pm2_version":"%s","pm2_integrity":"%s","php_version":"%s"},"parameters":{"rounds":%d,"restart_delay_millis":10,"poll_interval_millis":10,"crash_signal":9,"instances":1}}\n' \
+printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s,"dirty_scope":"tracked_files"},"host":{"kernel":%s},"tools":{"pam_sha256":"%s","pam_native_commit":"%s","pm2_version":"%s","pm2_integrity":"%s","php_version":"%s"},"parameters":{"rounds":%d,"restart_delay_millis":10,"poll_interval_millis":10,"crash_signal":9,"instances":1}}\n' \
     "${commit}" "${dirty}" "${kernel}" \
     "$(sha256sum "${PAM_BENCH_BINARY:-${root}/target/release/pam}" | awk '{print $1}')" \
-    "${pm2_version}" "${pm2_integrity}" "$(php -r 'echo PHP_VERSION;')" "${rounds}" \
+    "${native_commit}" "${pm2_version}" "${pm2_integrity}" "$(php -r 'echo PHP_VERSION;')" "${rounds}" \
     >"${results}/metadata.json"
 
 php "${root}/benchmarks/process-manager/comparison-report.php" "${results}"

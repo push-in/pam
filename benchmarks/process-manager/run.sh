@@ -97,11 +97,16 @@ printf '{"daemon_rss_before_bytes":%d,"daemon_rss_after_bytes":%d}\n' \
 
 commit=$(git -C "${root}" rev-parse HEAD)
 dirty=false
-[[ -z $(git -C "${root}" status --porcelain) ]] || dirty=true
+git -C "${root}" diff --quiet --ignore-submodules HEAD -- || dirty=true
+native_commit=$(git -C "${root}/pam-native" rev-parse HEAD)
+[[ ${native_commit} =~ ^[0-9a-f]{40}$ ]] || {
+    printf 'cannot resolve pinned PAM Native commit\n' >&2
+    exit 1
+}
 kernel=$(uname -srmo | php -r 'echo json_encode(trim(stream_get_contents(STDIN)), JSON_THROW_ON_ERROR);')
 binary_sha=$(sha256sum "${pam_binary}" | awk '{print $1}')
-printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s},"host":{"kernel":%s},"tools":{"pam_sha256":"%s"},"parameters":{"rounds":%d,"restart_delay_millis":10,"poll_interval_millis":10,"maximum_p95_millis":%d,"maximum_rss_growth_bytes":%d}}\n' \
-    "${commit}" "${dirty}" "${kernel}" "${binary_sha}" "${rounds}" \
+printf '{"schema_version":1,"source":{"commit":"%s","dirty":%s,"dirty_scope":"tracked_files"},"host":{"kernel":%s},"tools":{"pam_sha256":"%s","pam_native_commit":"%s"},"parameters":{"rounds":%d,"restart_delay_millis":10,"poll_interval_millis":10,"maximum_p95_millis":%d,"maximum_rss_growth_bytes":%d}}\n' \
+    "${commit}" "${dirty}" "${kernel}" "${binary_sha}" "${native_commit}" "${rounds}" \
     "${maximum_p95_millis}" "${maximum_rss_growth_bytes}" >"${results}/metadata.json"
 
 "${pam_binary}" "${root}/benchmarks/process-manager/recovery-report.php" \
