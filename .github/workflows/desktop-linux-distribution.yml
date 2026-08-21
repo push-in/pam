@@ -69,16 +69,16 @@ jobs:
       PAM_BASELINE_TAG: ${{ inputs.desktop_baseline_tag }}
       PAM_EXPECTED_EVIDENCE_IDENTITY: ${{ inputs.evidence_key_identity }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-desktop
           ref: ${{ inputs.desktop_current_ref }}
           path: desktop-current-source
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-desktop
           ref: ${{ inputs.desktop_baseline_ref }}
@@ -300,7 +300,7 @@ jobs:
           test "$(jq -r '.packageCode' certification/verification.json)" = 1
           test "$(jq -r '.platformVerificationSha256' certification/verification.json)" = null
           test "$(jq -r '.signingIdentitySha256' certification/verification.json)" = "${PAM_EXPECTED_EVIDENCE_IDENTITY}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-desktop-linux-host-distribution-${{ inputs.desktop_current_tag }}-${{ github.sha }}
           path: certification/

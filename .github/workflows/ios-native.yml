@@ -57,52 +57,52 @@ jobs:
       PAM_FOUNDATION_EXTENSIONS: ${{ matrix.foundation_extensions }}
       PAM_EXTENSIONKIT_EXTENSIONS: ${{ matrix.extensionkit_extensions }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: 26a768c9a7e0137bda9fa7de23f46c9308de2839
           path: pam-native
           persist-credentials: false
       - name: Check out the iOS capability certification plugins
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native-share-extension
           ref: 662fa09b57dfd5aff0f9ed11f10026e09e291801
           path: certification-plugins/share-extension
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native-health
           ref: 3f3a72ce3ec663efc250ecfa7bae3a18062cc6dc
           path: certification-plugins/health
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native-media
           ref: 7fbb48c7eeff8a0303f4b90b91f82bce7c4db691
           path: certification-plugins/media
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native-widgets
           ref: b7d9106a1ba8a83af0be576ec863e72ea5b31ead
           path: certification-plugins/widgets
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native-intents
           ref: b32e2daae135cedd58d8dd7ed45e76410ceec4b4
           path: certification-plugins/intents
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native-live-activities
           ref: 48caf73cfcff6fea54d42d41a426e1777b62d303
           path: certification-plugins/live-activities
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
       - uses: Swatinem/rust-cache@v2
@@ -115,7 +115,7 @@ jobs:
           coverage: none
       - name: Restore verified PHP/XCFramework runtime
         id: runtime-cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             runtime/ios/${{ matrix.runtime_id }}
@@ -133,7 +133,7 @@ jobs:
           test -f "runtime/ios/${{ matrix.runtime_id }}/runtime.json"
       - name: Save verified PHP/XCFramework runtime immediately
         if: steps.runtime-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: |
             runtime/ios/${{ matrix.runtime_id }}
@@ -301,7 +301,7 @@ jobs:
           fi
           ! grep -E 'Pam Native failed to start|PHP (fatal|parse) error' \
             "${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: pam-native-ios-generated-host-${{ matrix.profile }}

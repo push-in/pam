@@ -39,12 +39,12 @@ jobs:
       contents: read
       attestations: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.current_ref }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pam-${{ matrix.target }}
           path: candidate
@@ -320,7 +320,7 @@ jobs:
           test "${PAM_EXPECTED_EVIDENCE_IDENTITY}" = \
             "$(jq -r '.signingIdentitySha256' certification/verification.json)"
           rm certification/draft.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: certification-runtime-distribution-${{ matrix.target }}-${{ github.sha }}
           path: certification/
@@ -346,12 +346,12 @@ jobs:
       contents: read
       attestations: read
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.current_ref }}
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pam-${{ matrix.target }}
           path: candidate
@@ -592,7 +592,7 @@ jobs:
           test "${PAM_EXPECTED_EVIDENCE_IDENTITY}" = \
             "$(jq -r '.signingIdentitySha256' certification/verification.json)"
           rm certification/draft.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: certification-runtime-distribution-${{ matrix.target }}-${{ github.sha }}
           path: certification/
