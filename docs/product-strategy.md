@@ -55,6 +55,15 @@ Scores are intentionally omitted until PAM has a repeatable scoring harness.
 | Desktop | [Electron](https://www.electronjs.org/docs/latest/tutorial/security) | Mature Chromium compatibility, process model, packaging, updates, and a large ecosystem | **Shipped:** capability-scoped PAM commands reduce ambient renderer privilege. **Explore:** hardened renderer isolation, permission auditing, crash recovery, and update ergonomics while keeping the smaller trusted boundary. |
 | Desktop engine | [Servo](https://servo.org/blog/2026/07/31/june-in-servo/) | A lightweight embeddable engine with an evolving embedding API and work toward a stable C ABI | **Shipped:** PAM pins the Rust embedding API and compiles the real host on Linux x64, macOS arm64 and Windows x64. **Prove next:** signed installers, clean-machine launch, accessibility coverage and renderer recovery before broadening support claims. |
 
+The process-manager follow-up is now implemented as `pam extensions`: it
+reproduces Composer's official content-hash freshness check, rejects unsafe or
+stale inputs, explains direct and transitive requirement origins with integer
+codes, honors locked providers/replacers, distinguishes built-in from `conf.d`
+modules and emits explicit arguments without applying them. The next evidence
+gate is to feed this generated production profile into hosted suite 8 and bind
+the reviewable profile report into release evidence while retaining compatible
+mode as the default.
+
 ### Competitive research refresh — 2026-08-21 progressive delivery
 
 The official [Kubernetes Deployment contract](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)

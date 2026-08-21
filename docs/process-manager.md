@@ -226,9 +226,29 @@ php_extensions = ["iconv", "mbstring", "pdo", "pdo_mysql", "opcache"]
 ```
 
 This is an explicit compatibility/performance tradeoff, never an automatic
-guess. Include every direct and transitive requirement and verify the exact
-production build with Composer's platform check plus application tests before
-deployment. Omitting the option retains the complete configured extension set.
+guess. `pam extensions [path] --no-dev` verifies Composer's official
+`content-hash` algorithm locally, walks root and locked transitive `ext-*`
+requirements, honors package `provide`/`replace`, and compares the compatible
+PHP module inventory with the same main `php.ini` running without `conf.d`.
+It reports integer-coded requirement origins, manifest/lock SHA-256 digests,
+built-in, package-provided, selected and missing extensions, then prints the
+exact repeatable arguments for operator review. `--json` exposes the versioned
+schema-1 result. It refuses missing, stale, symlinked, malformed or oversized
+Composer documents and never applies the profile automatically:
+
+```bash
+pam extensions . --no-dev
+pam extensions . --no-dev --json
+pam up public/index.php --name api --workers 16 --php-extension iconv
+```
+
+Composer's official [`validate`](https://getcomposer.org/doc/03-cli.md#validate)
+contract likewise checks whether the lock is current, and its
+[`Locker::getContentHash`](https://github.com/composer/composer/blob/main/src/Composer/Package/Locker.php#L84-L112)
+defines the exact relevant keys and canonical hash PAM reproduces. Still run
+`pam composer check-platform-reqs` and application tests against the production
+build before deployment. Omitting extension arguments retains the complete
+configured extension set.
 Official PHP guidance says CLI preloading is generally pointless unless the
 process persists and that preloading is unavailable on Windows, so PAM does
 not silently substitute `opcache.preload` for extension isolation.
@@ -239,6 +259,21 @@ readiness p95 from 142 to 83 ms and PHP-engine p95 from 77 to 10 ms. That is a
 25.65%, 41.55% and 87.01% directional improvement respectively. Both profiles
 recovered 10/10, every gate passed, and the recursive manifest verified all 14
 artifacts. Hosted evidence is required before treating the delta as portable.
+
+The Composer-derived follow-up removed the hardcoded isolated list from suite
+`8`. On a clean local process table, `pam extensions --no-dev` verified the
+fixture lock and selected `iconv`; both profiles again recovered 10/10. Total,
+readiness and PHP-engine p95 changed from 184/122/59 ms to 148/81/10 ms,
+improvements of 19.57%, 33.61% and 83.05%. All gates passed, the recursive
+manifest verified 15 artifacts including the exact profile decision, and no
+fixture process remained after the campaign.
+
+Linux workers now install `PR_SET_PDEATHSIG` before `exec` and verify that the
+master did not exit during the fork/exec window. An unexpected master
+`SIGKILL` therefore kills its workers at the kernel boundary instead of leaking
+detached PHP processes. A cluster integration test captures both worker PIDs,
+kills the master and requires both `/proc` entries to disappear within five
+seconds. Graceful shutdown remains unchanged and still drains workers first.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the

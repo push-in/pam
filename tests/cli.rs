@@ -467,6 +467,22 @@ fn aggregates_and_verifies_manager_recovery_worker_matrix() {
 #[test]
 fn compares_compatible_and_isolated_php_extension_profiles() {
     let results = temporary_path("manager-recovery-extension-profile");
+    fs::create_dir_all(&results).unwrap();
+    fs::write(
+        results.join("composer-extension-profile.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "schemaVersion": 1,
+            "stateCode": 1,
+            "ready": true,
+            "includeDev": false,
+            "manifestSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "lockSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "lockContentHash": "cccccccccccccccccccccccccccccccc",
+            "selectedExtensions": ["iconv"]
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     for (directory_name, extensions, total, readiness, engine) in [
         ("compatible", serde_json::json!([]), 200, 130, 80),
         ("isolated", serde_json::json!(["iconv"]), 150, 90, 20),
@@ -516,6 +532,11 @@ fn compares_compatible_and_isolated_php_extension_profiles() {
         serde_json::from_slice(&fs::read(results.join("extension-profile-report.json")).unwrap())
             .unwrap();
     assert_eq!(report["suite_code"], 8);
+    assert_eq!(
+        report["composer_profile"]["selected_extensions"][0],
+        "iconv"
+    );
+    assert_eq!(report["gate_codes"]["composer_profile"], 1);
     assert_eq!(report["configurations"][0]["profile_code"], 1);
     assert_eq!(report["configurations"][1]["profile_code"], 2);
     assert_eq!(
@@ -596,6 +617,76 @@ fn records_reproducible_soak_metadata() {
         33_554_432
     );
     fs::remove_dir_all(results).unwrap();
+}
+
+#[test]
+fn derives_a_bounded_explainable_composer_extension_profile() {
+    let project = temporary_path("composer-extension-profile");
+    fs::create_dir(&project).unwrap();
+    fs::write(
+        project.join("composer.json"),
+        r#"{"require":{"ext-json":"*"},"require-dev":{"ext-pam_missing_test":"*"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        project.join("composer.lock"),
+        r#"{"content-hash":"ff17aa792baa38e4862573aa737743c0","packages":[],"packages-dev":[]}"#,
+    )
+    .unwrap();
+
+    let production = run_pam(&[
+        "extensions",
+        project.to_str().unwrap(),
+        "--no-dev",
+        "--json",
+    ]);
+    assert!(
+        production.status.success(),
+        "{}",
+        String::from_utf8_lossy(&production.stderr)
+    );
+    let production: serde_json::Value = serde_json::from_slice(&production.stdout).unwrap();
+    assert_eq!(production["schemaVersion"], 1);
+    assert_eq!(production["stateCode"], 3);
+    assert_eq!(production["ready"], true);
+    assert_eq!(production["includeDev"], false);
+    assert_eq!(production["builtinExtensions"], serde_json::json!(["json"]));
+    assert_eq!(production["selectedExtensions"], serde_json::json!([]));
+    assert_eq!(production["requirements"][0]["sources"][0]["sourceCode"], 1);
+    assert_eq!(production["manifestSha256"].as_str().unwrap().len(), 64);
+    assert_eq!(production["lockSha256"].as_str().unwrap().len(), 64);
+    assert_eq!(
+        production["lockContentHash"],
+        "ff17aa792baa38e4862573aa737743c0"
+    );
+
+    let development = run_pam(&["extensions", project.to_str().unwrap(), "--json"]);
+    assert_eq!(development.status.code(), Some(1));
+    let development: serde_json::Value = serde_json::from_slice(&development.stdout).unwrap();
+    assert_eq!(development["stateCode"], 2);
+    assert_eq!(development["ready"], false);
+    assert_eq!(
+        development["missingExtensions"],
+        serde_json::json!(["pam_missing_test"])
+    );
+    assert_eq!(
+        development["requirements"][1]["sources"][0]["sourceCode"],
+        2
+    );
+    fs::write(
+        project.join("composer.json"),
+        r#"{"require":{"ext-json":"*","ext-filter":"*"},"require-dev":{"ext-pam_missing_test":"*"}}"#,
+    )
+    .unwrap();
+    let stale = run_pam(&[
+        "extensions",
+        project.to_str().unwrap(),
+        "--no-dev",
+        "--json",
+    ]);
+    assert!(!stale.status.success());
+    assert!(String::from_utf8_lossy(&stale.stderr).contains("composer.lock is stale"));
+    fs::remove_dir_all(project).unwrap();
 }
 
 #[test]
@@ -2209,6 +2300,11 @@ fn exposes_the_authoritative_machine_readable_cli_catalog() {
     }));
     assert!(commands.iter().any(|command| {
         command["name"] == "dev" && command["groupCode"] == 2 && command["supportsJson"] == false
+    }));
+    assert!(commands.iter().any(|command| {
+        command["name"] == "extensions"
+            && command["groupCode"] == 4
+            && command["supportsJson"] == true
     }));
     assert!(commands.iter().all(|command| {
         command["groupCode"]

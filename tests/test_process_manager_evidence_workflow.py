@@ -107,6 +107,8 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("for profile in compatible isolated", extension_profile)
         self.assertIn("PAM_RECOVERY_PHP_EXTENSIONS", extension_profile)
+        self.assertIn("composer-extension-profile.json", extension_profile)
+        self.assertIn('extensions "${composer_project}" --no-dev --json', extension_profile)
         self.assertIn("extension-profile-report.php", extension_profile)
         self.assertIn(
             'evidence-manifest.php" "${results}" 8 --verify', extension_profile

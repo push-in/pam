@@ -10,11 +10,26 @@ pam_binary=${PAM_BENCH_BINARY:-"${root}/target/release/pam"}
 [[ ! -e ${results} ]] || { printf 'refusing to overwrite extension-profile evidence: %s\n' "${results}" >&2; exit 1; }
 mkdir -p "${results}"
 
+composer_project=${PAM_RECOVERY_EXTENSION_PROJECT:-"${root}/compat/composer-smoke"}
+composer_profile="${results}/composer-extension-profile.json"
+"${pam_binary}" extensions "${composer_project}" --no-dev --json >"${composer_profile}"
+derived_extensions=$(php -r '
+    $profile = json_decode(file_get_contents($argv[1]), true, flags: JSON_THROW_ON_ERROR);
+    $extensions = $profile["selectedExtensions"] ?? null;
+    if (($profile["schemaVersion"] ?? null) !== 1 || ($profile["stateCode"] ?? null) !== 1
+        || ($profile["ready"] ?? null) !== true || ($profile["includeDev"] ?? null) !== false
+        || !is_array($extensions) || $extensions === []) { exit(1); }
+    foreach ($extensions as $extension) {
+        if (!is_string($extension) || preg_match("/^[A-Za-z0-9_-]{1,64}$/D", $extension) !== 1) { exit(1); }
+    }
+    echo implode(",", $extensions);
+' "${composer_profile}")
+
 profile_status=0
 for profile in compatible isolated; do
     extensions=
     if [[ ${profile} == isolated ]]; then
-        extensions=iconv
+        extensions=${derived_extensions}
     fi
     printf 'Measuring 16-worker PAM recovery with %s extension profile\n' "${profile}"
     if ! PAM_RECOVERY_RESULTS="${results}/${profile}" \
