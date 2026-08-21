@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::Shutdown;
+use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -12,8 +12,10 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use base64::Engine;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::cluster::{
     MasterState, RELOAD_SIGNAL, STOP_SIGNAL, master_is_running, read_master_state, signal_master,
@@ -30,6 +32,9 @@ const MAX_DEPLOY_HISTORY: usize = 50;
 const MAX_DASHBOARD_BYTES: usize = 2 * 1024 * 1024;
 const MAX_RESOURCE_HISTORY: usize = 120;
 const RESOURCE_SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
+const MAX_DASHBOARD_REQUEST_BYTES: usize = 16 * 1024;
+static LIVE_DASHBOARD_RUNNING: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(true);
 
 #[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[repr(u8)]
@@ -199,6 +204,25 @@ struct ResourceHistoryEntry {
     alert_state_code: u8,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveDashboardConfig {
+    schema_version: u8,
+    listen: SocketAddr,
+    token_sha256: [u8; 32],
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LiveDashboardState {
+    schema_version: u8,
+    state_code: u8,
+    pid: u32,
+    process_start_ticks: u64,
+    listen: SocketAddr,
+    started_at_millis: u64,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 enum DeploymentEventKind {
@@ -298,6 +322,9 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "monit" => monit(arguments),
         "monit:history" => resource_history(arguments),
         "dashboard" => dashboard(arguments),
+        "dashboard:start" => live_dashboard_start(executable, arguments),
+        "dashboard:status" => live_dashboard_status(arguments),
+        "dashboard:stop" => live_dashboard_stop(arguments),
         "apply" => apply_ecosystem(executable, arguments),
         "config:check" => check_ecosystem(arguments),
         "deploy" => deploy(executable, arguments),
@@ -311,6 +338,7 @@ fn run_local(executable: &OsStr, command: &str, arguments: Vec<OsString>) -> Res
         "traffic:evaluate" => traffic_evaluate(arguments),
         "traffic:stop" => traffic_stop(arguments),
         "__traffic_proxy" => traffic_proxy(arguments),
+        "__manager_dashboard_server" => live_dashboard_server(arguments),
         "daemon" => daemon(executable, arguments),
         "__pamd" => daemon_serve(executable),
         _ => Err(format!(
@@ -335,6 +363,9 @@ fn daemon_managed_command(command: &str) -> bool {
             | "monit"
             | "monit:history"
             | "dashboard"
+            | "dashboard:start"
+            | "dashboard:status"
+            | "dashboard:stop"
             | "deploy"
             | "deploy:history"
             | "rollback"
@@ -1337,7 +1368,33 @@ fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
             .map_err(|error| format!("cannot create dashboard directory: {error}"))?;
     }
     let paths = ManagerPaths::load()?;
-    let applications = read_all_records(&paths)?
+    let applications = dashboard_applications(&paths)?;
+    let html = crate::manager_dashboard::render(&applications);
+    if html.len() > MAX_DASHBOARD_BYTES {
+        return Err("manager dashboard exceeds the 2 MiB safety limit".to_owned());
+    }
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true).mode(0o600);
+    let mut file = options.open(&output).map_err(|error| {
+        format!(
+            "cannot create new manager dashboard {}: {error}",
+            output.display()
+        )
+    })?;
+    file.write_all(html.as_bytes())
+        .and_then(|()| file.sync_all())
+        .map_err(|error| format!("cannot persist manager dashboard: {error}"))?;
+    println!(
+        "Wrote private PAM manager dashboard to {}",
+        output.display()
+    );
+    Ok(0)
+}
+
+fn dashboard_applications(
+    paths: &ManagerPaths,
+) -> Result<Vec<crate::manager_dashboard::DashboardApplication>, String> {
+    read_all_records(paths)?
         .into_iter()
         .map(|record| {
             let state = running_state(&record);
@@ -1348,7 +1405,7 @@ fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
                 .map(|value| crate::resource_monitor::process_tree(value.pid))
                 .unwrap_or_default();
             let alert = resource_alert_state(&record, &resources);
-            let history = read_resource_history(&paths, &record.name)?;
+            let history = read_resource_history(paths, &record.name)?;
             let first_rss = history.entries.first().map(|entry| entry.rss_bytes);
             let latest_rss = history.entries.last().map(|entry| entry.rss_bytes);
             let peak_rss_bytes = history
@@ -1390,27 +1447,405 @@ fn dashboard(arguments: Vec<OsString>) -> Result<u8, String> {
                 }),
             })
         })
-        .collect::<Result<Vec<_>, String>>()?;
-    let html = crate::manager_dashboard::render(&applications);
-    if html.len() > MAX_DASHBOARD_BYTES {
-        return Err("manager dashboard exceeds the 2 MiB safety limit".to_owned());
+        .collect()
+}
+
+fn live_dashboard_start(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
+    let mut listen = "127.0.0.1:9615".parse::<SocketAddr>().unwrap();
+    let mut token_file = None;
+    let mut json = false;
+    let mut arguments = arguments.into_iter();
+    while let Some(argument) = arguments.next() {
+        match argument.to_string_lossy().as_ref() {
+            "--listen" => listen = parse_socket(arguments.next(), "--listen")?,
+            "--token-file" => {
+                token_file = Some(PathBuf::from(required_utf8(
+                    arguments.next(),
+                    "--token-file",
+                )?))
+            }
+            "--json" => json = true,
+            option => return Err(format!("unknown dashboard:start option: {option}")),
+        }
     }
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true).mode(0o600);
-    let mut file = options.open(&output).map_err(|error| {
-        format!(
-            "cannot create new manager dashboard {}: {error}",
-            output.display()
-        )
-    })?;
-    file.write_all(html.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|error| format!("cannot persist manager dashboard: {error}"))?;
-    println!(
-        "Wrote private PAM manager dashboard to {}",
-        output.display()
-    );
+    if !listen.ip().is_loopback() || listen.port() == 0 {
+        return Err(
+            "dashboard:start requires an explicit loopback IP and non-zero port".to_owned(),
+        );
+    }
+    let token_file =
+        token_file.ok_or_else(|| "dashboard:start requires --token-file".to_owned())?;
+    let token_file = fs::canonicalize(&token_file)
+        .map_err(|error| format!("cannot resolve dashboard token file: {error}"))?;
+    let metadata = fs::metadata(&token_file)
+        .map_err(|error| format!("cannot inspect dashboard token file: {error}"))?;
+    if metadata.permissions().mode() & 0o077 != 0 {
+        return Err("dashboard token file must be owner-only (mode 0600 or stricter)".to_owned());
+    }
+    let credential = crate::admin_auth::read_file(&token_file)?;
+    let paths = ManagerPaths::load()?;
+    let state_path = paths.live_dashboard_state();
+    if read_live_dashboard_state(&state_path).is_ok_and(|state| live_dashboard_running(&state)) {
+        return Err("live manager dashboard is already online".to_owned());
+    }
+    if state_path.exists() {
+        fs::remove_file(&state_path)
+            .map_err(|error| format!("cannot remove stale dashboard state: {error}"))?;
+    }
+    let config_path = paths.live_dashboard_config();
+    write_private_json(
+        &config_path,
+        &LiveDashboardConfig {
+            schema_version: 1,
+            listen,
+            token_sha256: credential.digest(),
+        },
+    )?;
+    let stdout = secure_append(&paths.logs.join("live-dashboard.out.log"))?;
+    let stderr = secure_append(&paths.logs.join("live-dashboard.error.log"))?;
+    let mut command = Command::new(executable);
+    command
+        .arg("__manager_dashboard_server")
+        .arg(&config_path)
+        .arg(&state_path)
+        .stdin(Stdio::null())
+        .stdout(stdout)
+        .stderr(stderr);
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() < 0 {
+                Err(std::io::Error::last_os_error())
+            } else {
+                Ok(())
+            }
+        })
+    };
+    command
+        .spawn()
+        .map_err(|error| format!("cannot start live manager dashboard: {error}"))?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let state = loop {
+        if let Ok(state) = read_live_dashboard_state(&state_path)
+            && live_dashboard_running(&state)
+        {
+            break state;
+        }
+        if Instant::now() >= deadline {
+            return Err(
+                "live manager dashboard did not become ready; inspect live-dashboard.error.log"
+                    .to_owned(),
+            );
+        }
+        thread::sleep(Duration::from_millis(25));
+    };
+    print_live_dashboard_state(&state, json);
     Ok(0)
+}
+
+fn live_dashboard_status(arguments: Vec<OsString>) -> Result<u8, String> {
+    let json = parse_json_only(arguments, "dashboard:status")?;
+    let path = ManagerPaths::load()?.live_dashboard_state();
+    let state = read_live_dashboard_state(&path).ok();
+    let online = state.as_ref().is_some_and(live_dashboard_running);
+    if let Some(state) = state.filter(|_| online) {
+        print_live_dashboard_state(&state, json);
+    } else if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"stateCode":2,"online":false})
+        );
+    } else {
+        println!("Live PAM manager dashboard is stopped");
+    }
+    Ok(if online { 0 } else { 1 })
+}
+
+fn live_dashboard_stop(arguments: Vec<OsString>) -> Result<u8, String> {
+    let json = parse_json_only(arguments, "dashboard:stop")?;
+    let paths = ManagerPaths::load()?;
+    let state_path = paths.live_dashboard_state();
+    let state = read_live_dashboard_state(&state_path)?;
+    if live_dashboard_running(&state) {
+        let result = unsafe { libc::kill(state.pid as i32, libc::SIGTERM) };
+        if result != 0 {
+            return Err(format!(
+                "cannot stop live manager dashboard: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while live_dashboard_running(&state) && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(25));
+        }
+        if live_dashboard_running(&state) {
+            return Err("live manager dashboard did not stop before the deadline".to_owned());
+        }
+    }
+    for path in [state_path, paths.live_dashboard_config()] {
+        if path.exists() {
+            fs::remove_file(&path)
+                .map_err(|error| format!("cannot remove live dashboard state: {error}"))?;
+        }
+    }
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"stateCode":2,"online":false})
+        );
+    } else {
+        println!("Stopped live PAM manager dashboard");
+    }
+    Ok(0)
+}
+
+fn print_live_dashboard_state(state: &LiveDashboardState, json: bool) {
+    if json {
+        println!(
+            "{}",
+            serde_json::json!({"schemaVersion":1,"stateCode":1,"online":true,"pid":state.pid,"listen":state.listen,"startedAtMillis":state.started_at_millis})
+        );
+    } else {
+        println!(
+            "Live PAM manager dashboard online at http://{}",
+            state.listen
+        );
+    }
+}
+
+fn read_live_dashboard_state(path: &Path) -> Result<LiveDashboardState, String> {
+    let state: LiveDashboardState = read_private_json(path)?;
+    if state.schema_version != 1
+        || state.state_code != 1
+        || !state.listen.ip().is_loopback()
+        || state.listen.port() == 0
+        || state.pid == 0
+        || state.process_start_ticks == 0
+    {
+        return Err("invalid live dashboard state contract".to_owned());
+    }
+    Ok(state)
+}
+
+fn live_dashboard_running(state: &LiveDashboardState) -> bool {
+    (unsafe { libc::kill(state.pid as i32, 0) == 0 })
+        && linux_process_start_ticks(state.pid) == Some(state.process_start_ticks)
+}
+
+fn linux_process_start_ticks(pid: u32) -> Option<u64> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let after_name = stat.get(stat.rfind(')')? + 2..)?;
+    after_name.split_whitespace().nth(19)?.parse().ok()
+}
+
+fn live_dashboard_server(arguments: Vec<OsString>) -> Result<u8, String> {
+    let [config_path, state_path] = arguments.as_slice() else {
+        return Err("__manager_dashboard_server requires config and state paths".to_owned());
+    };
+    let config_path = PathBuf::from(config_path);
+    let state_path = PathBuf::from(state_path);
+    let config: LiveDashboardConfig = read_private_json(&config_path)?;
+    if config.schema_version != 1 || !config.listen.ip().is_loopback() || config.listen.port() == 0
+    {
+        return Err("invalid live dashboard config contract".to_owned());
+    }
+    let listener = TcpListener::bind(config.listen)
+        .map_err(|error| format!("cannot bind live dashboard {}: {error}", config.listen))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    LIVE_DASHBOARD_RUNNING.store(true, std::sync::atomic::Ordering::SeqCst);
+    unsafe {
+        libc::signal(libc::SIGTERM, live_dashboard_signal as libc::sighandler_t);
+        libc::signal(libc::SIGINT, live_dashboard_signal as libc::sighandler_t);
+    }
+    write_private_json(
+        &state_path,
+        &LiveDashboardState {
+            schema_version: 1,
+            state_code: 1,
+            pid: std::process::id(),
+            process_start_ticks: linux_process_start_ticks(std::process::id())
+                .ok_or_else(|| "cannot identify live dashboard process".to_owned())?,
+            listen: config.listen,
+            started_at_millis: epoch_millis(),
+        },
+    )?;
+    while LIVE_DASHBOARD_RUNNING.load(std::sync::atomic::Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                if let Err(error) = serve_live_dashboard_request(&mut stream, &config.token_sha256)
+                {
+                    eprintln!("live dashboard request rejected: {error}");
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                thread::sleep(Duration::from_millis(25));
+            }
+            Err(error) => return Err(format!("live dashboard accept failed: {error}")),
+        }
+    }
+    if state_path.exists() {
+        fs::remove_file(state_path).map_err(|error| error.to_string())?;
+    }
+    Ok(0)
+}
+
+extern "C" fn live_dashboard_signal(_: libc::c_int) {
+    LIVE_DASHBOARD_RUNNING.store(false, std::sync::atomic::Ordering::SeqCst);
+}
+
+fn serve_live_dashboard_request(
+    stream: &mut TcpStream,
+    expected_digest: &[u8; 32],
+) -> Result<(), String> {
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(2)))
+        .map_err(|error| error.to_string())?;
+    let mut request = Vec::new();
+    let mut chunk = [0_u8; 2048];
+    while !request.windows(4).any(|window| window == b"\r\n\r\n") {
+        let read = stream.read(&mut chunk).map_err(|error| error.to_string())?;
+        if read == 0 {
+            return Err("request ended before headers".to_owned());
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.len() > MAX_DASHBOARD_REQUEST_BYTES {
+            write_http_response(
+                stream,
+                "431 Request Header Fields Too Large",
+                "text/plain; charset=utf-8",
+                b"Request headers exceed 16 KiB.\n",
+                &[],
+            )?;
+            return Ok(());
+        }
+    }
+    let request =
+        std::str::from_utf8(&request).map_err(|_| "request headers are not UTF-8".to_owned())?;
+    let mut lines = request.split("\r\n");
+    let request_line = lines.next().unwrap_or_default();
+    let mut request_parts = request_line.split_whitespace();
+    let method = request_parts.next().unwrap_or_default();
+    let target = request_parts.next().unwrap_or_default();
+    let version = request_parts.next().unwrap_or_default();
+    if request_parts.next().is_some() || version != "HTTP/1.1" {
+        write_http_response(
+            stream,
+            "400 Bad Request",
+            "text/plain; charset=utf-8",
+            b"Malformed HTTP request.\n",
+            &[],
+        )?;
+        return Ok(());
+    }
+    let authorized = lines
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.eq_ignore_ascii_case("authorization"))
+        .and_then(|(_, value)| live_dashboard_credential(value.trim()))
+        .is_some_and(|credential| {
+            constant_time_digest_eq(
+                expected_digest,
+                &Sha256::digest(credential.as_bytes()).into(),
+            )
+        });
+    if !authorized {
+        write_http_response(
+            stream,
+            "401 Unauthorized",
+            "text/plain; charset=utf-8",
+            b"Authentication required. Use HTTP Basic user pam with the dashboard token as password, or a Bearer token.\n",
+            &["WWW-Authenticate: Basic realm=\"PAM manager\", charset=\"UTF-8\""],
+        )?;
+        return Ok(());
+    }
+    if method != "GET" {
+        write_http_response(
+            stream,
+            "405 Method Not Allowed",
+            "text/plain; charset=utf-8",
+            b"Only GET is supported.\n",
+            &["Allow: GET"],
+        )?;
+        return Ok(());
+    }
+    match target {
+        "/" => {
+            let paths = ManagerPaths::load()?;
+            let html = crate::manager_dashboard::render_live(&dashboard_applications(&paths)?);
+            if html.len() > MAX_DASHBOARD_BYTES {
+                return Err("live dashboard exceeds the 2 MiB safety limit".to_owned());
+            }
+            write_http_response(
+                stream,
+                "200 OK",
+                "text/html; charset=utf-8",
+                html.as_bytes(),
+                &[],
+            )?;
+        }
+        "/health" => write_http_response(
+            stream,
+            "200 OK",
+            "application/json; charset=utf-8",
+            br#"{"schemaVersion":1,"stateCode":1,"healthy":true}"#,
+            &[],
+        )?,
+        _ => write_http_response(
+            stream,
+            "404 Not Found",
+            "text/plain; charset=utf-8",
+            b"Not found.\n",
+            &[],
+        )?,
+    }
+    Ok(())
+}
+
+fn live_dashboard_credential(header: &str) -> Option<String> {
+    if let Some(token) = header.strip_prefix("Bearer ") {
+        return Some(token.to_owned());
+    }
+    let encoded = header.strip_prefix("Basic ")?;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(encoded)
+        .ok()?;
+    let decoded = String::from_utf8(decoded).ok()?;
+    decoded.strip_prefix("pam:").map(str::to_owned)
+}
+
+fn constant_time_digest_eq(expected: &[u8; 32], supplied: &[u8; 32]) -> bool {
+    expected
+        .iter()
+        .zip(supplied)
+        .fold(0_u8, |difference, (left, right)| {
+            difference | (left ^ right)
+        })
+        == 0
+}
+
+fn write_http_response(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+    extra_headers: &[&str],
+) -> Result<(), String> {
+    let mut headers = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\nCache-Control: no-store\r\nPragma: no-cache\r\nX-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'\r\n",
+        body.len()
+    );
+    for header in extra_headers {
+        headers.push_str(header);
+        headers.push_str("\r\n");
+    }
+    headers.push_str("\r\n");
+    stream
+        .write_all(headers.as_bytes())
+        .and_then(|()| stream.write_all(body))
+        .map_err(|error| error.to_string())
 }
 
 fn deploy(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -2831,6 +3266,12 @@ impl ManagerPaths {
     }
     fn resource_history(&self, name: &str) -> PathBuf {
         self.history.join(format!("{name}.json"))
+    }
+    fn live_dashboard_config(&self) -> PathBuf {
+        self.base.join("live-dashboard.json")
+    }
+    fn live_dashboard_state(&self) -> PathBuf {
+        self.runtime.join("live-dashboard.json")
     }
 }
 

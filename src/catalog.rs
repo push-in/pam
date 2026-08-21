@@ -130,6 +130,9 @@ impl CommandSpec {
                 | "logs"
                 | "monit"
                 | "monit:history"
+                | "dashboard:start"
+                | "dashboard:status"
+                | "dashboard:stop"
                 | "packages"
                 | "top"
         )
@@ -190,6 +193,21 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "dashboard",
             "Create a private manager health dashboard",
             "Develop",
+        ),
+        command(
+            "dashboard:start",
+            "Start the authenticated local live dashboard",
+            "Observe",
+        ),
+        command(
+            "dashboard:status",
+            "Inspect the local live dashboard service",
+            "Observe",
+        ),
+        command(
+            "dashboard:stop",
+            "Stop the local live dashboard service",
+            "Observe",
         ),
         command("apply", "Reconcile applications from pam.toml", "Develop"),
         command(
