@@ -64,7 +64,7 @@ SHA-256 and detects later modification. The `Performance evidence` workflow
 accepts manual suite ID `5`, builds the measured release binary on Ubuntu 24.04,
 runs ten recovery rounds, verifies the manifest before upload, and retains the
 clean-host artifact for 30 days. Its default gates require 100% recovery,
-p95 at most 2000 ms, and daemon RSS growth at most 16 MiB. A launch failure
+p95 at most 300 ms, and daemon RSS growth at most 16 MiB. A launch failure
 keeps the workflow red but retains at most 64 KiB of CLI diagnostics and 1 MiB
 of application stderr so clean-host failures remain actionable after cleanup.
 
@@ -101,6 +101,15 @@ p95 delta of 546 ms. The evidence records `dirty=false`, PAM Native commit
 downloaded eight-artifact bundle passed independent offline verification. The
 RSS values remain intentionally excluded from comparison because the daemon
 topologies and responsibilities differ.
+
+On Linux, `pamd` watches the exact registered master processes with `pidfd` and
+wakes supervision as soon as a master exits. Restart backoff deadlines also
+schedule an exact bounded wake-up, while a 250 ms scan remains as a compatibility
+fallback when the running kernel cannot provide a descriptor. This avoids both
+the former two-pass recovery delay and aggressive idle polling across large
+application catalogs. A controlled local 10-round run after this change measured
+PAM p50/p95 193/199 ms versus PM2 103/108 ms; hosted evidence is required before
+those figures replace the published baseline.
 
 `--env-file FILE` supplies per-application environment without copying secret
 values into manager records, JSON output, logs, or `pam.toml`. PAM reads the

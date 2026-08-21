@@ -5,7 +5,7 @@ root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 results=${PAM_RECOVERY_RESULTS:-"${root}/benchmarks/process-manager/results"}
 pam_binary=${PAM_BENCH_BINARY:-"${root}/target/release/pam"}
 rounds=${PAM_RECOVERY_ROUNDS:-10}
-maximum_p95_millis=${PAM_RECOVERY_MAX_P95_MILLIS:-2000}
+maximum_p95_millis=${PAM_RECOVERY_MAX_P95_MILLIS:-300}
 maximum_rss_growth_bytes=${PAM_RECOVERY_MAX_RSS_GROWTH_BYTES:-16777216}
 
 [[ ${rounds} =~ ^[0-9]+$ ]] && (( rounds >= 3 && rounds <= 100 )) || {

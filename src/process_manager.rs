@@ -3,7 +3,7 @@ use std::ffi::{OsStr, OsString};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
-use std::os::fd::AsRawFd;
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::os::unix::process::CommandExt;
@@ -246,6 +246,35 @@ struct HealthProbeResult {
     path: String,
     checked_at_millis: u64,
     success: bool,
+}
+
+#[derive(Default)]
+struct MasterWatchers {
+    _descriptors: Vec<OwnedFd>,
+    poll_descriptors: Vec<libc::pollfd>,
+}
+
+impl MasterWatchers {
+    fn exit_ready(&mut self) -> bool {
+        if self.poll_descriptors.is_empty() {
+            return false;
+        }
+        for descriptor in &mut self.poll_descriptors {
+            descriptor.revents = 0;
+        }
+        let ready = unsafe {
+            libc::poll(
+                self.poll_descriptors.as_mut_ptr(),
+                self.poll_descriptors.len() as _,
+                0,
+            )
+        };
+        ready > 0
+            && self
+                .poll_descriptors
+                .iter()
+                .any(|descriptor| descriptor.revents & libc::POLLIN != 0)
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -1739,8 +1768,9 @@ fn schedule_recovery(record: &mut ApplicationRecord, now: u64) {
     record.next_restart_at_millis = Some(now.saturating_add(delay));
 }
 
-fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<(), String> {
+fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<Option<u64>, String> {
     let now = epoch_millis();
+    let mut earliest_restart = None;
     for mut record in read_all_records(paths)? {
         if record.desired_state_code != ApplicationState::Online as u8 || !record.auto_restart {
             continue;
@@ -1764,6 +1794,7 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<()
             || record.next_restart_at_millis.is_none()
         {
             schedule_recovery(&mut record, now);
+            earliest_restart = earliest_deadline(earliest_restart, record.next_restart_at_millis);
             write_record(&path, &record)?;
             continue;
         }
@@ -1771,6 +1802,7 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<()
             .next_restart_at_millis
             .is_some_and(|deadline| deadline > now)
         {
+            earliest_restart = earliest_deadline(earliest_restart, record.next_restart_at_millis);
             continue;
         }
         match restart_record(executable, &record, false, false) {
@@ -1782,11 +1814,29 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<()
             Err(error) => {
                 eprintln!("pamd could not recover {:?}: {error}", record.name);
                 schedule_recovery(&mut record, epoch_millis());
+                earliest_restart =
+                    earliest_deadline(earliest_restart, record.next_restart_at_millis);
             }
         }
         write_record(&path, &record)?;
     }
-    Ok(())
+    Ok(earliest_restart)
+}
+
+fn earliest_deadline(current: Option<u64>, candidate: Option<u64>) -> Option<u64> {
+    match (current, candidate) {
+        (Some(current), Some(candidate)) => Some(current.min(candidate)),
+        (None, candidate) => candidate,
+        (current, None) => current,
+    }
+}
+
+fn next_supervision_delay(now_millis: u64, earliest_restart: Option<u64>) -> Duration {
+    earliest_restart
+        .map(|deadline| Duration::from_millis(deadline.saturating_sub(now_millis).max(1)))
+        .map_or(SUPERVISION_INTERVAL, |delay| {
+            delay.min(SUPERVISION_INTERVAL)
+        })
 }
 
 fn startup(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
@@ -2821,26 +2871,33 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
     }
     let mut next_sample = Instant::now() + RESOURCE_SAMPLE_INTERVAL;
     let mut next_supervision = Instant::now();
+    let mut master_watchers = MasterWatchers::default();
     let (health_sender, health_receiver) = mpsc::channel();
     let mut health_probes_in_flight = HashSet::new();
     let own_uid = unsafe { libc::geteuid() };
     loop {
-        reap_daemon_children();
+        let reaped_child = reap_daemon_children();
         if let Err(error) =
             apply_health_probe_results(&paths, &health_receiver, &mut health_probes_in_flight)
         {
             eprintln!("pamd health result error: {error}");
         }
-        if Instant::now() >= next_supervision {
-            if let Err(error) = supervise_applications(executable, &paths) {
-                eprintln!("pamd supervision error: {error}");
-            }
+        if reaped_child || master_watchers.exit_ready() || Instant::now() >= next_supervision {
+            let earliest_restart = match supervise_applications(executable, &paths) {
+                Ok(deadline) => deadline,
+                Err(error) => {
+                    eprintln!("pamd supervision error: {error}");
+                    None
+                }
+            };
             if let Err(error) =
                 schedule_health_probes(&paths, &health_sender, &mut health_probes_in_flight)
             {
                 eprintln!("pamd health scheduling error: {error}");
             }
-            next_supervision = Instant::now() + SUPERVISION_INTERVAL;
+            next_supervision =
+                Instant::now() + next_supervision_delay(epoch_millis(), earliest_restart);
+            master_watchers = watch_running_masters(&paths);
         }
         if Instant::now() >= next_sample {
             if let Err(error) = record_resource_history(&paths) {
@@ -3702,12 +3759,46 @@ fn terminate_master(state: &MasterState, graceful_timeout_millis: u64) -> Result
     Ok(true)
 }
 
-fn reap_daemon_children() {
+fn reap_daemon_children() -> bool {
+    let mut reaped = false;
     loop {
         let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
         if result <= 0 {
             break;
         }
+        reaped = true;
+    }
+    reaped
+}
+
+fn watch_running_masters(paths: &ManagerPaths) -> MasterWatchers {
+    let descriptors = read_all_records(paths)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|record| running_state(&record))
+        .filter(master_is_running)
+        .filter_map(|state| open_pidfd(state.pid))
+        .collect::<Vec<_>>();
+    let poll_descriptors = descriptors
+        .iter()
+        .map(|descriptor| libc::pollfd {
+            fd: descriptor.as_raw_fd(),
+            events: libc::POLLIN,
+            revents: 0,
+        })
+        .collect();
+    MasterWatchers {
+        _descriptors: descriptors,
+        poll_descriptors,
+    }
+}
+
+fn open_pidfd(pid: u32) -> Option<OwnedFd> {
+    let descriptor = unsafe { libc::syscall(libc::SYS_pidfd_open, pid, 0) as libc::c_int };
+    if descriptor < 0 {
+        None
+    } else {
+        Some(unsafe { OwnedFd::from_raw_fd(descriptor) })
     }
 }
 
@@ -4648,6 +4739,44 @@ mod tests {
         schedule_recovery(&mut record, 4_000);
         assert_eq!(record.recovery_state_code, RecoveryState::CircuitOpen as u8);
         assert_eq!(record.next_restart_at_millis, None);
+    }
+
+    #[test]
+    fn supervision_wakes_for_the_earliest_backoff_without_busy_spinning() {
+        assert_eq!(earliest_deadline(None, Some(1_050)), Some(1_050));
+        assert_eq!(earliest_deadline(Some(1_080), Some(1_020)), Some(1_020));
+        assert_eq!(earliest_deadline(Some(1_020), None), Some(1_020));
+        assert_eq!(next_supervision_delay(1_000, None), SUPERVISION_INTERVAL);
+        assert_eq!(
+            next_supervision_delay(1_000, Some(1_010)),
+            Duration::from_millis(10)
+        );
+        assert_eq!(
+            next_supervision_delay(1_000, Some(2_000)),
+            SUPERVISION_INTERVAL
+        );
+        assert_eq!(
+            next_supervision_delay(1_000, Some(999)),
+            Duration::from_millis(1)
+        );
+    }
+
+    #[test]
+    fn pidfd_reports_the_registered_master_exit_without_pid_polling() {
+        let mut child = Command::new("/bin/sleep").arg("10").spawn().unwrap();
+        let descriptor = open_pidfd(child.id()).expect("Linux pidfd support");
+        let mut watchers = MasterWatchers {
+            poll_descriptors: vec![libc::pollfd {
+                fd: descriptor.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            }],
+            _descriptors: vec![descriptor],
+        };
+        assert!(!watchers.exit_ready());
+        child.kill().unwrap();
+        child.wait().unwrap();
+        assert!(watchers.exit_ready());
     }
 
     #[test]
