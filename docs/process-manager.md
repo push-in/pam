@@ -167,6 +167,14 @@ The measured 16-worker readiness slope is now the primary optimization target;
 the gate records the current clean-runner envelope rather than treating it as
 the desired endpoint.
 
+Suite `8` compares the compatible host-extension profile with an explicit,
+fixture-minimal extension profile at 16 workers. It keeps the 650 ms total and
+550 ms readiness budgets, and uses a 250 ms effective-backoff envelope because
+that phase includes daemon scheduling delay under simultaneous worker startup.
+The extension optimization itself remains guarded by equal successful round
+counts and by requiring the isolated PHP-engine p95 to be no slower. The normal
+suite-5 and suite-7 backoff gate remains 20 ms.
+
 `status`, `describe` and `ps --json` expose additive `workerStartup`
 diagnostics for each ready generation: the time between spawning the first and
 last worker, plus p95 and maximum spawn-to-ready latency across every worker.

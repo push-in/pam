@@ -63,6 +63,12 @@ class ProcessManagerEvidenceWorkflowTest(unittest.TestCase):
         self.assertIn(
             "8) benchmarks/process-manager/extension-profile.sh ;;", workflow
         )
+        extension_script = (
+            ROOT / "benchmarks/process-manager/extension-profile.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            "PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS=250", extension_script
+        )
         self.assertIn(
             "8) results=benchmarks/process-manager/results/extension-profile ;;",
             workflow,

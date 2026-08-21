@@ -22,6 +22,7 @@ for profile in compatible isolated; do
     PAM_RECOVERY_WORKERS=16 \
     PAM_RECOVERY_PHP_EXTENSIONS="${extensions}" \
     PAM_RECOVERY_MAX_P95_MILLIS=650 \
+    PAM_RECOVERY_MAX_BACKOFF_P95_MILLIS=250 \
     PAM_RECOVERY_MAX_READINESS_P95_MILLIS=550 \
     PAM_BENCH_BINARY="${pam_binary}" \
         "${root}/benchmarks/process-manager/run.sh"; then
