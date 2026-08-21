@@ -810,6 +810,10 @@ pam apply [pam.toml] [--json]                       reconcile all declared appli
 pam deploy api /srv/api/releases/2026-08-21         activate a readiness-gated release
 pam deploy:history api [--json]                     inspect bounded release history
 pam rollback api [--steps N]                        restore a previous healthy release
+pam traffic:start edge --listen IP:PORT --stable IP:PORT
+pam traffic:set edge --candidate IP:PORT --weight-bps N
+pam traffic:status edge [--json]                     inspect per-version rollout evidence
+pam traffic:abort|traffic:promote edge               atomically finish a rollout
 pam test [directory] [--pest|--phpunit]            test inside the Embed SAPI
 pam routes [index.php]                              inspect registered routes
 pam inspect [index.php]                             inspect PHP, INI, ABI, and extensions

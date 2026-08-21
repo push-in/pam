@@ -53,6 +53,51 @@ Scores are intentionally omitted until PAM has a repeatable scoring harness.
 | Desktop | [Electron](https://www.electronjs.org/docs/latest/tutorial/security) | Mature Chromium compatibility, process model, packaging, updates, and a large ecosystem | **Shipped:** capability-scoped PAM commands reduce ambient renderer privilege. **Explore:** hardened renderer isolation, permission auditing, crash recovery, and update ergonomics while keeping the smaller trusted boundary. |
 | Desktop engine | [Servo](https://servo.org/blog/2026/07/31/june-in-servo/) | A lightweight embeddable engine with an evolving embedding API and work toward a stable C ABI | **Shipped:** PAM pins the Rust embedding API and compiles the real host on Linux x64, macOS arm64 and Windows x64. **Prove next:** signed installers, clean-machine launch, accessibility coverage and renderer recovery before broadening support claims. |
 
+### Competitive research refresh — 2026-08-21 progressive delivery
+
+The official [Kubernetes Deployment contract](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/)
+separates readiness, availability, progress deadlines, bounded revision history,
+pause/resume and rollback. It also makes the capacity tradeoff explicit through
+`maxUnavailable` and `maxSurge`; a rollout may temporarily consume more than the
+steady-state replica target. PAM must therefore report candidate and stable
+capacity independently and may not call a process ready merely because it has a
+PID.
+
+The official [Gateway API traffic-splitting guide](https://gateway-api.sigs.k8s.io/guides/user-guides/traffic-splitting/)
+defines backend weights as relative values and demonstrates both a 90/10 canary
+and header-selected preview traffic. PAM will use integer basis points for its
+public contract, deterministic affinity for a stable request key, and an
+explicit preview override that cannot be supplied through an untrusted generic
+forwarding header. Weight changes must be atomic, observable and reversible.
+
+This raises the acceptance bar beyond the already shipped transactional
+stop/start deploy:
+
+1. start the candidate beside the stable release on an isolated loopback
+   listener and pass readiness before exposing traffic;
+2. retain the stable release while weight is below 10,000 basis points;
+3. expose per-version request, error and latency evidence with bounded label
+   cardinality;
+4. abort by atomically restoring stable weight to 10,000 and draining the
+   candidate; promote by moving candidate to stable only after an explicit gate;
+5. persist rollout phase and history with sequential integer enums, deadlines
+   and crash recovery;
+6. account for temporary surge in worker, memory and task limits.
+
+The existing pool ingress is not evidence for this feature: it selects
+specialized worker groups from one release and requires one fallback. A separate
+version-ingress authority is required so PAM cannot market capacity routing as
+blue-green delivery.
+
+For Linux resource governance, systemd's official
+[`pam_systemd` documentation](https://www.freedesktop.org/software/systemd/man/pam_systemd.html)
+maps session limits to `MemoryMax=`, `TasksMax=` and CPU weight controls, while
+also warning that the per-user service manager sits outside an individual login
+session scope. PAM's systemd user unit alone therefore does not prove per-app
+isolation. The target is one transient scope/service per managed application (or
+a delegated cgroup-v2 subtree), with requested and observed limits shown in
+`describe`, and fail-closed behavior when a mandatory limit cannot be applied.
+
 ### Competitive research refresh — 2026-08-20 Windows Runtime architecture
 
 PHP's official [Embed SAPI documentation](https://github.com/php/php-src/blob/master/sapi/embed/README.md)

@@ -524,7 +524,7 @@ impl Drop for MasterStateFile {
     }
 }
 
-fn linux_process_start(pid: u32) -> Option<u64> {
+pub(crate) fn linux_process_start(pid: u32) -> Option<u64> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
     let after_command = stat.rsplit_once(") ")?.1;
     after_command.split_whitespace().nth(19)?.parse().ok()
