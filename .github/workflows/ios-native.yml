@@ -60,7 +60,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 26a768c9a7e0137bda9fa7de23f46c9308de2839
+          ref: 05f6b707c25c9beeccbe5553333854a3cc952dea
           path: pam-native
           persist-credentials: false
       - name: Check out the iOS capability certification plugins
