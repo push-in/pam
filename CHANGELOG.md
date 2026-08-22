@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.4 - 2026-08-22
+
+- Preserve the canonical release tag across distribution-certification steps so
+  signed evidence always carries a valid v-prefixed SemVer identity.
+- Keep inline PHP source intact inside the isolated Linux certification shell.
+
 ## 2.0.3 - 2026-08-22
 
 - Certify packaged extension inventories through PAM's supported inline PHP
