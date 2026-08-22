@@ -109,7 +109,11 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
             'echo implode(PHP_EOL, \\$modules), PHP_EOL;"',
             workflow,
         )
-        self.assertEqual(workflow.count("module-load.stderr"), 4)
+        self.assertEqual(workflow.count("module-load.stderr"), 6)
+        self.assertIn(
+            'test "$(wc -l <clean-host/module-load.stderr)" -le 1', workflow
+        )
+        self.assertIn('grep -Fx "${timezone_warning}" clean-host/module-load.stderr', workflow)
         self.assertEqual(workflow.count("runtime-loaded-modules.txt"), 6)
         self.assertEqual(
             workflow.count('grep -Fx "timezonedb" clean-host/loaded-modules.txt'),

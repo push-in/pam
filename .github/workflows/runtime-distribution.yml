@@ -180,7 +180,12 @@ jobs:
                 "\$modules = get_loaded_extensions(); sort(\$modules, SORT_STRING); echo implode(PHP_EOL, \$modules), PHP_EOL;" \
                 >clean-host/loaded-modules.unsorted \
                 2>clean-host/module-load.stderr
-              test ! -s clean-host/module-load.stderr
+              quote=$(printf "\047")
+              timezone_warning="PHP Warning:  PHP Startup: Invalid date.timezone value ${quote}UTC${quote}, using ${quote}UTC${quote} instead in Unknown on line 0"
+              test "$(wc -l <clean-host/module-load.stderr)" -le 1
+              if test -s clean-host/module-load.stderr; then
+                grep -Fx "${timezone_warning}" clean-host/module-load.stderr
+              fi
               test "$(wc -c <clean-host/loaded-modules.unsorted)" -le 1048576
               LC_ALL=C sort -u clean-host/loaded-modules.unsorted \
                 >clean-host/loaded-modules.txt
