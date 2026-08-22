@@ -10,8 +10,8 @@
             "options": {
                 "symlink": true,
                 "versions": {
-                    "pushinbr/pam-contracts": "1.0.2",
-                    "pushinbr/pam-http": "1.0.2",
+                    "pushinbr/pam-contracts": "1.1.0",
+                    "pushinbr/pam-http": "2.0.0",
                     "pushinbr/pam-psr": "1.0.2",
                     "pushinbr/pam-socket": "1.0.2",
                     "pushinbr/pam-testing": "1.0.2"
@@ -30,7 +30,7 @@
         "open-telemetry/api": "^1.4",
         "open-telemetry/exporter-otlp": "^1.4",
         "open-telemetry/sdk": "^1.15",
-        "pushinbr/pam-http": "^1.0",
+        "pushinbr/pam-http": "^2.0",
         "pushinbr/pam-psr": "^1.0",
         "pushinbr/pam-socket": "^1.0",
         "psr/http-factory": "^1.1",
