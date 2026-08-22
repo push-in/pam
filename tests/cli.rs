@@ -3840,7 +3840,7 @@ fn initializes_raw_and_socket_presets_without_composer() {
     assert!(manifest.contains("pushinbr/pam-socket"));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
     assert_eq!(manifest_json["require"]["pushinbr/pam-http"], "^2.0");
-    assert_eq!(manifest_json["require"]["pushinbr/pam-socket"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-socket"], "^1.1");
 
     fs::remove_dir_all(raw).unwrap();
     fs::remove_dir_all(api).unwrap();
