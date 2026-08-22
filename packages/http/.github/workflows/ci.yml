@@ -9,6 +9,23 @@ permissions:
   contents: read
 
 jobs:
+  minimal-install:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          coverage: none
+      - uses: ramsey/composer-install@v3
+        with:
+          dependency-versions: locked
+          composer-options: --no-dev
+      - name: Enforce the HTTP kernel dependency boundary
+        run: |
+          test ! -d vendor/illuminate
+          php -r "require 'vendor/autoload.php'; new Pam\\App(); fwrite(STDOUT, \"minimal-boot-ok\\n\");"
+
   verify:
     runs-on: ubuntu-latest
     strategy:
@@ -23,4 +40,3 @@ jobs:
           coverage: none
       - uses: ramsey/composer-install@v3
       - run: composer verify
-

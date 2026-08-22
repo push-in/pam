@@ -42,8 +42,8 @@ namespace, `pushinbr/pam-*`:
 | `pushinbr/pam-contracts` | Stable extension contracts |
 | `pushinbr/pam-http` | Routing, middleware, controllers, validation and resources |
 | `pushinbr/pam-socket` | High-level WebSocket events and rooms |
-| `pushinbr/pam-psr` | PSR-7, PSR-15 and PSR-17 interoperability |
-| `pushinbr/pam-testing` | Application testing utilities |
+| `pushinbr/pam-http-psr` | PSR-7, PSR-15 and PSR-17 HTTP interoperability |
+| `pushinbr/pam-http-testing` | HTTP application testing utilities |
 | `pushinbr/pam-laravel` | Laravel integration |
 | `pushinbr/pam-native` | Android/iOS host and PHP application framework |
 | `pushinbr/pam-desktop` | Desktop host and PHP application framework |
@@ -105,6 +105,9 @@ and self-update—cannot be shadowed.
 
 ## Compatibility policy
 
+The [package naming policy](package-naming-policy.md) defines permanent product-family ownership
+and the required metapackage migration sequence.
+
 Package and protocol evolution is additive within a major version. Renamed
 packages retain a Composer compatibility package at the old name that depends on
 the replacement and is marked abandoned in favor of it. Public PHP namespaces
@@ -124,7 +127,9 @@ replacement. They contain no duplicate implementation:
 | --- | --- |
 | `pushinbr/pam-api` | `pushinbr/pam-http` |
 | `pushinbr/pam-core-api` | `pushinbr/pam-contracts` |
-| `pushinbr/pam-psr-bridge` | `pushinbr/pam-psr` |
+| `pushinbr/pam-psr-bridge` | `pushinbr/pam-http-psr` |
+| `pushinbr/pam-psr` | `pushinbr/pam-http-psr` |
+| `pushinbr/pam-testing` | `pushinbr/pam-http-testing` |
 | `pushinbr/pam-mobile-ui` | `pushinbr/pam-native-ui` |
 | `pushinbr/pam-native-laravel-sync` | `pushinbr/pam-native-sync-laravel` |
 

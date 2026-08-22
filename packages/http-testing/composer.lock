@@ -1,0 +1,62 @@
+{
+    "_readme": [
+        "This file locks the dependencies of your project to a known state",
+        "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
+        "This file is @generated automatically"
+    ],
+    "content-hash": "56833805cf567ae9184060748e27d30d",
+    "packages": [
+        {
+            "name": "pushinbr/pam-contracts",
+            "version": "v1.1.0",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-contracts.git",
+                "reference": "8a06b88a29e4f2e708c6b5d1b1fa311758428d4d"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-contracts/zipball/8a06b88a29e4f2e708c6b5d1b1fa311758428d4d",
+                "reference": "8a06b88a29e4f2e708c6b5d1b1fa311758428d4d",
+                "shasum": ""
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Contracts\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Stable PHP contracts for the Pam persistent runtime.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "contracts",
+                "pam",
+                "php",
+                "runtime"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-contracts"
+            },
+            "time": "2026-08-21T23:32:15+00:00"
+        }
+    ],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": "^8.4"
+    },
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
+}

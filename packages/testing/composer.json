@@ -1,28 +1,19 @@
 {
     "name": "pushinbr/pam-testing",
-    "description": "In-memory HTTP testing utilities for Pam applications.",
-    "type": "library",
+    "description": "Compatibility package for pushinbr/pam-http-testing.",
+    "type": "metapackage",
     "license": "Apache-2.0",
-    "keywords": [
-        "http",
-        "pam",
-        "php",
-        "testing"
-    ],
-    "homepage": "https://github.com/push-in/pam",
+    "keywords": ["compatibility", "http", "pam", "testing"],
+    "homepage": "https://github.com/push-in/pam-testing",
     "support": {
-        "issues": "https://github.com/push-in/pam/issues",
+        "issues": "https://github.com/push-in/pam-testing/issues",
         "source": "https://github.com/push-in/pam-testing"
     },
     "require": {
         "php": "^8.4",
-        "pushinbr/pam-contracts": "^1.0"
+        "pushinbr/pam-http-testing": "^1.0"
     },
-    "autoload": {
-        "psr-4": {
-            "Pam\\Testing\\": "src/"
-        }
-    },
+    "abandoned": "pushinbr/pam-http-testing",
     "config": {
         "sort-packages": true
     }

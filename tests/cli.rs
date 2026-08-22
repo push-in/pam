@@ -3793,7 +3793,10 @@ fn initializes_a_project_without_overwriting_files() {
     assert_eq!(manifest_json["license"], "proprietary");
     assert_eq!(manifest_json["require"]["pushinbr/pam-http"], "^2.0");
     assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
-    assert_eq!(manifest_json["require-dev"]["pushinbr/pam-testing"], "^1.1");
+    assert_eq!(
+        manifest_json["require-dev"]["pushinbr/pam-http-testing"],
+        "^1.0"
+    );
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());

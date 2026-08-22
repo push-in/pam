@@ -23,18 +23,32 @@
             "description": "Event-oriented socket APIs for PAM WebSockets."
         },
         {
+            "name": "pushinbr/pam-http-psr",
+            "path": "packages/http-psr",
+            "repository": "pam-http-psr",
+            "deploySecret": "PAM_HTTP_PSR_DEPLOY_KEY",
+            "description": "PSR-7, PSR-15 and PSR-17 interoperability for PAM."
+        },
+        {
+            "name": "pushinbr/pam-http-testing",
+            "path": "packages/http-testing",
+            "repository": "pam-http-testing",
+            "deploySecret": "PAM_HTTP_TESTING_DEPLOY_KEY",
+            "description": "In-memory HTTP testing utilities for PAM applications."
+        },
+        {
             "name": "pushinbr/pam-psr",
             "path": "packages/psr",
             "repository": "pam-psr",
             "deploySecret": "PAM_PSR_BRIDGE_DEPLOY_KEY",
-            "description": "PSR-7, PSR-15 and PSR-17 interoperability for PAM."
+            "description": "Compatibility package for pushinbr/pam-http-psr."
         },
         {
             "name": "pushinbr/pam-testing",
             "path": "packages/testing",
             "repository": "pam-testing",
             "deploySecret": "PAM_TESTING_DEPLOY_KEY",
-            "description": "In-memory HTTP testing utilities for PAM applications."
+            "description": "Compatibility package for pushinbr/pam-http-testing."
         },
         {
             "name": "pushinbr/pam-skeleton",

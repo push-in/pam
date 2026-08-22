@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace Pam\Testing;
+namespace Pam\Http\Testing;
 
 use Pam\Contracts\Http\ApplicationInterface;
 use Pam\Http\Request;

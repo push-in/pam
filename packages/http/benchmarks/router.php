@@ -14,7 +14,10 @@ const MINIMUM_MATCHES_PER_SECOND = 50_000;
 const MAXIMUM_P99_NANOSECONDS = 500_000;
 const MAXIMUM_PEAK_MEMORY_BYTES = 67_108_864;
 
-$assertBudget = in_array('--assert', array_slice($argv, 1), true);
+$arguments = isset($_SERVER['argv']) && is_array($_SERVER['argv'])
+    ? array_values(array_filter($_SERVER['argv'], is_string(...)))
+    : [];
+$assertBudget = in_array('--assert', array_slice($arguments, 1), true);
 $router = new Router();
 for ($index = 1; $index <= 100; ++$index) {
     $router->add('GET', "/static/{$index}", static fn (): null => null);

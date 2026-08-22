@@ -1,0 +1,39 @@
+{
+    "name": "pushinbr/pam-http-testing",
+    "description": "In-memory HTTP testing utilities for Pam applications.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "keywords": [
+        "http",
+        "pam",
+        "php",
+        "testing"
+    ],
+    "homepage": "https://github.com/push-in/pam-http-testing",
+    "support": {
+        "issues": "https://github.com/push-in/pam-http-testing/issues",
+        "source": "https://github.com/push-in/pam-http-testing"
+    },
+    "require": {
+        "php": "^8.4",
+        "pushinbr/pam-contracts": "^1.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Pam\\Http\\Testing\\": "src/"
+        },
+        "files": [
+            "src/legacy-aliases.php"
+        ]
+    },
+    "scripts": {
+        "test": [
+            "@php -l src/TestClient.php",
+            "@php -l src/TestResponse.php",
+            "@php tests/run.php"
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

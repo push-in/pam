@@ -996,7 +996,7 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
     let http_version = "^2.0";
-    let testing_version = "^1.1";
+    let testing_version = "^1.0";
     let socket_version = "^1.1";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.5")),
@@ -1019,7 +1019,7 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
         "require": require,
         "require-dev": {
             "laravel/pint": "^1.30",
-            "pushinbr/pam-testing": testing_version,
+            "pushinbr/pam-http-testing": testing_version,
             "phpunit/phpunit": "^12.5"
         },
         "autoload": {"psr-4": {"App\\": "src/"}},
@@ -5819,9 +5819,9 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                     "versions": {
                         "pushinbr/pam-contracts": "1.1.0",
                         "pushinbr/pam-http": "2.0.0",
-                        "pushinbr/pam-psr": "1.0.2",
+                        "pushinbr/pam-http-psr": "1.0.0",
                         "pushinbr/pam-socket": "1.1.0",
-                        "pushinbr/pam-testing": "1.1.0"
+                        "pushinbr/pam-http-testing": "1.0.0"
                     }
                 }
             })

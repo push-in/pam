@@ -56,6 +56,25 @@ final class PublicApiCompatibilityGateTest extends TestCase
         );
     }
 
+    public function testSelfAndDeclaringClassReturnsAreEquivalentAcrossPhpVersions(): void
+    {
+        $baseline = $this->baseline();
+        $app = $baseline['symbols']['Pam\\App'] ?? null;
+        $methods = is_array($app) ? ($app['methods'] ?? null) : null;
+        $boot = is_array($methods) ? ($methods['boot'] ?? null) : null;
+        if (!is_array($app) || !is_array($methods) || !is_array($boot)) {
+            self::fail('App API fixture is malformed.');
+        }
+        $boot['return'] = 'Pam\\App';
+        $methods['boot'] = $boot;
+        $app['methods'] = $methods;
+        $baseline['symbols']['Pam\\App'] = $app;
+
+        [$status, $output] = $this->runGateWithContents($baseline);
+
+        self::assertSame(0, $status, $output);
+    }
+
     public function testAddingAnInterfaceMethodIsDetectedAsBreaking(): void
     {
         $baseline = $this->baseline();
@@ -105,14 +124,24 @@ final class PublicApiCompatibilityGateTest extends TestCase
      */
     private function assertGateFailure(array $baseline, string $expected): void
     {
+        [$status, $output] = $this->runGateWithContents($baseline);
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString($expected, $output);
+    }
+
+    /**
+     * @param array{schema: int, symbols: array<string, array<string, mixed>>} $baseline
+     * @return array{int, string}
+     */
+    private function runGateWithContents(array $baseline): array
+    {
         $fixture = tempnam(sys_get_temp_dir(), 'pam-api-surface-');
         self::assertIsString($fixture);
-        file_put_contents($fixture, json_encode($baseline, JSON_THROW_ON_ERROR));
+        file_put_contents($fixture, json_encode($baseline, JSON_PRESERVE_ZERO_FRACTION | JSON_THROW_ON_ERROR));
 
         try {
-            [$status, $output] = $this->runGate($fixture);
-            self::assertSame(1, $status);
-            self::assertStringContainsString($expected, $output);
+            return $this->runGate($fixture);
         } finally {
             unlink($fixture);
         }

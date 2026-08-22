@@ -373,8 +373,8 @@ pam binary
 Composer
 ├── pushinbr/pam-http          routing + middleware (the Express-like layer)
 ├── pushinbr/pam-socket       realtime events (the Socket.IO-like layer)
-├── pushinbr/pam-psr   standards interoperability
-├── pushinbr/pam-testing      in-memory application tests
+├── pushinbr/pam-http-psr      standards interoperability
+├── pushinbr/pam-http-testing  in-memory HTTP application tests
 ├── pushinbr/pam-octane       Laravel Octane bridge
 ├── pushinbr/pam-desktop    desktop application model (separate repository)
 └── every existing compatible PHP package
@@ -397,8 +397,8 @@ Install only the higher-level pieces your application needs:
 ```bash
 pam composer require pushinbr/pam-http
 pam composer require pushinbr/pam-socket          # optional
-pam composer require pushinbr/pam-psr      # optional
-pam composer require --dev pushinbr/pam-testing   # optional
+pam composer require pushinbr/pam-http-psr            # optional
+pam composer require --dev pushinbr/pam-http-testing   # optional
 ```
 
 See [Packages and extension model](docs/packages.md) for stability, discovery and publishing rules.

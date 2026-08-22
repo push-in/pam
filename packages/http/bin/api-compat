@@ -20,15 +20,18 @@ enum PublicApiChangeCode: int
 $root = dirname(__DIR__);
 require $root . '/vendor/autoload.php';
 
-$mode = $argv[1] ?? 'check';
-if (!in_array($mode, ['check', 'update'], true) || count($argv) > 3) {
+$arguments = isset($_SERVER['argv']) && is_array($_SERVER['argv'])
+    ? array_values(array_filter($_SERVER['argv'], is_string(...)))
+    : [];
+$mode = $arguments[1] ?? 'check';
+if (!in_array($mode, ['check', 'update'], true) || count($arguments) > 3) {
     fwrite(STDERR, "Usage: bin/api-compat [check|update] [baseline.json]\n");
     exit(2);
 }
 
 try {
     $current = snapshot($root . '/src');
-    $baselinePath = $argv[2] ?? $root . '/api-surface.json';
+    $baselinePath = $arguments[2] ?? $root . '/api-surface.json';
     if ($baselinePath === '' || strlen($baselinePath) > 4_096) {
         throw new RuntimeException('Public API baseline path is invalid.');
     }
@@ -415,7 +418,13 @@ function compareMethods(array &$changes, string $symbol, array $before, array $a
             continue;
         }
         foreach (['static', 'abstract', 'returnsReference', 'return'] as $field) {
-            if (($oldMethod[$field] ?? null) !== ($newMethod[$field] ?? null)) {
+            $oldValue = $oldMethod[$field] ?? null;
+            $newValue = $newMethod[$field] ?? null;
+            if ($field === 'return') {
+                $oldValue = canonicalMethodReturn($oldValue, $symbol);
+                $newValue = canonicalMethodReturn($newValue, $symbol);
+            }
+            if ($oldValue !== $newValue) {
                 $changes[] = change(PublicApiChangeCode::ChangedMember, $path, "method {$field} changed");
             }
         }
@@ -437,6 +446,11 @@ function compareMethods(array &$changes, string $symbol, array $before, array $a
             }
         }
     }
+}
+
+function canonicalMethodReturn(mixed $returnType, string $declaringClass): mixed
+{
+    return $returnType === 'self' ? $declaringClass : $returnType;
 }
 
 /**

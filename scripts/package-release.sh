@@ -30,7 +30,7 @@ package_field() {
 validate_map() {
     jq -e '
         .owner == "push-in"
-        and (.packages | length == 7)
+        and (.packages | length >= 9)
         and ([.packages[].name] | length == (unique | length))
         and ([.packages[].path] | length == (unique | length))
         and ([.packages[].repository] | length == (unique | length))
@@ -87,7 +87,8 @@ validate_packages() {
 
         jq -e \
             --arg source "https://github.com/${owner}/${repository_name}" \
-            --arg issues "https://github.com/${owner}/pam/issues" \
+            --arg root_issues "https://github.com/${owner}/pam/issues" \
+            --arg package_issues "https://github.com/${owner}/${repository_name}/issues" \
             '
                 (has("version") | not)
                 and .license == "Apache-2.0"
@@ -95,7 +96,7 @@ validate_packages() {
                 and .description != null
                 and (.keywords | type == "array" and length > 0)
                 and .support.source == $source
-                and .support.issues == $issues
+                and (.support.issues == $root_issues or .support.issues == $package_issues)
             ' "${manifest}" >/dev/null ||
             fail "${package_path}/composer.json has incomplete publication metadata"
 

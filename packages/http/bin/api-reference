@@ -5,9 +5,12 @@ declare(strict_types=1);
 
 const MAXIMUM_REFERENCE_BASELINE_BYTES = 4_194_304;
 
-$mode = $argv[1] ?? '--check';
-$output = $argv[2] ?? dirname(__DIR__) . '/docs/PUBLIC-API.md';
-if (!in_array($mode, ['--check', '--write'], true) || count($argv) > 3) {
+$arguments = isset($_SERVER['argv']) && is_array($_SERVER['argv'])
+    ? array_values(array_filter($_SERVER['argv'], is_string(...)))
+    : [];
+$mode = $arguments[1] ?? '--check';
+$output = $arguments[2] ?? dirname(__DIR__) . '/docs/PUBLIC-API.md';
+if (!in_array($mode, ['--check', '--write'], true) || count($arguments) > 3) {
     fwrite(STDERR, "Usage: bin/api-reference [--check|--write] [output.md]\n");
     exit(2);
 }

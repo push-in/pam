@@ -1,0 +1,39 @@
+{
+    "name": "pushinbr/pam-http-psr",
+    "description": "PSR-7, PSR-15 and PSR-17 implementations for Pam.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "keywords": [
+        "pam",
+        "php",
+        "psr-7",
+        "psr-15",
+        "psr-17"
+    ],
+    "homepage": "https://github.com/push-in/pam-http-psr",
+    "support": {
+        "issues": "https://github.com/push-in/pam-http-psr/issues",
+        "source": "https://github.com/push-in/pam-http-psr"
+    },
+    "require": {
+        "php": "^8.4",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^2.0",
+        "psr/http-server-handler": "^1.0",
+        "psr/http-server-middleware": "^1.0"
+    },
+    "autoload": {
+        "files": [
+            "src/psr.php"
+        ]
+    },
+    "scripts": {
+        "test": [
+            "@php -l src/psr.php",
+            "@php tests/run.php"
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    }
+}
