@@ -5314,11 +5314,11 @@ fn init_mobile(
             "sort-packages": true
         },
         "scripts": {
-            "mobile:doctor": "pam mobile doctor .",
-            "mobile:dev": "pam mobile dev .",
-            "mobile:build": "pam mobile build . --release",
-            "mobile:benchmark": "pam mobile benchmark .",
-            "mobile:profile": "pam mobile profile .",
+            "native:doctor": "pam doctor .",
+            "native:dev": "pam dev .",
+            "native:build": "pam build . --release",
+            "native:benchmark": "pam benchmark .",
+            "native:profile": "pam profile .",
             "test": "pam test . --phpunit -c phpunit.xml"
         }
     });
@@ -5992,10 +5992,11 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
     );
     let next = if template == InitTemplate::Product {
         format!("cd {} && read README.md", directory.display())
-    } else if template == InitTemplate::Desktop {
-        format!("cd {} && pam desktop dev .", directory.display())
-    } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
-        format!("cd {} && pam mobile dev .", directory.display())
+    } else if matches!(
+        template,
+        InitTemplate::Desktop | InitTemplate::Mobile | InitTemplate::MobileUi
+    ) {
+        format!("cd {} && pam dev .", directory.display())
     } else {
         let entry = if template == InitTemplate::Laravel {
             "pam.php"

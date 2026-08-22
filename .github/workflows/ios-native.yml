@@ -141,7 +141,7 @@ jobs:
         run: |
           php_config="runtime/macos/${{ matrix.runtime_id }}/bin/php-config"
           test -x "${php_config}"
-          php_sdk=$(dirname "$(dirname "${php_config}")")
+          php_sdk=$(CDPATH= cd -- "$(dirname "$(dirname "${php_config}")")" && pwd)
           PHP_CONFIG="${php_config}" \
           PAM_PHP_LIB_DIR="${php_sdk}/lib" \
             cargo build --locked
@@ -157,7 +157,7 @@ jobs:
             '.runtime.php = $php | .ios.minimumVersion = $minimum' \
             "${fixture}/pam-native.json" >"${fixture}/pam-native.json.tmp"
           mv "${fixture}/pam-native.json.tmp" "${fixture}/pam-native.json"
-          if [[ "${{ matrix.php }}" == 8.4.* ]]; then
+          if [[ "${{ matrix.php }}" == 8.4* ]]; then
             jq '.require.php = "^8.4"' \
               "${fixture}/composer.json" >"${fixture}/composer.json.tmp"
             mv "${fixture}/composer.json.tmp" "${fixture}/composer.json"
