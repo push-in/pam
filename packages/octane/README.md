@@ -18,29 +18,32 @@ HTTP → PAM / Tokio → PamClient → Octane Worker → Laravel
 HTTP ← PAM / Tokio ← PamClient ← Octane Worker ← Laravel
 ```
 
-## Install
+## Start here
+
+PAM Octane is a Composer product that connects a Laravel application to the
+PAM Runtime; it is not a standalone server. Install PAM first, then add Octane
+and the bridge from inside the Laravel application:
+
+```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
+    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+pam doctor
+cd my-laravel-app
+pam composer require laravel/octane pushinbr/pam-octane
+pam octane:start
+```
 
 PAM Octane follows PAM's versioned release train. Install a tagged stable
 version for production; pre-release tags are intended for staging and feedback.
-
-Inside an existing Laravel application:
-
-```bash
-pam composer require laravel/octane pushinbr/pam-octane
-```
-
-Start it:
-
-```bash
-pam octane:start
-```
 
 Open <http://127.0.0.1:8000>. That is the complete development setup.
 
 Use another address or port when needed:
 
 ```bash
-pam octane:start --host=0.0.0.0 --port=8080
+pam octane:start -- --host=0.0.0.0 --port=8080
 ```
 
 For public, anonymous read endpoints, PAM can serve an explicitly opted-in
@@ -134,7 +137,8 @@ Workloads with different latency or memory profiles can run in isolated pools:
 pam octane:start \
   --ingress-address=0.0.0.0:8000 \
   --pool=api=8@/api,/graphql \
-  --pool=web=4@*
+  --pool=web=4@* \
+  -- --host=0.0.0.0 --port=8000
 ```
 
 The Rust ingress streams HTTP and WebSocket traffic, uses segment-aware longest
@@ -148,8 +152,10 @@ The maintained matrix is:
 
 | PHP | Laravel | Octane |
 | --- | --- | --- |
-| 8.4 | 12.x | 2.19+ |
-| 8.4 | 13.x | 2.19+ |
+| 8.5 (default) | 12.x | 2.19+ |
+| 8.5 (default) | 13.x | 2.19+ |
+| 8.4 (supported) | 12.x | 2.19+ |
+| 8.4 (supported) | 13.x | 2.19+ |
 
 PAM Octane requires the PAM runtime. Running `php artisan pam:octane` reports a
 clear error because ordinary PHP CLI does not contain PAM's native server.

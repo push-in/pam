@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "282c34d41b9b92bfb49b0fa50afa7851",
+    "content-hash": "2f17b2c8a359648f2e7863236933505a",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2902,94 +2902,12 @@
             "time": "2021-10-29T13:26:27+00:00"
         },
         {
-            "name": "pushinbr/pam-api",
-            "version": "1.0.2",
+            "name": "pushinbr/pam-contracts",
+            "version": "1.1.0",
             "dist": {
                 "type": "path",
-                "url": "../../packages/api",
-                "reference": "513cb5f35d410ed0a1db598cec6fd37b87b0f4ca"
-            },
-            "require": {
-                "illuminate/database": "^13.0",
-                "illuminate/events": "^13.0",
-                "illuminate/filesystem": "^13.0",
-                "illuminate/pagination": "^13.0",
-                "php": "^8.4",
-                "pushinbr/pam-core-api": "^1.0"
-            },
-            "require-dev": {
-                "phpstan/phpstan": "^2.1",
-                "phpunit/phpunit": "^11.5"
-            },
-            "suggest": {
-                "pushinbr/pam-psr-bridge": "PSR-7, PSR-15 and PSR-17 interoperability.",
-                "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
-            },
-            "type": "library",
-            "autoload": {
-                "classmap": [
-                    "src/App.php"
-                ],
-                "psr-4": {
-                    "Pam\\Api\\": "src/"
-                }
-            },
-            "autoload-dev": {
-                "psr-4": {
-                    "Pam\\Api\\Tests\\": "tests/"
-                },
-                "files": [
-                    "tests/bootstrap.php"
-                ]
-            },
-            "scripts": {
-                "analyse": [
-                    "phpstan analyse --configuration=phpstan.neon --memory-limit=1G"
-                ],
-                "benchmark": [
-                    "php benchmarks/router.php"
-                ],
-                "test": [
-                    "phpunit --configuration=phpunit.xml"
-                ],
-                "verify": [
-                    "@analyse",
-                    "@test"
-                ]
-            },
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "Elegant HTTP routing and middleware for the Pam runtime.",
-            "homepage": "https://github.com/push-in/pam",
-            "keywords": [
-                "api",
-                "dependency-injection",
-                "http",
-                "middleware",
-                "openapi",
-                "pam",
-                "php",
-                "router",
-                "validation"
-            ],
-            "support": {
-                "docs": "https://push-in.github.io/pam-docs/packages/api/",
-                "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-api"
-            },
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
-        },
-        {
-            "name": "pushinbr/pam-core-api",
-            "version": "1.0.2",
-            "dist": {
-                "type": "path",
-                "url": "../../packages/core-api",
-                "reference": "645d5b4a0b8277ddaee436ab3e674ae93f0d7874"
+                "url": "../../packages/contracts",
+                "reference": "62c5a8d98d2f7eab4e076b9333d44f9d10d2b63f"
             },
             "require": {
                 "php": "^8.4"
@@ -3013,7 +2931,7 @@
             ],
             "support": {
                 "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-core-api"
+                "source": "https://github.com/push-in/pam-contracts"
             },
             "transport-options": {
                 "symlink": true,
@@ -3021,12 +2939,109 @@
             }
         },
         {
-            "name": "pushinbr/pam-psr-bridge",
+            "name": "pushinbr/pam-http",
+            "version": "2.0.0",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/http",
+                "reference": "12f7ab5d6829d5077f460c1b3a3ddc9a1284b0ac"
+            },
+            "require": {
+                "illuminate/database": "^13.0",
+                "illuminate/events": "^13.0",
+                "illuminate/filesystem": "^13.0",
+                "illuminate/pagination": "^13.0",
+                "php": "^8.4",
+                "pushinbr/pam-contracts": "^1.1"
+            },
+            "require-dev": {
+                "phpstan/phpstan": "^2.1",
+                "phpunit/phpunit": "^11.5"
+            },
+            "suggest": {
+                "pushinbr/pam-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
+                "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
+            },
+            "type": "library",
+            "autoload": {
+                "classmap": [
+                    "src/App.php"
+                ],
+                "psr-4": {
+                    "Pam\\Api\\": "src/"
+                }
+            },
+            "autoload-dev": {
+                "psr-4": {
+                    "Pam\\Api\\Tests\\": "tests/"
+                },
+                "files": [
+                    "tests/bootstrap.php"
+                ]
+            },
+            "scripts": {
+                "analyse": [
+                    "phpstan analyse --configuration=phpstan.neon --memory-limit=1G"
+                ],
+                "api:compat": [
+                    "bin/api-compat check"
+                ],
+                "docs:check": [
+                    "bin/api-reference --check"
+                ],
+                "docs:generate": [
+                    "bin/api-reference --write"
+                ],
+                "benchmark": [
+                    "php benchmarks/router.php"
+                ],
+                "benchmark:check": [
+                    "php benchmarks/router.php --assert"
+                ],
+                "test": [
+                    "phpunit --configuration=phpunit.xml"
+                ],
+                "verify": [
+                    "@analyse",
+                    "@api:compat",
+                    "@docs:check",
+                    "@benchmark:check",
+                    "@test"
+                ]
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Elegant HTTP routing and middleware for the Pam runtime.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "api",
+                "dependency-injection",
+                "http",
+                "middleware",
+                "openapi",
+                "pam",
+                "php",
+                "router",
+                "validation"
+            ],
+            "support": {
+                "docs": "https://push-in.github.io/pam-docs/packages/http/",
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-http"
+            },
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-psr",
             "version": "1.0.2",
             "dist": {
                 "type": "path",
-                "url": "../../packages/psr-bridge",
-                "reference": "66d8c902e4998f460d56796faede36b9520a135a"
+                "url": "../../packages/psr",
+                "reference": "cafe369ab70daf4945a910cbcfbcf840b33810bd"
             },
             "require": {
                 "php": "^8.4",
@@ -3055,7 +3070,7 @@
             ],
             "support": {
                 "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-psr-bridge"
+                "source": "https://github.com/push-in/pam-psr"
             },
             "transport-options": {
                 "symlink": true,
@@ -3068,11 +3083,11 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/socket",
-                "reference": "e72dc716e0ae3a665e60cecb8ae5e72b2fc12b8e"
+                "reference": "a968a8818f419a75bb7df2c9c0a39c7fe5b89e4f"
             },
             "require": {
                 "php": "^8.4",
-                "pushinbr/pam-core-api": "^1.0"
+                "pushinbr/pam-contracts": "^1.0"
             },
             "type": "library",
             "autoload": {
@@ -7141,11 +7156,11 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/testing",
-                "reference": "4eaa3033a0bd0e5ce16412110931e9565a948fba"
+                "reference": "930d5cc6421e1195c799658092f0c6869d7d4e8b"
             },
             "require": {
                 "php": "^8.4",
-                "pushinbr/pam-core-api": "^1.0"
+                "pushinbr/pam-contracts": "^1.0"
             },
             "type": "library",
             "autoload": {

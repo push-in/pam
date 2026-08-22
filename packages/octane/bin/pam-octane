@@ -1,0 +1,64 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$pam = getenv('PAM_BINARY');
+
+if (!is_string($pam) || $pam === '') {
+    fwrite(STDERR, "pam-octane: PAM_BINARY is required; run this command through PAM\n");
+    exit(64);
+}
+
+$mode = $argv[1] ?? null;
+$arguments = array_slice($argv, 2);
+
+switch ($mode) {
+    case 'start':
+        if (!is_file(getcwd() . DIRECTORY_SEPARATOR . 'artisan')) {
+            fwrite(STDERR, "pam-octane: run octane:start from a Laravel project\n");
+            exit(66);
+        }
+
+        $separator = array_search('--', $arguments, true);
+        if ($separator === false) {
+            $supervisor = $arguments;
+            $server = [];
+        } else {
+            $supervisor = array_slice($arguments, 0, $separator);
+            $server = array_slice($arguments, $separator + 1);
+        }
+        $command = array_merge(
+            [$pam, 'up', 'artisan', '--name', 'pam-octane'],
+            $supervisor,
+            ['--', 'pam:octane'],
+            $server,
+        );
+        break;
+
+    case 'status':
+    case 'reload':
+    case 'stop':
+        $command = array_merge([$pam, $mode, 'pam-octane'], $arguments);
+        break;
+
+    default:
+        fwrite(STDERR, "pam-octane: expected start, status, reload, or stop\n");
+        exit(64);
+}
+
+$process = proc_open(
+    $command,
+    [0 => STDIN, 1 => STDOUT, 2 => STDERR],
+    $pipes,
+    getcwd(),
+    null,
+    ['bypass_shell' => true],
+);
+
+if (!is_resource($process)) {
+    fwrite(STDERR, "pam-octane: cannot start PAM\n");
+    exit(70);
+}
+
+exit(proc_close($process));

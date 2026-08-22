@@ -78,9 +78,8 @@ Release selection accepts canonical `vMAJOR.MINOR.PATCH[-PRERELEASE]` only; the
 CLI and installer reject ambiguous leading zeros and build metadata.
 
 For Android projects, `pam doctor --fix` installs PAM's SHA-256-verified PHP
-runtimes and native engines. Projects configured with the signed PAM registry
-also authenticate the artifact URL, compatibility, Native protocol and catalog
-sequence before installation. Application developers do not need a Rust
+runtimes and native engines from the versioned official GitHub release.
+Application developers do not need a Rust
 toolchain unless they intend to rebuild the engine itself.
 
 ## Create a project interactively
@@ -92,9 +91,9 @@ pam
 Or choose a preset explicitly:
 
 ```bash
-pam init my-api --template api
+pam init my-api --template http
 pam init my-laravel-app --template laravel
-pam init my-native-app --template mobile
+pam init my-native-app --template native
 pam init my-desktop-app --template desktop
 pam init my-product --template product
 ```
@@ -123,7 +122,7 @@ Light/dark themes use sequential integer mode codes, semantic color roles, a
 4/8 spacing rhythm, bounded motion, and a 48-unit minimum touch target. Root
 `pam.json` publishes `workspace.designTokenPath`, so tooling locates the
 contract without guessing. The generated Native app reads that bounded document,
-validates its exact schema/mode order and derives both PAM Mobile UI themes from
+validates its exact schema/mode order and derives both PAM Native UI themes from
 the framework defaults, so unspecified framework roles remain forward-compatible.
 The generated Desktop worker exposes the same bounded contract through an
 authenticated typed command; its renderer validates the exact response, applies
@@ -195,44 +194,9 @@ cd ../.. && pam package
 pam release:verify
 ```
 
-Before trusting a Desktop build or installer operation, inspect the host
-boundary without downloading or launching the application:
-
-```bash
-pam desktop host:doctor . --json
-```
-
-The schema-1 report uses `surfaceCode: 3`; result code `1` means the signed
-registry release, persisted provenance, exact SHA-256 and
-`pam-desktop <version>` identity all agree. Result code `2` needs attention.
-Source codes are `1` signed registry, `2` explicit environment binary, `3`
-sibling binary and `4` PATH. Fallback binaries may be useful during local
-development but are never reported as authenticated installer evidence. The
-identity probe is bounded to five seconds and 4 KiB on each output stream; a
-stalled or noisy host process group is terminated and fails closed instead of
-hanging Doctor or first acquisition indefinitely. In signed-registry mode,
-Doctor verifies the catalog SHA-256 before executing the identity probe, so
-modified host bytes are never launched. Hashing accepts only a non-empty regular
-file up to 512 MiB and fails closed on symlinks or special files instead of
-following or blocking on them. The
-strict offline contract is
-[`desktop-host-doctor.schema.json`](schemas/desktop-host-doctor.schema.json).
-
-Host acquisition never deletes the existing executable before the replacement
-has passed the signed digest and exact version-identity checks. Activation uses
-a same-directory backup and atomic rename, restores the previous executable if
-publication fails, and synchronizes the containing directory on Unix. If the
-binary already matches the current signed release, PAM repairs missing or stale
-provenance locally without downloading the host again. A later invocation also
-recognizes and restores a backup left between the two activation renames.
-Provenance replacement follows the same backup/rollback protocol and closes its
-temporary handle before activation for Windows compatibility. Per-process
-monotonic suffixes prevent an abandoned temporary name from colliding with a
-later acquisition, while normal cleanup still removes failed downloads.
-The file transaction module has no PHP or third-party dependency and runs as a
-native `rustc --test` contract on `windows-2022` in CI, covering replacement,
-closed-handle activation, rollback, interrupted-backup recovery and unique
-same-directory temporary paths on NTFS semantics.
+Desktop host installation and diagnostics belong to `pushinbr/pam-desktop`.
+Install that package with Composer to add its commands and their autocomplete
+to the project; the PAM runtime does not download or proxy a Desktop host.
 
 The aggregation command refuses missing, symbolic-link, or non-portably named artifacts, hashes files by
 streaming them in 64 KiB chunks, verifies that they did not change during the
@@ -300,14 +264,13 @@ and explicit cross-project automation.
 ## Add ecosystem capabilities
 
 ```bash
-pam packages
-pam add maps
-pam add auth
-pam remove maps
+pam composer require pushinbr/pam-native-maps
+pam composer require pushinbr/pam-native-auth
+pam composer remove pushinbr/pam-native-maps
 ```
 
-PAM queries package metadata and performs a non-mutating Composer preflight
-before it changes the manifest or lockfile.
+Composer owns package metadata, dependency resolution, the manifest and the
+lockfile. `pam composer` runs it with PAM's verified PHP runtime.
 
 ## Automation
 
@@ -321,7 +284,7 @@ Interactive flows always have deterministic command forms for CI:
 
 ```bash
 pam init my-native-app \
-  --template mobile \
+  --template native \
   --no-interaction
 ```
 

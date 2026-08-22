@@ -37,7 +37,7 @@ incomplete scan, symlink or unexpected non-directory fails closed instead of
 deleting an uncertain path.
 
 Cleanup never removes `.pam` as a whole. It targets only known cache children,
-preserving plugin-registry trust state, Desktop host provenance, Firebase
+preserving Composer lock state, package-owned host provenance, Firebase
 configuration and other project authority stored beside those caches.
 
 The default cleanup removes only regenerable build outputs and caches from the

@@ -60,28 +60,175 @@
       "groupCode": 2,
       "groupLabel": "Develop",
       "name": "logs",
-      "summary": "Stream logs from the active application",
+      "summary": "Query or follow managed application logs",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "daemon",
+      "summary": "Manage the per-user PAM supervisor",
       "supportsJson": false
     },
     {
       "groupCode": 2,
       "groupLabel": "Develop",
-      "name": "devices",
-      "summary": "List connected development targets",
+      "name": "scale",
+      "summary": "Change a managed application's worker count",
       "supportsJson": false
     },
     {
       "groupCode": 2,
       "groupLabel": "Develop",
-      "name": "devtools",
-      "summary": "Toggle contextual development tools",
+      "name": "save",
+      "summary": "Save the desired managed process list",
       "supportsJson": false
     },
     {
       "groupCode": 2,
       "groupLabel": "Develop",
-      "name": "console",
-      "summary": "Open the application console",
+      "name": "resurrect",
+      "summary": "Restore the saved managed process list",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "startup",
+      "summary": "Generate or install the Linux user service",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "monit",
+      "summary": "Show managed process health and capacity",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "monit:history",
+      "summary": "Inspect bounded process resource history",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "dashboard",
+      "summary": "Create a private manager health dashboard",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "dashboard:start",
+      "summary": "Start the authenticated local live dashboard",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "dashboard:status",
+      "summary": "Inspect the local live dashboard service",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "dashboard:stop",
+      "summary": "Stop the local live dashboard service",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "apply",
+      "summary": "Reconcile applications from pam.toml",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "plan",
+      "summary": "Preview pam.toml reconciliation without mutation",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 2,
+      "groupLabel": "Develop",
+      "name": "config:check",
+      "summary": "Validate a pam.toml ecosystem contract",
+      "supportsJson": true
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "deploy",
+      "summary": "Activate a readiness-gated release",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "deploy:history",
+      "summary": "Inspect bounded deployment history",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "rollback",
+      "summary": "Restore a previous healthy release",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "traffic:start",
+      "summary": "Start a weighted release ingress",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "traffic:set",
+      "summary": "Change candidate traffic atomically",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "traffic:promote",
+      "summary": "Promote candidate to stable",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "traffic:abort",
+      "summary": "Abort candidate traffic",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 8,
+      "groupLabel": "Observe",
+      "name": "traffic:status",
+      "summary": "Inspect release traffic state",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "traffic:evaluate",
+      "summary": "Gate a candidate using live evidence",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "traffic:stop",
+      "summary": "Stop a release traffic ingress",
       "supportsJson": false
     },
     {
@@ -92,108 +239,24 @@
       "supportsJson": true
     },
     {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:screen",
-      "summary": "Generate a native screen",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:component",
-      "summary": "Generate a native component",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:native-view",
-      "summary": "Generate a native view bridge",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:model",
-      "summary": "Generate a Laravel model",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:controller",
-      "summary": "Generate a Laravel controller",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:request",
-      "summary": "Generate a Laravel form request",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:resource",
-      "summary": "Generate a Laravel API resource",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:migration",
-      "summary": "Generate a Laravel migration",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:test",
-      "summary": "Generate a Laravel test",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:command",
-      "summary": "Generate a Laravel console command",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 3,
-      "groupLabel": "Generate",
-      "name": "make:job",
-      "summary": "Generate a Laravel job",
-      "supportsJson": false
-    },
-    {
       "groupCode": 4,
       "groupLabel": "Ecosystem",
       "name": "packages",
-      "summary": "List official PAM capabilities",
+      "summary": "List direct Composer requirements",
       "supportsJson": true
     },
     {
       "groupCode": 4,
       "groupLabel": "Ecosystem",
-      "name": "registry",
-      "summary": "Verify signed plugin metadata and compatibility",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 4,
-      "groupLabel": "Ecosystem",
       "name": "add",
-      "summary": "Install an official capability",
+      "summary": "Legacy alias for Composer require",
       "supportsJson": false
     },
     {
       "groupCode": 4,
       "groupLabel": "Ecosystem",
       "name": "remove",
-      "summary": "Remove an official capability",
+      "summary": "Legacy alias for Composer remove",
       "supportsJson": false
     },
     {
@@ -213,9 +276,9 @@
     {
       "groupCode": 4,
       "groupLabel": "Ecosystem",
-      "name": "artisan",
-      "summary": "Run Laravel Artisan inside PAM",
-      "supportsJson": false
+      "name": "extensions",
+      "summary": "Derive an explainable PHP extension profile from Composer",
+      "supportsJson": true
     },
     {
       "groupCode": 5,
@@ -269,13 +332,6 @@
     {
       "groupCode": 6,
       "groupLabel": "Ship",
-      "name": "sign",
-      "summary": "Validate native release signing",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 6,
-      "groupLabel": "Ship",
       "name": "release",
       "summary": "Validate and publish a release candidate",
       "supportsJson": false
@@ -302,6 +358,13 @@
       "supportsJson": false
     },
     {
+      "groupCode": 6,
+      "groupLabel": "Ship",
+      "name": "distribution:desktop-report",
+      "summary": "Bind native Desktop trust proofs to an installer",
+      "supportsJson": false
+    },
+    {
       "groupCode": 7,
       "groupLabel": "Runtime",
       "name": "start",
@@ -311,29 +374,57 @@
     {
       "groupCode": 7,
       "groupLabel": "Runtime",
-      "name": "octane:start",
-      "summary": "Start Laravel Octane on the PAM runtime",
+      "name": "up",
+      "summary": "Start an environment-aware, health-supervised application",
       "supportsJson": false
     },
     {
       "groupCode": 7,
       "groupLabel": "Runtime",
-      "name": "octane:status",
-      "summary": "Inspect the PAM Octane master",
+      "name": "ps",
+      "summary": "List managed PAM applications",
       "supportsJson": false
     },
     {
       "groupCode": 7,
       "groupLabel": "Runtime",
-      "name": "octane:reload",
-      "summary": "Reload PAM Octane without downtime",
+      "name": "status",
+      "summary": "Inspect managed application health",
       "supportsJson": false
     },
     {
       "groupCode": 7,
       "groupLabel": "Runtime",
-      "name": "octane:stop",
-      "summary": "Gracefully stop PAM Octane",
+      "name": "describe",
+      "summary": "Describe a managed application",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "reload",
+      "summary": "Reload a managed application without downtime",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "restart",
+      "summary": "Restart a managed application",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "stop",
+      "summary": "Gracefully stop a managed application",
+      "supportsJson": false
+    },
+    {
+      "groupCode": 7,
+      "groupLabel": "Runtime",
+      "name": "delete",
+      "summary": "Remove a stopped application from PAM",
       "supportsJson": false
     },
     {
@@ -376,7 +467,7 @@
       "groupLabel": "Observe",
       "name": "top",
       "summary": "Stream live runtime metrics",
-      "supportsJson": false
+      "supportsJson": true
     },
     {
       "groupCode": 9,
@@ -384,20 +475,6 @@
       "name": "catalog",
       "summary": "Discover the versioned CLI contract",
       "supportsJson": true
-    },
-    {
-      "groupCode": 9,
-      "groupLabel": "Advanced",
-      "name": "mobile",
-      "summary": "Use explicit PAM Native commands",
-      "supportsJson": false
-    },
-    {
-      "groupCode": 9,
-      "groupLabel": "Advanced",
-      "name": "desktop",
-      "summary": "Use explicit PAM Desktop commands",
-      "supportsJson": false
     },
     {
       "groupCode": 9,
@@ -417,7 +494,7 @@
       "groupCode": 9,
       "groupLabel": "Advanced",
       "name": "self-update",
-      "summary": "Install a verified PAM release",
+      "summary": "Install a cryptographically authorized PAM release",
       "supportsJson": false
     },
     {

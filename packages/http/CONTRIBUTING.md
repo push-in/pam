@@ -16,4 +16,3 @@ Controllers in examples must remain thin. Validation belongs in Form Requests,
 business rules in services, persistence in repositories and domain responses in
 Resources. Coded status/type/state/kind/category values use sequential
 integer-backed enums.
-

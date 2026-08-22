@@ -16,6 +16,8 @@ class DoctorWorkflowContractTest(unittest.TestCase):
         self.assertIn('>"${PAM_DOCTOR_EVIDENCE}/runtime.json"', workflow)
         self.assertIn('>"${PAM_DOCTOR_EVIDENCE}/project.json"', workflow)
         self.assertIn('>"${PAM_DOCTOR_EVIDENCE}/schema.json"', workflow)
+        self.assertNotIn("desktop-host.json", workflow)
+        self.assertNotIn("desktop-host.schema.json", workflow)
         self.assertIn("sha256sum --check --strict SHA256SUMS", workflow)
         self.assertIn("pam-doctor-contract-${{ github.sha }}", workflow)
         self.assertIn("if-no-files-found: error", workflow)

@@ -4,12 +4,12 @@
 
 ### PHP was never the ceiling. The runtime was.
 
-**One persistent PHP platform for servers, Laravel, real native mobile apps, and secure desktop software.**
+**The small persistent PHP runtime behind a Composer-native application ecosystem.**
 
 Rust owns the runtime. Tokio owns concurrency. PHP owns your product.
 
-[![Status](https://img.shields.io/badge/PAM-1.0%20stable-16a34a?style=for-the-badge)](https://push-in.github.io/pam-docs/project/status/)
-[![PHP](https://img.shields.io/badge/PHP-8.4-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net/)
+[![Status](https://img.shields.io/badge/PAM-2.0-16a34a?style=for-the-badge)](https://push-in.github.io/pam-docs/project/status/)
+[![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net/)
 [![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-2563eb?style=for-the-badge)](LICENSE)
 
@@ -26,29 +26,31 @@ on every request?**
 Much further.
 
 PAM keeps the Zend Engine and your Composer application alive inside a
-supervised, event-driven runtime powered by Rust, Tokio, and PHP Fibers. That
-same foundation can serve HTTP and WebSockets, run Laravel with isolated request
-sandboxes, render actual Android Views and UIKit controls, and power desktop
-applications inside capability-secured native windows.
+supervised, event-driven runtime powered by Rust, Tokio, and PHP Fibers. The
+runtime owns execution, processes, transports, and its small request/response
+contract. HTTP routing, Laravel, Native, Desktop, Octane, authentication, and
+future capabilities belong to installable Composer packages.
 
 This is not PHP imitating another ecosystem. **This is PHP with a modern systems
 boundary built around its strengths.**
 
 > [!IMPORTANT]
-> PAM 1.0 stabilizes the documented CLI, server runtime, Composer packages,
-> editor tooling, Android distribution, and generated iOS host contracts. Read
+> PAM 2.0 establishes the permanent ecosystem boundary: PAM is the runtime;
+> Composer packages own product features and add their commands dynamically.
+> Read
 > the [project status](https://push-in.github.io/pam-docs/project/status/) and
 > [known limitations](#known-limitations), then validate your own extensions,
 > devices, credentials, and workloads before production deployment.
 
-## One command. Four product surfaces. No ecosystem reset.
+## One runtime. An open Composer ecosystem.
 
 | Build | What PAM changes | What you keep |
 | --- | --- | --- |
-| **PAM Server** | Persistent Zend, native HTTP/WebSockets, async I/O, supervised workers | PHP, Composer, PSRs, your application |
-| **Laravel on PAM** | Boot once, isolate every request, add native operations and observability | Laravel, Artisan, packages, conventions |
-| **PAM Native** | Reconcile in Rust and render real Android/iOS controls | Reactive PHP components, state, routes, Composer |
-| **PAM Desktop** | Servo UI, Rust process control, explicit native capabilities | PHP application logic, HTML/CSS/JS views |
+| **PAM runtime** | Persistent Zend, transports, async I/O and supervised processes | PHP, Composer, PSRs, your application |
+| **`pushinbr/pam-http`** | Express-like routing and application structure | Install with `pam composer require` |
+| **`pushinbr/pam-laravel`** | Laravel integration and package-owned Artisan command | Laravel conventions and packages |
+| **`pushinbr/pam-native`** | Native SDK, platform CLI and dynamic PAM commands | Android/iOS features stay outside the runtime |
+| **`pushinbr/pam-desktop`** | Desktop host, lifecycle and dynamic PAM commands | Desktop features stay outside the runtime |
 
 Most platforms ask you to choose between the PHP ecosystem and a modern runtime.
 PAM rejects the trade-off. Composer stays Composer. Laravel stays Laravel. Rust
@@ -65,12 +67,11 @@ $ curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
     --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
     https://github.com/push-in/pam/releases/latest/download/install.sh | sh
 
-$ pam init my-api --template api
-✓ Project created
+$ mkdir my-api && cd my-api
+$ pam composer require pushinbr/pam-http
 ✓ Composer dependencies installed
-✓ PAM runtime ready
 
-$ cd my-api && pam dev
+$ pam dev
 ⚡ PAM listening on http://127.0.0.1:3000
 ↻ Hot reload enabled
 
@@ -93,7 +94,7 @@ Choose another target without learning another platform CLI:
 
 ```bash
 pam init my-laravel-app --template laravel  # Persistent Laravel
-pam init my-native-app  --template mobile   # Android + iOS
+pam init my-native-app  --template native   # Android + iOS
 pam init my-desktop-app --template desktop  # Linux + macOS + Windows
 pam init my-product     --template product  # Server + Native + Desktop
 ```
@@ -192,7 +193,7 @@ The result is a product-grade native foundation:
 Start it with the same CLI:
 
 ```console
-$ pam init orbit --template mobile
+$ pam init orbit --template native
 $ cd orbit
 $ pam doctor --fix
 $ pam dev
@@ -370,12 +371,12 @@ pam binary
 └── lifecycle, workers, health, metrics and diagnostics
 
 Composer
-├── pushinbr/pam-api          routing + middleware (the Express-like layer)
+├── pushinbr/pam-http          routing + middleware (the Express-like layer)
 ├── pushinbr/pam-socket       realtime events (the Socket.IO-like layer)
-├── pushinbr/pam-psr-bridge   standards interoperability
+├── pushinbr/pam-psr   standards interoperability
 ├── pushinbr/pam-testing      in-memory application tests
 ├── pushinbr/pam-octane       Laravel Octane bridge
-├── pam/desktop      desktop application model (separate repository)
+├── pushinbr/pam-desktop    desktop application model (separate repository)
 └── every existing compatible PHP package
 ```
 
@@ -394,9 +395,9 @@ Server::create(static fn (Request $request, Response $response): Response =>
 Install only the higher-level pieces your application needs:
 
 ```bash
-pam composer require pushinbr/pam-api
+pam composer require pushinbr/pam-http
 pam composer require pushinbr/pam-socket          # optional
-pam composer require pushinbr/pam-psr-bridge      # optional
+pam composer require pushinbr/pam-psr      # optional
 pam composer require --dev pushinbr/pam-testing   # optional
 ```
 
@@ -404,7 +405,7 @@ See [Packages and extension model](docs/packages.md) for stability, discovery an
 
 ## The API programming model
 
-`pushinbr/pam-api` is the optional, Express-like API:
+`pushinbr/pam-http` is the optional, Express-like API:
 
 ```php
 <?php
@@ -454,9 +455,8 @@ Superglobals, output buffers, headers, sessions, uploads, Fiber context, and req
 
 ## Composer stays Composer
 
-Composer remains the dependency resolver and PAM does not introduce a competing
-package format. Projects may opt into PAM's signed compatibility catalog to
-authenticate official versions and artifact bytes before Composer sees them.
+Composer is PAM's only package registry and dependency resolver. PAM does not
+maintain a package allowlist, a second package format, or a parallel registry.
 
 ```bash
 pam composer require guzzlehttp/guzzle
@@ -465,18 +465,12 @@ pam doctor
 pam test
 ```
 
-Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and loads the normal Composer autoloader. Your lockfile remains the dependency source of truth; the signed PAM catalog is an authenticity and compatibility gate, not a second solver.
+Pam discovers the nearest `composer.json`, respects `config.vendor-dir`, and
+loads the normal Composer autoloader. `composer.lock` is the dependency source
+of truth. Package integrity, provenance, security advisories and repository
+metadata use Composer and Packagist's standard mechanisms.
 
-Registry operators and CI can export one verified Server/Native/Desktop view with
-`pam registry matrix --root root.json --root-sha256 <hex> --catalog catalog.json
---native-protocol <n> --desktop-protocol <n> --json`. The output uses stable
-integer surface and result codes and is suitable as the source for compatibility
-dashboards; see the [registry operations runbook](docs/registry-operations.md).
-`pam registry dashboard` turns the same verified inputs into a dependency-free,
-accessible static site plus its exact JSON evidence. It refuses to overwrite an
-existing output directory so publication can use an atomic directory swap.
-
-Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pushinbr/pam-api` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
+Pam packages use the same mechanism. A third-party package can publish a service provider under `extra.pam.providers`; `pushinbr/pam-http` discovers it from Composer's installed metadata and writes an atomic cache under `.pam/cache`. Set `PAM_DISABLE_PACKAGE_DISCOVERY=1` for fully explicit registration.
 
 The executable compatibility project currently covers real behavior from:
 
@@ -859,12 +853,20 @@ pam doctor [directory]                              compare CLI, Embed, and Comp
 pam doctor --json|--schema                          emit diagnostics or its embedded contract
 pam doctor --validate doctor-report.json            verify a saved report offline
 pam benchmark http://host/path                      built-in HTTP benchmark
-pam init [directory] --template raw|api|laravel|desktop|mobile|mobile-ui|product
+pam init [directory] --template raw|http|laravel|desktop|native|native-ui|product
                                                     scaffold and install a project
-pam init [directory] --template api --socket        add native Socket support
+pam init [directory] --template http --socket       add native Socket support
 pam init [directory] --no-interaction               accept the default API preset
 pam build [directory] --entry index.php --output dist
 ```
+
+`pam plan` and `pam apply` fingerprint each declared service's kind, canonical
+working directory, canonical script target, and arguments. Structural drift is
+reported as action code `8`; apply performs a validated replacement and restores
+the previous online definition if the new process fails readiness. Existing
+records without a declarative identity are replaced once on their next apply.
+See [Process manager](docs/process-manager.md) for the full contract and JSON
+fields.
 
 `pam dev` watches PHP files, `.env`, `composer.json`, and `composer.lock`, while ignoring heavy/generated directories. A syntax error does not kill the watcher; fix the file and save again.
 

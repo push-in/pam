@@ -3,7 +3,19 @@
 > This branch targets PAM API 2.0. Use the published `1.x` skeleton until the
 > PAM API 2.0 prerelease is available on Packagist.
 
+## Start here
+
+This skeleton creates an application for the PAM Runtime; it does not include
+the runtime itself. Install PAM first, then create the project through PAM:
+
 ```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
+    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+pam doctor
+pam init my-app
+cd my-app
 pam composer install
 mkdir -p storage && touch storage/database.sqlite
 pam composer migrate

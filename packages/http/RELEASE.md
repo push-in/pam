@@ -7,20 +7,20 @@ must come from a commit already integrated into the monorepo `main` branch.
 
 1. Date the version entry in `CHANGELOG.md` and complete `UPGRADE.md` for a
    major release.
-2. Run `composer verify` in `packages/api`.
+2. Run `composer verify` in `packages/http`.
 3. Run the package metadata and isolated split gates:
 
    ```bash
    scripts/package-release.sh validate
-   scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
-   split_sha=$(scripts/package-release.sh split pushinbr/pam-api HEAD)
-   scripts/package-release.sh verify-split pushinbr/pam-api "$split_sha"
+   scripts/package-release.sh validate-package-tag pushinbr/pam-http v2.0.0
+   split_sha=$(scripts/package-release.sh split pushinbr/pam-http HEAD)
+   scripts/package-release.sh verify-split pushinbr/pam-http "$split_sha"
    ```
 
 4. Merge through the protected `main` branch. Do not release a pull-request
    commit.
 5. Dispatch **Independent Composer package release** with package
-   `pushinbr/pam-api`, the exact version tag, `source_ref=main`, and
+   `pushinbr/pam-http`, the exact version tag, `source_ref=main`, and
    `publish=false`. Inspect the retained provenance artifact.
 6. Re-run with `publish=true`. The workflow uses only the API mirror deploy
    key, refuses a conflicting existing tag, waits for Packagist and performs a

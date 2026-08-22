@@ -2,7 +2,7 @@
 
 PAM packages can add queues, pub/sub brokers, ordered streams, and RPC systems
 without importing the Rust runtime implementation. The stable contract lives in
-`pushinbr/pam-core-api` under `Pam\Contracts\Transport`.
+`pushinbr/pam-contracts` under `Pam\Contracts\Transport`.
 
 ## Provider contract
 

@@ -242,63 +242,14 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Ship",
         ),
         command("traffic:stop", "Stop a release traffic ingress", "Ship"),
-        command("devices", "List connected development targets", "Develop"),
-        command("devtools", "Toggle contextual development tools", "Develop"),
-        command("console", "Open the application console", "Develop"),
         command(
             "commands",
             "List application and package commands",
             "Develop",
         ),
-        command("make:screen", "Generate a native screen", "Generate"),
-        command("make:component", "Generate a native component", "Generate"),
-        command(
-            "make:native-view",
-            "Generate a native view bridge",
-            "Generate",
-        ),
-        command("make:model", "Generate a Laravel model", "Generate"),
-        command(
-            "make:controller",
-            "Generate a Laravel controller",
-            "Generate",
-        ),
-        command(
-            "make:request",
-            "Generate a Laravel form request",
-            "Generate",
-        ),
-        command(
-            "make:resource",
-            "Generate a Laravel API resource",
-            "Generate",
-        ),
-        command("make:migration", "Generate a Laravel migration", "Generate"),
-        command(
-            "make:service",
-            "Generate an application service",
-            "Generate",
-        ),
-        command(
-            "make:repository",
-            "Generate a persistence repository",
-            "Generate",
-        ),
-        command("make:test", "Generate a Laravel test", "Generate"),
-        command(
-            "make:command",
-            "Generate a Laravel console command",
-            "Generate",
-        ),
-        command("make:job", "Generate a Laravel job", "Generate"),
-        command("packages", "List official PAM capabilities", "Ecosystem"),
-        command(
-            "registry",
-            "Verify signed plugin metadata and compatibility",
-            "Ecosystem",
-        ),
-        command("add", "Install an official capability", "Ecosystem"),
-        command("remove", "Remove an official capability", "Ecosystem"),
+        command("packages", "List direct Composer requirements", "Ecosystem"),
+        command("add", "Legacy alias for Composer require", "Ecosystem"),
+        command("remove", "Legacy alias for Composer remove", "Ecosystem"),
         command(
             "outdated",
             "Inspect available dependency updates",
@@ -310,7 +261,6 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Derive an explainable PHP extension profile from Composer",
             "Ecosystem",
         ),
-        command("artisan", "Run Laravel Artisan inside PAM", "Ecosystem"),
         command("format", "Format project source", "Quality"),
         command(
             "lint",
@@ -322,7 +272,6 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("profile", "Capture contextual performance data", "Quality"),
         command("build", "Create a release build", "Ship"),
         command("package", "Create a distributable package", "Ship"),
-        command("sign", "Validate native release signing", "Ship"),
         command(
             "release",
             "Validate and publish a release candidate",
@@ -361,18 +310,6 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("restart", "Restart a managed application", "Runtime"),
         command("stop", "Gracefully stop a managed application", "Runtime"),
         command("delete", "Remove a stopped application from PAM", "Runtime"),
-        command(
-            "octane:start",
-            "Start Laravel Octane on the PAM runtime",
-            "Runtime",
-        ),
-        command("octane:status", "Inspect the PAM Octane master", "Runtime"),
-        command(
-            "octane:reload",
-            "Reload PAM Octane without downtime",
-            "Runtime",
-        ),
-        command("octane:stop", "Gracefully stop PAM Octane", "Runtime"),
         command("exec", "Execute a PHP script explicitly", "Runtime"),
         command("inspect", "Inspect runtime capabilities", "Observe"),
         command("routes", "List application routes", "Observe"),
@@ -384,8 +321,6 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         ),
         command("top", "Stream live runtime metrics", "Observe"),
         command("catalog", "Discover the versioned CLI contract", "Advanced"),
-        command("mobile", "Use explicit PAM Native commands", "Advanced"),
-        command("desktop", "Use explicit PAM Desktop commands", "Advanced"),
         command("completion", "Generate shell completion", "Advanced"),
         command(
             "editor:install",
@@ -400,6 +335,41 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
         command("docs:generate", "Generate the CLI reference", "Advanced"),
     ]
 });
+
+pub fn package_can_override(name: &str) -> bool {
+    matches!(
+        name,
+        "artisan"
+            | "benchmark"
+            | "build"
+            | "console"
+            | "desktop"
+            | "diagnostics"
+            | "devices"
+            | "devtools"
+            | "dev"
+            | "doctor"
+            | "format"
+            | "lint"
+            | "logs"
+            | "make:command"
+            | "make:component"
+            | "make:controller"
+            | "make:migration"
+            | "make:model"
+            | "make:native-view"
+            | "make:request"
+            | "make:resource"
+            | "make:screen"
+            | "make:test"
+            | "package"
+            | "profile"
+            | "release"
+            | "run"
+            | "sign"
+            | "test"
+    )
+}
 
 fn command(name: &'static str, summary: &'static str, group_label: &'static str) -> CommandSpec {
     let group_code = match group_label {
@@ -546,19 +516,16 @@ pub fn completion(shell: &str) -> Result<String, String> {
     let joined = names.join(" ");
     match shell {
         "bash" => Ok(format!(
-            "_pam() {{ COMPREPLY=($(compgen -W '{joined}' -- \"${{COMP_WORDS[1]}}\")); }}\ncomplete -F _pam pam\n"
+            "_pam() {{ local commands='{joined}'; local project_commands; project_commands=$(pam commands --names 2>/dev/null); COMPREPLY=($(compgen -W \"$commands $project_commands\" -- \"${{COMP_WORDS[1]}}\")); }}\ncomplete -F _pam pam\n"
         )),
         "zsh" => Ok(format!(
-            "#compdef pam\n_arguments '1:command:({joined})' '*::argument:->args'\n"
+            "#compdef pam\nlocal -a pam_commands\npam_commands=({joined} ${{(f)\"$(pam commands --names 2>/dev/null)\"}})\n_arguments '1:command:($pam_commands)' '*::argument:->args'\n"
         )),
-        "fish" => Ok(names
-            .iter()
-            .map(|name| format!("complete -c pam -n '__fish_use_subcommand' -a '{name}'"))
-            .collect::<Vec<_>>()
-            .join("\n")
-            + "\n"),
+        "fish" => Ok(format!(
+            "complete -c pam -n '__fish_use_subcommand' -a '{joined}'\ncomplete -c pam -n '__fish_use_subcommand' -a '(pam commands --names 2>/dev/null)'\n"
+        )),
         "powershell" | "pwsh" => Ok(format!(
-            "Register-ArgumentCompleter -Native -CommandName pam -ScriptBlock {{ param($wordToComplete) '{joined}'.Split(' ') | Where-Object {{ $_ -like \"$wordToComplete*\" }} }}\n"
+            "Register-ArgumentCompleter -Native -CommandName pam -ScriptBlock {{ param($wordToComplete) $commands = @('{joined}'.Split(' ')) + @(pam commands --names 2>$null); $commands | Where-Object {{ $_ -like \"$wordToComplete*\" }} }}\n"
         )),
         _ => Err("completion requires bash, zsh, fish, or powershell".to_owned()),
     }
@@ -638,7 +605,11 @@ mod tests {
         for shell in ["bash", "zsh", "fish", "powershell"] {
             let script = completion(shell).unwrap();
             assert!(script.contains("doctor"));
-            assert!(script.contains("make:component"));
+            assert!(script.contains("start"));
+            assert!(
+                script.contains("pam commands --names"),
+                "{shell} completion must discover Composer package commands"
+            );
         }
         assert_eq!(CommandGroupCode::Project as u8, 1);
         assert_eq!(CommandGroupCode::Develop as u8, 2);

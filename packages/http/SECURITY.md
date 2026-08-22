@@ -15,4 +15,3 @@ publish an advisory after a fixed release is available.
 Debug profilers must remain disabled in production. Signing keys, database
 credentials and bearer tokens must come from a secret manager and must never be
 included in logs, traces, diagnostics or issue reports.
-

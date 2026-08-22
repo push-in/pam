@@ -176,6 +176,8 @@ struct ApplicationRecord {
     working_directory: PathBuf,
     command: Vec<String>,
     #[serde(default)]
+    declarative_identity_sha256: Option<String>,
+    #[serde(default)]
     php_extensions: Vec<String>,
     #[serde(default)]
     php_extension_isolation: bool,
@@ -468,6 +470,7 @@ enum ReconcileAction {
     Disabled = 5,
     PolicyUpdated = 6,
     ResourceLimitsUpdated = 7,
+    Replaced = 8,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1072,6 +1075,8 @@ fn reconcile_ecosystem(
             application.health_check_start_period_millis,
             health_check.is_some(),
         )?;
+        let declarative_identity_sha256 =
+            ecosystem_structural_identity(&root, &name, &application)?;
         let action = if !application.autostart {
             let record_path = paths.application(&name);
             if apply && record_path.exists() {
@@ -1083,199 +1088,167 @@ fn reconcile_ecosystem(
         } else {
             let record_path = paths.application(&name);
             if !record_path.exists() {
-                let cwd = scoped_cwd(&root, &application.cwd)?;
-                let mut command = Command::new(executable);
-                command
-                    .current_dir(cwd)
-                    .args(["up", "--name", &name, "--workers"]);
-                command.arg(application.workers.to_string());
-                if php_extension_isolation {
-                    command.arg("--isolate-php-extensions");
-                }
-                for extension in &effective_php_extensions {
-                    command.args(["--php-extension", extension]);
-                }
-                if let Some(path) = environment_file.as_deref() {
-                    command.arg("--env-file").arg(path);
-                }
-                if let Some(url) = application.health_check_url.as_deref() {
-                    command
-                        .arg("--health-check-url")
-                        .arg(url)
-                        .arg("--health-check-interval-ms")
-                        .arg(application.health_check_interval_millis.to_string())
-                        .arg("--health-check-timeout-ms")
-                        .arg(application.health_check_timeout_millis.to_string())
-                        .arg("--health-check-start-period-ms")
-                        .arg(application.health_check_start_period_millis.to_string())
-                        .arg("--health-check-failures")
-                        .arg(application.health_check_failure_threshold.to_string());
-                }
-                if !application.auto_restart {
-                    command.arg("--no-autorestart");
-                }
-                command
-                    .arg("--shutdown-timeout-ms")
-                    .arg(application.shutdown_timeout_millis.to_string())
-                    .arg("--restart-delay-ms")
-                    .arg(application.restart_delay_millis.to_string())
-                    .arg("--restart-backoff-max-ms")
-                    .arg(application.restart_backoff_max_millis.to_string())
-                    .arg("--max-unstable-restarts")
-                    .arg(application.max_unstable_restarts.to_string())
-                    .arg("--min-uptime-ms")
-                    .arg(application.min_uptime_millis.to_string());
-                if let Some(value) = application.memory_warning_bytes {
-                    command.args(["--memory-warning-bytes", &value.to_string()]);
-                }
-                if let Some(value) = application.task_warning_count {
-                    command.args(["--task-warning-count", &value.to_string()]);
-                }
-                if let Some(value) = application.memory_max_bytes {
-                    command.args(["--memory-max-bytes", &value.to_string()]);
-                }
-                if let Some(value) = application.task_max_count {
-                    command.args(["--task-max-count", &value.to_string()]);
-                }
-                if application.kind_code == ApplicationKind::Runtime as u8 {
-                    command.arg(
-                        application
-                            .script
-                            .as_deref()
-                            .unwrap_or(Path::new("index.php")),
-                    );
-                }
-                if !application.arguments.is_empty() {
-                    command.arg("--").args(&application.arguments);
-                }
                 if apply {
-                    run_reconcile_command(command, &name)?;
+                    launch_ecosystem_application(
+                        executable,
+                        &root,
+                        &name,
+                        &application,
+                        &effective_php_extensions,
+                        php_extension_isolation,
+                        environment_file.as_deref(),
+                        &declarative_identity_sha256,
+                        &record_path,
+                    )?;
                 }
                 ReconcileAction::Created
             } else {
                 let mut record = read_record(&record_path)?;
-                let limit_updated = record.memory_max_bytes != application.memory_max_bytes
-                    || record.task_max_count != application.task_max_count;
-                let environment_updated = record.environment_file != environment_file;
-                let expected_php_extensions = effective_php_extensions;
-                let extensions_updated = record.php_extensions != expected_php_extensions;
-                let extension_isolation_updated =
-                    record.php_extension_isolation != php_extension_isolation;
-                let health_updated = record.health_check_address
-                    != health_check.as_ref().map(|(address, _)| *address)
-                    || record.health_check_path
-                        != health_check.as_ref().map(|(_, path)| path.clone())
-                    || record.health_check_interval_millis
-                        != application.health_check_interval_millis
-                    || record.health_check_timeout_millis
-                        != application.health_check_timeout_millis
-                    || record.health_check_start_period_millis
-                        != application.health_check_start_period_millis
-                    || record.health_check_failure_threshold
-                        != application.health_check_failure_threshold;
-                let policy_updated = record.memory_warning_bytes
-                    != application.memory_warning_bytes
-                    || record.task_warning_count != application.task_warning_count
-                    || record.auto_restart != application.auto_restart
-                    || record.restart_delay_millis != application.restart_delay_millis
-                    || record.restart_backoff_max_millis != application.restart_backoff_max_millis
-                    || record.max_unstable_restarts != application.max_unstable_restarts
-                    || record.min_uptime_millis != application.min_uptime_millis
-                    || record.shutdown_timeout_millis != application.shutdown_timeout_millis;
-                if policy_updated
-                    || limit_updated
-                    || environment_updated
-                    || health_updated
-                    || extensions_updated
-                    || extension_isolation_updated
-                {
-                    record.memory_warning_bytes = application.memory_warning_bytes;
-                    record.task_warning_count = application.task_warning_count;
-                    record.memory_max_bytes = application.memory_max_bytes;
-                    record.task_max_count = application.task_max_count;
-                    record.auto_restart = application.auto_restart;
-                    record.restart_delay_millis = application.restart_delay_millis;
-                    record.restart_backoff_max_millis = application.restart_backoff_max_millis;
-                    record.max_unstable_restarts = application.max_unstable_restarts;
-                    record.min_uptime_millis = application.min_uptime_millis;
-                    record.shutdown_timeout_millis = application.shutdown_timeout_millis;
-                    record.environment_file = environment_file;
-                    record.php_extensions = expected_php_extensions.clone();
-                    record.php_extension_isolation = php_extension_isolation;
-                    set_command_flag(
-                        &mut record.command,
-                        "--isolate-php-extensions",
-                        php_extension_isolation,
-                    );
-                    set_command_options(
-                        &mut record.command,
-                        "--php-extension",
-                        &expected_php_extensions,
-                    );
-                    record.health_check_address =
-                        health_check.as_ref().map(|(address, _)| *address);
-                    record.health_check_path = health_check.map(|(_, path)| path);
-                    record.health_check_interval_millis = application.health_check_interval_millis;
-                    record.health_check_timeout_millis = application.health_check_timeout_millis;
-                    record.health_check_start_period_millis =
-                        application.health_check_start_period_millis;
-                    record.health_check_failure_threshold =
-                        application.health_check_failure_threshold;
-                    record.consecutive_health_failures = 0;
-                    record.last_health_check_at_millis = None;
-                    record.health_state_code = initial_health_state(
-                        record.health_check_address.is_some(),
-                        record.health_check_start_period_millis,
-                    );
-                    if !record.auto_restart {
-                        record.recovery_state_code = RecoveryState::Disabled as u8;
-                        record.next_restart_at_millis = None;
-                    }
-                    if apply {
-                        write_record(&record_path, &record)?;
-                    }
-                }
-                let state = running_state(&record);
-                if (limit_updated
-                    || environment_updated
-                    || health_updated
-                    || extensions_updated
-                    || extension_isolation_updated)
-                    && state.as_ref().is_some_and(master_is_running)
+                if record.declarative_identity_sha256.as_deref()
+                    != Some(declarative_identity_sha256.as_str())
                 {
                     if apply {
-                        restart_record(executable, &record, false, false)?;
+                        replace_ecosystem_application(
+                            executable,
+                            &root,
+                            &name,
+                            &application,
+                            &effective_php_extensions,
+                            php_extension_isolation,
+                            environment_file.as_deref(),
+                            &declarative_identity_sha256,
+                            &record_path,
+                            &record,
+                        )?;
                     }
-                    if limit_updated {
-                        ReconcileAction::ResourceLimitsUpdated
-                    } else {
-                        ReconcileAction::Restarted
-                    }
-                } else if !state.as_ref().is_some_and(master_is_running) {
-                    let mut command = Command::new(executable);
-                    command.args(["restart", &name]);
-                    if apply {
-                        run_reconcile_command(command, &name)?;
-                    }
-                    ReconcileAction::Restarted
-                } else if state
-                    .as_ref()
-                    .is_some_and(|state| state.workers != application.workers)
-                {
-                    let mut command = Command::new(executable);
-                    command.args(["scale", &name, &application.workers.to_string()]);
-                    if apply {
-                        run_reconcile_command(command, &name)?;
-                    }
-                    ReconcileAction::Scaled
-                } else if policy_updated {
-                    ReconcileAction::PolicyUpdated
+                    ReconcileAction::Replaced
                 } else {
-                    ReconcileAction::Unchanged
+                    let limit_updated = record.memory_max_bytes != application.memory_max_bytes
+                        || record.task_max_count != application.task_max_count;
+                    let environment_updated = record.environment_file != environment_file;
+                    let expected_php_extensions = effective_php_extensions;
+                    let extensions_updated = record.php_extensions != expected_php_extensions;
+                    let extension_isolation_updated =
+                        record.php_extension_isolation != php_extension_isolation;
+                    let health_updated = record.health_check_address
+                        != health_check.as_ref().map(|(address, _)| *address)
+                        || record.health_check_path
+                            != health_check.as_ref().map(|(_, path)| path.clone())
+                        || record.health_check_interval_millis
+                            != application.health_check_interval_millis
+                        || record.health_check_timeout_millis
+                            != application.health_check_timeout_millis
+                        || record.health_check_start_period_millis
+                            != application.health_check_start_period_millis
+                        || record.health_check_failure_threshold
+                            != application.health_check_failure_threshold;
+                    let policy_updated = record.memory_warning_bytes
+                        != application.memory_warning_bytes
+                        || record.task_warning_count != application.task_warning_count
+                        || record.auto_restart != application.auto_restart
+                        || record.restart_delay_millis != application.restart_delay_millis
+                        || record.restart_backoff_max_millis
+                            != application.restart_backoff_max_millis
+                        || record.max_unstable_restarts != application.max_unstable_restarts
+                        || record.min_uptime_millis != application.min_uptime_millis
+                        || record.shutdown_timeout_millis != application.shutdown_timeout_millis;
+                    if policy_updated
+                        || limit_updated
+                        || environment_updated
+                        || health_updated
+                        || extensions_updated
+                        || extension_isolation_updated
+                    {
+                        record.memory_warning_bytes = application.memory_warning_bytes;
+                        record.task_warning_count = application.task_warning_count;
+                        record.memory_max_bytes = application.memory_max_bytes;
+                        record.task_max_count = application.task_max_count;
+                        record.auto_restart = application.auto_restart;
+                        record.restart_delay_millis = application.restart_delay_millis;
+                        record.restart_backoff_max_millis = application.restart_backoff_max_millis;
+                        record.max_unstable_restarts = application.max_unstable_restarts;
+                        record.min_uptime_millis = application.min_uptime_millis;
+                        record.shutdown_timeout_millis = application.shutdown_timeout_millis;
+                        record.environment_file = environment_file;
+                        record.php_extensions = expected_php_extensions.clone();
+                        record.php_extension_isolation = php_extension_isolation;
+                        set_command_flag(
+                            &mut record.command,
+                            "--isolate-php-extensions",
+                            php_extension_isolation,
+                        );
+                        set_command_options(
+                            &mut record.command,
+                            "--php-extension",
+                            &expected_php_extensions,
+                        );
+                        record.health_check_address =
+                            health_check.as_ref().map(|(address, _)| *address);
+                        record.health_check_path = health_check.map(|(_, path)| path);
+                        record.health_check_interval_millis =
+                            application.health_check_interval_millis;
+                        record.health_check_timeout_millis =
+                            application.health_check_timeout_millis;
+                        record.health_check_start_period_millis =
+                            application.health_check_start_period_millis;
+                        record.health_check_failure_threshold =
+                            application.health_check_failure_threshold;
+                        record.consecutive_health_failures = 0;
+                        record.last_health_check_at_millis = None;
+                        record.health_state_code = initial_health_state(
+                            record.health_check_address.is_some(),
+                            record.health_check_start_period_millis,
+                        );
+                        if !record.auto_restart {
+                            record.recovery_state_code = RecoveryState::Disabled as u8;
+                            record.next_restart_at_millis = None;
+                        }
+                        if apply {
+                            write_record(&record_path, &record)?;
+                        }
+                    }
+                    let state = running_state(&record);
+                    if (limit_updated
+                        || environment_updated
+                        || health_updated
+                        || extensions_updated
+                        || extension_isolation_updated)
+                        && state.as_ref().is_some_and(master_is_running)
+                    {
+                        if apply {
+                            restart_record(executable, &record, false, false)?;
+                        }
+                        if limit_updated {
+                            ReconcileAction::ResourceLimitsUpdated
+                        } else {
+                            ReconcileAction::Restarted
+                        }
+                    } else if !state.as_ref().is_some_and(master_is_running) {
+                        let mut command = Command::new(executable);
+                        command.args(["restart", &name]);
+                        if apply {
+                            run_reconcile_command(command, &name)?;
+                        }
+                        ReconcileAction::Restarted
+                    } else if state
+                        .as_ref()
+                        .is_some_and(|state| state.workers != application.workers)
+                    {
+                        let mut command = Command::new(executable);
+                        command.args(["scale", &name, &application.workers.to_string()]);
+                        if apply {
+                            run_reconcile_command(command, &name)?;
+                        }
+                        ReconcileAction::Scaled
+                    } else if policy_updated {
+                        ReconcileAction::PolicyUpdated
+                    } else {
+                        ReconcileAction::Unchanged
+                    }
                 }
             }
         };
-        results.push(serde_json::json!({"name":name,"actionCode":action as u8}));
+        results.push(serde_json::json!({"name":name,"actionCode":action as u8,"structuralIdentitySha256":declarative_identity_sha256}));
     }
     let change_count = results
         .iter()
@@ -1431,12 +1404,26 @@ fn validate_ecosystem_application(
         return Err(format!("Laravel application {name:?} cannot set script"));
     }
     let cwd = scoped_cwd(root, &application.cwd)?;
-    if application.kind_code == ApplicationKind::LaravelOctane as u8
-        && !cwd.join("artisan").is_file()
-    {
+    let target = if application.kind_code == ApplicationKind::LaravelOctane as u8 {
+        cwd.join("artisan")
+    } else {
+        cwd.join(
+            application
+                .script
+                .as_deref()
+                .unwrap_or(Path::new("index.php")),
+        )
+    };
+    let target = fs::canonicalize(&target).map_err(|error| {
+        format!(
+            "application {name:?} cannot resolve target {}: {error}",
+            target.display()
+        )
+    })?;
+    if !target.starts_with(root) || !target.is_file() {
         return Err(format!(
-            "Laravel application {name:?} requires artisan in {}",
-            cwd.display()
+            "application {name:?} target must be a regular file beneath {}",
+            root.display()
         ));
     }
     if application
@@ -1553,6 +1540,39 @@ fn validate_ecosystem_application(
         ));
     }
     Ok((profile.selected_extensions, true))
+}
+
+fn ecosystem_structural_identity(
+    root: &Path,
+    name: &str,
+    application: &EcosystemApplication,
+) -> Result<String, String> {
+    let cwd = scoped_cwd(root, &application.cwd)?;
+    let target = if application.kind_code == ApplicationKind::LaravelOctane as u8 {
+        cwd.join("artisan")
+    } else {
+        cwd.join(
+            application
+                .script
+                .as_deref()
+                .unwrap_or(Path::new("index.php")),
+        )
+    };
+    let target = fs::canonicalize(&target).map_err(|error| {
+        format!(
+            "application {name:?} cannot resolve target {}: {error}",
+            target.display()
+        )
+    })?;
+    let canonical = serde_json::to_vec(&serde_json::json!({
+        "schemaVersion": 1,
+        "kindCode": application.kind_code,
+        "workingDirectory": cwd,
+        "target": target,
+        "arguments": &application.arguments,
+    }))
+    .map_err(|error| format!("cannot fingerprint application {name:?}: {error}"))?;
+    Ok(format!("{:x}", Sha256::digest(canonical)))
 }
 
 fn scoped_cwd(root: &Path, cwd: &Path) -> Result<PathBuf, String> {
@@ -1677,6 +1697,139 @@ fn run_reconcile_command(mut command: Command, name: &str) -> Result<(), String>
         return Err(format!(
             "cannot reconcile {name:?}: {}",
             String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn launch_ecosystem_application(
+    executable: &OsStr,
+    root: &Path,
+    name: &str,
+    application: &EcosystemApplication,
+    php_extensions: &[String],
+    php_extension_isolation: bool,
+    environment_file: Option<&Path>,
+    declarative_identity_sha256: &str,
+    record_path: &Path,
+) -> Result<(), String> {
+    let mut command = Command::new(executable);
+    command
+        .current_dir(scoped_cwd(root, &application.cwd)?)
+        .args(["up", "--name", name, "--workers"])
+        .arg(application.workers.to_string());
+    if php_extension_isolation {
+        command.arg("--isolate-php-extensions");
+    }
+    for extension in php_extensions {
+        command.args(["--php-extension", extension]);
+    }
+    if let Some(path) = environment_file {
+        command.arg("--env-file").arg(path);
+    }
+    if let Some(url) = application.health_check_url.as_deref() {
+        command
+            .arg("--health-check-url")
+            .arg(url)
+            .arg("--health-check-interval-ms")
+            .arg(application.health_check_interval_millis.to_string())
+            .arg("--health-check-timeout-ms")
+            .arg(application.health_check_timeout_millis.to_string())
+            .arg("--health-check-start-period-ms")
+            .arg(application.health_check_start_period_millis.to_string())
+            .arg("--health-check-failures")
+            .arg(application.health_check_failure_threshold.to_string());
+    }
+    if !application.auto_restart {
+        command.arg("--no-autorestart");
+    }
+    command
+        .arg("--shutdown-timeout-ms")
+        .arg(application.shutdown_timeout_millis.to_string())
+        .arg("--restart-delay-ms")
+        .arg(application.restart_delay_millis.to_string())
+        .arg("--restart-backoff-max-ms")
+        .arg(application.restart_backoff_max_millis.to_string())
+        .arg("--max-unstable-restarts")
+        .arg(application.max_unstable_restarts.to_string())
+        .arg("--min-uptime-ms")
+        .arg(application.min_uptime_millis.to_string());
+    for (flag, value) in [
+        ("--memory-warning-bytes", application.memory_warning_bytes),
+        ("--task-warning-count", application.task_warning_count),
+        ("--memory-max-bytes", application.memory_max_bytes),
+        ("--task-max-count", application.task_max_count),
+    ] {
+        if let Some(value) = value {
+            command.args([flag, &value.to_string()]);
+        }
+    }
+    if application.kind_code == ApplicationKind::Runtime as u8 {
+        command.arg(
+            application
+                .script
+                .as_deref()
+                .unwrap_or(Path::new("index.php")),
+        );
+    }
+    if !application.arguments.is_empty() {
+        command.arg("--").args(&application.arguments);
+    }
+    run_reconcile_command(command, name)?;
+    let mut record = read_record(record_path)?;
+    record.declarative_identity_sha256 = Some(declarative_identity_sha256.to_owned());
+    write_record(record_path, &record)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn replace_ecosystem_application(
+    executable: &OsStr,
+    root: &Path,
+    name: &str,
+    application: &EcosystemApplication,
+    php_extensions: &[String],
+    php_extension_isolation: bool,
+    environment_file: Option<&Path>,
+    declarative_identity_sha256: &str,
+    record_path: &Path,
+    previous: &ApplicationRecord,
+) -> Result<(), String> {
+    let was_running = running_state(previous)
+        .as_ref()
+        .is_some_and(master_is_running);
+    let operation = (|| {
+        if was_running {
+            let mut command = Command::new(executable);
+            command.args(["stop", name]);
+            run_reconcile_command(command, name)?;
+        }
+        let mut command = Command::new(executable);
+        command.args(["delete", name]);
+        run_reconcile_command(command, name)?;
+        launch_ecosystem_application(
+            executable,
+            root,
+            name,
+            application,
+            php_extensions,
+            php_extension_isolation,
+            environment_file,
+            declarative_identity_sha256,
+            record_path,
+        )
+    })();
+    if let Err(error) = operation {
+        write_record(record_path, previous)?;
+        if was_running {
+            restart_record(executable, previous, false, false).map_err(|rollback_error| {
+                format!(
+                    "structural replacement of {name:?} failed: {error}; rollback also failed: {rollback_error}"
+                )
+            })?;
+        }
+        return Err(format!(
+            "structural replacement of {name:?} failed and the previous definition was restored: {error}"
         ));
     }
     Ok(())
@@ -3733,6 +3886,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
                     .map(|argument| argument.to_string_lossy().into_owned()),
             )
             .collect(),
+        declarative_identity_sha256: None,
         php_extensions,
         php_extension_isolation,
         master_state_file: effective_state,
@@ -4358,6 +4512,7 @@ fn application_json(record: &ApplicationRecord, state: Option<&MasterState>) -> 
         })),
         "phpExtensions": record.php_extensions,
         "phpExtensionIsolation": record.php_extension_isolation,
+        "declarativeIdentitySha256": record.declarative_identity_sha256,
         "workingDirectory": record.working_directory,
         "stdoutLog": record.stdout_log,
         "stderrLog": record.stderr_log,
@@ -4926,8 +5081,9 @@ mod tests {
                 ReconcileAction::Disabled as u8,
                 ReconcileAction::PolicyUpdated as u8,
                 ReconcileAction::ResourceLimitsUpdated as u8,
+                ReconcileAction::Replaced as u8,
             ],
-            [1, 2, 3, 4, 5, 6, 7]
+            [1, 2, 3, 4, 5, 6, 7, 8]
         );
         assert_eq!(
             [ReconcileMode::Plan as u8, ReconcileMode::Apply as u8],
@@ -5029,6 +5185,7 @@ mod tests {
             kind_code: 1,
             working_directory: PathBuf::from("/srv/api"),
             command: vec!["pam".to_owned(), "start".to_owned()],
+            declarative_identity_sha256: None,
             php_extensions: Vec::new(),
             php_extension_isolation: false,
             master_state_file: PathBuf::from("state.json"),

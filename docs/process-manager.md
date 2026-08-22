@@ -440,6 +440,17 @@ for execution. Plan and apply share the same decision path and return schema 1,
 mode code `1` (plan) or `2` (apply), an `applied` boolean and the existing
 integer action codes. Each result binds the exact configuration bytes with
 `configurationSha256` and reports `changeCount`, making CI previews reviewable.
+Each application result also includes `structuralIdentitySha256`, a deterministic
+identity over `kind_code`, canonical working directory, canonical script or
+`artisan` target, and the exact argument list. Structural drift uses action code
+`8` (replaced). Apply validates the new target before stopping anything, then
+replaces the managed definition; if launch fails, PAM restores the prior record
+and restarts the prior process when it was online. Script targets must be regular
+files beneath the `pam.toml` directory. Records created before structural
+identities were introduced receive a deliberate one-time replacement on their
+next apply and then converge normally. `describe --json` exposes the persisted
+identity as `declarativeIdentitySha256`; applications started manually with
+`pam up` report `null`.
 Planning does not start `pamd`, create manager directories,
 write records, send signals, or spawn applications. Apply always recomputes the
 decision because manager state may change after a speculative plan:

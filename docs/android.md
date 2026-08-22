@@ -5,7 +5,7 @@ partem da raiz do projeto, onde está o `pam-native.json`.
 
 Se você ainda não possui o PAM, comece pela
 [instalação única do CLI](getting-started.md#install). Depois crie o projeto com
-`pam init meu-app --template mobile`. O CLI detecta Android pelo contexto do
+`pam init meu-app --template native`. O CLI detecta Android pelo contexto do
 projeto; os comandos `pam mobile ...` são aliases explícitos para CI e automação
 avançada.
 
@@ -21,11 +21,9 @@ pam doctor
 pam build
 ```
 
-`pam doctor --fix` baixa o bundle atestado da release, verifica SHA-256 e
-instala os runtimes PHP 8.4/8.5 e engines para `arm64-v8a` e `x86_64`. Em um
-projeto com `pam-registry.json`, URL, hash, compatibilidade com PAM e protocolo
-Native vêm do catálogo assinado; o piso antirrollback só avança após instalação
-completa. A proveniência em `.pam-native/android-runtime.artifact.json` força
+`pam doctor --fix` baixa o bundle versionado da release oficial, verifica
+SHA-256 e instala os runtimes PHP 8.4/8.5 e engines para `arm64-v8a` e
+`x86_64`. A proveniência em `.pam-native/android-runtime.artifact.json` força
 reinstalação quando raiz, catálogo, versão ou hash mudam. Rust só é
 necessário para contribuir com o engine; uma aplicação comum usa os binários
 pré-compilados. O doctor falha se qualquer exigência restante estiver ausente.

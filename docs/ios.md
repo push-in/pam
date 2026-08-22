@@ -5,7 +5,7 @@ Swift Package Manager localmente e não exige CocoaPods, Tuist ou XcodeGen.
 
 Se você ainda não possui o PAM, comece pela
 [instalação única do CLI](getting-started.md#install). Depois crie o projeto com
-`pam init meu-app --template mobile --platform ios`. Dentro do projeto, os
+`pam init meu-app --template native --platform ios`. Dentro do projeto, os
 comandos curtos abaixo selecionam iOS pelo manifesto e pelo ambiente. Os aliases
 `pam mobile ios:*` continuam disponíveis para CI e automação explícita.
 

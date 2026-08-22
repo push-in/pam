@@ -10,22 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  windows-desktop-contracts:
-    name: Windows Desktop transaction contracts
-    runs-on: windows-2022
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - name: Test portable Desktop host transactions
-        shell: pwsh
-        run: |
-          rustc --edition=2024 -D warnings --test src/desktop_transaction.rs `
-            -o "$env:RUNNER_TEMP/pam-desktop-transaction-tests.exe"
-          & "$env:RUNNER_TEMP/pam-desktop-transaction-tests.exe" --test-threads=1
-
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -37,7 +21,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 26a768c9a7e0137bda9fa7de23f46c9308de2839
+          ref: 05f6b707c25c9beeccbe5553333854a3cc952dea
           path: pam-native
           persist-credentials: false
       - name: Check out the pinned PAM Native plugin kit
@@ -52,7 +36,7 @@ jobs:
           components: clippy,rustfmt
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
       - name: Install PHP Embed development package
         timeout-minutes: 12
@@ -77,9 +61,9 @@ jobs:
             -o Acquire::https::Timeout=30
           timeout 300s sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
             -o Dpkg::Options::=--force-confnew \
-            libphp8.4-embed php8.4-dev php8.4-bcmath php8.4-curl php8.4-gd \
-            php8.4-intl php8.4-mbstring php8.4-mysql php8.4-pgsql \
-            php8.4-sqlite3 php8.4-xml php8.4-zip
+            libphp8.5-embed php8.5-dev php8.5-bcmath php8.5-curl php8.5-gd \
+            php8.5-intl php8.5-mbstring php8.5-mysql php8.5-pgsql \
+            php8.5-sqlite3 php8.5-xml php8.5-zip
       - uses: Swatinem/rust-cache@v2
       - name: Validate locked Composer dependencies
         run: |
@@ -91,7 +75,7 @@ jobs:
             composer validate --strict --no-check-lock --no-check-publish "$package"
           done
           scripts/package-release.sh validate
-          scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
+          scripts/package-release.sh validate-package-tag pushinbr/pam-http v2.0.0
           scripts/package-release.sh validate-package-tag pushinbr/pam-skeleton v2.0.0
       - name: Install locked Composer dependencies
         run: |
@@ -102,7 +86,6 @@ jobs:
           cargo fmt --all -- --check
           cargo run --locked -- docs:generate docs/cli-reference.md --check
           python3 -m json.tool docs/schemas/pam.schema.json >/dev/null
-          python3 -m json.tool docs/schemas/registry-compatibility-matrix.schema.json >/dev/null
           python3 -m json.tool docs/schemas/product-release.schema.json >/dev/null
           python3 -m json.tool docs/schemas/doctor-report.schema.json >/dev/null
           python3 -m json.tool docs/schemas/distribution-evidence.schema.json >/dev/null
@@ -110,7 +93,6 @@ jobs:
           python3 -m json.tool docs/schemas/cli-catalog.schema.json >/dev/null
           python3 -m json.tool docs/schemas/cli-catalog-compatibility.schema.json >/dev/null
           python3 -m json.tool docs/contracts/cli-catalog-v1.json >/dev/null
-          python3 -m json.tool docs/schemas/desktop-host-doctor.schema.json >/dev/null
           python3 -m json.tool docs/schemas/control-plane-diagnostics.schema.json >/dev/null
           python3 -m json.tool docs/schemas/control-plane-health.schema.json >/dev/null
           python3 -m json.tool docs/schemas/top-sample.schema.json >/dev/null
@@ -123,7 +105,6 @@ jobs:
             tests.test_cli_catalog_contract \
             tests.test_control_plane_diagnostics_contract \
             tests.test_native_plugin_conformance \
-            tests.test_desktop_host_doctor_contract \
             tests.test_desktop_distribution_workflow \
             tests.test_distribution_contract \
             tests.test_ecosystem_compatibility \
@@ -216,33 +197,6 @@ jobs:
           PAM_DOCTOR_EVIDENCE: artifacts/doctor
         run: |
           mkdir -p "${PAM_DOCTOR_EVIDENCE}" "${RUNNER_TEMP}/pam-doctor-project/target/debug"
-          printf '%s\n' '#!/bin/sh' \
-            'test "$1" = "--version" && printf "%s\\n" "pam-desktop 0.0.0-ci"' \
-            >"${RUNNER_TEMP}/pam-desktop"
-          chmod 0755 "${RUNNER_TEMP}/pam-desktop"
-          if PAM_DESKTOP_BINARY="${RUNNER_TEMP}/pam-desktop" \
-            ./target/debug/pam desktop host:doctor . --json \
-            >"${PAM_DOCTOR_EVIDENCE}/desktop-host.json"; then
-            echo "untrusted Desktop fallback was incorrectly authenticated" >&2
-            exit 1
-          else
-            test "$?" -eq 1
-          fi
-          cp docs/schemas/desktop-host-doctor.schema.json \
-            "${PAM_DOCTOR_EVIDENCE}/desktop-host.schema.json"
-          python3 - "${PAM_DOCTOR_EVIDENCE}/desktop-host.json" <<'PY'
-          import json
-          import sys
-
-          report = json.load(open(sys.argv[1], encoding="utf-8"))
-          assert report["schemaVersion"] == 1
-          assert report["surfaceCode"] == 3
-          assert report["resultCode"] == 2
-          assert report["sourceCode"] == 2
-          assert report["authenticated"] is False
-          assert [check["checkCode"] for check in report["checks"]] == [1, 2, 3]
-          assert [check["resultCode"] for check in report["checks"]] == [2, 2, 1]
-          PY
           printf '%s' \
             '{"schema":1,"type":5,"name":"ci-doctor","version":"1.0.0"}' \
             >"${RUNNER_TEMP}/pam-doctor-project/pam.json"
@@ -339,8 +293,8 @@ jobs:
             >"${PAM_DOCTOR_EVIDENCE}/provenance.json"
           (
             cd "${PAM_DOCTOR_EVIDENCE}"
-            sha256sum desktop-host.json desktop-host.schema.json project.json \
-              provenance.json runtime.json schema.json support-product.json \
+            sha256sum project.json provenance.json runtime.json schema.json \
+              support-product.json \
               support-runtime.json support-manager.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
@@ -385,6 +339,11 @@ jobs:
           test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/native/packages/native/composer.json"
           test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/runtime/catalog.json"
           "$runtime_dist/pam-ci-linux-x86_64/bin/pam-run" -r '
+          $pamHome = getenv("PAM_HOME");
+          if (!is_string($pamHome) || !is_file($pamHome . "/runtime/catalog.json")) {
+              fwrite(STDERR, "PAM_HOME does not expose the bundled runtime catalog\n");
+              exit(1);
+          }
           foreach (["curl", "intl", "mbstring", "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "sockets", "xml", "zip"] as $extension) {
               if (!extension_loaded($extension)) {
                   fwrite(STDERR, "Missing bundled extension: {$extension}\n");

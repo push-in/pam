@@ -59,7 +59,7 @@ final class PamServer
     {
         if (!class_exists(Server::class) || !class_exists(\Pam\Internal\Runtime::class)) {
             throw new \RuntimeException(
-                'PAM Octane must run inside the PAM runtime. Use `pam artisan pam:octane`.',
+                'PAM Octane must run inside the PAM runtime. Use `pam octane:start`.',
             );
         }
 

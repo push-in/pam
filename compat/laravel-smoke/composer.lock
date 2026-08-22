@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "8ab2066b5eddf0e385616046276a8391",
+    "content-hash": "3770f5efb8060e17feb6cd8b3b34648f",
     "packages": [
         {
             "name": "brick/math",
@@ -2902,6 +2902,71 @@
                 "source": "https://github.com/php-fig/simple-cache/tree/3.0.0"
             },
             "time": "2021-10-29T13:26:27+00:00"
+        },
+        {
+            "name": "pushinbr/pam-laravel",
+            "version": "v0.1.49",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/push-in/pam-laravel.git",
+                "reference": "ff9d3b752ae51024e2e2375cc763036c0c784f34"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/push-in/pam-laravel/zipball/ff9d3b752ae51024e2e2375cc763036c0c784f34",
+                "reference": "ff9d3b752ae51024e2e2375cc763036c0c784f34",
+                "shasum": ""
+            },
+            "require": {
+                "laravel/framework": "^12.0 || ^13.0",
+                "php": "^8.4"
+            },
+            "bin": [
+                "bin/pam-artisan"
+            ],
+            "type": "library",
+            "extra": {
+                "pam": {
+                    "commands": {
+                        "artisan": {
+                            "script": "bin/pam-artisan",
+                            "description": "Run Laravel Artisan inside PAM's embedded PHP",
+                            "environment": {
+                                "PAM_CLI_MODE": "1",
+                                "APP_RUNNING_IN_CONSOLE": "true"
+                            }
+                        }
+                    }
+                },
+                "laravel": {
+                    "providers": [
+                        "Pam\\Laravel\\PamServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Laravel\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "description": "Production tooling, lifecycle safety, observability and deployment for Laravel applications running on PAM.",
+            "homepage": "https://github.com/push-in/pam-laravel",
+            "keywords": [
+                "laravel",
+                "observability",
+                "pam",
+                "php",
+                "production"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-laravel"
+            },
+            "time": "2026-08-22T01:17:03+00:00"
         },
         {
             "name": "ralouphie/getallheaders",

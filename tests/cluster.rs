@@ -80,19 +80,7 @@ fn routes_requests_to_isolated_specialized_pools() {
             .unwrap()
             .contains(r#""pool":"web""#)
     );
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline {
-        if cluster.request_path("/api/pool").is_ok() {
-            break;
-        }
-        thread::sleep(Duration::from_millis(25));
-    }
-    assert!(
-        cluster
-            .request_path("/api/pool")
-            .unwrap()
-            .contains(r#""pool":"api""#)
-    );
+    cluster.wait_for_path("/api/pool", r#""pool":"api""#, Duration::from_secs(5));
 
     let metrics_deadline = Instant::now() + Duration::from_secs(2);
     let metrics = loop {
@@ -124,18 +112,8 @@ fn routes_requests_to_isolated_specialized_pools() {
         }
         thread::sleep(Duration::from_millis(25));
     }
-    assert!(
-        cluster
-            .request_path("/api/pool")
-            .unwrap()
-            .contains(r#""pool":"api""#)
-    );
-    assert!(
-        cluster
-            .request_path("/pool")
-            .unwrap()
-            .contains(r#""pool":"web""#)
-    );
+    cluster.wait_for_path("/api/pool", r#""pool":"api""#, Duration::from_secs(5));
+    cluster.wait_for_path("/pool", r#""pool":"web""#, Duration::from_secs(5));
     let (mut socket, upgrade) = connect(format!("ws://127.0.0.1:{port}/ws")).unwrap();
     assert_eq!(upgrade.status().as_u16(), 101);
     let welcome = socket.read().unwrap().into_text().unwrap();
@@ -263,6 +241,22 @@ impl ClusterProcess {
             thread::sleep(Duration::from_millis(25));
         }
         panic!("Pam cluster did not become ready");
+    }
+
+    fn wait_for_path(&mut self, path: &str, expected: &str, timeout: Duration) -> String {
+        let deadline = Instant::now() + timeout;
+        let mut last_response = String::new();
+        while Instant::now() < deadline {
+            match self.request_path(path) {
+                Ok(response) if response.contains(expected) => return response,
+                Ok(response) | Err(response) => last_response = response,
+            }
+            if let Some(status) = self.child.try_wait().unwrap() {
+                panic!("Pam cluster exited while waiting for {path}: {status}");
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        panic!("Pam cluster did not serve {path} with {expected}: {last_response}");
     }
 
     fn request(&self) -> Result<String, String> {

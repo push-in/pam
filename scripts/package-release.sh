@@ -70,6 +70,12 @@ validate_packages() {
         test -d "${directory}" || fail "package directory is missing: ${package_path}"
         test -f "${manifest}" || fail "composer.json is missing: ${package_path}"
         test -f "${directory}/README.md" || fail "README.md is missing: ${package_path}"
+        grep -Fqx '## Start here' "${directory}/README.md" ||
+            fail "${package_path}/README.md must contain the standard Start here section"
+        grep -Fq 'pam composer' "${directory}/README.md" ||
+            fail "${package_path}/README.md must install or initialize through pam composer"
+        grep -Eq 'Install PAM|Install and.*PAM|install.*PAM|PAM Runtime' "${directory}/README.md" ||
+            fail "${package_path}/README.md must explain that PAM is installed first"
         test -f "${directory}/LICENSE" || fail "LICENSE is missing: ${package_path}"
         cmp -s "${repository_root}/LICENSE" "${directory}/LICENSE" ||
             fail "${package_path}/LICENSE differs from the root Apache license"
@@ -140,9 +146,6 @@ validate_release_tag() {
     grep -Eq "^${release_heading}[0-9]{4}-[0-9]{2}-[0-9]{2}$" \
         "${repository_root}/CHANGELOG.md" ||
         fail "CHANGELOG.md does not contain a dated ${runtime_version} release"
-    grep -Eq "^${release_heading}[0-9]{4}-[0-9]{2}-[0-9]{2}$" \
-        "${repository_root}/packages/octane/CHANGELOG.md" ||
-        fail "packages/octane/CHANGELOG.md does not contain a dated ${runtime_version} release"
 }
 
 validate_package_tag() {

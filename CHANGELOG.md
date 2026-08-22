@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.0.0 - 2026-08-21
+
 - Add `pam support` for bounded, path-redacted and integrity-digested Doctor
   reports, with zero persistence by default and private create-once JSON output.
 - Stop retaining the disposable release binary from ordinary CI pushes after its

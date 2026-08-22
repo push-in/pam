@@ -2,16 +2,16 @@
     "owner": "push-in",
     "packages": [
         {
-            "name": "pushinbr/pam-core-api",
-            "path": "packages/core-api",
-            "repository": "pam-core-api",
+            "name": "pushinbr/pam-contracts",
+            "path": "packages/contracts",
+            "repository": "pam-contracts",
             "deploySecret": "PAM_CORE_API_DEPLOY_KEY",
             "description": "Stable PHP contracts for packages that extend the PAM runtime."
         },
         {
-            "name": "pushinbr/pam-api",
-            "path": "packages/api",
-            "repository": "pam-api",
+            "name": "pushinbr/pam-http",
+            "path": "packages/http",
+            "repository": "pam-http",
             "deploySecret": "PAM_API_DEPLOY_KEY",
             "description": "Elegant HTTP routing and middleware for the PAM runtime."
         },
@@ -23,9 +23,9 @@
             "description": "Event-oriented socket APIs for PAM WebSockets."
         },
         {
-            "name": "pushinbr/pam-psr-bridge",
-            "path": "packages/psr-bridge",
-            "repository": "pam-psr-bridge",
+            "name": "pushinbr/pam-psr",
+            "path": "packages/psr",
+            "repository": "pam-psr",
             "deploySecret": "PAM_PSR_BRIDGE_DEPLOY_KEY",
             "description": "PSR-7, PSR-15 and PSR-17 interoperability for PAM."
         },

@@ -74,7 +74,7 @@ jobs:
             --output "${evidence}/artifacts/product-visual-dark.json"
       - name: Seal and verify the portable evidence bundle
         env:
-          PAM_NATIVE_COMMIT: 26a768c9a7e0137bda9fa7de23f46c9308de2839
+          PAM_NATIVE_COMMIT: 05f6b707c25c9beeccbe5553333854a3cc952dea
           PAM_DESKTOP_COMMIT: c89ea15a78eb3509a8611e42302c867c3c09bbbf
         run: |
           evidence=product-visual-evidence
