@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.3 - 2026-08-22
+
+- Certify packaged extension inventories through PAM's supported inline PHP
+  execution contract instead of treating PHP CLI `-m` as a PAM option.
+
 ## 2.0.2 - 2026-08-22
 
 - Make Linux master-death certification distinguish exited zombie workers from
