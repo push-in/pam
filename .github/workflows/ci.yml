@@ -10,22 +10,6 @@ permissions:
   contents: read
 
 jobs:
-  windows-desktop-contracts:
-    name: Windows Desktop transaction contracts
-    runs-on: windows-2022
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - name: Test portable Desktop host transactions
-        shell: pwsh
-        run: |
-          rustc --edition=2024 -D warnings --test src/desktop_transaction.rs `
-            -o "$env:RUNNER_TEMP/pam-desktop-transaction-tests.exe"
-          & "$env:RUNNER_TEMP/pam-desktop-transaction-tests.exe" --test-threads=1
-
   test:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

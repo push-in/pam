@@ -16,7 +16,7 @@ on:
       - 'scripts/ecosystem-compatibility.py'
       - '.github/workflows/ecosystem-compatibility.yml'
       - 'Cargo.toml'
-      - 'src/mobile.rs'
+      - 'src/project.rs'
   schedule:
     - cron: '17 5 * * 1'
   workflow_dispatch:

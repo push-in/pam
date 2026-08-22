@@ -7,7 +7,6 @@ on:
     paths:
       - runtime/catalog.json
       - runtime-builder/ios/**
-      - src/mobile.rs
       - src/commands.rs
       - pam-native/**
       - .github/workflows/ios-native.yml
@@ -15,7 +14,6 @@ on:
     paths:
       - runtime/catalog.json
       - runtime-builder/ios/**
-      - src/mobile.rs
       - src/commands.rs
       - pam-native/**
       - .github/workflows/ios-native.yml
