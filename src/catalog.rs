@@ -344,6 +344,7 @@ pub fn package_can_override(name: &str) -> bool {
             | "build"
             | "console"
             | "desktop"
+            | "diagnostics"
             | "devices"
             | "devtools"
             | "dev"
