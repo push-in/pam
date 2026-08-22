@@ -11,6 +11,7 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
         macos = (ROOT / "scripts/package-runtime-macos.sh").read_text(encoding="utf-8")
 
         self.assertIn('export PAM_HOME="$PAM_INSTALL_ROOT/share/pam"', linux)
+        self.assertIn("modules='timezonedb opcache ", linux)
         self.assertIn('export PAM_HOME="${pam_install_root}/share/pam"', macos)
 
     def test_clean_host_workflow_is_signed_bounded_and_fail_closed(self) -> None:
@@ -111,9 +112,21 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
         self.assertEqual(workflow.count("module-load.stderr"), 4)
         self.assertEqual(workflow.count("runtime-loaded-modules.txt"), 6)
         self.assertEqual(
+            workflow.count('grep -Fx "timezonedb" clean-host/loaded-modules.txt'),
+            1,
+        )
+        self.assertEqual(
             workflow.count('test "$(wc -c <clean-host/loaded-modules.unsorted)" -le 1048576'),
             2,
         )
+
+        release = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
+        self.assertIn("timezonedb-2026.3.tgz", release)
+        self.assertIn(
+            "4b6cbc1f3fe7aebf9e2d9f00469afb4a050c8b196f18b1e637fda4b33df17dd1",
+            release,
+        )
+        self.assertIn("phpize8.5", release)
 
     def test_release_cannot_publish_before_distribution_certification(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(

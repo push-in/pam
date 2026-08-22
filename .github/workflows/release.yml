@@ -164,6 +164,23 @@ jobs:
             libphp8.5-embed php8.5-dev php8.5-bcmath php8.5-curl php8.5-gd \
             php8.5-intl php8.5-mbstring php8.5-mysql php8.5-pgsql \
             php8.5-sqlite3 php8.5-xml php8.5-zip
+      - name: Build the pinned portable timezone database
+        run: |
+          archive=${RUNNER_TEMP}/timezonedb-2026.3.tgz
+          source=${RUNNER_TEMP}/timezonedb-2026.3
+          curl --fail --silent --show-error --location \
+            https://pecl.php.net/get/timezonedb-2026.3.tgz \
+            --output "${archive}"
+          printf '%s  %s\n' \
+            4b6cbc1f3fe7aebf9e2d9f00469afb4a050c8b196f18b1e637fda4b33df17dd1 \
+            "${archive}" | sha256sum --check --strict
+          mkdir -p "${source}"
+          tar -xzf "${archive}" -C "${source}" --strip-components=1
+          cd "${source}"
+          phpize8.5
+          ./configure --with-php-config=php-config8.5
+          make -j2
+          sudo make install
       - uses: Swatinem/rust-cache@v2
       - name: Validate locked Composer dependencies
         run: |
