@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.2 - 2026-08-22
+
+- Make Linux master-death certification distinguish exited zombie workers from
+  live workers when container PID 1 delays reaping them.
+
 ## 2.0.1 - 2026-08-22
 
 - Treat Linux zombie dashboard processes as stopped so containerized shutdown
