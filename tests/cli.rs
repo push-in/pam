@@ -2227,12 +2227,12 @@ fn executes_inline_php_with_ini_entries() {
 #[test]
 fn accepts_php_cli_ini_options_for_composer_tool_workers() {
     let ini = temporary_path("tool-worker.ini");
-    fs::write(&ini, "precision=7\n").unwrap();
+    // Disable JIT during module startup so CI instrumentation extensions do not
+    // emit an environment-specific warning before the script output.
+    fs::write(&ini, "opcache.jit=0\nprecision=7\n").unwrap();
     let output = run_pam(&[
         "-c",
         ini.to_str().unwrap(),
-        "-d",
-        "opcache.jit=0",
         "-d",
         "memory_limit=256M",
         "-r",
