@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "packages": [
-    {"repository": "pam-mobile-ui", "composerName": "pushinbr/pam-mobile-ui", "roleCode": 3, "requiresNative": true, "testRequired": true},
+    {"repository": "pam-native-ui", "composerName": "pushinbr/pam-native-ui", "roleCode": 3, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-auth", "composerName": "pushinbr/pam-native-auth", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-background-transfer", "composerName": "pushinbr/pam-native-background-transfer", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-bluetooth", "composerName": "pushinbr/pam-native-bluetooth", "roleCode": 2, "requiresNative": true, "testRequired": true},
@@ -10,7 +10,7 @@
     {"repository": "pam-native-firebase", "composerName": "pushinbr/pam-native-firebase", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-health", "composerName": "pushinbr/pam-native-health", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-intents", "composerName": "pushinbr/pam-native-intents", "roleCode": 2, "requiresNative": true, "testRequired": true},
-    {"repository": "pam-native-laravel-sync", "composerName": "pushinbr/pam-native-laravel-sync", "roleCode": 3, "requiresNative": true, "testRequired": true},
+    {"repository": "pam-native-sync-laravel", "composerName": "pushinbr/pam-native-sync-laravel", "roleCode": 3, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-live-activities", "composerName": "pushinbr/pam-native-live-activities", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-maps", "composerName": "pushinbr/pam-native-maps", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-media", "composerName": "pushinbr/pam-native-media", "roleCode": 2, "requiresNative": true, "testRequired": true},
