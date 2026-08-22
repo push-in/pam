@@ -18,7 +18,7 @@
         "additionalProperties": false,
         "required": ["repository", "composerName", "roleCode", "resultCode", "manifestSha256", "publicationWorkflowSha256"],
         "properties": {
-          "repository": {"type": "string", "pattern": "^(pam-native-[a-z0-9]+(?:-[a-z0-9]+)*|pam-mobile-ui)$"},
+          "repository": {"type": "string", "pattern": "^(pam-native-[a-z0-9]+(?:-[a-z0-9]+)*|pam-native-ui)$"},
           "composerName": {"type": "string", "pattern": "^pushinbr/[a-z0-9]+(?:-[a-z0-9]+)*$"},
           "roleCode": {"type": "integer", "enum": [1, 2, 3, 4]},
           "resultCode": {"const": 1},

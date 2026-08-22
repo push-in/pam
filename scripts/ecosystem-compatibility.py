@@ -16,7 +16,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 CATALOG = ROOT / "config" / "ecosystem-packages.json"
-REPOSITORY = re.compile(r"^(?:pam-native-[a-z0-9]+(?:-[a-z0-9]+)*|pam-mobile-ui)$")
+REPOSITORY = re.compile(r"^(?:pam-native-[a-z0-9]+(?:-[a-z0-9]+)*|pam-native-ui)$")
 COMPOSER_NAME = re.compile(r"^pushinbr/[a-z0-9]+(?:-[a-z0-9]+)*$")
 LOCAL_CHECKOUT_ALIASES = {"pam-native-php": "pam-native/packages/native"}
 MAX_LOCAL_EVIDENCE_BYTES = 1_048_576

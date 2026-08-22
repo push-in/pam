@@ -39,16 +39,16 @@ class EcosystemCompatibilityTests(unittest.TestCase):
     def test_inventory_includes_the_official_mobile_ui_package(self) -> None:
         matrix = json.loads(self.run_script("matrix").stdout)
         mobile_ui = next(
-            package for package in matrix if package["repository"] == "pam-mobile-ui"
+            package for package in matrix if package["repository"] == "pam-native-ui"
         )
-        self.assertEqual(mobile_ui["composerName"], "pushinbr/pam-mobile-ui")
+        self.assertEqual(mobile_ui["composerName"], "pushinbr/pam-native-ui")
         self.assertEqual(mobile_ui["roleCode"], 3)
         self.assertTrue(mobile_ui["requiresNative"])
         self.assertTrue(mobile_ui["testRequired"])
         workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("pam-mobile-ui$", workflow)
+        self.assertIn("pam-native-ui$", workflow)
 
     def test_checkout_contract_requires_test_and_native_constraints(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
