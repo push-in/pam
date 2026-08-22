@@ -301,14 +301,14 @@ impl InitTemplate {
     pub fn parse(value: &str) -> Result<Self, String> {
         match value {
             "raw" | "pure" => Ok(Self::Raw),
-            "api" => Ok(Self::Api),
+            "http" | "api" => Ok(Self::Api),
             "laravel" => Ok(Self::Laravel),
             "desktop" => Ok(Self::Desktop),
-            "mobile" | "android" | "mobile-pure" => Ok(Self::Mobile),
-            "mobile-ui" | "android-ui" | "mobile+ui" => Ok(Self::MobileUi),
+            "native" | "mobile" | "android" | "mobile-pure" => Ok(Self::Mobile),
+            "native-ui" | "mobile-ui" | "android-ui" | "mobile+ui" => Ok(Self::MobileUi),
             "product" | "fullstack" | "flagship" => Ok(Self::Product),
             _ => Err(format!(
-                "unknown init template {value:?}; expected raw, api, laravel, desktop, mobile, mobile-ui, or product"
+                "unknown init template {value:?}; expected raw, http, laravel, desktop, native, native-ui, or product"
             )),
         }
     }
@@ -898,7 +898,7 @@ fn choose_template(
     println!(
         "  {}  {} {}",
         ui.accent("03"),
-        ui.heading(format!("{:<25}", "API + Socket")),
+        ui.heading(format!("{:<25}", "HTTP + Socket")),
         ui.muted("HTTP and realtime events")
     );
     println!(
@@ -922,14 +922,14 @@ fn choose_template(
     println!(
         "  {}  {} {}",
         ui.accent("07"),
-        ui.heading(format!("{:<25}", "Mobile · Core")),
+        ui.heading(format!("{:<25}", "Native · Core")),
         ui.muted("Pure PAM Native primitives")
     );
     println!(
         "  {}  {} {}",
         ui.accent("08"),
-        ui.heading(format!("{:<25}", "Mobile · Official UI")),
-        ui.muted("PAM Mobile UI design system · recommended for apps")
+        ui.heading(format!("{:<25}", "Native · Official UI")),
+        ui.muted("PAM Native UI design system · recommended for apps")
     );
     println!(
         "  {}  {} {}",
@@ -995,20 +995,13 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let api_version = "^2.0";
-    let ecosystem_version = "^1.0";
+    let version = "^1.0";
     let mut require = serde_json::Map::from_iter([
-        ("php".to_owned(), serde_json::json!("^8.4")),
-        (
-            "pushinbr/pam-api".to_owned(),
-            serde_json::json!(api_version),
-        ),
+        ("php".to_owned(), serde_json::json!("^8.5")),
+        ("pushinbr/pam-http".to_owned(), serde_json::json!(version)),
     ]);
     if socket {
-        require.insert(
-            "pushinbr/pam-socket".to_owned(),
-            serde_json::json!(ecosystem_version),
-        );
+        require.insert("pushinbr/pam-socket".to_owned(), serde_json::json!(version));
     }
     let mut manifest = serde_json::json!({
         "name": "app/pam-project",
@@ -1018,13 +1011,13 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
         "require": require,
         "require-dev": {
             "laravel/pint": "^1.30",
+            "pushinbr/pam-testing": version,
             "phpunit/phpunit": "^12.5"
         },
         "autoload": {"psr-4": {"App\\": "src/"}},
         "config": {"platform-check": true, "sort-packages": true},
         "scripts": {
             "dev": "pam dev index.php",
-            "migrate": "pam bin/migrate",
             "start": "pam start index.php",
             "test": "pam test . --phpunit -c phpunit.xml"
         }
@@ -1039,123 +1032,82 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
             + "\n"),
     )?;
 
-    let mut index = include_str!("../packages/skeleton/index.php").to_owned();
-    if socket {
-        index = index.replace(
-            "$app = new App();",
-            r#"$app = new App();
-
+    let socket_setup = if socket {
+        r#"
 $socket = \Pam\Socket\Server::create();
 $socket->on('connection', static function (\Pam\WS\Socket $client): void {
     $client->emit('welcome', ['message' => 'Connected to Pam Socket']);
-});"#,
-        );
+});
+"#
+    } else {
+        ""
+    };
+    write_new(
+        &directory.join("index.php"),
+        &format!(
+            r#"<?php
+
+declare(strict_types=1);
+
+use Pam\App;
+use Pam\Http\Request;
+use Pam\Http\Response;
+
+$app = new App;
+{socket_setup}
+$app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json([
+    'message' => 'pong',
+]));
+$app->listen((int) (getenv('PAM_PORT') ?: 3000));
+"#
+        ),
+    )?;
+    write_new(&directory.join(".gitignore"), "/vendor/\n/.pam/\n")?;
+    write_new(&directory.join(".env.example"), "PAM_PORT=3000\n")?;
+    write_new(
+        &directory.join("phpunit.xml"),
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php" colors="true" cacheDirectory=".pam/phpunit-cache">
+    <testsuites>
+        <testsuite name="Pam application">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+</phpunit>
+"#,
+    )?;
+    fs::create_dir_all(directory.join("tests"))
+        .map_err(|error| format!("cannot create test directory: {error}"))?;
+    write_new(
+        &directory.join("tests/ApplicationTest.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+use Pam\App;
+use Pam\Http\Request;
+use Pam\Http\Response;
+use Pam\Testing\TestClient;
+use PHPUnit\Framework\TestCase;
+
+final class ApplicationTest extends TestCase
+{
+    public function test_ping_endpoint(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json(['message' => 'pong']));
+
+        (new TestClient($app))
+            ->get('/api/ping')
+            ->assertSuccessful()
+            ->assertJson(['message' => 'pong']);
+        self::addToAssertionCount(1);
     }
-    write_new(&directory.join("index.php"), &index)?;
-    for (path, contents) in API_STARTER_FILES {
-        let target = directory.join(path);
-        let parent = target
-            .parent()
-            .ok_or_else(|| format!("starter file has no parent: {}", target.display()))?;
-        fs::create_dir_all(parent)
-            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
-        write_new(&target, contents)?;
-    }
+}
+"#,
+    )?;
     Ok(())
 }
-
-const API_STARTER_FILES: &[(&str, &str)] = &[
-    (
-        ".env.example",
-        include_str!("../packages/skeleton/.env.example"),
-    ),
-    (
-        ".gitignore",
-        include_str!("../packages/skeleton/.gitignore"),
-    ),
-    (
-        "phpunit.xml",
-        include_str!("../packages/skeleton/phpunit.xml"),
-    ),
-    (
-        "src/Http/Controllers/PingController.php",
-        include_str!("../packages/skeleton/src/Http/Controllers/PingController.php"),
-    ),
-    (
-        "src/Http/Resources/PingResource.php",
-        include_str!("../packages/skeleton/src/Http/Resources/PingResource.php"),
-    ),
-    (
-        "src/Http/Controllers/ProductController.php",
-        include_str!("../packages/skeleton/src/Http/Controllers/ProductController.php"),
-    ),
-    (
-        "src/Http/Requests/StoreProductRequest.php",
-        include_str!("../packages/skeleton/src/Http/Requests/StoreProductRequest.php"),
-    ),
-    (
-        "src/Http/Resources/ProductResource.php",
-        include_str!("../packages/skeleton/src/Http/Resources/ProductResource.php"),
-    ),
-    (
-        "src/Domain/Products/CreateProductData.php",
-        include_str!("../packages/skeleton/src/Domain/Products/CreateProductData.php"),
-    ),
-    (
-        "src/Domain/Products/ProductStatus.php",
-        include_str!("../packages/skeleton/src/Domain/Products/ProductStatus.php"),
-    ),
-    (
-        "src/Models/Product.php",
-        include_str!("../packages/skeleton/src/Models/Product.php"),
-    ),
-    (
-        "src/Providers/AppServiceProvider.php",
-        include_str!("../packages/skeleton/src/Providers/AppServiceProvider.php"),
-    ),
-    (
-        "src/Repositories/ProductRepository.php",
-        include_str!("../packages/skeleton/src/Repositories/ProductRepository.php"),
-    ),
-    (
-        "src/Repositories/EloquentProductRepository.php",
-        include_str!("../packages/skeleton/src/Repositories/EloquentProductRepository.php"),
-    ),
-    (
-        "src/Services/ProductService.php",
-        include_str!("../packages/skeleton/src/Services/ProductService.php"),
-    ),
-    (
-        "src/Services/ReadinessService.php",
-        include_str!("../packages/skeleton/src/Services/ReadinessService.php"),
-    ),
-    (
-        "src/Services/ReadinessSnapshot.php",
-        include_str!("../packages/skeleton/src/Services/ReadinessSnapshot.php"),
-    ),
-    (
-        "src/Services/ReadinessStatus.php",
-        include_str!("../packages/skeleton/src/Services/ReadinessStatus.php"),
-    ),
-    (
-        "tests/ApplicationTest.php",
-        include_str!("../packages/skeleton/tests/ApplicationTest.php"),
-    ),
-    (
-        "tests/bootstrap.php",
-        include_str!("../packages/skeleton/tests/bootstrap.php"),
-    ),
-    (
-        "bin/migrate",
-        include_str!("../packages/skeleton/bin/migrate"),
-    ),
-    (
-        "database/migrations/2026_08_21_000000_create_products.php",
-        include_str!(
-            "../packages/skeleton/database/migrations/2026_08_21_000000_create_products.php"
-        ),
-    ),
-];
 
 fn init_product(directory: &Path, options: &InitOptions) -> Result<(), String> {
     let applications = directory.join("apps");
@@ -1173,7 +1125,7 @@ fn init_product(directory: &Path, options: &InitOptions) -> Result<(), String> {
     "version": "1.0.0",
     "type": "library",
     "license": "proprietary",
-    "require": {"php": "^8.4"},
+    "require": {"php": "^8.5"},
     "autoload": {"psr-4": {"Product\\Contracts\\": "src/"}},
     "config": {"platform-check": true, "sort-packages": true}
 }
@@ -1790,7 +1742,7 @@ declare(strict_types=1);
 use Pam\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
-use Pam\Api\Testing\TestClient;
+use Pam\Testing\TestClient;
 use PHPUnit\Framework\TestCase;
 use Product\Contracts\ProductMutation;
 use Product\Contracts\ProductMutationReceipt;
@@ -3647,7 +3599,7 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
         "type": "project",
         "license": "proprietary",
         "require": {
-            "php": "^8.4",
+            "php": "^8.5",
             "pushinbr/pam-desktop": "^1.2"
         },
         "autoload": {
@@ -4020,7 +3972,7 @@ HelloApp::run();
                 </article>
                 <article>
                     <span>application</span>
-                    <strong>PHP 8.4</strong>
+                    <strong>PHP 8.5</strong>
                     <small>Composer e domínio</small>
                 </article>
                 <article>
@@ -5329,20 +5281,20 @@ fn init_mobile(
         .map(|repository| repository.package.as_str())
         .unwrap_or("pushinbr/pam-native");
     let mut requirements = serde_json::json!({
-        "php": "^8.4"
+        "php": "^8.5"
     });
     requirements[native_package] = serde_json::json!("^0.6");
     if with_official_ui {
-        requirements["pushinbr/pam-mobile-ui"] = serde_json::json!("^0.4");
+        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^0.4");
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
-            "app/pam-mobile-ui-project"
+            "app/pam-native-ui-project"
         } else {
             "app/pam-native-project"
         },
         "description": if with_official_ui {
-            "A native Android application powered by PHP and PAM Mobile UI."
+            "A native Android application powered by PHP and PAM Native UI."
         } else {
             "A native Android application powered by persistent PHP."
         },
@@ -5587,7 +5539,7 @@ final class Hello extends Component
                     <VStack class="gap-5 p-6">
                         <Heading size="2xl">Component showcase</Heading>
                         <Badge variant="secondary">
-                            <BadgeText>PAM Mobile UI</BadgeText>
+                            <BadgeText>PAM Native UI</BadgeText>
                         </Badge>
                         <Card class="gap-3 p-5">
                             <Text>State, components, accessibility, and native layout.</Text>
@@ -5848,7 +5800,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
     }
     let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/*");
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("packages/api/composer.json")
+        .join("packages/http/composer.json")
         .is_file()
         .then(|| {
             serde_json::json!({
@@ -5857,11 +5809,11 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-core-api": "1.0.0",
-                        "pushinbr/pam-api": "2.0.0",
-                        "pushinbr/pam-psr-bridge": "1.0.0",
-                        "pushinbr/pam-socket": "1.0.0",
-                        "pushinbr/pam-testing": "1.0.0"
+                        "pushinbr/pam-contracts": "0.1.0",
+                        "pushinbr/pam-http": "0.1.0",
+                        "pushinbr/pam-psr": "0.1.0",
+                        "pushinbr/pam-socket": "0.1.0",
+                        "pushinbr/pam-testing": "0.1.0"
                     }
                 }
             })
@@ -5968,8 +5920,8 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
     let candidates = [
         configured,
         installed,
-        Some(manifest_root.join("pam-mobile-ui")),
-        Some(manifest_root.join("../pam-mobile-ui")),
+        Some(manifest_root.join("pam-native-ui")),
+        Some(manifest_root.join("../pam-native-ui")),
     ];
     candidates
         .into_iter()
@@ -5983,7 +5935,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-mobile-ui": "0.1.0"
+                        "pushinbr/pam-native-ui": "0.1.0"
                     }
                 }
             })

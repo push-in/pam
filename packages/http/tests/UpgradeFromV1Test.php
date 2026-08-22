@@ -16,7 +16,7 @@ final class UpgradeFromV1Test extends TestCase
         $source = self::sourceEvidence($fixture . '/source.json');
 
         self::assertSame(1, $source['schemaVersion']);
-        self::assertSame('pushinbr/pam-api', $source['package']);
+        self::assertSame('pushinbr/pam-http', $source['package']);
         self::assertSame('v1.0.2', $source['tag']);
         self::assertSame(
             '2b99c19782ff3c88e9b7484aa13a5960088fcccb',

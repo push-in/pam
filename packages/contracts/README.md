@@ -1,4 +1,4 @@
-# pushinbr/pam-core-api
+# pushinbr/pam-contracts
 
 Small, versioned contracts for packages that extend Pam. It contains the HTTP
 application and middleware contracts, service providers, stability values and
@@ -7,7 +7,7 @@ contract for queues, pub/sub, streams, and RPC transports. It does not contain a
 router, broker client, or server.
 
 ```bash
-pam composer require pushinbr/pam-core-api
+pam composer require pushinbr/pam-contracts
 ```
 
 Transport packages implement `TransportProviderInterface` and expose a strict

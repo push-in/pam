@@ -7,7 +7,7 @@ RUN apt-get update \
     && echo "deb [signed-by=/usr/share/keyrings/php-sury.gpg] https://packages.sury.org/php/ bookworm main" \
         > /etc/apt/sources.list.d/php-sury.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends php8.4-dev libphp8.4-embed \
+    && apt-get install -y --no-install-recommends php8.5-dev libphp8.5-embed \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /source
@@ -26,7 +26,7 @@ RUN apt-get update \
     && echo "deb [signed-by=/usr/share/keyrings/php-sury.gpg] https://packages.sury.org/php/ bookworm main" \
         > /etc/apt/sources.list.d/php-sury.list \
     && apt-get update \
-    && apt-get install -y --no-install-recommends libphp8.4-embed tini \
+    && apt-get install -y --no-install-recommends libphp8.5-embed tini \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 --shell /usr/sbin/nologin pam
 

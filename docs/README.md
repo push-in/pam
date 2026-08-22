@@ -25,7 +25,7 @@ The report contract is embedded and available offline with
 
 | Product | Build | Start |
 | --- | --- | --- |
-| PAM API | Persistent HTTP and realtime services | `pam init app --template api` |
+| PAM HTTP | Composer framework for HTTP and realtime services | `pam init app --template http` |
 | PAM Laravel | Laravel hosted by the persistent runtime | [`laravel.md`](laravel.md) |
 | PAM Octane | Laravel Octane on the PAM transport | [`../packages/octane/README.md`](../packages/octane/README.md) |
 | PAM Native | Android and iOS applications in PHP | [`../pam-native/README.md`](../pam-native/README.md) |
@@ -41,9 +41,8 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 
 ## Guides
 
+- [PAM runtime and Composer ecosystem](ecosystem.md)
 - [Composer packages and ecosystem boundaries](packages.md)
-- [Signed plugin registry and trust rotation](plugin-registry.md)
-- [Plugin registry ceremony and publication operations](registry-operations.md)
 - [CLI workflow and automation](cli.md)
 - [Application and package commands](extending-cli.md)
 - [Laravel lifecycle and production behavior](laravel.md)
@@ -54,7 +53,6 @@ dependencies managed through `pam add`, `pam remove`, and `pam doctor`.
 - [Cross-surface observability and OTLP certification](observability.md)
 - [Product semantic screenshot evidence](product-visual-evidence.md)
 - [Signed clean-host distribution evidence](distribution-evidence.md)
-- [Desktop host diagnostic schema](schemas/desktop-host-doctor.schema.json)
 - [Control-plane diagnostic schema](schemas/control-plane-diagnostics.schema.json)
 - [Control-plane health schema](schemas/control-plane-health.schema.json)
 - [`pam top` NDJSON sample schema](schemas/top-sample.schema.json)

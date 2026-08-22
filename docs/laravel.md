@@ -8,7 +8,7 @@ depends on Laravel and its ordinary Composer packages.
 
 Compatibility is a tested contract, not a claim based only on successful boot.
 The dedicated workflow runs the same PAM binary against Laravel 12 and 13 on
-PHP 8.4 Embed. These are the maintained production matrix.
+PHP 8.5 Embed by default. PHP 8.4 remains in the maintained compatibility matrix.
 The matrix exercises:
 
 - HTTP kernel boot, providers, middleware, routing, validation, exceptions and

@@ -247,14 +247,6 @@ pub fn print_help(executable: &OsStr) {
                 "start [script.php]",
                 "Run a supervised multi-worker cluster",
             ),
-            (
-                "artisan [args...]",
-                "Run the Laravel console inside Embed SAPI",
-            ),
-            ("octane:start [options]", "Start Laravel Octane on PAM"),
-            ("octane:status", "Inspect the PAM Octane master"),
-            ("octane:reload", "Reload PAM Octane without downtime"),
-            ("octane:stop", "Gracefully stop PAM Octane"),
             ("exec <script.php>", "Execute a PHP script explicitly"),
             ("composer [args...]", "Run the embedded Composer toolchain"),
             (
@@ -500,7 +492,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[
                 (
                     "--template PRESET",
-                    "raw, api, laravel, desktop, mobile, mobile-ui, or product",
+                    "raw, http, laravel, desktop, native, native-ui, or product",
                 ),
                 ("--socket", "Add Pam Socket support"),
                 ("--name NAME", "Human-readable mobile application name"),
@@ -517,10 +509,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("--no-interaction", "Use API when no preset is supplied"),
             ],
             &[
-                "init my-api --template api",
+                "init my-api --template http",
                 "init my-app --template laravel --socket",
-                "init native-app --template mobile --no-install",
-                "init ui-app --template mobile-ui --no-install",
+                "init native-app --template native --no-install",
+                "init ui-app --template native-ui --no-install",
                 "init my-product --template product --no-install",
             ],
         ),
@@ -729,15 +721,6 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "package --entry public/index.php --output artifacts",
             ],
         ),
-        "console" => (
-            "Open the contextual interactive application console.",
-            "console [arguments...]",
-            &[],
-            &[
-                "console",
-                "console --execute=\"App\\Models\\User::count()\"",
-            ],
-        ),
         "editor:install" => (
             "Install or print PAM Native language support for your editor.",
             "editor:install [vscode|neovim|helix] [options]",
@@ -758,107 +741,6 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 "self-update --check",
                 "self-update v2.0.0",
                 "self-update v1.0.0 --allow-downgrade",
-            ],
-        ),
-        "mobile" => (
-            "Build native Android and iOS applications powered by PHP.",
-            "mobile <command> [project] [options]",
-            &[
-                ("doctor", "Validate the Android and PAM Native toolchain"),
-                (
-                    "audit",
-                    "Audit native permissions and release dependency authority",
-                ),
-                ("prepare", "Stage the project and generate its Android host"),
-                ("codegen", "Regenerate Kotlin native-module bindings"),
-                (
-                    "ios:doctor | ios:prepare",
-                    "Validate and generate the iOS host",
-                ),
-                ("ios:build | ios:run", "Build or launch on an iOS Simulator"),
-                (
-                    "ios:devices | ios:logs",
-                    "Inspect iOS simulators and application logs",
-                ),
-                (
-                    "screenshot | ios:screenshot",
-                    "Capture a validated PNG for visual tests",
-                ),
-                (
-                    "ios:sign | ios:package",
-                    "Validate signing and export a signed IPA",
-                ),
-                ("build | run | dev", "Build, launch, or hot-reload the app"),
-                (
-                    "sign | package",
-                    "Validate signing and create signed APK/AAB release artifacts",
-                ),
-                (
-                    "benchmark | profile",
-                    "Measure performance or create a baseline profile",
-                ),
-                ("devtools", "Toggle the live performance overlay"),
-                (
-                    "diagnostics [--device SERIAL]",
-                    "Capture a redacted snapshot from one explicit target",
-                ),
-                ("logs | devices", "Inspect app logs and connected targets"),
-                ("plugin:list | plugin:doctor", "Inspect native plugins"),
-                (
-                    "runtime:list | runtime:info",
-                    "Inspect selectable embedded PHP runtimes",
-                ),
-                (
-                    "runtime:use | runtime:update",
-                    "Select and lock PHP 8.4 or 8.5",
-                ),
-                (
-                    "runtime:install",
-                    "Install verified Android runtimes and native engines",
-                ),
-                ("make:*", "Generate screens, components, or native views"),
-            ],
-            &[
-                "mobile doctor",
-                "mobile audit . --deny-high --json",
-                "mobile dev .",
-                "mobile devtools .",
-                "mobile diagnostics .",
-                "mobile android:diagnostics . --device R58M1234",
-                "mobile ios:diagnostics .",
-                "mobile ios:devtools .",
-                "mobile screenshot . --output artifacts/home.png",
-                "mobile runtime:use 8.5 .",
-                "mobile runtime:install .",
-                "mobile make:screen Dashboard .",
-                "mobile ios:doctor .",
-                "mobile ios:run .",
-            ],
-        ),
-        "desktop" => (
-            "Build and inspect cross-platform Desktop applications powered by PHP.",
-            "desktop <command> [project] [options]",
-            &[
-                ("doctor", "Validate the PAM Desktop host and project"),
-                (
-                    "host:doctor [--json]",
-                    "Verify signed host provenance, digest, and identity offline",
-                ),
-                (
-                    "dev | build | run",
-                    "Develop, package, or launch the application",
-                ),
-                (
-                    "visual accept | verify",
-                    "Manage exact project-scoped visual regression evidence",
-                ),
-                ("diagnostics", "Capture bounded Desktop diagnostics"),
-            ],
-            &[
-                "desktop dev .",
-                "desktop visual verify . --name product.dark --actual artifacts/screenshots/product-desktop-dark.png",
-                "desktop doctor .",
-                "desktop host:doctor . --json",
             ],
         ),
         _ => {

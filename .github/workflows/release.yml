@@ -84,7 +84,7 @@ jobs:
           key: pam-android-runtime
       - name: Build both PHP release lines and PAM Native engines
         run: |
-          runtime-builder/android/build.sh --php 8.4 all
+          runtime-builder/android/build.sh --php 8.5 all
           runtime-builder/android/build.sh --php 8.5 all
           toolchain="${ANDROID_HOME}/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/bin"
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${toolchain}/aarch64-linux-android26-clang" \
@@ -153,7 +153,7 @@ jobs:
           components: clippy,rustfmt
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
       - name: Install PHP Embed toolchain
         run: |
@@ -161,9 +161,9 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             -o Dpkg::Options::=--force-confnew \
-            libphp8.4-embed php8.4-dev php8.4-bcmath php8.4-curl php8.4-gd \
-            php8.4-intl php8.4-mbstring php8.4-mysql php8.4-pgsql \
-            php8.4-sqlite3 php8.4-xml php8.4-zip
+            libphp8.5-embed php8.5-dev php8.5-bcmath php8.5-curl php8.5-gd \
+            php8.5-intl php8.5-mbstring php8.5-mysql php8.5-pgsql \
+            php8.5-sqlite3 php8.5-xml php8.5-zip
       - uses: Swatinem/rust-cache@v2
       - name: Validate locked Composer dependencies
         run: |
@@ -191,7 +191,6 @@ jobs:
           cargo fmt --all -- --check
           cargo run --locked -- docs:generate docs/cli-reference.md --check
           python3 -m json.tool docs/schemas/pam.schema.json >/dev/null
-          python3 -m json.tool docs/schemas/registry-compatibility-matrix.schema.json >/dev/null
           python3 -m json.tool docs/schemas/distribution-evidence.schema.json >/dev/null
           python3 -m json.tool docs/schemas/desktop-platform-verification.schema.json >/dev/null
           python3 scripts/check-docs.py
@@ -271,7 +270,7 @@ jobs:
         env:
           PAM_RUNTIME_SLICE: ${{ matrix.target == 'macos-arm64' && 'all' || 'macos' }}
         run: |
-          runtime-builder/ios/build.sh --php 8.4 "${PAM_RUNTIME_SLICE}"
+          runtime-builder/ios/build.sh --php 8.5 "${PAM_RUNTIME_SLICE}"
           runtime-builder/ios/build.sh --php 8.5 "${PAM_RUNTIME_SLICE}"
       - name: Build PAM for macOS
         env:

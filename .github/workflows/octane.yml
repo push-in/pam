@@ -59,11 +59,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - php: '8.4'
+          - php: '8.5'
             laravel: '^12.0'
             testbench: '^10.0'
             phpunit: '^12.5'
-          - php: '8.4'
+          - php: '8.5'
             laravel: '^13.0'
             testbench: '^11.0'
             phpunit: '^13.0'
@@ -91,14 +91,14 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           coverage: none
           tools: composer:v2
       - name: Install PHP Embed development package
         run: |
           sudo add-apt-repository -y ppa:ondrej/php
           sudo apt-get update
-          sudo apt-get install -y libphp8.4-embed php8.4-dev php8.4-sqlite3
+          sudo apt-get install -y libphp8.5-embed php8.5-dev php8.5-sqlite3
       - uses: Swatinem/rust-cache@v2
       - name: Preflight package dependencies
         working-directory: packages/octane

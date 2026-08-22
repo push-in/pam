@@ -1,5 +1,5 @@
 {
-    "name": "pushinbr/pam-psr-bridge",
+    "name": "pushinbr/pam-psr",
     "description": "PSR-7, PSR-15 and PSR-17 implementations for Pam.",
     "type": "library",
     "license": "Apache-2.0",
@@ -13,7 +13,7 @@
     "homepage": "https://github.com/push-in/pam",
     "support": {
         "issues": "https://github.com/push-in/pam/issues",
-        "source": "https://github.com/push-in/pam-psr-bridge"
+        "source": "https://github.com/push-in/pam-psr"
     },
     "require": {
         "php": "^8.4",

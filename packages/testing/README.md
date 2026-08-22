@@ -1,6 +1,6 @@
 # pushinbr/pam-testing
 
-Fast in-memory tests for applications built with `pushinbr/pam-api`.
+Fast in-memory tests for applications built with `pushinbr/pam-http`.
 
 ```bash
 pam composer require --dev pushinbr/pam-testing

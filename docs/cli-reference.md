@@ -55,35 +55,15 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam traffic:stop` — Stop a release traffic ingress.
 ## Develop
 
-- `pam devices` — List connected development targets.
-- `pam devtools` — Toggle contextual development tools.
-- `pam console` — Open the application console.
 - `pam commands` — List application and package commands.
-## Generate
-
-- `pam make:screen` — Generate a native screen.
-- `pam make:component` — Generate a native component.
-- `pam make:native-view` — Generate a native view bridge.
-- `pam make:model` — Generate a Laravel model.
-- `pam make:controller` — Generate a Laravel controller.
-- `pam make:request` — Generate a Laravel form request.
-- `pam make:resource` — Generate a Laravel API resource.
-- `pam make:migration` — Generate a Laravel migration.
-- `pam make:service` — Generate an application service.
-- `pam make:repository` — Generate a persistence repository.
-- `pam make:test` — Generate a Laravel test.
-- `pam make:command` — Generate a Laravel console command.
-- `pam make:job` — Generate a Laravel job.
 ## Ecosystem
 
-- `pam packages` — List official PAM capabilities.
-- `pam registry` — Verify signed plugin metadata and compatibility.
-- `pam add` — Install an official capability.
-- `pam remove` — Remove an official capability.
+- `pam packages` — List direct Composer requirements.
+- `pam add` — Legacy alias for Composer require.
+- `pam remove` — Legacy alias for Composer remove.
 - `pam outdated` — Inspect available dependency updates.
 - `pam composer` — Run Composer inside PAM.
 - `pam extensions` — Derive an explainable PHP extension profile from Composer.
-- `pam artisan` — Run Laravel Artisan inside PAM.
 ## Quality
 
 - `pam format` — Format project source.
@@ -95,7 +75,6 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 
 - `pam build` — Create a release build.
 - `pam package` — Create a distributable package.
-- `pam sign` — Validate native release signing.
 - `pam release` — Validate and publish a release candidate.
 - `pam release:verify` — Verify a Product release offline.
 - `pam distribution:verify` — Verify signed clean-host distribution evidence.
@@ -112,10 +91,6 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam restart` — Restart a managed application.
 - `pam stop` — Gracefully stop a managed application.
 - `pam delete` — Remove a stopped application from PAM.
-- `pam octane:start` — Start Laravel Octane on the PAM runtime.
-- `pam octane:status` — Inspect the PAM Octane master.
-- `pam octane:reload` — Reload PAM Octane without downtime.
-- `pam octane:stop` — Gracefully stop PAM Octane.
 - `pam exec` — Execute a PHP script explicitly.
 ## Observe
 
@@ -127,8 +102,6 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 ## Advanced
 
 - `pam catalog` — Discover the versioned CLI contract.
-- `pam mobile` — Use explicit PAM Native commands.
-- `pam desktop` — Use explicit PAM Desktop commands.
 - `pam completion` — Generate shell completion.
 - `pam editor:install` — Install PAM language support in an editor.
 - `pam self-update` — Install a cryptographically authorized PAM release.

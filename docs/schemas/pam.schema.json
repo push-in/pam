@@ -81,9 +81,18 @@
                     {
                         "type": "object",
                         "additionalProperties": false,
-                        "required": ["script"],
+                        "oneOf": [
+                            {"required": ["script"]},
+                            {"required": ["bin"]}
+                        ],
                         "properties": {
                             "script": {"type": "string", "minLength": 1},
+                            "bin": {"type": "string", "minLength": 1},
+                            "arguments": {
+                                "type": "array",
+                                "maxItems": 32,
+                                "items": {"type": "string", "maxLength": 4096}
+                            },
                             "description": {"type": "string", "maxLength": 240}
                         }
                     }

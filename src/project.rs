@@ -39,7 +39,14 @@ pub struct ProjectContext {
 pub struct RegisteredCommand {
     pub name: String,
     pub description: String,
-    pub script: PathBuf,
+    pub target: CommandTarget,
+    pub arguments: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CommandTarget {
+    PhpScript(PathBuf),
+    Executable(PathBuf),
 }
 
 pub fn discover_cleanable(path: &Path) -> Option<ProjectContext> {
@@ -460,41 +467,6 @@ fn workspace_tooling_targets() -> Vec<(&'static Path, CleanupArtifactKind)> {
     ]
 }
 
-pub fn native_platforms(context: &ProjectContext) -> Result<Vec<u8>, String> {
-    if context.kind != ProjectKind::Native {
-        return Ok(Vec::new());
-    }
-    let path = context.root.join("pam.json");
-    if !path.is_file() {
-        return Ok(vec![1]);
-    }
-    let source =
-        fs::read(&path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let manifest: serde_json::Value = serde_json::from_slice(&source)
-        .map_err(|error| format!("invalid {}: {error}", path.display()))?;
-    let platforms = manifest
-        .pointer("/native/platforms")
-        .and_then(serde_json::Value::as_array)
-        .ok_or_else(|| "pam.json native.platforms must be an integer array".to_owned())?;
-    if platforms.is_empty() {
-        return Err(
-            "pam.json native.platforms must select Android (1), iOS (2), or both".to_owned(),
-        );
-    }
-    let mut result = Vec::new();
-    for value in platforms {
-        let value = value
-            .as_u64()
-            .and_then(|value| u8::try_from(value).ok())
-            .filter(|value| matches!(value, 1 | 2))
-            .ok_or_else(|| "pam.json native.platforms values must be integer 1 or 2".to_owned())?;
-        if !result.contains(&value) {
-            result.push(value);
-        }
-    }
-    Ok(result)
-}
-
 pub fn info(context: &ProjectContext, json: bool) -> Result<u8, String> {
     let composer = context.root.join("composer.json");
     let manifest = context.root.join("pam.json");
@@ -907,7 +879,10 @@ pub fn registered_commands(context: &ProjectContext) -> Result<Vec<RegisteredCom
         &context.root,
         &mut commands,
     )?;
-    let installed = context.root.join("vendor/composer/installed.json");
+    let vendor_directory = crate::composer::discover(&context.root)?
+        .map(|composer| composer.vendor_directory)
+        .unwrap_or_else(|| context.root.join("vendor"));
+    let installed = vendor_directory.join("composer/installed.json");
     if installed.is_file() {
         let source = fs::read(&installed)
             .map_err(|error| format!("cannot read {}: {error}", installed.display()))?;
@@ -927,10 +902,11 @@ pub fn registered_commands(context: &ProjectContext) -> Result<Vec<RegisteredCom
                     continue;
                 };
                 let install_path = package
-                    .get("install_path")
+                    .get("install-path")
+                    .or_else(|| package.get("install_path"))
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(".");
-                let package_root = context.root.join("vendor/composer").join(install_path);
+                let package_root = vendor_directory.join("composer").join(install_path);
                 collect_commands(extra, &package_root, &context.root, &mut commands)?;
             }
         }
@@ -940,6 +916,7 @@ pub fn registered_commands(context: &ProjectContext) -> Result<Vec<RegisteredCom
         crate::catalog::COMMANDS
             .iter()
             .any(|built_in| built_in.name == command.name)
+            && !crate::catalog::package_can_override(&command.name)
     }) {
         return Err(format!(
             "PAM command registration {} shadows a built-in command",
@@ -992,37 +969,77 @@ fn collect_commands(
         if !valid_command_name(name) {
             return Err(format!("invalid PAM command name {name:?}"));
         }
-        let (script, description) = if let Some(script) = definition.as_str() {
-            (script, "Application command")
+        let (target_kind, target, description, arguments) = if let Some(script) =
+            definition.as_str()
+        {
+            ("script", script, "Application command", Vec::new())
         } else {
             let definition = definition
                 .as_object()
                 .ok_or_else(|| format!("PAM command {name} must be a string or object"))?;
+            let script = definition.get("script").and_then(serde_json::Value::as_str);
+            let executable = definition.get("bin").and_then(serde_json::Value::as_str);
+            let (target_kind, target) = match (script, executable) {
+                (Some(script), None) => ("script", script),
+                (None, Some(executable)) => ("bin", executable),
+                (None, None) => return Err(format!("PAM command {name} requires script or bin")),
+                (Some(_), Some(_)) => {
+                    return Err(format!(
+                        "PAM command {name} must declare exactly one of script or bin"
+                    ));
+                }
+            };
             (
-                definition
-                    .get("script")
-                    .and_then(serde_json::Value::as_str)
-                    .ok_or_else(|| format!("PAM command {name} requires script"))?,
+                target_kind,
+                target,
                 definition
                     .get("description")
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("Application command"),
+                command_arguments(name, definition.get("arguments"))?,
             )
         };
-        let script = base
-            .join(script)
+        let target = base
+            .join(target)
             .canonicalize()
-            .map_err(|error| format!("cannot resolve script for PAM command {name}: {error}"))?;
-        if !script.starts_with(&project_root) || !script.is_file() {
-            return Err(format!("PAM command {name} script escapes the project"));
+            .map_err(|error| format!("cannot resolve target for PAM command {name}: {error}"))?;
+        if !target.starts_with(&project_root) || !target.is_file() {
+            return Err(format!("PAM command {name} target escapes the project"));
         }
         output.push(RegisteredCommand {
             name: name.clone(),
             description: description.to_owned(),
-            script,
+            target: if target_kind == "script" {
+                CommandTarget::PhpScript(target)
+            } else {
+                CommandTarget::Executable(target)
+            },
+            arguments,
         });
     }
     Ok(())
+}
+
+fn command_arguments(name: &str, value: Option<&serde_json::Value>) -> Result<Vec<String>, String> {
+    let Some(value) = value else {
+        return Ok(Vec::new());
+    };
+    let values = value
+        .as_array()
+        .filter(|values| values.len() <= 32)
+        .ok_or_else(|| {
+            format!("PAM command {name} arguments must be an array of at most 32 strings")
+        })?;
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|value| value.len() <= 4096 && !value.contains(['\0', '\n', '\r']))
+                .map(str::to_owned)
+                .ok_or_else(|| format!("PAM command {name} contains an invalid argument"))
+        })
+        .collect()
 }
 
 fn valid_command_name(name: &str) -> bool {
@@ -1385,6 +1402,67 @@ mod tests {
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "app:import");
         assert_eq!(commands[0].description, "Import data");
+        assert!(matches!(commands[0].target, CommandTarget::PhpScript(_)));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn loads_package_executable_commands() {
+        let root = temporary("package-bin-commands");
+        fs::create_dir_all(root.join("vendor/pushinbr/tool/bin")).unwrap();
+        fs::create_dir_all(root.join("vendor/composer")).unwrap();
+        fs::write(
+            root.join("pam.json"),
+            r#"{"schema":1,"type":1,"name":"Commands"}"#,
+        )
+        .unwrap();
+        fs::write(root.join("vendor/pushinbr/tool/bin/tool"), "tool").unwrap();
+        fs::write(
+            root.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"bin":"bin/tool","description":"Run tool"}}}}}]}"#,
+        )
+        .unwrap();
+
+        let context = discover(&root).unwrap();
+        let commands = registered_commands(&context).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "tool:run");
+        assert!(matches!(commands[0].target, CommandTarget::Executable(_)));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn loads_package_commands_from_a_custom_composer_vendor_directory() {
+        let root = temporary("custom-vendor-commands");
+        fs::create_dir_all(root.join("dependencies/pushinbr/tool/bin")).unwrap();
+        fs::create_dir_all(root.join("dependencies/composer")).unwrap();
+        fs::write(
+            root.join("pam.json"),
+            r#"{"schema":1,"type":1,"name":"Commands"}"#,
+        )
+        .unwrap();
+        fs::write(
+            root.join("composer.json"),
+            r#"{"name":"app/commands","config":{"vendor-dir":"dependencies"}}"#,
+        )
+        .unwrap();
+        fs::write(root.join("dependencies/autoload.php"), "<?php\n").unwrap();
+        fs::write(
+            root.join("dependencies/pushinbr/tool/bin/tool.php"),
+            "<?php\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join("dependencies/composer/installed.json"),
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"script":"bin/tool.php"}}}}}]}"#,
+        )
+        .unwrap();
+
+        let context = discover(&root).unwrap();
+        let commands = registered_commands(&context).unwrap();
+        assert_eq!(commands.len(), 1);
+        assert_eq!(commands[0].name, "tool:run");
+        assert!(matches!(commands[0].target, CommandTarget::PhpScript(_)));
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1412,10 +1490,10 @@ mod tests {
     fn refuses_to_shadow_builtin_commands() {
         let root = temporary("shadow");
         fs::create_dir_all(root.join("bin")).unwrap();
-        fs::write(root.join("bin/dev.php"), "<?php\n").unwrap();
+        fs::write(root.join("bin/start.php"), "<?php\n").unwrap();
         fs::write(
             root.join("pam.json"),
-            r#"{"schema":1,"type":1,"name":"Shadow","commands":{"dev":"bin/dev.php"}}"#,
+            r#"{"schema":1,"type":1,"name":"Shadow","commands":{"start":"bin/start.php"}}"#,
         )
         .unwrap();
         let context = discover(&root).unwrap();

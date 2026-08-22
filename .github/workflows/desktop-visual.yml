@@ -38,7 +38,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           coverage: none
           tools: composer:v2
       - uses: Swatinem/rust-cache@v2
@@ -50,7 +50,7 @@ jobs:
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential clang imagemagick libclang-dev libfontconfig1-dev \
-            libphp8.4-embed php8.4-dev pkg-config xdotool xvfb x11-utils
+            libphp8.5-embed php8.5-dev pkg-config xdotool xvfb x11-utils
       - name: Build PAM and the real Servo host
         run: |
           cargo build --locked

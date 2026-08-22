@@ -8,10 +8,10 @@ lifecycle and diagnostics. Composer owns every optional application feature.
 
 | Package | Responsibility |
 | --- | --- |
-| `pushinbr/pam-core-api` | Stable contracts and runtime capability checks for package authors |
-| `pushinbr/pam-api` | HTTP router, middleware pipeline, error boundary and provider discovery |
+| `pushinbr/pam-contracts` | Stable contracts and runtime capability checks for package authors |
+| `pushinbr/pam-http` | HTTP router, middleware pipeline, error boundary and provider discovery |
 | `pushinbr/pam-socket` | Event-oriented WebSocket API, rooms, broadcasts and distributed adapters |
-| `pushinbr/pam-psr-bridge` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
+| `pushinbr/pam-psr` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
 | `pushinbr/pam-testing` | In-memory HTTP client and fluent response assertions |
 | `pushinbr/pam-skeleton` | Minimal production-oriented project template |
 
@@ -21,7 +21,7 @@ authenticates official compatibility metadata and bytes; Composer and
 `composer.lock` still own dependency resolution.
 
 ```bash
-pam composer require pushinbr/pam-api
+pam composer require pushinbr/pam-http
 pam composer require pushinbr/pam-socket
 pam composer require --dev pushinbr/pam-testing
 ```
@@ -34,7 +34,7 @@ A Composer package can register one or more providers:
 {
     "name": "acme/pam-health",
     "require": {
-        "pushinbr/pam-core-api": "^1.0"
+        "pushinbr/pam-contracts": "^1.0"
     },
     "extra": {
         "pam": {
@@ -89,10 +89,10 @@ distribution mirrors place each package's `composer.json` at the repository root
 
 | Package | Distribution mirror |
 | --- | --- |
-| `pushinbr/pam-core-api` | `push-in/pam-core-api` |
-| `pushinbr/pam-api` | `push-in/pam-api` |
+| `pushinbr/pam-contracts` | `push-in/pam-core-api` |
+| `pushinbr/pam-http` | `push-in/pam-http` |
 | `pushinbr/pam-socket` | `push-in/pam-socket` |
-| `pushinbr/pam-psr-bridge` | `push-in/pam-psr-bridge` |
+| `pushinbr/pam-psr` | `push-in/pam-psr-bridge` |
 | `pushinbr/pam-testing` | `push-in/pam-testing` |
 | `pushinbr/pam-skeleton` | `push-in/pam-skeleton` |
 

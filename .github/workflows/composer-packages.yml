@@ -38,7 +38,7 @@ jobs:
           ref: ${{ github.event_name == 'push' && github.ref || inputs.release_tag }}
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
       - name: Resolve and validate the release tag
         id: release
@@ -79,7 +79,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release_tag }}
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
       - name: Create and inspect the isolated package history
         env:
@@ -111,7 +111,7 @@ jobs:
           ref: ${{ needs.prepare.outputs.release_tag }}
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
       - name: Require the completed PAM GitHub release
         env:

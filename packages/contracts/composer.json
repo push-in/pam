@@ -1,5 +1,5 @@
 {
-    "name": "pushinbr/pam-core-api",
+    "name": "pushinbr/pam-contracts",
     "description": "Stable PHP contracts for the Pam persistent runtime.",
     "type": "library",
     "license": "Apache-2.0",
@@ -12,7 +12,7 @@
     "homepage": "https://github.com/push-in/pam",
     "support": {
         "issues": "https://github.com/push-in/pam/issues",
-        "source": "https://github.com/push-in/pam-core-api"
+        "source": "https://github.com/push-in/pam-contracts"
     },
     "require": {
         "php": "^8.4"

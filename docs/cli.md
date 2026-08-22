@@ -146,7 +146,6 @@ These commands emit JSON without terminal decoration:
 ```bash
 pam info --json
 pam doctor --json
-pam packages --json
 pam commands --json
 pam catalog --json
 ```

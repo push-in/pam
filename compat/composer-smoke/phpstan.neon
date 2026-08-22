@@ -5,10 +5,10 @@ parameters:
             - ../../runtime/laravel.php
     paths:
         - ../../runtime
-        - ../../packages/core-api/src
-        - ../../packages/api/src
+        - ../../packages/contracts/src
+        - ../../packages/http/src
         - ../../packages/socket/src
-        - ../../packages/psr-bridge/src
+        - ../../packages/psr/src
         - ../../packages/testing/src
         - src
         - tests/ProbeTest.php

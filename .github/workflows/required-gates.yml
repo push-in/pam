@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
           coverage: none
       - name: Preflight locked dependencies
@@ -82,7 +82,7 @@ jobs:
           fetch-depth: 0
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
           coverage: none
       - name: Validate package publication metadata and splits
@@ -101,7 +101,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.88.0
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.4'
+          php-version: '8.5'
           tools: composer:v2
           coverage: none
       - name: Validate dependency graphs before audit

@@ -16,10 +16,13 @@
     },
     "require": {
         "php": "^8.4",
-        "pushinbr/pam-api": "^2.0"
+        "pushinbr/pam-http": "^1.0",
+        "pushinbr/pam-psr": "^1.0",
+        "pushinbr/pam-socket": "^1.0"
     },
     "require-dev": {
         "laravel/pint": "^1.30",
+        "pushinbr/pam-testing": "^1.0",
         "phpunit/phpunit": "^12.5"
     },
     "autoload": {
@@ -32,9 +35,6 @@
         "sort-packages": true
     },
     "scripts": {
-        "dev": "pam dev index.php",
-        "migrate": "pam bin/migrate",
-        "start": "pam start index.php",
         "test": "pam test . --phpunit -c phpunit.xml"
     }
 }

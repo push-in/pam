@@ -16,7 +16,7 @@
     },
     "require": {
         "php": "^8.4",
-        "pushinbr/pam-core-api": "^1.0"
+        "pushinbr/pam-contracts": "^1.0"
     },
     "autoload": {
         "psr-4": {

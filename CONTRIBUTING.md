@@ -13,7 +13,7 @@ documentation fixes, benchmarks and focused pull requests are welcome.
 
 ## Local setup
 
-Runtime contributors need Rust 1.88+, PHP 8.4 Embed development headers, a C
+Runtime contributors need Rust 1.88+, PHP 8.5 Embed development headers, a C
 toolchain and Composer 2. Inspect manifests and lockfiles before changing or
 installing dependencies. Run the relevant dry-run first.
 
