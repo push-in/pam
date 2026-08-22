@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.6 - 2026-08-22
+
+- Keep Linux clean-host extension certification fail-closed while recognizing
+  the single deterministic timezone warning emitted before shared timezonedb
+  can replace Debian PHP's system database.
+
 ## 2.0.5 - 2026-08-22
 
 - Bundle the pinned IANA timezone database with Linux distributions so PAM's
