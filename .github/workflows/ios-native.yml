@@ -51,6 +51,7 @@ jobs:
             extensionkit_extensions: PamAppIntents
             cache_salt: c185ac6aaf58e8d98e6197cf5e3f0a85dbe28a92
     env:
+      PAM_HOME: ${{ github.workspace }}
       PAM_CERTIFICATION_PLUGINS: ${{ matrix.plugins }}
       PAM_FOUNDATION_EXTENSIONS: ${{ matrix.foundation_extensions }}
       PAM_EXTENSIONKIT_EXTENSIONS: ${{ matrix.extensionkit_extensions }}

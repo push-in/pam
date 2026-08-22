@@ -84,6 +84,7 @@ while test -L "${launcher}"; do
 done
 launcher_directory=$(CDPATH= cd -- "$(dirname -- "${launcher}")" && pwd)
 pam_install_root=$(CDPATH= cd -- "${launcher_directory}/.." && pwd)
+export PAM_HOME="${pam_install_root}/share/pam"
 export DYLD_LIBRARY_PATH="${pam_install_root}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
 export PHPRC="${pam_install_root}/etc/php.ini"
 export PHP_INI_SCAN_DIR="${pam_install_root}/etc/conf.d${PAM_PHP_INI_SCAN_DIR:+:${PAM_PHP_INI_SCAN_DIR}}"

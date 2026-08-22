@@ -339,6 +339,11 @@ jobs:
           test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/native/packages/native/composer.json"
           test -f "$runtime_dist/pam-ci-linux-x86_64/share/pam/runtime/catalog.json"
           "$runtime_dist/pam-ci-linux-x86_64/bin/pam-run" -r '
+          $pamHome = getenv("PAM_HOME");
+          if (!is_string($pamHome) || !is_file($pamHome . "/runtime/catalog.json")) {
+              fwrite(STDERR, "PAM_HOME does not expose the bundled runtime catalog\n");
+              exit(1);
+          }
           foreach (["curl", "intl", "mbstring", "pdo_mysql", "pdo_pgsql", "pdo_sqlite", "sockets", "xml", "zip"] as $extension) {
               if (!extension_loaded($extension)) {
                   fwrite(STDERR, "Missing bundled extension: {$extension}\n");

@@ -118,12 +118,13 @@ cat > "${package_root}/bin/pam-run" <<'EOF'
 #!/bin/sh
 set -eu
 PAM_LAUNCHER=$(readlink -f -- "$0")
-PAM_HOME=$(CDPATH= cd -- "$(dirname -- "$PAM_LAUNCHER")/.." && pwd)
-export LD_LIBRARY_PATH="$PAM_HOME/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export PAM_EXTENSION_DIR="$PAM_HOME/lib/php/extensions"
-export PHPRC="$PAM_HOME/etc/php.ini"
-export PHP_INI_SCAN_DIR="$PAM_HOME/etc/conf.d${PAM_PHP_INI_SCAN_DIR:+:$PAM_PHP_INI_SCAN_DIR}"
-exec "$PAM_HOME/bin/pam" "$@"
+PAM_INSTALL_ROOT=$(CDPATH= cd -- "$(dirname -- "$PAM_LAUNCHER")/.." && pwd)
+export PAM_HOME="$PAM_INSTALL_ROOT/share/pam"
+export LD_LIBRARY_PATH="$PAM_INSTALL_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export PAM_EXTENSION_DIR="$PAM_INSTALL_ROOT/lib/php/extensions"
+export PHPRC="$PAM_INSTALL_ROOT/etc/php.ini"
+export PHP_INI_SCAN_DIR="$PAM_INSTALL_ROOT/etc/conf.d${PAM_PHP_INI_SCAN_DIR:+:$PAM_PHP_INI_SCAN_DIR}"
+exec "$PAM_INSTALL_ROOT/bin/pam" "$@"
 EOF
 chmod 0755 "${package_root}/bin/pam" "${package_root}/bin/pam-run"
 

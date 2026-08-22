@@ -6,6 +6,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class RuntimeDistributionWorkflowTest(unittest.TestCase):
+    def test_runtime_launchers_expose_the_canonical_package_home(self) -> None:
+        linux = (ROOT / "scripts/package-runtime.sh").read_text(encoding="utf-8")
+        macos = (ROOT / "scripts/package-runtime-macos.sh").read_text(encoding="utf-8")
+
+        self.assertIn('export PAM_HOME="$PAM_INSTALL_ROOT/share/pam"', linux)
+        self.assertIn('export PAM_HOME="${pam_install_root}/share/pam"', macos)
+
     def test_clean_host_workflow_is_signed_bounded_and_fail_closed(self) -> None:
         workflow = (ROOT / ".github/workflows/runtime-distribution.yml").read_text(
             encoding="utf-8"
