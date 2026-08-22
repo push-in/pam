@@ -2,7 +2,19 @@
 
 Fast in-memory tests for applications built with `pushinbr/pam-http`.
 
+## Start here
+
+PAM Testing is a Composer package for applications running on the PAM Runtime;
+it is not a standalone test runtime. Install PAM first, open your application
+directory, and add the development package through PAM's Composer toolchain:
+
 ```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
+    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+pam doctor
+cd my-app
 pam composer require --dev pushinbr/pam-testing
 ```
 

@@ -6,7 +6,19 @@ native runtime compatibility checks. It also defines the protocol-1 provider
 contract for queues, pub/sub, streams, and RPC transports. It does not contain a
 router, broker client, or server.
 
+## Start here
+
+PAM Contracts is a Composer package for the PAM Runtime; it is not a
+standalone runtime. Install PAM first, open your application directory, and
+add the package through PAM's Composer toolchain:
+
 ```bash
+curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
+    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
+    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+
+pam doctor
+cd my-app
 pam composer require pushinbr/pam-contracts
 ```
 
