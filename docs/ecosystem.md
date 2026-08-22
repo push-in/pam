@@ -112,7 +112,8 @@ do not change merely to mirror a distribution rename.
 
 PHP 8.5 is the default for generated projects and bundled runtime selection.
 PHP 8.4 may remain a tested compatibility line while it is supported; default
-does not mean exclusive.
+does not mean exclusive. Selection and compatibility are separate contracts.
+See the [PHP version policy](php-version-policy.md).
 
 ## Renamed-package migration
 
