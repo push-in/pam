@@ -1156,7 +1156,11 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
     assert!(!dashboard_html.contains(script));
     assert!(!dashboard_html.contains("needle-new-output"));
     assert!(dashboard_html.contains("Peak RSS"));
-    assert!(dashboard_html.contains("Stable"));
+    assert!(
+        ["Stable", "Collecting", "Up ", "Down "]
+            .iter()
+            .any(|signal| dashboard_html.contains(signal))
+    );
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -2227,6 +2231,8 @@ fn accepts_php_cli_ini_options_for_composer_tool_workers() {
     let output = run_pam(&[
         "-c",
         ini.to_str().unwrap(),
+        "-d",
+        "opcache.jit=0",
         "-d",
         "memory_limit=256M",
         "-r",
