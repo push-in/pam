@@ -820,6 +820,8 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "1",
             "--php-extension",
             "iconv",
+            "--php-extension",
+            "pdo",
             "--env-file",
             environment_file.to_str().unwrap(),
             "--json",
@@ -888,7 +890,10 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         );
     }
     assert_eq!(recovered["environmentFileConfigured"], true);
-    assert_eq!(recovered["phpExtensions"], serde_json::json!(["iconv"]));
+    assert_eq!(
+        recovered["phpExtensions"],
+        serde_json::json!(["iconv", "pdo"])
+    );
     assert!(!recovered.to_string().contains("private-value"));
     assert!(
         !recovered
@@ -1382,7 +1387,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
-php_extensions = ["iconv"]
+php_extensions = ["iconv", "pdo"]
 memory_warning_bytes = 1
 task_warning_count = 1
 "#,
@@ -1477,7 +1482,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
-php_extensions = ["iconv"]
+php_extensions = ["iconv", "pdo"]
 memory_warning_bytes = 1099511627776
 task_warning_count = 1000000
 "#,
@@ -1530,7 +1535,10 @@ task_warning_count = 1000000
     );
     let described: serde_json::Value = serde_json::from_slice(&described.stdout).unwrap();
     assert_eq!(described["resourceAlertStateCode"], 1);
-    assert_eq!(described["phpExtensions"], serde_json::json!(["iconv"]));
+    assert_eq!(
+        described["phpExtensions"],
+        serde_json::json!(["iconv", "pdo"])
+    );
     assert_eq!(described["phpExtensionIsolation"], true);
     assert_eq!(described["resourcePolicy"]["taskWarningCount"], 1000000);
 
@@ -1544,7 +1552,7 @@ script = "tests/fixtures/server.php"
 workers = 2
 cwd = "."
 autostart = true
-php_extensions = ["iconv"]
+php_extensions = ["iconv", "pdo"]
 memory_warning_bytes = 1099511627776
 task_warning_count = 1000000
 "#,
