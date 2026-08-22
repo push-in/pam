@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.0.1 - 2026-08-22
+
+- Treat Linux zombie dashboard processes as stopped so containerized shutdown
+  does not wait until the control-plane deadline.
+- Record benchmark source identity from the explicit release environment when
+  mounted CI checkouts cannot be queried safely by Git.
+
 ## 2.0.0 - 2026-08-21
 
 - Add `pam support` for bounded, path-redacted and integrity-digested Doctor

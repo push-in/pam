@@ -22,12 +22,16 @@ $environment = static function (string $name, string $default): string {
 
     return $value === false || $value === '' ? $default : $value;
 };
+$sourceCommit = $environment(
+    'PAM_BENCH_SOURCE_COMMIT',
+    $environment('GITHUB_SHA', $command('git -C '.escapeshellarg($root).' rev-parse HEAD')),
+);
 
 $metadata = [
     'schema_version' => 1,
     'generated_at' => gmdate(DATE_ATOM),
     'source' => [
-        'commit' => $command('git -C '.escapeshellarg($root).' rev-parse HEAD'),
+        'commit' => $sourceCommit,
         'dirty' => $command('git -C '.escapeshellarg($root).' status --porcelain') !== '',
     ],
     'host' => [

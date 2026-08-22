@@ -2694,14 +2694,28 @@ fn read_live_dashboard_state(path: &Path) -> Result<LiveDashboardState, String> 
 }
 
 fn live_dashboard_running(state: &LiveDashboardState) -> bool {
+    let process = linux_process_stat(state.pid);
     (unsafe { libc::kill(state.pid as i32, 0) == 0 })
-        && linux_process_start_ticks(state.pid) == Some(state.process_start_ticks)
+        && process.is_some_and(|(process_state, start_ticks)| {
+            process_state != 'Z' && start_ticks == state.process_start_ticks
+        })
+}
+
+fn linux_process_stat(pid: u32) -> Option<(char, u64)> {
+    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_linux_process_stat(&stat)
+}
+
+fn parse_linux_process_stat(stat: &str) -> Option<(char, u64)> {
+    let after_name = stat.get(stat.rfind(')')? + 2..)?;
+    let mut fields = after_name.split_whitespace();
+    let process_state = fields.next()?.chars().next()?;
+    let start_ticks = fields.nth(18)?.parse().ok()?;
+    Some((process_state, start_ticks))
 }
 
 fn linux_process_start_ticks(pid: u32) -> Option<u64> {
-    let stat = fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
-    let after_name = stat.get(stat.rfind(')')? + 2..)?;
-    after_name.split_whitespace().nth(19)?.parse().ok()
+    linux_process_stat(pid).map(|(_, start_ticks)| start_ticks)
 }
 
 fn live_dashboard_server(arguments: Vec<OsString>) -> Result<u8, String> {
@@ -5045,6 +5059,16 @@ fn epoch_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn parses_linux_process_state_and_start_ticks_after_complex_names() {
+        let mut fields = vec!["0"; 20];
+        fields[0] = "Z";
+        fields[19] = "4242";
+        let stat = format!("17 (dashboard worker (old)) {}", fields.join(" "));
+
+        assert_eq!(parse_linux_process_stat(&stat), Some(('Z', 4242)));
+    }
+
     use super::*;
     #[test]
     fn application_names_are_bounded_and_path_safe() {
