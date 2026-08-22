@@ -175,7 +175,8 @@ jobs:
               test "$("${candidate_root}/bin/pam-run" -r "echo 204;")" = 204
               first_success_millis=$(( $(date +%s%3N) - started ))
               test "${first_success_millis}" -gt 0 || first_success_millis=1
-              "${candidate_root}/bin/pam-run" -m \
+              "${candidate_root}/bin/pam-run" -r \
+                '$modules = get_loaded_extensions(); sort($modules, SORT_STRING); echo implode(PHP_EOL, $modules), PHP_EOL;' \
                 >clean-host/loaded-modules.unsorted \
                 2>clean-host/module-load.stderr
               test ! -s clean-host/module-load.stderr
@@ -471,7 +472,8 @@ jobs:
           finished=$(python3 -c 'import time; print(time.time_ns() // 1000000)')
           first_success_millis=$(( finished - started ))
           test "${first_success_millis}" -gt 0 || first_success_millis=1
-          "${candidate_root}/bin/pam-run" -m \
+          "${candidate_root}/bin/pam-run" -r \
+            '$modules = get_loaded_extensions(); sort($modules, SORT_STRING); echo implode(PHP_EOL, $modules), PHP_EOL;' \
             >clean-host/loaded-modules.unsorted \
             2>clean-host/module-load.stderr
           test ! -s clean-host/module-load.stderr

@@ -93,7 +93,10 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
         self.assertIn('test -n "${ImageVersion:-}"', workflow)
         self.assertIn("platformCode: 2", workflow)
         self.assertIn("mv -fh clean-host/install/next", workflow)
-        self.assertEqual(workflow.count('"${candidate_root}/bin/pam-run" -m'), 2)
+        self.assertEqual(
+            workflow.count("get_loaded_extensions(); sort($modules, SORT_STRING)"),
+            2,
+        )
         self.assertEqual(workflow.count("module-load.stderr"), 4)
         self.assertEqual(workflow.count("runtime-loaded-modules.txt"), 6)
         self.assertEqual(
