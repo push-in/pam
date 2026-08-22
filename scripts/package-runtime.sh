@@ -94,7 +94,7 @@ EOF
 
 # This is the reviewed extension surface shipped by PAM. It does not inherit
 # arbitrary extensions enabled on the build machine.
-modules='opcache bcmath calendar ctype curl dom exif ffi fileinfo ftp gd gettext iconv intl mbstring mysqlnd mysqli pdo pdo_mysql pdo_pgsql pdo_sqlite pgsql phar posix shmop simplexml soap sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xml xmlreader xmlwriter xsl zip'
+modules='timezonedb opcache bcmath calendar ctype curl dom exif ffi fileinfo ftp gd gettext iconv intl mbstring mysqlnd mysqli pdo pdo_mysql pdo_pgsql pdo_sqlite pgsql phar posix shmop simplexml soap sockets sqlite3 sysvmsg sysvsem sysvshm tokenizer xml xmlreader xmlwriter xsl zip'
 priority=10
 for module in ${modules}; do
     module_file="${extension_directory}/${module}.so"

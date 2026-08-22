@@ -185,6 +185,7 @@ jobs:
               LC_ALL=C sort -u clean-host/loaded-modules.unsorted \
                 >clean-host/loaded-modules.txt
               test -s clean-host/loaded-modules.txt
+              grep -Fx "timezonedb" clean-host/loaded-modules.txt
               ln -s "../baseline/$(basename "${baseline_root}")" clean-host/install/current
               started=$(date +%s%3N)
               ln -s "../candidate/$(basename "${candidate_root}")" clean-host/install/next

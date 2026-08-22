@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.5 - 2026-08-22
+
+- Bundle the pinned IANA timezone database with Linux distributions so PAM's
+  embedded PHP 8.5 remains warning-free on minimal hosts without system tzdata.
+
 ## 2.0.4 - 2026-08-22
 
 - Preserve the canonical release tag across distribution-certification steps so
