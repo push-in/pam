@@ -293,8 +293,8 @@ jobs:
             >"${PAM_DOCTOR_EVIDENCE}/provenance.json"
           (
             cd "${PAM_DOCTOR_EVIDENCE}"
-            sha256sum desktop-host.json desktop-host.schema.json project.json \
-              provenance.json runtime.json schema.json support-product.json \
+            sha256sum project.json provenance.json runtime.json schema.json \
+              support-product.json \
               support-runtime.json support-manager.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
