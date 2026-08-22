@@ -995,13 +995,20 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let version = "^1.0";
+    let http_version = "^2.0";
+    let ecosystem_version = "^1.0";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.5")),
-        ("pushinbr/pam-http".to_owned(), serde_json::json!(version)),
+        (
+            "pushinbr/pam-http".to_owned(),
+            serde_json::json!(http_version),
+        ),
     ]);
     if socket {
-        require.insert("pushinbr/pam-socket".to_owned(), serde_json::json!(version));
+        require.insert(
+            "pushinbr/pam-socket".to_owned(),
+            serde_json::json!(ecosystem_version),
+        );
     }
     let mut manifest = serde_json::json!({
         "name": "app/pam-project",
@@ -1011,7 +1018,7 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
         "require": require,
         "require-dev": {
             "laravel/pint": "^1.30",
-            "pushinbr/pam-testing": version,
+            "pushinbr/pam-testing": ecosystem_version,
             "phpunit/phpunit": "^12.5"
         },
         "autoload": {"psr-4": {"App\\": "src/"}},
@@ -5809,11 +5816,11 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-contracts": "0.1.0",
-                        "pushinbr/pam-http": "0.1.0",
-                        "pushinbr/pam-psr": "0.1.0",
-                        "pushinbr/pam-socket": "0.1.0",
-                        "pushinbr/pam-testing": "0.1.0"
+                        "pushinbr/pam-contracts": "1.1.0",
+                        "pushinbr/pam-http": "2.0.0",
+                        "pushinbr/pam-psr": "1.0.2",
+                        "pushinbr/pam-socket": "1.0.2",
+                        "pushinbr/pam-testing": "1.0.2"
                     }
                 }
             })

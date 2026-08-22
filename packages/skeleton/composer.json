@@ -15,8 +15,8 @@
         "source": "https://github.com/push-in/pam-skeleton"
     },
     "require": {
-        "php": "^8.4",
-        "pushinbr/pam-http": "^1.0",
+        "php": "^8.5",
+        "pushinbr/pam-http": "^2.0",
         "pushinbr/pam-psr": "^1.0",
         "pushinbr/pam-socket": "^1.0"
     },

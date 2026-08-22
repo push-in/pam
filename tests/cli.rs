@@ -3789,7 +3789,7 @@ fn initializes_a_project_without_overwriting_files() {
         "A PHP application powered by the PAM runtime."
     );
     assert_eq!(manifest_json["license"], "proprietary");
-    assert_eq!(manifest_json["require"]["pushinbr/pam-http"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-http"], "^2.0");
     assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
     assert_eq!(manifest_json["require-dev"]["pushinbr/pam-testing"], "^1.0");
 
@@ -3839,7 +3839,7 @@ fn initializes_raw_and_socket_presets_without_composer() {
     let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
     assert!(manifest.contains("pushinbr/pam-socket"));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-    assert_eq!(manifest_json["require"]["pushinbr/pam-http"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-http"], "^2.0");
     assert_eq!(manifest_json["require"]["pushinbr/pam-socket"], "^1.0");
 
     fs::remove_dir_all(raw).unwrap();
