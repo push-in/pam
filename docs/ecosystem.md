@@ -65,6 +65,9 @@ Any Composer package may register bounded CLI commands in `extra.pam.commands`:
       "commands": {
         "acme:import": {
           "script": "bin/import.php",
+          "environment": {
+            "ACME_CLI_MODE": "1"
+          },
           "description": "Import Acme records"
         }
       }
@@ -84,7 +87,9 @@ PHP tools use `script`; native package CLIs use `bin`:
 ```
 
 `arguments` contains at most 32 validated arguments and is prepended to the
-arguments supplied by the user. PAM reads Composer's canonical `install-path` metadata, confines both target
+arguments supplied by the user. `environment` contains at most 32 bounded,
+uppercase environment entries applied before the command starts. PAM reads
+Composer's canonical `install-path` metadata, confines both target
 types to the project, rejects duplicates and built-in shadowing, lists them
 through `pam commands`, and adds them to generated shell completion. PHP
 scripts execute in PAM's embedded PHP; binaries receive the arguments, project
@@ -93,7 +98,8 @@ rights whether their package is official or community maintained.
 
 Product-level contextual commands such as `dev`, `build`, `package`,
 `desktop`, and `mobile` may be supplied by an installed package and take
-precedence over their temporary compatibility adapter in the runtime. Core
+precedence over generic runtime commands when explicitly allowed. There are no
+compiled Desktop, Native, Octane, or Laravel command adapters. Core
 runtime authority—including `start`, process supervision, `composer`, `exec`,
 and self-update—cannot be shadowed.
 

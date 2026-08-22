@@ -5,7 +5,8 @@
     "license": "Apache-2.0",
     "require": {
         "php": "^8.4",
-        "laravel/framework": "^13.0"
+        "laravel/framework": "^13.0",
+        "pushinbr/pam-laravel": "^0.1.49"
     },
     "require-dev": {
         "inertiajs/inertia-laravel": "^3.1",

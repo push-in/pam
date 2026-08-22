@@ -41,6 +41,7 @@ pub struct RegisteredCommand {
     pub description: String,
     pub target: CommandTarget,
     pub arguments: Vec<String>,
+    pub environment: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -969,10 +970,16 @@ fn collect_commands(
         if !valid_command_name(name) {
             return Err(format!("invalid PAM command name {name:?}"));
         }
-        let (target_kind, target, description, arguments) = if let Some(script) =
+        let (target_kind, target, description, arguments, environment) = if let Some(script) =
             definition.as_str()
         {
-            ("script", script, "Application command", Vec::new())
+            (
+                "script",
+                script,
+                "Application command",
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            )
         } else {
             let definition = definition
                 .as_object()
@@ -997,6 +1004,7 @@ fn collect_commands(
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or("Application command"),
                 command_arguments(name, definition.get("arguments"))?,
+                command_environment(name, definition.get("environment"))?,
             )
         };
         let target = base
@@ -1015,9 +1023,44 @@ fn collect_commands(
                 CommandTarget::Executable(target)
             },
             arguments,
+            environment,
         });
     }
     Ok(())
+}
+
+fn command_environment(
+    name: &str,
+    value: Option<&serde_json::Value>,
+) -> Result<std::collections::BTreeMap<String, String>, String> {
+    let Some(value) = value else {
+        return Ok(std::collections::BTreeMap::new());
+    };
+    let values = value
+        .as_object()
+        .filter(|values| values.len() <= 32)
+        .ok_or_else(|| {
+            format!("PAM command {name} environment must be an object of at most 32 strings")
+        })?;
+    values
+        .iter()
+        .map(|(key, value)| {
+            let valid_key = !key.is_empty()
+                && key.len() <= 128
+                && key
+                    .bytes()
+                    .all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'_');
+            let value = value
+                .as_str()
+                .filter(|value| value.len() <= 4096 && !value.contains(['\0', '\n', '\r']));
+            if !valid_key || value.is_none() {
+                return Err(format!(
+                    "PAM command {name} contains an invalid environment entry"
+                ));
+            }
+            Ok((key.clone(), value.unwrap().to_owned()))
+        })
+        .collect()
 }
 
 fn command_arguments(name: &str, value: Option<&serde_json::Value>) -> Result<Vec<String>, String> {
@@ -1419,7 +1462,7 @@ mod tests {
         fs::write(root.join("vendor/pushinbr/tool/bin/tool"), "tool").unwrap();
         fs::write(
             root.join("vendor/composer/installed.json"),
-            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"bin":"bin/tool","description":"Run tool"}}}}}]}"#,
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"bin":"bin/tool","description":"Run tool","environment":{"TOOL_MODE":"ci"}}}}}}]}"#,
         )
         .unwrap();
 
@@ -1427,6 +1470,7 @@ mod tests {
         let commands = registered_commands(&context).unwrap();
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "tool:run");
+        assert_eq!(commands[0].environment.get("TOOL_MODE").unwrap(), "ci");
         assert!(matches!(commands[0].target, CommandTarget::Executable(_)));
         fs::remove_dir_all(root).unwrap();
     }
