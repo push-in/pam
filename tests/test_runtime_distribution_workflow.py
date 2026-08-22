@@ -53,6 +53,12 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
         )
         self.assertEqual(
             workflow.count(
+                "printf 'PAM_CURRENT_TAG=%s\\n' \"${PAM_CURRENT_TAG}\""
+            ),
+            2,
+        )
+        self.assertEqual(
+            workflow.count(
                 "printf 'PAM_CURRENT_SOURCE_REF=refs/tags/%s\\n' \"${PAM_CURRENT_TAG}\""
             ),
             2,
@@ -94,8 +100,13 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
         self.assertIn("platformCode: 2", workflow)
         self.assertIn("mv -fh clean-host/install/next", workflow)
         self.assertEqual(
-            workflow.count("get_loaded_extensions(); sort($modules, SORT_STRING)"),
+            workflow.count("get_loaded_extensions()"),
             2,
+        )
+        self.assertIn(
+            '"\\$modules = get_loaded_extensions(); sort(\\$modules, SORT_STRING); '
+            'echo implode(PHP_EOL, \\$modules), PHP_EOL;"',
+            workflow,
         )
         self.assertEqual(workflow.count("module-load.stderr"), 4)
         self.assertEqual(workflow.count("runtime-loaded-modules.txt"), 6)

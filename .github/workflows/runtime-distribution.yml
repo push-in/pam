@@ -57,6 +57,7 @@ jobs:
           tagged_revision=$(git rev-parse "refs/tags/${PAM_CURRENT_TAG}^{commit}")
           test "${current_revision}" = "${tagged_revision}"
           printf 'PAM_CURRENT_REVISION=%s\n' "${current_revision}" >>"${GITHUB_ENV}"
+          printf 'PAM_CURRENT_TAG=%s\n' "${PAM_CURRENT_TAG}" >>"${GITHUB_ENV}"
           printf 'PAM_CURRENT_SOURCE_REF=refs/tags/%s\n' "${PAM_CURRENT_TAG}" >>"${GITHUB_ENV}"
           releases_file=${RUNNER_TEMP}/pam-runtime-releases.json
           gh release list \
@@ -176,7 +177,7 @@ jobs:
               first_success_millis=$(( $(date +%s%3N) - started ))
               test "${first_success_millis}" -gt 0 || first_success_millis=1
               "${candidate_root}/bin/pam-run" -r \
-                '$modules = get_loaded_extensions(); sort($modules, SORT_STRING); echo implode(PHP_EOL, $modules), PHP_EOL;' \
+                "\$modules = get_loaded_extensions(); sort(\$modules, SORT_STRING); echo implode(PHP_EOL, \$modules), PHP_EOL;" \
                 >clean-host/loaded-modules.unsorted \
                 2>clean-host/module-load.stderr
               test ! -s clean-host/module-load.stderr
@@ -365,6 +366,7 @@ jobs:
           tagged_revision=$(git rev-parse "refs/tags/${PAM_CURRENT_TAG}^{commit}")
           test "${current_revision}" = "${tagged_revision}"
           printf 'PAM_CURRENT_REVISION=%s\n' "${current_revision}" >>"${GITHUB_ENV}"
+          printf 'PAM_CURRENT_TAG=%s\n' "${PAM_CURRENT_TAG}" >>"${GITHUB_ENV}"
           printf 'PAM_CURRENT_SOURCE_REF=refs/tags/%s\n' "${PAM_CURRENT_TAG}" >>"${GITHUB_ENV}"
           releases_file=${RUNNER_TEMP}/pam-runtime-releases.json
           gh release list --repo "${GITHUB_REPOSITORY}" \
