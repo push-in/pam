@@ -84,7 +84,7 @@ jobs:
           key: pam-android-runtime
       - name: Build both PHP release lines and PAM Native engines
         run: |
-          runtime-builder/android/build.sh --php 8.5 all
+          runtime-builder/android/build.sh --php 8.4 all
           runtime-builder/android/build.sh --php 8.5 all
           toolchain="${ANDROID_HOME}/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/bin"
           CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="${toolchain}/aarch64-linux-android26-clang" \
@@ -270,7 +270,7 @@ jobs:
         env:
           PAM_RUNTIME_SLICE: ${{ matrix.target == 'macos-arm64' && 'all' || 'macos' }}
         run: |
-          runtime-builder/ios/build.sh --php 8.5 "${PAM_RUNTIME_SLICE}"
+          runtime-builder/ios/build.sh --php 8.4 "${PAM_RUNTIME_SLICE}"
           runtime-builder/ios/build.sh --php 8.5 "${PAM_RUNTIME_SLICE}"
       - name: Build PAM for macOS
         env:

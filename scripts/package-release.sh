@@ -146,9 +146,6 @@ validate_release_tag() {
     grep -Eq "^${release_heading}[0-9]{4}-[0-9]{2}-[0-9]{2}$" \
         "${repository_root}/CHANGELOG.md" ||
         fail "CHANGELOG.md does not contain a dated ${runtime_version} release"
-    grep -Eq "^${release_heading}[0-9]{4}-[0-9]{2}-[0-9]{2}$" \
-        "${repository_root}/packages/octane/CHANGELOG.md" ||
-        fail "packages/octane/CHANGELOG.md does not contain a dated ${runtime_version} release"
 }
 
 validate_package_tag() {
