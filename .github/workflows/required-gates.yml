@@ -47,12 +47,12 @@ jobs:
       - name: Verify the Octane package
         run: composer verify
 
-  pam_api:
-    name: Required PAM API
+  pam_http:
+    name: Required PAM HTTP
     runs-on: ubuntu-24.04
     defaults:
       run:
-        working-directory: packages/api
+        working-directory: packages/http
     steps:
       - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
@@ -64,7 +64,7 @@ jobs:
         run: composer install --dry-run --no-interaction --prefer-dist
       - name: Install locked dependencies
         run: composer install --no-interaction --prefer-dist
-      - name: Verify PAM API including its public API baseline
+      - name: Verify PAM HTTP including its public API baseline
         run: composer verify
       - name: Verify the generated Eloquent starter
         run: |
@@ -88,9 +88,9 @@ jobs:
       - name: Validate package publication metadata and splits
         run: |
           scripts/package-release.sh validate
-          scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
+          scripts/package-release.sh validate-package-tag pushinbr/pam-http v2.0.0
           scripts/package-release.sh validate-package-tag pushinbr/pam-skeleton v2.0.0
-          test "$(scripts/package-release.sh package-matrix pushinbr/pam-api | jq 'length')" -eq 1
+          test "$(scripts/package-release.sh package-matrix pushinbr/pam-http | jq 'length')" -eq 1
           ! scripts/package-release.sh package-matrix pushinbr/not-a-package
 
   security:
@@ -109,15 +109,15 @@ jobs:
           cargo metadata --locked --format-version=1 >/dev/null
           composer install --working-dir=compat/composer-smoke --dry-run --no-interaction --prefer-dist
           composer install --working-dir=compat/laravel-smoke --dry-run --no-interaction --prefer-dist
-          composer install --working-dir=packages/api --dry-run --no-interaction --prefer-dist
+          composer install --working-dir=packages/http --dry-run --no-interaction --prefer-dist
           composer install --working-dir=packages/octane --dry-run --no-interaction --prefer-dist
       - name: Install package dependencies for audit
         run: |
-          composer install --working-dir=packages/api --no-interaction --prefer-dist
+          composer install --working-dir=packages/http --no-interaction --prefer-dist
           composer install --working-dir=packages/octane --no-interaction --prefer-dist
       - name: Audit locked Composer dependencies
         run: |
           composer audit --working-dir=compat/composer-smoke --locked
           composer audit --working-dir=compat/laravel-smoke --locked
-          composer audit --working-dir=packages/api --locked
+          composer audit --working-dir=packages/http --locked
           composer audit --working-dir=packages/octane
