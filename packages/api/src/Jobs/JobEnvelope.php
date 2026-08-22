@@ -8,16 +8,19 @@ final class JobEnvelope
 {
     public JobState $state = JobState::Pending;
     public int $attempts = 0;
+    public int $availableAt;
+    public ?int $leaseUntil = null;
+    public ?string $lastFailureClass = null;
 
     public function __construct(
         public readonly string $id,
         public readonly object $job,
         public readonly int $maximumAttempts = 3,
-        public readonly int $availableAt = 0,
+        int $availableAt = 0,
     ) {
         if ($id === '' || $maximumAttempts < 1) {
             throw new \InvalidArgumentException('Job envelope configuration is invalid.');
         }
+        $this->availableAt = $availableAt;
     }
 }
-

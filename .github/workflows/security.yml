@@ -33,6 +33,9 @@ jobs:
         run: |
           composer audit --working-dir=compat/composer-smoke --locked
           composer audit --working-dir=compat/laravel-smoke --locked
+          composer install --working-dir=packages/api --no-interaction --prefer-dist --dry-run
+          composer install --working-dir=packages/api --no-interaction --prefer-dist
+          composer audit --working-dir=packages/api --locked
           composer install --working-dir=packages/octane --no-interaction --prefer-dist --dry-run
           composer install --working-dir=packages/octane --no-interaction --prefer-dist
           composer audit --working-dir=packages/octane

@@ -7,7 +7,6 @@ namespace Pam;
 use Pam\Contracts\Http\ApplicationInterface;
 use Pam\Contracts\Http\MiddlewareInterface;
 use Pam\Contracts\Package\ServiceProviderInterface;
-use Pam\Contracts\Transport\TransportApplicationInterface;
 use Pam\Contracts\Transport\TransportCapability;
 use Pam\Contracts\Transport\TransportProviderInterface;
 use Pam\Api\CallableRequestHandler;
@@ -21,12 +20,13 @@ use Pam\Api\Router;
 use Pam\Api\RoutingResultType;
 use Pam\Api\RouteRegistrar;
 use Pam\Api\OpenApi\OpenApiGenerator;
+use Pam\Api\Lifecycle\RequestLifecycleObserver;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Http\Server as HttpServer;
 use Pam\Internal\Runtime;
 
-final class App implements ApplicationInterface, TransportApplicationInterface
+final class App implements ApplicationInterface
 {
     private readonly Router $router;
 
@@ -54,6 +54,9 @@ final class App implements ApplicationInterface, TransportApplicationInterface
 
     private bool $frozen = false;
 
+    /** @var list<RequestLifecycleObserver> */
+    private array $observers = [];
+
     public function __construct(bool $discoverPackages = true, ?Container $container = null)
     {
         $this->container = $container ?? new Container();
@@ -68,7 +71,12 @@ final class App implements ApplicationInterface, TransportApplicationInterface
                 'file' => $error->getFile(),
                 'line' => $error->getLine(),
             ]);
-            return $response->json(['error' => 'Internal Server Error'], 500);
+            return self::problemResponse(
+                $response,
+                500,
+                \Pam\Api\Http\ProblemCode::InternalError,
+                'Internal Server Error',
+            );
         };
 
         if ($discoverPackages) {
@@ -112,6 +120,18 @@ final class App implements ApplicationInterface, TransportApplicationInterface
     }
 
     /** @param callable|class-string|array{class-string, non-empty-string} $handler */
+    public function head(string $path, callable|string|array $handler): PendingRoute
+    {
+        return $this->registerRoute('HEAD', $path, $handler);
+    }
+
+    /** @param callable|class-string|array{class-string, non-empty-string} $handler */
+    public function options(string $path, callable|string|array $handler): PendingRoute
+    {
+        return $this->registerRoute('OPTIONS', $path, $handler);
+    }
+
+    /** @param callable|class-string|array{class-string, non-empty-string} $handler */
     public function route(string $method, string $path, callable|string|array $handler): self
     {
         $this->registerRoute($method, $path, $handler);
@@ -121,6 +141,13 @@ final class App implements ApplicationInterface, TransportApplicationInterface
     public function container(): Container
     {
         return $this->container;
+    }
+
+    /** Boot providers and freeze application configuration without serving a request. */
+    public function boot(): self
+    {
+        $this->freeze();
+        return $this;
     }
 
     public function prefix(string $prefix): RouteRegistrar
@@ -195,6 +222,7 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         return $this;
     }
 
+    /** @return array<string, TransportProviderInterface> */
     public function transports(): array
     {
         return $this->transports;
@@ -204,6 +232,13 @@ final class App implements ApplicationInterface, TransportApplicationInterface
     {
         $this->assertMutable();
         $this->errorHandler = \Closure::fromCallable($handler);
+        return $this;
+    }
+
+    public function observe(RequestLifecycleObserver $observer): self
+    {
+        $this->assertMutable();
+        $this->observers[] = $observer;
         return $this;
     }
 
@@ -231,40 +266,91 @@ final class App implements ApplicationInterface, TransportApplicationInterface
         $this->container->beginScope();
         $this->container->scopedInstance(Request::class, $request);
         $this->container->scopedInstance(Response::class, $response);
+        $failure = null;
+        $startedObservers = [];
         try {
-            return $this->pipeline?->handle($request, $response)
+            foreach ($this->observers as $observer) {
+                $observer->starting($request);
+                $startedObservers[] = $observer;
+            }
+            $handled = $this->pipeline?->handle($request, $response)
                 ?? throw new \LogicException('Pam API pipeline was not compiled.');
+            return $this->finalizeResponse($request, $handled);
         } catch (\Throwable $error) {
+            $failure = $error;
             if ($error instanceof HttpException) {
-                return $response->json([
-                    'type' => 'https://pam.dev/problems/' . $error->problemCode->value,
-                    'title' => $error->getMessage(),
-                    'status' => $error->status,
-                    'code' => $error->problemCode->value,
-                    ...$error->details,
-                ], $error->status);
+                return $this->finalizeResponse($request, self::problemResponse(
+                    $response,
+                    $error->status,
+                    $error->problemCode,
+                    $error->getMessage(),
+                    $error->details,
+                ));
             }
             $handler = $this->errorHandler;
             $result = $handler($error, $response);
             if (!$result instanceof Response) {
                 throw new \UnexpectedValueException('The Pam error handler must return Response.');
             }
-            return $result;
+            return $this->finalizeResponse($request, $result);
         } finally {
+            foreach (array_reverse($startedObservers) as $observer) {
+                try {
+                    $observer->finished($request, $response, $failure);
+                } catch (\Throwable $observerError) {
+                    \Pam\Observability\Telemetry::log('error', 'PAM request observer failed during cleanup', [
+                        'observer' => $observer::class,
+                        'exception' => $observerError::class,
+                        'message' => $observerError->getMessage(),
+                    ]);
+                }
+            }
             $this->container->endScope();
         }
+    }
+
+    private function finalizeResponse(Request $request, Response $response): Response
+    {
+        return $request->method === 'HEAD' ? $response->send(null) : $response;
+    }
+
+    /** @param array<string, mixed> $details */
+    private static function problemResponse(
+        Response $response,
+        int $status,
+        \Pam\Api\Http\ProblemCode $code,
+        string $title,
+        array $details = [],
+    ): Response {
+        return $response
+            ->json([
+                ...$details,
+                'type' => 'https://pam.dev/problems/' . $code->value,
+                'title' => $title,
+                'status' => $status,
+                'code' => $code->value,
+            ], $status)
+            ->header('content-type', 'application/problem+json; charset=utf-8');
     }
 
     private function dispatchRoute(Request $request, Response $response): Response
     {
         $result = $this->router->match($request->method, $request->path);
         if ($result->type === RoutingResultType::NotFound) {
-            return $response->json(['error' => 'Route not found'], 404);
+            throw new HttpException(404, \Pam\Api\Http\ProblemCode::NotFound, 'Route not found.');
         }
         if ($result->type === RoutingResultType::MethodNotAllowed) {
-            return $response
-                ->header('allow', implode(', ', $result->allowedMethods))
-                ->json(['error' => 'Method Not Allowed'], 405);
+            if ($request->method === 'OPTIONS') {
+                return $response
+                    ->status(204)
+                    ->header('allow', implode(', ', $result->allowedMethods));
+            }
+            $response->header('allow', implode(', ', $result->allowedMethods));
+            throw new HttpException(
+                405,
+                \Pam\Api\Http\ProblemCode::MethodNotAllowed,
+                'Method Not Allowed',
+            );
         }
         $route = $result->route ?? throw new \LogicException('A matched route must contain a handler.');
         $this->container->scopedInstance(\Pam\Api\Route::class, $route);

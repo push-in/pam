@@ -38,6 +38,23 @@ final class ValidationAndResourceTest extends TestCase
         self::assertSame(['data' => ['id' => 10]], json_decode($response['body'], true, 512, JSON_THROW_ON_ERROR));
     }
 
+    public function testJsonResourceCanDeclareAValidHttpStatus(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->post('/users', static fn (): JsonResource => new TestUserResource(['id' => 11], 201));
+
+        $response = $app->handle(new Request('POST', '/users', [], [], ''), new Response())->export();
+
+        self::assertSame(201, $response['status']);
+        self::assertSame(['data' => ['id' => 11]], json_decode($response['body'], true, 512, JSON_THROW_ON_ERROR));
+    }
+
+    public function testJsonResourceRejectsInvalidHttpStatus(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new TestUserResource(['id' => 11], 99);
+    }
+
     private function request(string $body): Request
     {
         return new Request('POST', '/login', [], ['content-type' => ['application/json']], $body);

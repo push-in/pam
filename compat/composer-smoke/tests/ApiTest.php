@@ -246,7 +246,7 @@ final class ApiTest extends TestCase
 
         $methodMismatch = $router->match('POST', '/users/42');
         self::assertSame(RoutingResultType::MethodNotAllowed, $methodMismatch->type);
-        self::assertSame(['GET'], $methodMismatch->allowedMethods);
+        self::assertSame(['GET', 'HEAD', 'OPTIONS'], $methodMismatch->allowedMethods);
 
         self::assertSame(RoutingResultType::NotFound, $router->match('GET', '/missing')->type);
         self::assertSame('/users/me', $router->match('GET', '/users/me')->route?->path);

@@ -63,6 +63,36 @@ fn temporary_path(name: &str) -> PathBuf {
     std::env::temp_dir().join(format!("pam-{name}-{}-{unique}", std::process::id()))
 }
 
+#[test]
+fn generates_pam_api_architecture_without_overwriting() {
+    let project = temporary_path("api-generators");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":1,"name":"generated-api"}"#,
+    )
+    .unwrap();
+
+    let controller = run_pam_in(&project, &["make:controller", "LoginController"]);
+    assert!(
+        controller.status.success(),
+        "{}",
+        String::from_utf8_lossy(&controller.stderr)
+    );
+    let source =
+        fs::read_to_string(project.join("src/Http/Controllers/LoginController.php")).unwrap();
+    assert!(source.contains("public function index("));
+
+    let overwrite = run_pam_in(&project, &["make:controller", "LoginController"]);
+    assert!(!overwrite.status.success());
+    assert!(String::from_utf8_lossy(&overwrite.stderr).contains("without overwriting"));
+
+    let traversal = run_pam_in(&project, &["make:model", "../Secret"]);
+    assert!(!traversal.status.success());
+    assert!(!project.join("Secret.php").exists());
+    fs::remove_dir_all(project).unwrap();
+}
+
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
@@ -820,6 +850,8 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
             "1",
             "--php-extension",
             "iconv",
+            "--php-extension",
+            "pdo",
             "--env-file",
             environment_file.to_str().unwrap(),
             "--json",
@@ -888,7 +920,10 @@ fn manages_a_detached_runtime_through_its_complete_lifecycle() {
         );
     }
     assert_eq!(recovered["environmentFileConfigured"], true);
-    assert_eq!(recovered["phpExtensions"], serde_json::json!(["iconv"]));
+    assert_eq!(
+        recovered["phpExtensions"],
+        serde_json::json!(["iconv", "pdo"])
+    );
     assert!(!recovered.to_string().contains("private-value"));
     assert!(
         !recovered
@@ -1378,7 +1413,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
-php_extensions = ["iconv"]
+php_extensions = ["iconv", "pdo"]
 memory_warning_bytes = 1
 task_warning_count = 1
 "#,
@@ -1473,7 +1508,7 @@ script = "tests/fixtures/server.php"
 workers = 1
 cwd = "."
 autostart = true
-php_extensions = ["iconv"]
+php_extensions = ["iconv", "pdo"]
 memory_warning_bytes = 1099511627776
 task_warning_count = 1000000
 "#,
@@ -1526,7 +1561,10 @@ task_warning_count = 1000000
     );
     let described: serde_json::Value = serde_json::from_slice(&described.stdout).unwrap();
     assert_eq!(described["resourceAlertStateCode"], 1);
-    assert_eq!(described["phpExtensions"], serde_json::json!(["iconv"]));
+    assert_eq!(
+        described["phpExtensions"],
+        serde_json::json!(["iconv", "pdo"])
+    );
     assert_eq!(described["phpExtensionIsolation"], true);
     assert_eq!(described["resourcePolicy"]["taskWarningCount"], 1000000);
 
@@ -1540,7 +1578,7 @@ script = "tests/fixtures/server.php"
 workers = 2
 cwd = "."
 autostart = true
-php_extensions = ["iconv"]
+php_extensions = ["iconv", "pdo"]
 memory_warning_bytes = 1099511627776
 task_warning_count = 1000000
 "#,
@@ -3646,6 +3684,49 @@ fn initializes_a_project_without_overwriting_files() {
     assert!(directory.join(".env.example").is_file());
     assert!(directory.join("phpunit.xml").is_file());
     assert!(directory.join("tests/ApplicationTest.php").is_file());
+    assert!(directory.join("bin/migrate").is_file());
+    assert!(
+        directory
+            .join("src/Http/Controllers/PingController.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Http/Resources/PingResource.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Services/ReadinessService.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Services/ReadinessSnapshot.php")
+            .is_file()
+    );
+    assert!(directory.join("src/Services/ReadinessStatus.php").is_file());
+    assert!(
+        directory
+            .join("src/Http/Controllers/ProductController.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("src/Http/Requests/StoreProductRequest.php")
+            .is_file()
+    );
+    assert!(directory.join("src/Models/Product.php").is_file());
+    assert!(
+        directory
+            .join("src/Repositories/ProductRepository.php")
+            .is_file()
+    );
+    assert!(
+        directory
+            .join("database/migrations/2026_08_21_000000_create_products.php")
+            .is_file()
+    );
     let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
     assert!(manifest.contains("\"pushinbr/pam-api\""));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
@@ -3654,9 +3735,34 @@ fn initializes_a_project_without_overwriting_files() {
         "A PHP application powered by the PAM runtime."
     );
     assert_eq!(manifest_json["license"], "proprietary");
-    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^2.0");
     assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
-    assert_eq!(manifest_json["require-dev"]["pushinbr/pam-testing"], "^1.0");
+    assert_eq!(manifest_json["scripts"]["migrate"], "pam bin/migrate");
+    assert!(
+        manifest_json["require-dev"]
+            .get("pushinbr/pam-testing")
+            .is_none()
+    );
+    assert_eq!(
+        manifest_json["repositories"][0]["options"]["versions"]["pushinbr/pam-api"],
+        "2.0.0"
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("index.php")).unwrap(),
+        include_str!("../packages/skeleton/index.php")
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("src/Http/Controllers/PingController.php")).unwrap(),
+        include_str!("../packages/skeleton/src/Http/Controllers/PingController.php")
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("src/Http/Resources/PingResource.php")).unwrap(),
+        include_str!("../packages/skeleton/src/Http/Resources/PingResource.php")
+    );
+    assert_eq!(
+        fs::read_to_string(directory.join("tests/ApplicationTest.php")).unwrap(),
+        include_str!("../packages/skeleton/tests/ApplicationTest.php")
+    );
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());
@@ -3704,7 +3810,7 @@ fn initializes_raw_and_socket_presets_without_composer() {
     let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
     assert!(manifest.contains("pushinbr/pam-socket"));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^1.0");
+    assert_eq!(manifest_json["require"]["pushinbr/pam-api"], "^2.0");
     assert_eq!(manifest_json["require"]["pushinbr/pam-socket"], "^1.0");
 
     fs::remove_dir_all(raw).unwrap();

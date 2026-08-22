@@ -1,0 +1,199 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+const MAXIMUM_REFERENCE_BASELINE_BYTES = 4_194_304;
+
+$mode = $argv[1] ?? '--check';
+$output = $argv[2] ?? dirname(__DIR__) . '/docs/PUBLIC-API.md';
+if (!in_array($mode, ['--check', '--write'], true) || count($argv) > 3) {
+    fwrite(STDERR, "Usage: bin/api-reference [--check|--write] [output.md]\n");
+    exit(2);
+}
+
+try {
+    $root = dirname(__DIR__);
+    $baselinePath = $root . '/api-surface.json';
+    $size = filesize($baselinePath);
+    if (!is_int($size) || $size < 1 || $size > MAXIMUM_REFERENCE_BASELINE_BYTES) {
+        throw new RuntimeException('Public API baseline size is invalid.');
+    }
+    $baseline = json_decode((string) file_get_contents($baselinePath), true, 512, JSON_THROW_ON_ERROR);
+    if (!is_array($baseline) || ($baseline['schema'] ?? null) !== 1) {
+        throw new RuntimeException('Public API baseline schema is invalid.');
+    }
+    $symbols = referenceSymbols($baseline['symbols'] ?? null);
+    $reference = renderReference($symbols);
+    if ($mode === '--write') {
+        if (file_put_contents($output, $reference, LOCK_EX) !== strlen($reference)) {
+            throw new RuntimeException('Could not write the public API reference.');
+        }
+        fwrite(STDOUT, "Wrote {$output}.\n");
+        exit(0);
+    }
+    $current = file_get_contents($output);
+    if (!is_string($current) || !hash_equals($reference, $current)) {
+        throw new RuntimeException('Public API reference is stale; run bin/api-reference --write.');
+    }
+    fwrite(STDOUT, 'Public API reference current: ' . count($symbols) . " symbols.\n");
+} catch (Throwable $error) {
+    fwrite(STDERR, 'Public API reference error: ' . $error->getMessage() . "\n");
+    exit(1);
+}
+
+/** @param array<string, mixed> $symbols */
+function renderReference(array $symbols): string
+{
+    ksort($symbols, SORT_STRING);
+    $lines = [
+        '# PAM API public reference',
+        '',
+        '> Generated from `api-surface.json` by `bin/api-reference`. Do not edit manually.',
+        '',
+        'Every symbol below is protected by the PAM API Semantic Versioning gate.',
+        '',
+        '## Symbols',
+        '',
+    ];
+    foreach (array_keys($symbols) as $name) {
+        $lines[] = '- [`' . $name . '`](#' . referenceAnchor($name) . ')';
+    }
+    foreach ($symbols as $name => $symbol) {
+        if (!is_array($symbol)) {
+            throw new RuntimeException("Symbol {$name} is invalid.");
+        }
+        $kind = is_string($symbol['kind'] ?? null) ? $symbol['kind'] : 'symbol';
+        $modifiers = [];
+        foreach (['abstract', 'final', 'readonly'] as $modifier) {
+            if (($symbol[$modifier] ?? false) === true) {
+                $modifiers[] = $modifier;
+            }
+        }
+        $declaration = trim(implode(' ', $modifiers) . ' ' . $kind . ' ' . $name);
+        if (is_string($symbol['parent'] ?? null)) {
+            $declaration .= ' extends ' . $symbol['parent'];
+        }
+        $interfaces = referenceStringList($symbol['interfaces'] ?? []);
+        if ($interfaces !== []) {
+            $declaration .= ' implements ' . implode(', ', $interfaces);
+        }
+        if (is_string($symbol['backingType'] ?? null)) {
+            $declaration .= ': ' . $symbol['backingType'];
+        }
+        $lines[] = '';
+        $lines[] = '## `' . $name . '`';
+        $lines[] = '';
+        $lines[] = '```php';
+        $lines[] = $declaration;
+        $lines[] = '```';
+        appendReferenceValues($lines, 'Enum cases', $symbol['cases'] ?? []);
+        appendReferenceValues($lines, 'Constants', $symbol['constants'] ?? []);
+        if (is_array($symbol['properties'] ?? null) && $symbol['properties'] !== []) {
+            $lines[] = '';
+            $lines[] = '### Properties';
+            $lines[] = '';
+            foreach ($symbol['properties'] as $property => $definition) {
+                if (!is_array($definition)) {
+                    throw new RuntimeException("Property {$name}::{$property} is invalid.");
+                }
+                $signature = 'public ';
+                $signature .= ($definition['static'] ?? false) === true ? 'static ' : '';
+                $signature .= ($definition['readonly'] ?? false) === true ? 'readonly ' : '';
+                $signature .= referenceType($definition['type'] ?? null) . ' $' . $property;
+                $lines[] = '- `' . $signature . '`';
+            }
+        }
+        if (is_array($symbol['methods'] ?? null) && $symbol['methods'] !== []) {
+            $lines[] = '';
+            $lines[] = '### Methods';
+            $lines[] = '';
+            foreach ($symbol['methods'] as $method => $definition) {
+                if (!is_array($definition) || !is_array($definition['parameters'] ?? null)) {
+                    throw new RuntimeException("Method {$name}::{$method} is invalid.");
+                }
+                $parameters = [];
+                foreach ($definition['parameters'] as $parameter) {
+                    if (!is_array($parameter) || !is_string($parameter['name'] ?? null)) {
+                        throw new RuntimeException("Method {$name}::{$method} parameter is invalid.");
+                    }
+                    $value = referenceType($parameter['type'] ?? null) . ' ';
+                    $value .= ($parameter['byReference'] ?? false) === true ? '&' : '';
+                    $value .= ($parameter['variadic'] ?? false) === true ? '...' : '';
+                    $value .= '$' . $parameter['name'];
+                    if (($parameter['hasDefault'] ?? false) === true) {
+                        $value .= ' = ' . referenceValue($parameter['default'] ?? null);
+                    }
+                    $parameters[] = trim($value);
+                }
+                $signature = 'public ';
+                $signature .= ($definition['static'] ?? false) === true ? 'static ' : '';
+                $signature .= $method . '(' . implode(', ', $parameters) . ')';
+                $signature .= ': ' . referenceType($definition['return'] ?? null);
+                $lines[] = '- `' . $signature . '`';
+            }
+        }
+    }
+    return implode("\n", $lines) . "\n";
+}
+
+/** @param list<string> $lines */
+function appendReferenceValues(array &$lines, string $heading, mixed $values): void
+{
+    if (!is_array($values) || $values === []) {
+        return;
+    }
+    $lines[] = '';
+    $lines[] = '### ' . $heading;
+    $lines[] = '';
+    foreach ($values as $name => $value) {
+        $lines[] = '- `' . $name . ' = ' . referenceValue($value) . '`';
+    }
+}
+
+function referenceType(mixed $type): string
+{
+    return is_string($type) && $type !== '' ? $type : 'mixed';
+}
+
+function referenceValue(mixed $value): string
+{
+    return json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR);
+}
+
+function referenceAnchor(string $name): string
+{
+    return strtolower(str_replace('\\', '', $name));
+}
+
+/** @return array<string, mixed> */
+function referenceSymbols(mixed $symbols): array
+{
+    if (!is_array($symbols)) {
+        throw new RuntimeException('Public API symbols are invalid.');
+    }
+    $normalized = [];
+    foreach ($symbols as $name => $symbol) {
+        if (!is_string($name)) {
+            throw new RuntimeException('Public API symbol name is invalid.');
+        }
+        $normalized[$name] = $symbol;
+    }
+    return $normalized;
+}
+
+/** @return list<string> */
+function referenceStringList(mixed $values): array
+{
+    if (!is_array($values)) {
+        throw new RuntimeException('Public API string list is invalid.');
+    }
+    $normalized = [];
+    foreach ($values as $value) {
+        if (!is_string($value)) {
+            throw new RuntimeException('Public API string list value is invalid.');
+        }
+        $normalized[] = $value;
+    }
+    return $normalized;
+}

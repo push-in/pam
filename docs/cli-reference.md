@@ -69,6 +69,8 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam make:request` — Generate a Laravel form request.
 - `pam make:resource` — Generate a Laravel API resource.
 - `pam make:migration` — Generate a Laravel migration.
+- `pam make:service` — Generate an application service.
+- `pam make:repository` — Generate a persistence repository.
 - `pam make:test` — Generate a Laravel test.
 - `pam make:command` — Generate a Laravel console command.
 - `pam make:job` — Generate a Laravel job.

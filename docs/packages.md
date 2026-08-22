@@ -99,12 +99,14 @@ distribution mirrors place each package's `composer.json` at the repository root
 Do not commit directly to a mirror. Package changes, issues and pull requests
 belong in `push-in/pam`.
 
-During the `0.x` series, the runtime and all first-party packages use coordinated
-semantic versions. A `vX.Y.Z` tag must match `Cargo.toml`; the Composer package
-workflow validates every manifest, constructs an isolated history for each
-`packages/*` directory, verifies its contents and pushes the matching branch and
-immutable tag to the corresponding mirror. Re-running a release is idempotent
-only when an existing mirror tag resolves to the exact expected split commit.
+Runtime tags continue to create coordinated package releases. Packages may also
+advance independently after `1.x`: the **Independent Composer package release**
+workflow accepts one known Composer package, a source ref already integrated
+into `main`, and its own `vX.Y.Z` tag. It requires a dated package changelog,
+constructs and verifies the isolated history, uploads a provenance manifest and
+uses only that mirror's scoped deploy key. Re-running either release mode is
+idempotent only when an existing mirror tag resolves to the exact expected split
+commit.
 
 `pam/core-api` remains the compatibility seam: packages constrain its version and
 check runtime ABI capabilities instead of depending on Pam's Rust implementation.
@@ -123,7 +125,14 @@ inside the Pam Embed SAPI. Run the package-specific validation locally with:
 ```bash
 scripts/package-release.sh validate
 scripts/package-release.sh validate-tag v1.0.2
+scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
+scripts/package-release.sh package-matrix pushinbr/pam-api
 ```
+
+Independent releases are deliberately single-package operations. Release
+dependencies in topological order (for example API before a skeleton that
+requires its new major), wait for Packagist to expose each tag, and run a public
+Composer dry-run before releasing the dependent package.
 
 The workflow uses one write-enabled deploy key per mirror. Each private key is an
 Actions secret scoped by the package map in `packages/packages.json`; a compromised

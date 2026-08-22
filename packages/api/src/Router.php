@@ -8,8 +8,21 @@ use Pam\Api\Container\Container;
 
 final class Router
 {
-    public function __construct(private readonly ?Container $container = null)
-    {
+    private const int MAXIMUM_METHOD_BYTES = 32;
+    private const int MAXIMUM_PATH_BYTES = 2_048;
+    private const int MAXIMUM_ROUTE_NAME_BYTES = 128;
+    private const int MAXIMUM_CONSTRAINT_BYTES = 512;
+    private const int MAXIMUM_SEGMENTS = 128;
+    private const int MAXIMUM_PARAMETERS = 32;
+    private const string PCRE_BUDGET = '(*LIMIT_MATCH=100000)(*LIMIT_DEPTH=1000)';
+
+    public function __construct(
+        private readonly ?Container $container = null,
+        private readonly int $maximumRoutes = 10_000,
+    ) {
+        if ($maximumRoutes < 1 || $maximumRoutes > 100_000) {
+            throw new \InvalidArgumentException('Maximum routes must be between 1 and 100,000.');
+        }
     }
 
     public function container(): Container
@@ -37,11 +50,24 @@ final class Router
     public function register(string $method, string $path, callable $handler): Route
     {
         $method = strtoupper(trim($method));
-        if ($method === '' || preg_match('/^[A-Z!#$%&\'*+.^_`|~-]+$/D', $method) !== 1) {
+        if (
+            $method === ''
+            || strlen($method) > self::MAXIMUM_METHOD_BYTES
+            || preg_match('/^[A-Z!#$%&\'*+.^_`|~-]+$/D', $method) !== 1
+        ) {
             throw new \InvalidArgumentException('Route method is invalid.');
         }
-        if ($path === '' || $path[0] !== '/' || str_contains($path, "\0") || str_contains($path, '?')) {
+        if (
+            $path === ''
+            || strlen($path) > self::MAXIMUM_PATH_BYTES
+            || $path[0] !== '/'
+            || str_contains($path, "\0")
+            || str_contains($path, '?')
+        ) {
             throw new \InvalidArgumentException('Route paths must be absolute and cannot contain a query string.');
+        }
+        if (count($this->routes) >= $this->maximumRoutes) {
+            throw new \OverflowException('Router route limit exceeded.');
         }
 
         $signature = $method . ' ' . $path;
@@ -63,7 +89,11 @@ final class Router
 
     public function name(Route $route, string $name): void
     {
-        if ($name === '' || preg_match('/^[A-Za-z0-9_.-]+$/D', $name) !== 1) {
+        if (
+            $name === ''
+            || strlen($name) > self::MAXIMUM_ROUTE_NAME_BYTES
+            || preg_match('/^[A-Za-z0-9_.-]+$/D', $name) !== 1
+        ) {
             throw new \InvalidArgumentException('Route names may contain letters, numbers, dots, dashes and underscores.');
         }
         foreach ($this->routes as $registered) {
@@ -80,7 +110,11 @@ final class Router
             throw new \InvalidArgumentException("Route {$route->path} has no parameter named {$parameter}.");
         }
         $pattern = $constraint instanceof RouteConstraint ? $constraint->pattern() : $constraint;
-        if ($pattern === '' || @preg_match('#^(?:' . $pattern . ')$#D', '') === false) {
+        if (
+            $pattern === ''
+            || strlen($pattern) > self::MAXIMUM_CONSTRAINT_BYTES
+            || @preg_match('#' . self::PCRE_BUDGET . '^(?:' . $pattern . ')$#D', '') === false
+        ) {
             throw new \InvalidArgumentException("Constraint for {$parameter} is not a valid regular expression.");
         }
         $needle = '(?P<' . $parameter . '>[^/]+)';
@@ -89,6 +123,9 @@ final class Router
 
     public function match(string $method, string $path): RoutingResult
     {
+        if (strlen($method) > self::MAXIMUM_METHOD_BYTES || strlen($path) > self::MAXIMUM_PATH_BYTES) {
+            return new RoutingResult(RoutingResultType::NotFound);
+        }
         $method = strtoupper($method);
         $allowedMethods = [];
 
@@ -119,6 +156,10 @@ final class Router
         }
 
         if ($allowedMethods !== []) {
+            if (in_array('GET', $allowedMethods, true)) {
+                $allowedMethods[] = 'HEAD';
+            }
+            $allowedMethods[] = 'OPTIONS';
             $allowedMethods = array_values(array_unique($allowedMethods));
             sort($allowedMethods);
             return new RoutingResult(
@@ -145,11 +186,14 @@ final class Router
     private static function compile(string $path): array
     {
         if ($path === '/') {
-            return ['#^/$#D', []];
+            return ['#' . self::PCRE_BUDGET . '^/$#D', []];
         }
 
         $names = [];
         $segments = explode('/', ltrim($path, '/'));
+        if (count($segments) > self::MAXIMUM_SEGMENTS) {
+            throw new \InvalidArgumentException('Route path contains too many segments.');
+        }
         $compiled = [];
         foreach ($segments as $segment) {
             if (preg_match('/^\{([A-Za-z_][A-Za-z0-9_]*)\}$/D', $segment, $match) === 1) {
@@ -158,6 +202,9 @@ final class Router
                     throw new \InvalidArgumentException("Route parameter {$name} is duplicated.");
                 }
                 $names[] = $name;
+                if (count($names) > self::MAXIMUM_PARAMETERS) {
+                    throw new \InvalidArgumentException('Route path contains too many parameters.');
+                }
                 $compiled[] = '(?P<' . $name . '>[^/]+)';
                 continue;
             }
@@ -167,6 +214,6 @@ final class Router
             $compiled[] = preg_quote($segment, '#');
         }
 
-        return ['#^/' . implode('/', $compiled) . '/?$#D', $names];
+        return ['#' . self::PCRE_BUDGET . '^/' . implode('/', $compiled) . '/?$#D', $names];
     }
 }

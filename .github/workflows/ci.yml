@@ -91,6 +91,8 @@ jobs:
             composer validate --strict --no-check-lock --no-check-publish "$package"
           done
           scripts/package-release.sh validate
+          scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
+          scripts/package-release.sh validate-package-tag pushinbr/pam-skeleton v2.0.0
       - name: Install locked Composer dependencies
         run: |
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
@@ -358,6 +360,19 @@ jobs:
         run: |
           ./target/debug/pam test compat/composer-smoke --phpunit -c phpunit.xml
           ./target/debug/pam test compat/composer-smoke --pest
+      - name: Create, install, and execute the PAM API starter
+        env:
+          COMPOSER_PROCESS_TIMEOUT: 0
+        run: |
+          starter="${RUNNER_TEMP}/pam-api-starter"
+          ./target/debug/pam init "${starter}" \
+            --template api --no-install --no-interaction
+          composer validate --strict --no-check-publish "${starter}/composer.json"
+          composer install --working-dir="${starter}" \
+            --dry-run --no-interaction --prefer-dist
+          composer install --working-dir="${starter}" \
+            --no-interaction --prefer-dist
+          ./target/debug/pam test "${starter}" --phpunit -c phpunit.xml
       - name: Build release binary
         run: cargo build --locked --release
       - name: Smoke test isolated runtime bundle
