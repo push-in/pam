@@ -9,8 +9,8 @@ class VisualWorkflowContractTest(unittest.TestCase):
     def test_ios_capture_is_a_fatal_validated_cli_gate(self) -> None:
         workflow = (ROOT / ".github/workflows/ios-native.yml").read_text(encoding="utf-8")
         capture = (
-            'target/debug/pam mobile ios:screenshot "${PAM_IOS_FIXTURE}" '
-            "\\\n            --output artifacts/screenshots/ios-simulator.png"
+            '"${GITHUB_WORKSPACE}/target/debug/pam" ios:screenshot . '
+            "\\\n              --output artifacts/screenshots/ios-simulator.png"
         )
 
         self.assertIn(capture, workflow)
@@ -41,10 +41,10 @@ class VisualWorkflowContractTest(unittest.TestCase):
             workflow,
         )
         self.assertIn("api-level: 36", workflow)
-        self.assertIn("pam mobile run", workflow)
+        self.assertIn('target/debug/pam" run .', workflow)
         self.assertIn("product-native-light.png", workflow)
         self.assertIn("product-native-dark.png", workflow)
-        self.assertEqual(workflow.count("pam mobile screenshot"), 2)
+        self.assertEqual(workflow.count('target/debug/pam" screenshot .'), 2)
         self.assertIn("if-no-files-found: error", workflow)
         self.assertIn("retention-days: 30", workflow)
         self.assertIn("workflow_call:", workflow)

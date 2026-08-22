@@ -9,6 +9,7 @@
     <testsuites>
         <testsuite name="PAM Octane">
             <directory>tests</directory>
+            <exclude>tests/Fixtures</exclude>
         </testsuite>
     </testsuites>
     <source>

@@ -376,7 +376,7 @@ Composer
 ├── pushinbr/pam-psr   standards interoperability
 ├── pushinbr/pam-testing      in-memory application tests
 ├── pushinbr/pam-octane       Laravel Octane bridge
-├── pam/desktop      desktop application model (separate repository)
+├── pushinbr/pam-desktop    desktop application model (separate repository)
 └── every existing compatible PHP package
 ```
 

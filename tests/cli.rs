@@ -2390,7 +2390,7 @@ fn discovers_ecosystem_and_runs_extensible_project_commands() {
     .unwrap();
     fs::write(
         project.join("bin/greet.php"),
-        "<?php echo 'hello '.($argv[1] ?? 'world').'!';\n",
+        "<?php if ((getenv('PAM_BINARY') ?: '') === '') exit(71); echo 'hello '.($argv[1] ?? 'world').'!';\n",
     )
     .unwrap();
 

@@ -125,8 +125,8 @@ inside the Pam Embed SAPI. Run the package-specific validation locally with:
 ```bash
 scripts/package-release.sh validate
 scripts/package-release.sh validate-tag v1.0.2
-scripts/package-release.sh validate-package-tag pushinbr/pam-api v2.0.0
-scripts/package-release.sh package-matrix pushinbr/pam-api
+scripts/package-release.sh validate-package-tag pushinbr/pam-http v2.0.0
+scripts/package-release.sh package-matrix pushinbr/pam-http
 ```
 
 Independent releases are deliberately single-package operations. Release

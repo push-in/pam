@@ -157,6 +157,11 @@ jobs:
             '.runtime.php = $php | .ios.minimumVersion = $minimum' \
             "${fixture}/pam-native.json" >"${fixture}/pam-native.json.tmp"
           mv "${fixture}/pam-native.json.tmp" "${fixture}/pam-native.json"
+          if [[ "${{ matrix.php }}" == 8.4.* ]]; then
+            jq '.require.php = "^8.4"' \
+              "${fixture}/composer.json" >"${fixture}/composer.json.tmp"
+            mv "${fixture}/composer.json.tmp" "${fixture}/composer.json"
+          fi
           test "$(jq -r '.name' "${fixture}/pam-native.json")" = 'PAM App'
           test "$(jq -r '.applicationId' "${fixture}/pam-native.json")" = app.pam.hello
           test "$(jq -r '.runtime.php' "${fixture}/pam-native.json")" = "${{ matrix.php }}"
@@ -179,14 +184,20 @@ jobs:
           composer require --working-dir="${fixture}" \
             "${packages[@]}" \
             --update-no-dev --no-interaction --prefer-dist
-          target/debug/pam mobile audit "${fixture}" --json \
-            >"${fixture}/native-release-audit.json"
+          (
+            cd "${fixture}"
+            "${GITHUB_WORKSPACE}/target/debug/pam" audit . --json \
+              >native-release-audit.json
+          )
           test "$(jq -r '.schemaVersion' "${fixture}/native-release-audit.json")" = 1
           test "$(jq -r '.surfaceCode' "${fixture}/native-release-audit.json")" = 2
           test "$(jq -r '.resultCode' "${fixture}/native-release-audit.json")" = 1
           test "$(jq -r '.counts.critical' "${fixture}/native-release-audit.json")" = 0
-          target/debug/pam mobile ios:doctor "${fixture}"
-          target/debug/pam mobile ios:prepare "${fixture}"
+          (
+            cd "${fixture}"
+            "${GITHUB_WORKSPACE}/target/debug/pam" ios:doctor .
+            "${GITHUB_WORKSPACE}/target/debug/pam" ios:prepare .
+          )
           test -f "${fixture}/.pam-native/ios/App/PamNativeApp.xcodeproj/project.pbxproj"
           ! grep -R '__PAM_' "${fixture}/.pam-native/ios/App"
           grep -q 'PRODUCT_NAME = "PAM App"' \
@@ -256,14 +267,20 @@ jobs:
             xcrun simctl boot "${simulator}"
           fi
           xcrun simctl bootstatus "${simulator}" -b
-          target/debug/pam mobile ios:run "${PAM_IOS_FIXTURE}"
+          (
+            cd "${PAM_IOS_FIXTURE}"
+            "${GITHUB_WORKSPACE}/target/debug/pam" ios:run .
+          )
           app_container=$(xcrun simctl get_app_container "${simulator}" app.pam.hello app)
           test -d "${app_container}"
           launch=$(xcrun simctl launch --terminate-running-process "${simulator}" app.pam.hello)
           pid=${launch##*: }
           sleep 5
-          target/debug/pam mobile ios:screenshot "${PAM_IOS_FIXTURE}" \
-            --output artifacts/screenshots/ios-simulator.png
+          (
+            cd "${PAM_IOS_FIXTURE}"
+            "${GITHUB_WORKSPACE}/target/debug/pam" ios:screenshot . \
+              --output artifacts/screenshots/ios-simulator.png
+          )
           test -s "${PAM_IOS_FIXTURE}/artifacts/screenshots/ios-simulator.png"
           shasum -a 256 \
             "${PAM_IOS_FIXTURE}/artifacts/screenshots/ios-simulator.png" \

@@ -1372,11 +1372,15 @@ fn run_registered_command(
         .collect::<Vec<_>>();
     match &command.target {
         project::CommandTarget::PhpScript(script) => {
+            let pam_executable =
+                fs::canonicalize(pam_executable).unwrap_or_else(|_| PathBuf::from(pam_executable));
+            // SAFETY: package commands run before PHP or Tokio starts worker threads.
+            unsafe { env::set_var("PAM_BINARY", &pam_executable) };
             for (key, value) in &command.environment {
                 // SAFETY: package commands run before PHP or Tokio starts worker threads.
                 unsafe { env::set_var(key, value) };
             }
-            run_script(pam_executable, script, arguments)
+            run_script(pam_executable.as_os_str(), script, arguments)
         }
         project::CommandTarget::Executable(executable) => {
             let pam_executable =
