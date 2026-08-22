@@ -377,19 +377,28 @@ fn kills_workers_when_the_master_is_killed() {
     cluster.child.wait().unwrap();
 
     let deadline = Instant::now() + Duration::from_secs(5);
-    while Instant::now() < deadline
-        && workers
-            .iter()
-            .any(|pid| PathBuf::from(format!("/proc/{pid}")).exists())
-    {
+    while Instant::now() < deadline && workers.iter().any(|pid| linux_process_is_running(*pid)) {
         thread::sleep(Duration::from_millis(20));
     }
     assert!(
-        workers
-            .iter()
-            .all(|pid| !PathBuf::from(format!("/proc/{pid}")).exists()),
+        workers.iter().all(|pid| !linux_process_is_running(*pid)),
         "workers survived their killed PAM master: {workers:?}"
     );
+}
+
+#[cfg(target_os = "linux")]
+fn linux_process_is_running(pid: u32) -> bool {
+    let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat")) else {
+        return false;
+    };
+    let Some(after_name) = stat.rfind(')').and_then(|end| stat.get(end + 2..)) else {
+        return false;
+    };
+
+    after_name
+        .split_whitespace()
+        .next()
+        .is_some_and(|state| state != "Z")
 }
 
 fn request_identity(response: &str) -> (String, String) {
