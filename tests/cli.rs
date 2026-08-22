@@ -597,6 +597,7 @@ fn records_reproducible_soak_metadata() {
         .env("PAM_BENCH_WARMUP_DURATION", "5s")
         .env("PAM_BENCH_ROUNDS", "1")
         .env("PAM_BENCH_RUNTIME_ORDER", "pam")
+        .env("PAM_BENCH_SOURCE_COMMIT", "test-source-commit")
         .env("PAM_SOAK_MAX_RSS_GROWTH_BYTES", "33554432")
         .output()
         .expect("metadata script should start");
@@ -613,6 +614,7 @@ fn records_reproducible_soak_metadata() {
             .as_str()
             .is_some_and(|value| !value.is_empty())
     );
+    assert_eq!(metadata["source"]["commit"], "test-source-commit");
     assert!(
         metadata["tools"]["pam_sha256"]
             .as_str()
