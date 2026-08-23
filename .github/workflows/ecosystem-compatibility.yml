@@ -50,7 +50,7 @@ jobs:
             scripts/ecosystem-compatibility.py inventory
       - id: catalog
         name: Publish the validated matrix
-        run: printf 'matrix=%s\n' "$(scripts/ecosystem-compatibility.py matrix)" >>"${GITHUB_OUTPUT}"
+        run: printf 'matrix=%s\n' "$(scripts/ecosystem-compatibility.py ci-matrix)" >>"${GITHUB_OUTPUT}"
 
   packages:
     needs: inventory
@@ -59,8 +59,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        package: ${{ fromJSON(needs.inventory.outputs.matrix) }}
-        php: ['8.4', '8.5']
+        include: ${{ fromJSON(needs.inventory.outputs.matrix) }}
     name: ${{ matrix.package.repository }} / PHP ${{ matrix.php }}
     steps:
       - uses: actions/checkout@v5

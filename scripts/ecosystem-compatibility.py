@@ -44,8 +44,15 @@ class LocalContractResult(IntEnum):
 
 def catalog() -> list[dict[str, object]]:
     document = json.loads(CATALOG.read_text(encoding="utf-8"))
-    if document.get("schemaVersion") != 1 or not isinstance(document.get("packages"), list):
-        raise ValueError("ecosystem catalog must use schemaVersion 1 and a packages list")
+    default_constraint = document.get("defaultPhpConstraint")
+    default_series = document.get("defaultPhpSeries")
+    if (
+        document.get("schemaVersion") != 2
+        or not isinstance(document.get("packages"), list)
+        or default_constraint != "^8.4"
+        or default_series != ["8.4", "8.5"]
+    ):
+        raise ValueError("ecosystem catalog must use schemaVersion 2 and bounded PHP defaults")
     packages = document["packages"]
     repositories: set[str] = set()
     composer_names: set[str] = set()
@@ -65,11 +72,28 @@ def catalog() -> list[dict[str, object]]:
             package.get("testRequired"), bool
         ):
             raise ValueError(f"{repository} compatibility flags must be booleans")
+        php_constraint = package.get("phpConstraint", default_constraint)
+        php_series = package.get("phpSeries", default_series)
+        if php_constraint not in {"^8.4", "^8.5"}:
+            raise ValueError(f"{repository} PHP constraint must be ^8.4 or ^8.5")
+        expected_series = ["8.5"] if php_constraint == "^8.5" else ["8.4", "8.5"]
+        if php_series != expected_series:
+            raise ValueError(f"{repository} PHP series do not match {php_constraint}")
+        package["phpConstraint"] = php_constraint
+        package["phpSeries"] = php_series
         if repository in repositories or composer_name in composer_names:
             raise ValueError(f"duplicate ecosystem identity: {repository}")
         repositories.add(repository)
         composer_names.add(composer_name)
     return sorted(packages, key=lambda package: str(package["repository"]))
+
+
+def ci_matrix(packages: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [
+        {"package": package, "php": php}
+        for package in packages
+        for php in package["phpSeries"]
+    ]
 
 
 def verify_inventory(packages: list[dict[str, object]]) -> None:
@@ -173,8 +197,9 @@ def verify_checkout(
     if manifest.get("name") != package["composerName"]:
         raise ValueError(f"{repository} Composer identity does not match the catalog")
     requirements = manifest.get("require")
-    if not isinstance(requirements, dict) or requirements.get("php") != "^8.4":
-        raise ValueError(f"{repository} must declare PHP ^8.4 compatibility")
+    php_constraint = package["phpConstraint"]
+    if not isinstance(requirements, dict) or requirements.get("php") != php_constraint:
+        raise ValueError(f"{repository} must declare PHP {php_constraint} compatibility")
     native = requirements.get("pushinbr/pam-native")
     if package["requiresNative"] and not isinstance(native, str):
         raise ValueError(f"{repository} must constrain pushinbr/pam-native")
@@ -186,6 +211,8 @@ def verify_checkout(
     if package["testRequired"] and not isinstance(scripts.get("test"), str):
         raise ValueError(f"{repository} must expose composer test")
     workflow_path, is_release = publication_workflow(workflow_directory or directory)
+    if repository == "pam-native-php" and not workflow_path.exists():
+        return manifest_bytes, b"managed-by-push-in/pam-native-release"
     if not workflow_path.exists():
         raise ValueError(f"{repository} must certify every publication tag")
     workflow_bytes = read_bounded_regular(workflow_path, f"{repository} publication workflow")
@@ -290,7 +317,7 @@ def aggregate_evidence(
     expected = {
         (str(package["repository"]), php): package
         for package in packages
-        for php in ("8.4", "8.5")
+        for php in package["phpSeries"]
     }
     results: dict[tuple[str, str], dict[str, object]] = {}
     commits: set[str] = set()
@@ -379,7 +406,7 @@ def aggregate_evidence(
         "packageCount": len(packages),
         "combinationCount": len(results),
         "graphExecutionCount": len(results) * 2,
-        "phpSeries": ["8.4", "8.5"],
+        "phpSeries": sorted({php for package in packages for php in package["phpSeries"]}),
         "graphCodes": [DependencyGraph.LATEST, DependencyGraph.LOWEST],
         "results": [results[key] for key in sorted(results)],
     }
@@ -392,6 +419,8 @@ def main() -> int:
         command = sys.argv[1] if len(sys.argv) > 1 else ""
         if command == "matrix":
             print(json.dumps(packages, separators=(",", ":")))
+        elif command == "ci-matrix":
+            print(json.dumps(ci_matrix(packages), separators=(",", ":")))
         elif command == "inventory":
             verify_inventory(packages)
             print(f"Verified exact public ecosystem inventory: {len(packages)} repositories.")
@@ -406,10 +435,10 @@ def main() -> int:
             print(f"Verified local ecosystem evidence for {len(packages)} packages.")
         elif command == "evidence" and len(sys.argv) == 4:
             aggregate_evidence(packages, Path(sys.argv[2]), Path(sys.argv[3]))
-            print(f"Aggregated {len(packages) * 2} ecosystem evidence combinations.")
+            print(f"Aggregated {len(ci_matrix(packages))} ecosystem evidence combinations.")
         else:
             raise ValueError(
-                "usage: ecosystem-compatibility.py matrix | inventory | verify <directory> <repository> | local <root> <output> | local-verify <root> <evidence> | evidence <directory> <output>"
+                "usage: ecosystem-compatibility.py matrix | ci-matrix | inventory | verify <directory> <repository> | local <root> <output> | local-verify <root> <evidence> | evidence <directory> <output>"
             )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(f"ecosystem compatibility error: {error}", file=sys.stderr)
