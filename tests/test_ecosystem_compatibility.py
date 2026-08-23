@@ -28,6 +28,9 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertEqual(len(repositories), 27)
         self.assertEqual(len(repositories), len(set(repositories)))
         self.assertEqual({package["roleCode"] for package in packages}, {1, 2, 3, 4})
+        native = next(package for package in packages if package["repository"] == "pam-native-php")
+        self.assertEqual(native["phpConstraint"], "^8.5")
+        self.assertEqual(native["phpSeries"], ["8.5"])
 
     def test_inventory_fails_closed_for_an_unregistered_repository(self) -> None:
         matrix = json.loads(self.run_script("matrix").stdout)
@@ -92,11 +95,12 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertLess(workflow.index(preflight), workflow.index(installation))
         self.assertLess(workflow.index(installation), workflow.index("composer test"))
 
-    def test_every_package_runs_on_both_supported_php_series(self) -> None:
+    def test_packages_run_on_their_catalogued_php_series(self) -> None:
         workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("php: ['8.4', '8.5']", workflow)
+        self.assertIn("ecosystem-compatibility.py ci-matrix", workflow)
+        self.assertIn("include: ${{ fromJSON(needs.inventory.outputs.matrix) }}", workflow)
         self.assertIn("php-version: ${{ matrix.php }}", workflow)
         self.assertIn("/ PHP ${{ matrix.php }}", workflow)
         self.assertNotIn("php-version: '8.4'", workflow)
@@ -147,7 +151,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
             evidence.mkdir()
             commit = "a" * 40
             for package in matrix:
-                for php in ("8.4", "8.5"):
+                for php in package["phpSeries"]:
                     result = {
                         "schemaVersion": 1,
                         "resultCode": 1,
@@ -172,8 +176,8 @@ class EcosystemCompatibilityTests(unittest.TestCase):
             report = json.loads(output.read_text(encoding="utf-8"))
             self.assertEqual(report["resultCode"], 1)
             self.assertEqual(report["packageCount"], 27)
-            self.assertEqual(report["combinationCount"], 54)
-            self.assertEqual(report["graphExecutionCount"], 108)
+            self.assertEqual(report["combinationCount"], 53)
+            self.assertEqual(report["graphExecutionCount"], 106)
             self.assertEqual(report["pamCommit"], commit)
             self.assertEqual(report["nativeCandidateCommit"], "e" * 40)
 
@@ -247,6 +251,16 @@ class EcosystemCompatibilityTests(unittest.TestCase):
             result = self.run_script("verify", directory, "pam-native-auth")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must certify every publication tag", result.stderr)
+
+    def test_native_distribution_is_published_by_the_core_release(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = {
+                "name": "pushinbr/pam-native",
+                "require": {"php": "^8.5"},
+            }
+            Path(directory, "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
+            result = self.run_script("verify", directory, "pam-native-php")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_checkout_contract_rejects_a_commented_out_publication_gate(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -325,7 +339,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
                 checkout = root / "ecosystem" / package["repository"]
                 workflows = checkout / ".github" / "workflows"
                 workflows.mkdir(parents=True)
-                requires = {"php": "^8.4"}
+                requires = {"php": package["phpConstraint"]}
                 if package["requiresNative"]:
                     requires["pushinbr/pam-native"] = "^0.6.1"
                 manifest = {
