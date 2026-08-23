@@ -182,6 +182,9 @@ jobs:
             "${PACKAGE_NAME}" "${SOURCE_SHA}")
           scripts/package-release.sh verify-split "${PACKAGE_NAME}" "${split_sha}"
           remote="git@github.com:push-in/${REPOSITORY_NAME}.git"
+          remote_main=$(git ls-remote "${remote}" refs/heads/main |
+            awk 'NR == 1 { print $1 }')
+          main_lease="--force-with-lease=refs/heads/main:${remote_main}"
           remote_tag=$(git ls-remote "${remote}" "refs/tags/${PACKAGE_TAG}^{}" |
             awk 'NR == 1 { print $1 }')
           if [ -z "${remote_tag}" ]; then
@@ -194,10 +197,11 @@ jobs:
                 "${PACKAGE_TAG}" "${remote_tag}" "${split_sha}" >&2
               exit 1
             }
-            git push "${remote}" "${split_sha}:refs/heads/main"
+            git push "${main_lease}" "${remote}" \
+              "${split_sha}:refs/heads/main"
             exit 0
           fi
-          git push --atomic "${remote}" \
+          git push --atomic "${main_lease}" "${remote}" \
             "${split_sha}:refs/heads/main" \
             "${split_sha}:refs/tags/${PACKAGE_TAG}"
 
