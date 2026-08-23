@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.0.7 - 2026-08-22
+
+- Generate new HTTP applications with the permanent
+  `pushinbr/pam-http-testing` package family.
+- Keep PHP 8.5 as the default generated application runtime and certify
+  public Composer package installation on PHP 8.5.
+
 ## 2.0.6 - 2026-08-22
 
 - Keep Linux clean-host extension certification fail-closed while recognizing
