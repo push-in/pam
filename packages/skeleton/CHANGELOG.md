@@ -2,6 +2,12 @@
 
 All notable changes to PAM Skeleton are documented in this file.
 
+## 2.0.1 - 2026-08-22
+
+- Require the permanent `pushinbr/pam-http-psr` interoperability package.
+- Require `pushinbr/pam-http-testing` for the generated in-process test suite.
+- Preserve PHP 8.5 as the generated application's default runtime.
+
 ## 2.0.0 - 2026-08-21
 
 - Make PHP 8.5 the default application runtime.
