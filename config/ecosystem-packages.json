@@ -7,6 +7,7 @@
     {"repository": "pam-native-auth", "composerName": "pushinbr/pam-native-auth", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-background-transfer", "composerName": "pushinbr/pam-native-background-transfer", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-bluetooth", "composerName": "pushinbr/pam-native-bluetooth", "roleCode": 2, "requiresNative": true, "testRequired": true},
+    {"repository": "pam-native-camera", "composerName": "pushinbr/pam-native-camera", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-devtools", "composerName": "pushinbr/pam-native-devtools", "roleCode": 4, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-feature-flags", "composerName": "pushinbr/pam-native-feature-flags", "roleCode": 3, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-firebase", "composerName": "pushinbr/pam-native-firebase", "roleCode": 2, "requiresNative": true, "testRequired": true},
