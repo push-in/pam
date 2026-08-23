@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.9 - 2026-08-23
+
+- Isolate Composer-provided executable commands from the embedded PHP ini so
+  host-PHP shebangs cannot load extensions built for another module ABI.
+- Expose the bundled PAM Native SDK automatically to contextual native commands.
+
 ## 2.0.8 - 2026-08-23
 
 - Isolate the optional host-PHP inspection in `pam doctor` from PAM's bundled

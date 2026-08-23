@@ -1389,7 +1389,19 @@ fn run_registered_command(
             process
                 .args(arguments)
                 .current_dir(&context.root)
-                .env("PAM_BINARY", pam_executable);
+                .env("PAM_BINARY", pam_executable)
+                // Composer executable proxies commonly use `#!/usr/bin/env php`.
+                // Never feed PAM's embedded PHP 8.5 ini to a different host CLI.
+                .env_remove("PHPRC")
+                .env("PHP_INI_SCAN_DIR", "");
+            if env::var_os("PAM_NATIVE_HOME").is_none()
+                && let Some(pam_home) = env::var_os("PAM_HOME")
+            {
+                let native_home = PathBuf::from(pam_home).join("native");
+                if native_home.is_dir() {
+                    process.env("PAM_NATIVE_HOME", native_home);
+                }
+            }
             process.envs(&command.environment);
             let status = process.status().map_err(|error| {
                 CliError::Commands(format!(
