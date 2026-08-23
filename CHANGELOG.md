@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.11 - 2026-08-23
+
+- Bundle PAM Native 0.8.2 so Android runtime installation resolves the
+  independently versioned asset from the PAM stable release channel.
+
 ## 2.0.10 - 2026-08-23
 
 - Generate official UI mobile projects against `pushinbr/pam-native-ui ^0.6`,
