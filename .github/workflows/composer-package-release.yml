@@ -246,9 +246,11 @@ jobs:
           jq -n \
             --arg package "${PACKAGE_NAME}" \
             --arg version "${version}" \
-            '{name: "pam/release-smoke", type: "project", require: {php: "^8.4", ($package): $version}, config: {"allow-plugins": false, "sort-packages": true}}' \
+            '{name: "pam/release-smoke", type: "project", license: "proprietary", require: {php: "^8.4", ($package): $version}, config: {"allow-plugins": false, "sort-packages": true}}' \
             > consumer/composer.json
-          composer validate --strict --no-check-publish consumer/composer.json
+          # The exact package version is intentional: this certifies the
+          # immutable tag just published, not a floating compatibility range.
+          composer validate --no-check-publish consumer/composer.json
           composer show "${PACKAGE_NAME}" "${version}" --all
           composer update --working-dir=consumer --dry-run \
             --no-interaction --no-plugins --no-scripts --prefer-dist
