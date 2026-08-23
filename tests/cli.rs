@@ -2434,6 +2434,8 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     use std::os::unix::fs::PermissionsExt;
 
     let project = temporary_path("package-binary-command");
+    let pam_home = project.join("pam-home");
+    fs::create_dir_all(pam_home.join("native")).unwrap();
     let package = project.join("vendor/pushinbr/tool");
     fs::create_dir_all(package.join("bin")).unwrap();
     fs::create_dir_all(project.join("vendor/composer")).unwrap();
@@ -2445,7 +2447,7 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     let executable = package.join("bin/pam-tool");
     fs::write(
         &executable,
-        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\"\nprintf 'pam=%s\\n' \"$PAM_BINARY\"\nprintf 'args=%s|%s\\n' \"$1\" \"$2\"\nexit 23\n",
+        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\"\nprintf 'pam=%s\\n' \"$PAM_BINARY\"\nprintf 'args=%s|%s\\n' \"$1\" \"$2\"\nprintf 'phprc=%s\\n' \"${PHPRC-}\"\nprintf 'scan=%s\\n' \"${PHP_INI_SCAN_DIR-}\"\nprintf 'native=%s\\n' \"${PAM_NATIVE_HOME-}\"\nexit 23\n",
     )
     .unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
@@ -2459,7 +2461,14 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     assert!(names.status.success());
     assert_eq!(String::from_utf8_lossy(&names.stdout), "tool:run\n");
 
-    let output = run_pam_in(&project, &["tool:run", "value"]);
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .current_dir(&project)
+        .env("PAM_HOME", &pam_home)
+        .env("PHPRC", "/incompatible/php.ini")
+        .env("PHP_INI_SCAN_DIR", "/incompatible/conf.d")
+        .args(["tool:run", "value"])
+        .output()
+        .unwrap();
     assert_eq!(output.status.code(), Some(23));
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(
@@ -2468,6 +2477,12 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     );
     assert!(stdout.contains(env!("CARGO_BIN_EXE_pam")), "{stdout}");
     assert!(stdout.contains("args=fixed|value"), "{stdout}");
+    assert!(stdout.contains("phprc=\n"), "{stdout}");
+    assert!(stdout.contains("scan=\n"), "{stdout}");
+    assert!(
+        stdout.contains(&format!("native={}", pam_home.join("native").display())),
+        "{stdout}"
+    );
     fs::remove_dir_all(project).unwrap();
 }
 

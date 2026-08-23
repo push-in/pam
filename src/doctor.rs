@@ -219,6 +219,7 @@ echo json_encode([
         // different PHP module ABI.
         .env_remove("PHPRC")
         .env("PHP_INI_SCAN_DIR", "")
+        .arg("-n")
         .arg("-r")
         .arg(source)
         .output()
