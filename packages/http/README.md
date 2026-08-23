@@ -5,6 +5,7 @@ Express-like routing. Laravel-like application structure. PAM-native execution.
 **[Official documentation](https://push-in.github.io/pam-docs/packages/http/) ·
 [PAM introduction](https://push-in.github.io/pam-docs/introduction/) ·
 [Upgrade guide](UPGRADE.md) · [Changelog](CHANGELOG.md) ·
+[Architecture](docs/ARCHITECTURE.md) ·
 [Report an issue](https://github.com/push-in/pam-http/issues)**
 
 ## Start here
@@ -47,9 +48,16 @@ final readonly class LoginController
 }
 ```
 
-## Eloquent ORM (default)
+## Eloquent ORM (optional)
 
-PAM API ships with Laravel's Eloquent as its official ORM. The integration
+PAM HTTP keeps its kernel independent from any database. Install Eloquent only
+when the application needs the legacy built-in integration:
+
+```bash
+pam composer require illuminate/database illuminate/events illuminate/filesystem illuminate/pagination
+```
+
+The integration
 keeps a separate connection manager per request Fiber, so connections,
 transactions and mutable database state cannot leak between persistent-worker
 requests.

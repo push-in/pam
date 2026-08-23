@@ -3,6 +3,17 @@
 All notable PAM API changes are documented here. The package follows Semantic
 Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 
+## 2.0.1 - 2026-08-22
+
+### Changed
+
+- recommend the permanent `pushinbr/pam-http-psr` package name for optional
+  PSR-7 and PSR-15 interoperability;
+- keep the production HTTP kernel independent from optional Illuminate
+  components while preserving them as explicit development suggestions;
+- align the standalone package source with the monorepo compatibility and
+  PHP 8.4/8.5 validation gates.
+
 ## 2.0.0 - 2026-08-21
 
 ### Added

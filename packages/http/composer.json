@@ -14,22 +14,22 @@
         "router",
         "validation"
     ],
-    "homepage": "https://github.com/push-in/pam",
+    "homepage": "https://github.com/push-in/pam-http",
     "support": {
         "docs": "https://push-in.github.io/pam-docs/packages/http/",
-        "issues": "https://github.com/push-in/pam/issues",
+        "issues": "https://github.com/push-in/pam-http/issues",
         "source": "https://github.com/push-in/pam-http"
     },
     "require": {
         "php": "^8.4",
-        "illuminate/database": "^13.0",
-        "illuminate/events": "^13.0",
-        "illuminate/filesystem": "^13.0",
-        "illuminate/pagination": "^13.0",
         "pushinbr/pam-contracts": "^1.1"
     },
     "suggest": {
-        "pushinbr/pam-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
+        "illuminate/database": "Required by the deprecated built-in Eloquent bridge; use the dedicated PAM database adapter when available.",
+        "illuminate/events": "Required by the deprecated built-in Eloquent bridge.",
+        "illuminate/filesystem": "Required by the deprecated built-in migration bridge.",
+        "illuminate/pagination": "Required by the deprecated built-in Eloquent resource pagination bridge.",
+        "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
         "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
     },
     "autoload": {
@@ -68,6 +68,10 @@
         "sort-packages": true
     },
     "require-dev": {
+        "illuminate/database": "^13.0",
+        "illuminate/events": "^13.0",
+        "illuminate/filesystem": "^13.0",
+        "illuminate/pagination": "^13.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5"
     }

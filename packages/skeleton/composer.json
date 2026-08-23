@@ -17,12 +17,12 @@
     "require": {
         "php": "^8.5",
         "pushinbr/pam-http": "^2.0",
-        "pushinbr/pam-psr": "^1.0",
+        "pushinbr/pam-http-psr": "^1.0",
         "pushinbr/pam-socket": "^1.1"
     },
     "require-dev": {
         "laravel/pint": "^1.30",
-        "pushinbr/pam-testing": "^1.1",
+        "pushinbr/pam-http-testing": "^1.0",
         "phpunit/phpunit": "^12.5"
     },
     "autoload": {

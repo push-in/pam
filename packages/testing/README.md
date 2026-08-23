@@ -1,34 +1,15 @@
-# pushinbr/pam-testing
-
-Fast in-memory tests for applications built with `pushinbr/pam-http`.
+# PAM Testing compatibility package
 
 ## Start here
 
-PAM Testing is a Composer package for applications running on the PAM Runtime;
-it is not a standalone test runtime. Install PAM first, open your application
-directory, and add the development package through PAM's Composer toolchain:
+This package preserves existing `pushinbr/pam-testing` installations. New applications must use:
 
 ```bash
-curl --proto '=https' --proto-redir '=https' --tlsv1.2 \
-    --connect-timeout 15 --max-time 60 --max-filesize 1048576 -fsSL \
-    https://github.com/push-in/pam/releases/latest/download/install.sh | sh
-
-pam doctor
-cd my-app
-pam composer require --dev pushinbr/pam-testing
+pam composer require --dev pushinbr/pam-http-testing
 ```
 
-```php
-$client = new Pam\Testing\TestClient($app);
-$client->get('/users/42')
-    ->assertSuccessful()
-    ->assertJsonPath('id', '42');
-```
+The replacement keeps aliases for the legacy `Pam\Testing` namespace while new code uses
+`Pam\Http\Testing`.
 
-The client invokes the application pipeline without opening a network port. Use
-Pam's Rust integration suite for transport, timeout and protocol behavior.
-
-## License
-
-Free and open-source under the [Apache License 2.0](LICENSE). You may use,
-modify, and distribute this package for any purpose, including commercially.
+Install PAM before using either package. This bridge exists only for migration and is abandoned in
+Composer in favor of `pushinbr/pam-http-testing`.

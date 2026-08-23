@@ -117,7 +117,10 @@ jobs:
           composer install --working-dir=packages/octane --no-interaction --prefer-dist
       - name: Audit locked Composer dependencies
         run: |
-          composer audit --working-dir=compat/composer-smoke --locked
+          # This fixture intentionally installs the two abandoned legacy names
+          # to prove their migration bridges. Vulnerabilities still fail; only
+          # the expected abandonment is reported here.
+          composer audit --working-dir=compat/composer-smoke --locked --abandoned=report
           composer audit --working-dir=compat/laravel-smoke --locked
           composer audit --working-dir=packages/http --locked
           composer audit --working-dir=packages/octane

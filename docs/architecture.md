@@ -54,7 +54,7 @@ O binário não contém roteador de aplicação. `Pam\Http\Server` é a primitiv
 de baixo nível; `pushinbr/pam-http` fornece `Pam\App`, rotas, middleware, error boundary e
 descoberta de providers. `pushinbr/pam-socket` fornece a API de eventos/rooms sobre o
 transporte WebSocket nativo. A integração PSR e o cliente de testes também vivem
-em `pushinbr/pam-psr` e `pushinbr/pam-testing`.
+em `pushinbr/pam-http-psr` e `pushinbr/pam-http-testing`.
 
 Essa fronteira mantém boot, rede, segurança de transporte e lifecycle no núcleo,
 mas permite versionar e instalar ergonomia de aplicação pelo Composer. Consulte
