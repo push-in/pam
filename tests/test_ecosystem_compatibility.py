@@ -230,7 +230,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertIn("pam_ref:", workflow)
         self.assertEqual(workflow.count("inputs.pam_ref != '' && inputs.pam_ref"), 4)
         self.assertIn(
-            "group: ecosystem-compatibility-${{ inputs.pam_ref != '' && inputs.pam_ref || github.ref }}",
+            "group: ecosystem-compatibility-${{ github.repository }}-${{ inputs.pam_ref != '' && inputs.pam_ref || github.ref }}",
             workflow,
         )
         self.assertIn(
