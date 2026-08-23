@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 2.0.10 - 2026-08-23
+
+- Generate official UI mobile projects against `pushinbr/pam-native-ui ^0.6`,
+  the package line compatible with the bundled PAM Native 0.8 SDK.
+
 ## 2.0.9 - 2026-08-23
 
 - Isolate Composer-provided executable commands from the embedded PHP ini so

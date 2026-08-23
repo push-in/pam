@@ -4081,7 +4081,7 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
             || (manifest_json["require"]["pam/native"] == "^0.8"
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
-    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^0.4\""));
+    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^0.6\""));
     assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));
