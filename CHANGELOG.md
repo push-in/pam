@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.0.7 - 2026-08-22
+
+- Generate new HTTP applications with the permanent
+  `pushinbr/pam-http-testing` package family.
+- Keep PHP 8.5 as the default generated application runtime and certify
+  public Composer package installation on PHP 8.5.
+- Retry transient Composer advisory-service failures while keeping dependency
+  audits fail-closed after a bounded number of attempts.
+- Avoid duplicate branch/PR Octane runs and serialize advisory audits to stay
+  within the public security service's availability envelope.
+
 ## 2.0.6 - 2026-08-22
 
 - Keep Linux clean-host extension certification fail-closed while recognizing
