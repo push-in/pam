@@ -214,6 +214,11 @@ echo json_encode([
 ], JSON_THROW_ON_ERROR);
 "#;
     let output = Command::new("php")
+        // PAM's bundled PHP 8.5 configuration targets the embedded runtime.
+        // Never leak it into an optional host-CLI comparison, which may use a
+        // different PHP module ABI.
+        .env_remove("PHPRC")
+        .env("PHP_INI_SCAN_DIR", "")
         .arg("-r")
         .arg(source)
         .output()
