@@ -34,14 +34,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - profile: php84-baseline
-            php: '8.4'
-            runtime_id: 8.4.23-r1
-            ios_minimum: '15.0'
-            plugins: share-extension health media
-            foundation_extensions: PamShareExtension
-            extensionkit_extensions: ''
-            cache_salt: php84-v1
           - profile: php85-extensions
             php: '8.5'
             runtime_id: 8.5.8-r1
@@ -69,37 +61,37 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-share-extension
-          ref: 662fa09b57dfd5aff0f9ed11f10026e09e291801
+          ref: e3098097196ba2cfa3c47654ef5b69bfd9be3180
           path: certification-plugins/share-extension
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-health
-          ref: 3f3a72ce3ec663efc250ecfa7bae3a18062cc6dc
+          ref: 4f93f2d06ba27b949bb031700ed5e94c59281a9e
           path: certification-plugins/health
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-media
-          ref: 7fbb48c7eeff8a0303f4b90b91f82bce7c4db691
+          ref: 35d9e16514969c1352977a9af767e59e449608f0
           path: certification-plugins/media
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-widgets
-          ref: b7d9106a1ba8a83af0be576ec863e72ea5b31ead
+          ref: 3df0454e083b0d3591c960b423ea657a6dd547e7
           path: certification-plugins/widgets
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-intents
-          ref: b32e2daae135cedd58d8dd7ed45e76410ceec4b4
+          ref: c4712fe103437c3244f72859724fe9b6db3d3459
           path: certification-plugins/intents
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-live-activities
-          ref: 48caf73cfcff6fea54d42d41a426e1777b62d303
+          ref: dee003b1906b9df77b0b510b5b87922d298c488a
           path: certification-plugins/live-activities
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
