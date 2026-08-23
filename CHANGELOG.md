@@ -10,6 +10,8 @@
   public Composer package installation on PHP 8.5.
 - Retry transient Composer advisory-service failures while keeping dependency
   audits fail-closed after a bounded number of attempts.
+- Avoid duplicate branch/PR Octane runs and serialize advisory audits to stay
+  within the public security service's availability envelope.
 
 ## 2.0.6 - 2026-08-22
 

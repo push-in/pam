@@ -3,6 +3,8 @@ name: PAM Octane
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - 'packages/octane/**'
       - 'runtime/**'
@@ -55,6 +57,7 @@ jobs:
         working-directory: packages/octane
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         include:
           - php: '8.5'
