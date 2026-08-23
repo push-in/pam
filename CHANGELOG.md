@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.8 - 2026-08-23
+
+- Isolate the optional host-PHP inspection in `pam doctor` from PAM's bundled
+  PHP 8.5 configuration, preventing cross-ABI extension warnings.
+- Consume the certified PAM Native 0.8.1 engine for Android distributions.
+
 ## 2.0.7 - 2026-08-22
 
 - Generate new HTTP applications with the permanent
