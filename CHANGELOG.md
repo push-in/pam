@@ -7,6 +7,7 @@
 - Isolate the optional host-PHP inspection in `pam doctor` from PAM's bundled
   PHP 8.5 configuration, preventing cross-ABI extension warnings.
 - Consume the certified PAM Native 0.8.1 engine for Android distributions.
+- Generate mobile projects against the PAM Native 0.8 package line.
 
 ## 2.0.7 - 2026-08-22
 
