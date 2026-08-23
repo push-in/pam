@@ -78,7 +78,16 @@ jobs:
       - run: composer require --dev --no-update laravel/framework:${{ matrix.laravel }} orchestra/testbench:${{ matrix.testbench }} phpunit/phpunit:${{ matrix.phpunit }}
       - run: composer update --prefer-dist --no-interaction --no-progress
       - run: composer verify
-      - run: composer audit --no-interaction
+      - name: Audit resolved dependencies
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3; do
+            if composer audit --no-interaction; then
+              exit 0
+            fi
+            test "${attempt}" -lt 3 || exit 1
+            echo "Composer advisory audit attempt ${attempt} failed; retrying."
+          done
 
   native-bridge:
     name: Native PAM ↔ Octane smoke

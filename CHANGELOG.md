@@ -8,6 +8,8 @@
   `pushinbr/pam-http-testing` package family.
 - Keep PHP 8.5 as the default generated application runtime and certify
   public Composer package installation on PHP 8.5.
+- Retry transient Composer advisory-service failures while keeping dependency
+  audits fail-closed after a bounded number of attempts.
 
 ## 2.0.6 - 2026-08-22
 
