@@ -57,7 +57,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             manifest = {
                 "name": "pushinbr/pam-native-auth",
-                "require": {"php": "^8.4"},
+                "require": {"php": "^8.5"},
                 "scripts": {},
             }
             Path(directory, "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -245,7 +245,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             manifest = {
                 "name": "pushinbr/pam-native-auth",
-                "require": {"php": "^8.4", "pushinbr/pam-native": "^0.6.1"},
+                "require": {"php": "^8.5", "pushinbr/pam-native": "^0.8.0"},
                 "scripts": {"test": "php tests/run.php"},
             }
             Path(directory, "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -275,7 +275,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
             )
             manifest = {
                 "name": "pushinbr/pam-native-auth",
-                "require": {"php": "^8.4", "pushinbr/pam-native": "^0.6.1"},
+                "require": {"php": "^8.5", "pushinbr/pam-native": "^0.8.0"},
                 "scripts": {"test": "php tests/run.php"},
             }
             (root / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -296,7 +296,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
             )
             manifest = {
                 "name": "pushinbr/pam-native-auth",
-                "require": {"php": "^8.4", "pushinbr/pam-native": "^0.6.1"},
+                "require": {"php": "^8.5", "pushinbr/pam-native": "^0.8.0"},
                 "scripts": {"test": "php tests/run.php"},
             }
             (root / "composer.json").write_text(json.dumps(manifest), encoding="utf-8")
