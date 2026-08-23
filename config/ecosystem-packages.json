@@ -22,7 +22,7 @@
     {"repository": "pam-native-observability", "composerName": "pushinbr/pam-native-observability", "roleCode": 3, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-payments", "composerName": "pushinbr/pam-native-payments", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-php", "composerName": "pushinbr/pam-native", "roleCode": 1, "requiresNative": false, "testRequired": false, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
-    {"repository": "pam-native-plugin-kit", "composerName": "pushinbr/pam-native-plugin-kit", "roleCode": 4, "requiresNative": false, "testRequired": true},
+    {"repository": "pam-native-plugin-kit", "composerName": "pushinbr/pam-native-plugin-kit", "roleCode": 4, "requiresNative": false, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-realtime", "composerName": "pushinbr/pam-native-realtime", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-scanner", "composerName": "pushinbr/pam-native-scanner", "roleCode": 2, "requiresNative": true, "testRequired": true},
     {"repository": "pam-native-share-extension", "composerName": "pushinbr/pam-native-share-extension", "roleCode": 2, "requiresNative": true, "testRequired": true},
