@@ -124,9 +124,11 @@ export LD_LIBRARY_PATH="$PAM_INSTALL_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PAT
 export PAM_EXTENSION_DIR="$PAM_INSTALL_ROOT/lib/php/extensions"
 export PHPRC="$PAM_INSTALL_ROOT/etc/php.ini"
 export PHP_INI_SCAN_DIR="$PAM_INSTALL_ROOT/etc/conf.d${PAM_PHP_INI_SCAN_DIR:+:$PAM_PHP_INI_SCAN_DIR}"
+export PATH="$PAM_INSTALL_ROOT/bin:$PATH"
 exec "$PAM_INSTALL_ROOT/bin/pam" "$@"
 EOF
 chmod 0755 "${package_root}/bin/pam" "${package_root}/bin/pam-run"
+ln -s pam-run "${package_root}/bin/php"
 
 cp LICENSE LICENSING.md README.md "${package_root}/"
 tar -C "${output_directory}" -czf "${output_directory}/${package}.tar.gz" "${package}"
