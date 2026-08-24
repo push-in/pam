@@ -693,6 +693,16 @@ pam start index.php \
   --admin-address 127.0.0.1:3010
 ```
 
+Before packaging or deploying any PAM product, run its stable release gate:
+
+```bash
+pam production certify
+```
+
+The runtime discovers the active project and delegates certification to that
+product's installed Composer command, so Native, Desktop, HTTP, and future
+packages keep their own platform-specific production contract.
+
 The production master:
 
 - starts workers with `SO_REUSEPORT`;
@@ -852,6 +862,7 @@ pam top [admin URL]                                 live cluster metrics
 pam doctor [directory]                              compare CLI, Embed, and Composer
 pam doctor --json|--schema                          emit diagnostics or its embedded contract
 pam doctor --validate doctor-report.json            verify a saved report offline
+pam production certify                              run the active product's release gate
 pam benchmark http://host/path                      built-in HTTP benchmark
 pam init [directory] --template raw|http|laravel|desktop|native|native-ui|product
                                                     scaffold and install a project
