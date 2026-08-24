@@ -5863,14 +5863,8 @@ struct LocalComposerRepository {
 fn local_native_repository() -> Option<LocalComposerRepository> {
     let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let configured = std::env::var_os("PAM_NATIVE_PACKAGE_PATH").map(PathBuf::from);
-    let installed = std::env::current_exe().ok().and_then(|executable| {
-        executable
-            .parent()
-            .map(|binary| binary.join("../share/pam/native/packages/native"))
-    });
     let candidates = [
         configured,
-        installed,
         Some(manifest_root.join("pam-native/packages/native")),
         Some(manifest_root.join("../pam-native/packages/native")),
     ];
