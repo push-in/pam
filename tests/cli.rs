@@ -2486,6 +2486,49 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     fs::remove_dir_all(project).unwrap();
 }
 
+#[cfg(unix)]
+#[test]
+fn production_certify_dispatches_to_the_project_native_certifier() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = temporary_path("production-certify-command");
+    let package = project.join("vendor/pushinbr/native");
+    fs::create_dir_all(package.join("bin")).unwrap();
+    fs::create_dir_all(project.join("vendor/composer")).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":3,"name":"native"}"#,
+    )
+    .unwrap();
+    let executable = package.join("bin/certify");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nprintf 'certify=%s|%s' \"$1\" \"$2\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        project.join("vendor/composer/installed.json"),
+        r#"{"packages":[{"name":"pushinbr/pam-native","install-path":"../pushinbr/native","extra":{"pam":{"commands":{"production:certify":{"bin":"bin/certify","arguments":["strict"],"description":"Certify production"}}}}}]}"#,
+    )
+    .unwrap();
+
+    let output = run_pam_in(
+        &project,
+        &["production", "certify", "--platform", "android"],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "certify=strict|--platform"
+    );
+    fs::remove_dir_all(project).unwrap();
+}
+
 #[test]
 fn composer_packages_can_own_contextual_product_commands() {
     let project = temporary_path("contextual-package-command");

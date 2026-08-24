@@ -1023,6 +1023,32 @@ fn run() -> Result<u8, CliError> {
         return quality::outdated(&executable, &context.root, direct).map_err(CliError::Commands);
     }
 
+    if script_arg == "production" {
+        let action = raw_args.next().ok_or_else(|| {
+            CliError::Commands("usage: pam production certify [options]".to_owned())
+        })?;
+        if action != "certify" {
+            return Err(CliError::Commands(format!(
+                "unknown production action: {}; expected certify",
+                action.to_string_lossy()
+            )));
+        }
+        let context = current_project().ok_or_else(|| {
+            CliError::Commands("`pam production certify` must run inside a PAM project".to_owned())
+        })?;
+        let command = project::registered_commands(&context)
+            .map_err(CliError::Commands)?
+            .into_iter()
+            .find(|command| command.name == "production:certify")
+            .ok_or_else(|| {
+                CliError::Commands(
+                    "this project does not provide production certification; install pushinbr/pam-native"
+                        .to_owned(),
+                )
+            })?;
+        return run_registered_command(&executable, &context, &command, raw_args.collect());
+    }
+
     if script_arg == "release" {
         let check_only = match raw_args.next() {
             None => false,
