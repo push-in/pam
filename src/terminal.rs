@@ -338,6 +338,10 @@ pub fn print_help(executable: &OsStr) {
             ("sign", "Validate release-signing configuration"),
             ("release [--check]", "Run every local release gate"),
             (
+                "production certify",
+                "Run the product-specific production certification suite",
+            ),
+            (
                 "distribution:verify <manifest>",
                 "Verify signed clean-host evidence offline",
             ),
