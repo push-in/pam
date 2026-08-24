@@ -1420,7 +1420,7 @@ fn run_registered_command(
     }
 }
 
-fn project_command_alias<'a>(kind: project::ProjectKind, requested: &'a str) -> &'a str {
+fn project_command_alias(kind: project::ProjectKind, requested: &str) -> &str {
     if kind == project::ProjectKind::Native && matches!(requested, "serve" | "start") {
         "dev"
     } else {
