@@ -2,11 +2,13 @@
 
 ## Unreleased
 
-## 2.0.18 - 2026-08-24
+## 2.0.19 - 2026-08-24
 
 - Add the stable `pam production certify` release-readiness command.
 - Register `pushinbr/pam-native-image` in the official ecosystem catalog.
-- Delegate contextual desktop development commands to PAM Desktop projects.
+- Delegate contextual `pam dev` sessions in Desktop projects to the
+  Composer-provided Desktop host and infer the current project directory when
+  no target is supplied.
 
 ## 2.0.15 - 2026-08-24
 
