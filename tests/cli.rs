@@ -30,6 +30,52 @@ fn run_pam_in(directory: &std::path::Path, arguments: &[&str]) -> Output {
         .expect("pam should start")
 }
 
+#[cfg(unix)]
+#[test]
+fn contextual_desktop_dev_delegates_without_requiring_a_project_argument() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = temporary_path("desktop-contextual-dev");
+    let package = project.join("vendor/pushinbr/pam-desktop");
+    let composer = project.join("vendor/composer");
+    fs::create_dir_all(&package).unwrap();
+    fs::create_dir_all(&composer).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":4,"name":"Desktop test"}"#,
+    )
+    .unwrap();
+    fs::write(project.join("vendor/autoload.php"), "<?php").unwrap();
+    fs::write(
+        composer.join("installed.json"),
+        r#"{"packages":[{"name":"pushinbr/pam-desktop","install-path":"../pushinbr/pam-desktop","extra":{"pam":{"commands":{"desktop":{"bin":"pam-desktop","description":"Desktop test command"}}}}}]}"#,
+    )
+    .unwrap();
+    let executable = package.join("pam-desktop");
+    fs::write(&executable, "#!/bin/sh\nprintf '%s\\n' \"$@\"\n").unwrap();
+    let mut permissions = fs::metadata(&executable).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&executable, permissions).unwrap();
+
+    let output = run_pam_in(&project, &["dev"]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "dev\n.\n");
+
+    let explicit = run_pam_in(&project, &["dev", "."]);
+    assert!(
+        explicit.status.success(),
+        "{}",
+        String::from_utf8_lossy(&explicit.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&explicit.stdout), "dev\n.\n");
+
+    fs::remove_dir_all(project).unwrap();
+}
+
 fn run_managed_pam(
     directory: &std::path::Path,
     state: &std::path::Path,
