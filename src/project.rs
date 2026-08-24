@@ -881,6 +881,11 @@ pub fn registered_commands(context: &ProjectContext) -> Result<Vec<RegisteredCom
         &mut commands,
     )?;
     let vendor_directory = crate::composer::discover(&context.root)?
+        // A project with its own composer.json must never inherit commands from
+        // an installed vendor directory belonging to an ancestor monorepo.
+        // Composer discovery intentionally walks upwards for PHP entrypoints,
+        // so command discovery constrains that result to this project root.
+        .filter(|composer| composer.root == context.root)
         .map(|composer| composer.vendor_directory)
         .unwrap_or_else(|| context.root.join("vendor"));
     let installed = vendor_directory.join("composer/installed.json");
@@ -1507,6 +1512,29 @@ mod tests {
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "tool:run");
         assert!(matches!(commands[0].target, CommandTarget::PhpScript(_)));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn does_not_inherit_package_commands_from_an_ancestor_vendor() {
+        let root = temporary("nested-composer-commands");
+        let project = root.join("packages/app");
+        fs::create_dir_all(root.join("vendor/pushinbr/tool/bin")).unwrap();
+        fs::create_dir_all(root.join("vendor/composer")).unwrap();
+        fs::create_dir_all(&project).unwrap();
+        fs::write(root.join("composer.json"), r#"{"name":"workspace/root"}"#).unwrap();
+        fs::write(root.join("vendor/autoload.php"), "<?php\n").unwrap();
+        fs::write(root.join("vendor/pushinbr/tool/bin/tool.php"), "<?php\n").unwrap();
+        fs::write(
+            root.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"android:diagnostics":{"script":"bin/tool.php"}}}}}]}"#,
+        )
+        .unwrap();
+        fs::write(project.join("composer.json"), r#"{"name":"app/native"}"#).unwrap();
+        fs::write(project.join("pam-native.json"), "{}").unwrap();
+
+        let context = discover(&project).unwrap();
+        assert!(registered_commands(&context).unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

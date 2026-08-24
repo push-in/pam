@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+## 2.0.13 - 2026-08-23
+
+- Keep package command discovery scoped to the active project so a nested app
+  without `vendor/` can run `pam composer install` instead of inheriting an
+  ancestor workspace's commands.
+- Make `pam start` and `pam serve` enter the native development flow when run
+  inside a PAM Native project.
+- Generate mobile projects against the public PAM Native 0.8.4 release without
+  retaining an installation-specific Composer path repository.
+- Give the imperative mobile starter an explicit full-screen palette so its
+  text and button remain visible under dark Android system themes.
+
+## 2.0.12 - 2026-08-23
+
+- Simplify PAM Native project startup, generated public dependency resolution
+  and the default visible Android starter experience.
+
 ## 2.0.11 - 2026-08-23
 
 - Bundle PAM Native 0.8.2 so Android runtime installation resolves the
