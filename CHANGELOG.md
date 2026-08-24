@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.19 - 2026-08-24
+
+- Delegate contextual `pam dev` sessions in Desktop projects to the
+  Composer-provided Desktop host and infer the current project directory when
+  no target is supplied.
+
 ## 2.0.15 - 2026-08-24
 
 - Package the embedded `php` launcher as a regular executable script so the
