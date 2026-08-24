@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 2.0.17 - 2026-08-24
+## 2.0.18 - 2026-08-24
 
 - Add the stable `pam production certify` release-readiness command.
 - Register `pushinbr/pam-native-image` in the official ecosystem catalog.
