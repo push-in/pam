@@ -5446,12 +5446,23 @@ final class Hello extends Component
             SafeAreaView::make(
                 Column::make(
                     Text::make('Hello from persistent PHP')
-                        ->style(new Style(fontSize: 28)),
+                        ->style(new Style(
+                            textColor: 0xFFF8FAFC,
+                            fontSize: 28,
+                            fontWeight: 700,
+                        )),
                     Button::make('Native taps: '.$this->count)
+                        ->style(new Style(
+                            backgroundColor: 0xFF4ADE80,
+                            textColor: 0xFF052E16,
+                            minHeight: 48,
+                            paddingHorizontal: 16,
+                            borderRadius: 12,
+                        ))
                         ->onPress($this->increment(...)),
                 )->style(new Style(flexGrow: 1, padding: 24, gap: 16)),
-            ),
-        );
+            )->style(new Style(flexGrow: 1)),
+        )->style(new Style(flexGrow: 1, backgroundColor: 0xFF0F172A));
     }
 
     public function increment(): void
