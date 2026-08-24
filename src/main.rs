@@ -266,13 +266,19 @@ fn run() -> Result<u8, CliError> {
         ));
     }
 
-    if let Some(context) = current_project()
-        && let Some(command) = project::registered_commands(&context)
-            .map_err(CliError::Commands)?
+    if let Some(context) = current_project() {
+        let commands = project::registered_commands(&context).map_err(CliError::Commands)?;
+        let requested = script_arg.to_string_lossy();
+        let command_name = project_command_alias(context.kind, requested.as_ref());
+        if command_name != requested {
+            eprintln!("PAM Native uses `pam dev`; forwarding `{requested}` to it.");
+        }
+        if let Some(command) = commands
             .into_iter()
-            .find(|command| command.name == script_arg.to_string_lossy())
-    {
-        return run_registered_command(&executable, &context, &command, raw_args.collect());
+            .find(|command| command.name == command_name)
+        {
+            return run_registered_command(&executable, &context, &command, raw_args.collect());
+        }
     }
 
     if script_arg == "editor:install" {
@@ -1414,6 +1420,14 @@ fn run_registered_command(
     }
 }
 
+fn project_command_alias<'a>(kind: project::ProjectKind, requested: &'a str) -> &'a str {
+    if kind == project::ProjectKind::Native && matches!(requested, "serve" | "start") {
+        "dev"
+    } else {
+        requested
+    }
+}
+
 fn resolve_script(script: &OsStr) -> Result<PathBuf, CliError> {
     let path = Path::new(script);
     let metadata = fs::metadata(path).map_err(|source| CliError::ScriptUnavailable {
@@ -1611,6 +1625,22 @@ impl std::fmt::Display for CliError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_server_commands_use_the_single_development_flow() {
+        assert_eq!(
+            project_command_alias(project::ProjectKind::Native, "serve"),
+            "dev"
+        );
+        assert_eq!(
+            project_command_alias(project::ProjectKind::Native, "start"),
+            "dev"
+        );
+        assert_eq!(
+            project_command_alias(project::ProjectKind::Api, "start"),
+            "start"
+        );
+    }
 
     #[test]
     fn post_dev_budget_removes_outputs_created_during_the_session() {

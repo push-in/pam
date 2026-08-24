@@ -21,7 +21,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 5f42c2a5ba2c16bf4d487ee98de7b7eb4d90390a
+          ref: fa49ace75a5d14507f734d1ef8f4679ea8a8c6f7
           path: pam-native
           persist-credentials: false
       - name: Check out the pinned PAM Native plugin kit
