@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.17 - 2026-08-24
+
+- Add the stable `pam production certify` release-readiness command.
+- Register `pushinbr/pam-native-image` in the official ecosystem catalog.
+- Delegate contextual desktop development commands to PAM Desktop projects.
+
 ## 2.0.15 - 2026-08-24
 
 - Package the embedded `php` launcher as a regular executable script so the
