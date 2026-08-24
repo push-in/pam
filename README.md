@@ -1,23 +1,49 @@
+<!-- pam:product-page:start -->
 <div align="center">
 
-# ⚡ PAM
+# PAM Runtime
 
-### PHP was never the ceiling. The runtime was.
+**PHP was never the ceiling. The runtime was.**
 
-**The small persistent PHP runtime behind a Composer-native application ecosystem.**
+A small persistent PHP runtime built in Rust: supervised processes, Tokio I/O, transports, Fibers, and a Composer-native extension boundary.
 
-Rust owns the runtime. Tokio owns concurrency. PHP owns your product.
+[![Release](https://img.shields.io/github/v/release/push-in/pam?style=flat-square&label=stable)](https://github.com/push-in/pam/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/push-in/pam/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/push-in/pam/actions)
+![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?style=flat-square&logo=php&logoColor=white)
+![License](https://img.shields.io/github/license/push-in/pam?style=flat-square)
 
-[![Status](https://img.shields.io/badge/PAM-2.0-16a34a?style=for-the-badge)](https://push-in.github.io/pam-docs/project/status/)
-[![PHP](https://img.shields.io/badge/PHP-8.5-777BB4?style=for-the-badge&logo=php&logoColor=white)](https://www.php.net/)
-[![Rust](https://img.shields.io/badge/Rust-1.88%2B-000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org/)
-[![License](https://img.shields.io/badge/License-Apache%202.0-2563eb?style=for-the-badge)](LICENSE)
-
-**[Read the docs](https://push-in.github.io/pam-docs/introduction/) · [Install PAM](https://push-in.github.io/pam-docs/getting-started/installation/) · [Create your first app](https://push-in.github.io/pam-docs/getting-started/first-app/) · [Explore PAM Native](https://push-in.github.io/pam-docs/native/overview/)**
+**[Documentation](https://push-in.github.io/pam-docs/introduction/) · [Why this exists](#why-this-exists) · [What you can build](#what-you-can-build) · [Quick start](#quick-start) · [Issues](https://github.com/push-in/pam/issues)**
 
 </div>
 
 ---
+
+## Why this exists
+
+A small persistent PHP runtime built in Rust: supervised processes, Tokio I/O, transports, Fibers, and a Composer-native extension boundary.
+
+| | |
+| --- | --- |
+| **Role** | Runtime |
+| **Execution path** | Rust · Tokio · PHP Embed |
+| **This repository owns** | Process lifecycle, execution, transports, async I/O, supervision |
+| **Boundary** | Routing, frameworks, Native, Desktop, and product features live in Composer packages |
+
+## What you can build
+
+- Persistent PHP APIs and services
+- Laravel workers without PHP-FPM
+- The runtime foundation for PAM Native and PAM Desktop
+
+## Quick start
+
+```bash
+curl -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh | sh
+pam doctor
+```
+
+The **[PAM documentation](https://push-in.github.io/pam-docs/introduction/)** covers prerequisites, production setup, and the complete workflow. PAM projects keep normal manifests and lockfiles; product features stay in the package that owns them.
+<!-- pam:product-page:end -->
 
 PAM — **PHP, Always in Memory** — is an unapologetically ambitious answer to a
 simple question: **how far can PHP go when we stop rebuilding and discarding it
