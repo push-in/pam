@@ -353,3 +353,14 @@ jobs:
               }
           }
           '
+          embedded_version=$(
+            "$runtime_dist/pam-ci-linux-x86_64/bin/pam-run" -r 'echo PHP_VERSION_ID;'
+          )
+          composer_child_version=$(
+            PATH=/usr/bin:/bin \
+              "$runtime_dist/pam-ci-linux-x86_64/bin/pam-run" -r '
+              passthru("php -r '\''echo PHP_VERSION_ID;'\''", $status);
+              exit($status);
+              '
+          )
+          test "${composer_child_version}" = "${embedded_version}"

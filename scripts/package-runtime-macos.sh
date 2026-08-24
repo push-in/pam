@@ -88,9 +88,11 @@ export PAM_HOME="${pam_install_root}/share/pam"
 export DYLD_LIBRARY_PATH="${pam_install_root}/lib${DYLD_LIBRARY_PATH:+:${DYLD_LIBRARY_PATH}}"
 export PHPRC="${pam_install_root}/etc/php.ini"
 export PHP_INI_SCAN_DIR="${pam_install_root}/etc/conf.d${PAM_PHP_INI_SCAN_DIR:+:${PAM_PHP_INI_SCAN_DIR}}"
+export PATH="${pam_install_root}/bin:${PATH}"
 exec "${pam_install_root}/bin/pam" "$@"
 EOF
 chmod 0755 "${package_root}/bin/pam" "${package_root}/bin/pam-run"
+ln -s pam-run "${package_root}/bin/php"
 
 cp LICENSE LICENSING.md README.md "${package_root}/"
 tar -C "${output_directory}" -czf "${output_directory}/${package}.tar.gz" "${package}"

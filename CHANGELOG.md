@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.14 - 2026-08-24
+
+- Run Composer lifecycle scripts through PAM's bundled PHP 8.5 runtime on
+  Linux and macOS, preventing host-PHP ABI conflicts and platform-check
+  failures when projects invoke `php` from Composer scripts.
+
 ## 2.0.13 - 2026-08-23
 
 - Keep package command discovery scoped to the active project so a nested app
