@@ -79,6 +79,7 @@ partir do código-fonte precisa do SDK PHP Embed.
 ```bash
 pam composer install --no-dev --classmap-authoritative
 pam doctor
+pam production certify
 pam start index.php \
   --workers 8 \
   --max-requests 10000000 \
