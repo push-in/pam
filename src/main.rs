@@ -375,6 +375,31 @@ fn run() -> Result<u8, CliError> {
         } else {
             None
         };
+        if let Some(context) = cleanable_context.as_ref()
+            && context.kind == project::ProjectKind::Desktop
+        {
+            let desktop = project::registered_commands(context)
+                .map_err(CliError::Commands)?
+                .into_iter()
+                .find(|command| command.name == "desktop")
+                .ok_or_else(|| {
+                    CliError::Commands(
+                        "PAM Desktop is not installed; run `pam composer install` and retry `pam dev`"
+                            .to_owned(),
+                    )
+                })?;
+            let mut arguments = raw_args.collect::<Vec<_>>();
+            if arguments.is_empty() {
+                arguments.push(OsString::from("."));
+            }
+            arguments.insert(0, OsString::from("dev"));
+            let outcome = run_registered_command(&executable, context, &desktop, arguments);
+            return finish_dev_with_artifact_budget(
+                cleanable_context.as_ref(),
+                artifact_budget,
+                outcome,
+            );
+        }
         let dev_script = raw_args
             .next()
             .unwrap_or_else(|| OsString::from("index.php"));
