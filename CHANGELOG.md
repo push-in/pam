@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## 2.0.15 - 2026-08-24
+
+- Package the embedded `php` launcher as a regular executable script so the
+  hardened public installer accepts runtime archives without weakening its
+  special-file policy.
+
 ## 2.0.14 - 2026-08-24
 
 - Run Composer lifecycle scripts through PAM's bundled PHP 8.5 runtime on

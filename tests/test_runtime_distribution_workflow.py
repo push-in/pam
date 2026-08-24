@@ -12,11 +12,11 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
 
         self.assertIn('export PAM_HOME="$PAM_INSTALL_ROOT/share/pam"', linux)
         self.assertIn('export PATH="$PAM_INSTALL_ROOT/bin:$PATH"', linux)
-        self.assertIn('ln -s pam-run "${package_root}/bin/php"', linux)
+        self.assertIn('cp "${package_root}/bin/pam-run" "${package_root}/bin/php"', linux)
         self.assertIn("modules='timezonedb opcache ", linux)
         self.assertIn('export PAM_HOME="${pam_install_root}/share/pam"', macos)
         self.assertIn('export PATH="${pam_install_root}/bin:${PATH}"', macos)
-        self.assertIn('ln -s pam-run "${package_root}/bin/php"', macos)
+        self.assertIn('cp "${package_root}/bin/pam-run" "${package_root}/bin/php"', macos)
 
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("composer_child_version", workflow)
