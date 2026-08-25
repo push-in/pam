@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
-      PAM_NATIVE_COMMIT: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
+      PAM_NATIVE_COMMIT: 4997e3912329b3c2e4b4e6df1eecfc04eeee8189
       PAM_PRODUCT_APPLICATION_ID: app.pam.productvisual
     steps:
       - uses: actions/checkout@v5
