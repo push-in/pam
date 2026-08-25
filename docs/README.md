@@ -1,5 +1,8 @@
 # PAM documentation
 
+- [Performance offensive](performance-offensive.md): zero-copy request bodies,
+  LTO/PGO/BOLT builds, profiling, load, soak, and regression evidence.
+
 PAM is one ecosystem operated through one command: `pam`. Start with the user
 journey; open architecture and protocol references only when you need them.
 

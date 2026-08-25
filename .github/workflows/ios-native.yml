@@ -54,7 +54,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: 713e3dcec285a7f4082e694df5f8d47aa30d5f75
+          ref: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
           path: pam-native
           persist-credentials: false
       - name: Check out the iOS capability certification plugins
@@ -167,6 +167,10 @@ jobs:
             --working-dir="${fixture}" --no-dev --no-interaction --prefer-dist
           packages=()
           for plugin in ${PAM_CERTIFICATION_PLUGINS}; do
+            plugin_manifest="${GITHUB_WORKSPACE}/certification-plugins/${plugin}/composer.json"
+            jq '.require["pushinbr/pam-native"] = ">=0.8 <1.0"' \
+              "${plugin_manifest}" >"${plugin_manifest}.tmp"
+            mv "${plugin_manifest}.tmp" "${plugin_manifest}"
             composer config --working-dir="${fixture}" \
               "repositories.certification-${plugin}" \
               "{\"type\":\"path\",\"url\":\"${GITHUB_WORKSPACE}/certification-plugins/${plugin}\",\"options\":{\"symlink\":false}}"
