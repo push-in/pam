@@ -3980,6 +3980,7 @@ fn initializes_mobile_with_tree_default_and_pam_components_enabled() {
         manifest_json["require"]["pushinbr/pam-native"] == "^0.10"
             || manifest_json["require"]["pam/native"] == "^0.10"
     );
+    assert_eq!(manifest_json["config"]["platform"]["php"], "8.5.0");
     assert!(!manifest.contains("pushinbr/pam-native-ui"));
     assert!(entry.contains("App::components(__DIR__.'/src'"));
     assert!(entry.contains("App::run(new Hello())"));
@@ -4171,6 +4172,7 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
     assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^0.10\""));
+    assert_eq!(manifest_json["config"]["platform"]["php"], "8.5.0");
     assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));

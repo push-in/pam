@@ -352,9 +352,68 @@ jobs:
     secrets:
       evidence_key: ${{ secrets.PAM_DISTRIBUTION_EVIDENCE_KEY }}
 
+  community-first-run:
+    name: Create and launch a clean community mobile app
+    needs: [build, android-runtime]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
+          persist-credentials: false
+      - uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
+          path: native-sdk
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: pam-linux-x86_64
+          path: candidate-pam
+      - uses: actions/download-artifact@v4
+        with:
+          name: pam-android-runtime
+          path: candidate-runtime
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - name: Assemble the exact candidate toolchain
+        run: |
+          pam_archive=$(find candidate-pam -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
+          test -n "${pam_archive}"
+          mkdir -p "${RUNNER_TEMP}/pam-candidate" "${RUNNER_TEMP}/pam-home"
+          tar -xzf "${pam_archive}" -C "${RUNNER_TEMP}/pam-candidate"
+          pam_bin=$(find "${RUNNER_TEMP}/pam-candidate" -type f -path '*/bin/pam-run' -print -quit)
+          test -x "${pam_bin}"
+          (cd candidate-runtime && sha256sum --check pam-android-runtime.tar.gz.sha256)
+          tar -xzf candidate-runtime/pam-android-runtime.tar.gz -C "${RUNNER_TEMP}/pam-home"
+          cargo build --locked --release --manifest-path native-sdk/Cargo.toml -p pam-native-cli
+          mkdir -p native-sdk/target
+          cp -a "${RUNNER_TEMP}/pam-home/native/target/." native-sdk/target/
+          printf 'PAM_BIN=%s\n' "${pam_bin}" >>"${GITHUB_ENV}"
+          printf 'PAM_HOME=%s\n' "${RUNNER_TEMP}/pam-home" >>"${GITHUB_ENV}"
+          printf 'PAM_NATIVE_HOME=%s\n' "${GITHUB_WORKSPACE}/native-sdk" >>"${GITHUB_ENV}"
+          printf 'PAM_NATIVE_PACKAGE_PATH=%s\n' "${GITHUB_WORKSPACE}/native-sdk/packages/native" >>"${GITHUB_ENV}"
+          printf 'PAM_NATIVE_CLI=%s\n' "${GITHUB_WORKSPACE}/native-sdk/target/release/pam-native" >>"${GITHUB_ENV}"
+      - name: Prove pam init and pam dev from an empty directory
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PAM_COMMUNITY_GATE_TIMEOUT_SECONDS: '1200'
+        with:
+          api-level: 36
+          arch: x86_64
+          profile: pixel_6
+          disable-animations: true
+          script: scripts/community-experience-gate.sh mobile
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))
-    needs: [ecosystem-compatibility, android-runtime, build, build-macos, certify-runtime-distribution]
+    needs: [ecosystem-compatibility, android-runtime, build, build-macos, certify-runtime-distribution, community-first-run]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

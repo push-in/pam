@@ -1,5 +1,17 @@
 # PAM product strategy
 
+## Community first-run is release authority
+
+Every release must prove the public journey from an empty temporary directory,
+not only repository-local fixtures: `pam init --template <official-template>`,
+dependency installation performed by PAM/Composer, and `pam dev`. Mobile gates
+must reach a live emulator process, reject PAM/runtime/plugin errors from
+logcat, and capture a real screenshot. The reusable
+`scripts/community-experience-gate.sh` covers raw, HTTP, Laravel, mobile and
+Native UI projects; release publication is structurally dependent on its mobile
+device run. Platform-specific repositories add the same gate to their own
+publication graph.
+
 This document turns PAM's broad product ambition into an evidence-driven program.
 It is a planning artifact, not a claim that every listed capability already
 exists. Items are explicitly classified as **shipped**, **prove**, or **explore**.

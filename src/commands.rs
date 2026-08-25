@@ -1023,7 +1023,7 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
             "phpunit/phpunit": "^12.5"
         },
         "autoload": {"psr-4": {"App\\": "src/"}},
-        "config": {"platform-check": true, "sort-packages": true},
+        "config": {"platform": {"php": "8.5.0"}, "platform-check": true, "sort-packages": true},
         "scripts": {
             "dev": "pam dev index.php",
             "start": "pam start index.php",
@@ -1135,7 +1135,7 @@ fn init_product(directory: &Path, options: &InitOptions) -> Result<(), String> {
     "license": "proprietary",
     "require": {"php": "^8.5"},
     "autoload": {"psr-4": {"Product\\Contracts\\": "src/"}},
-    "config": {"platform-check": true, "sort-packages": true}
+    "config": {"platform": {"php": "8.5.0"}, "platform-check": true, "sort-packages": true}
 }
 "#,
     )?;
@@ -3616,6 +3616,9 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
             }
         },
         "config": {
+            "platform": {
+                "php": "8.5.0"
+            },
             "platform-check": true,
             "sort-packages": true
         },
@@ -5318,6 +5321,9 @@ fn init_mobile(
             }
         },
         "config": {
+            "platform": {
+                "php": "8.5.0"
+            },
             "platform-check": true,
             "sort-packages": true
         },
@@ -5948,7 +5954,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-native-ui": "0.1.0"
+                        "pushinbr/pam-native-ui": "0.10.1"
                     }
                 }
             })
