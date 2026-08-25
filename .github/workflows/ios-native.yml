@@ -54,44 +54,44 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: dd486195a047471665d54fe9feb76b11a1391d87
+          ref: 713e3dcec285a7f4082e694df5f8d47aa30d5f75
           path: pam-native
           persist-credentials: false
       - name: Check out the iOS capability certification plugins
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-share-extension
-          ref: e3098097196ba2cfa3c47654ef5b69bfd9be3180
+          ref: 891fafc42fa952ee41acab5d73376399d5a060a5
           path: certification-plugins/share-extension
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-health
-          ref: 4f93f2d06ba27b949bb031700ed5e94c59281a9e
+          ref: 3213bb085aa9ea1280163c70112cb0e980fd8770
           path: certification-plugins/health
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-media
-          ref: 35d9e16514969c1352977a9af767e59e449608f0
+          ref: 201fba21df7da838f9542a1422a3b57706c62b77
           path: certification-plugins/media
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-widgets
-          ref: 3df0454e083b0d3591c960b423ea657a6dd547e7
+          ref: dd3777b965522abfd5e88f9eaac5b78983e85b9d
           path: certification-plugins/widgets
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-intents
-          ref: c4712fe103437c3244f72859724fe9b6db3d3459
+          ref: 4b8f4523c185f59d3c29163a8beb55d91dd5b4a2
           path: certification-plugins/intents
           persist-credentials: false
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native-live-activities
-          ref: dee003b1906b9df77b0b510b5b87922d298c488a
+          ref: 4b1777b924a3716b36ab618b4892725384827562
           path: certification-plugins/live-activities
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
