@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.0.20 - 2026-08-24
+
+- Bundle the certified PAM Native 0.9.1 SDK and Android engines so Composer
+  applications cannot combine the new PHP protocol with an older native host.
+- Pin CI, visual, evidence, Android and iOS certification to the same immutable
+  PAM Native 0.9.1 revision used by the runtime release.
+
 ## 2.0.19 - 2026-08-24
 
 - Add the stable `pam production certify` release-readiness command.
