@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
           fetch-depth: 0
@@ -60,14 +60,14 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - name: Validate tag matches the runtime version
         env:
           PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
         run: scripts/package-release.sh validate-tag "${PAM_RELEASE_TAG}"
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
@@ -76,7 +76,7 @@ jobs:
       - uses: android-actions/setup-android@v4
       - name: Install pinned Android NDK
         run: sdkmanager "ndk;27.1.12297006"
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: aarch64-linux-android,x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
@@ -101,7 +101,7 @@ jobs:
         if: github.event.repository.visibility == 'public'
         with:
           subject-path: dist/pam-android-runtime.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-android-runtime
           path: |
@@ -134,7 +134,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
             ca-certificates curl git gnupg software-properties-common sudo \
             unzip zstd
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - name: Validate tag matches the runtime version
@@ -142,13 +142,13 @@ jobs:
           PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
         run: scripts/package-release.sh validate-tag "${PAM_RELEASE_TAG}"
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
           path: pam-native
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: clippy,rustfmt
       - uses: shivammathur/setup-php@v2
@@ -237,7 +237,7 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: dist/*.tar.gz
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-${{ matrix.target }}
           path: |
@@ -263,7 +263,7 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
       - name: Validate tag matches the runtime version
@@ -271,13 +271,13 @@ jobs:
           PAM_RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref_name }}
         run: scripts/package-release.sh validate-tag "${PAM_RELEASE_TAG}"
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
           path: pam-native
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
       - uses: Swatinem/rust-cache@v2
@@ -329,7 +329,7 @@ jobs:
         uses: actions/attest@v4
         with:
           subject-path: dist/*.tar.gz
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-${{ matrix.target }}
           path: |
@@ -361,28 +361,28 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: pam-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: certification-runtime-distribution-linux-x86_64-${{ github.sha }}
           path: runtime-distribution-certification/linux-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: certification-runtime-distribution-linux-aarch64-${{ github.sha }}
           path: runtime-distribution-certification/linux-aarch64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: certification-runtime-distribution-macos-x86_64-${{ github.sha }}
           path: runtime-distribution-certification/macos-x86_64
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: certification-runtime-distribution-macos-arm64-${{ github.sha }}
           path: runtime-distribution-certification/macos-arm64

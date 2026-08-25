@@ -52,23 +52,23 @@ jobs:
       PAM_RECOVERY_MAX_READINESS_P95_MILLIS: '150'
       PAM_RECOVERY_MAX_RSS_GROWTH_BYTES: '16777216'
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
           path: pam-native
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.100.0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
           coverage: none
           tools: composer:v2
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: env.PAM_EVIDENCE_SUITE_ID == '6'
         with:
           node-version: '22.22.0'
@@ -132,7 +132,7 @@ jobs:
           esac
           php benchmarks/octane/evidence-manifest.php \
             "${results}" "${PAM_EVIDENCE_SUITE_ID}" --verify
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: pam-evidence-suite-${{ env.PAM_EVIDENCE_SUITE_ID }}-${{ github.sha }}

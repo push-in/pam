@@ -24,11 +24,11 @@ jobs:
       PAM_NATIVE_COMMIT: cde29febd6f1ffbeff10e3b16f0a20e094ee3476
       PAM_PRODUCT_APPLICATION_ID: app.pam.productvisual
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: ${{ env.PAM_NATIVE_COMMIT }}
@@ -40,7 +40,7 @@ jobs:
           java-version: '17'
           cache: gradle
       - uses: android-actions/setup-android@v4
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           targets: x86_64-linux-android
       - uses: shivammathur/setup-php@v2
@@ -135,7 +135,7 @@ jobs:
           mkdir -p "${fixture}/artifacts"
           adb logcat -d -t 2000 2>/dev/null \
             >"${fixture}/artifacts/android-logcat.txt" || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: pam-product-android-visual-${{ github.sha }}
