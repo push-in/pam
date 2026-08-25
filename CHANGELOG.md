@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+## 2.2.0 - 2026-08-25
+
+- Generate Core and UI mobile applications against the stable PAM Native 1.x
+  and PAM Native UI 1.x contracts while preserving independent Composer
+  packages and optional capabilities.
+- Make clean `pam init` plus `pam dev` journeys for raw, HTTP, Laravel, mobile
+  and Native UI starters a mandatory release gate, including emulator launch,
+  process, Logcat and screenshot evidence for Android products.
+- Pin PAM Native 1.0, the official plugin capability contracts and PHP 8.5
+  runtime inputs to immutable, CI-certified revisions.
+
 ## 2.1.0 - 2026-08-24
 
 - Move request bodies into persistent PHP workers without an intermediate
