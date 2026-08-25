@@ -1,6 +1,6 @@
 [package]
 name = "pam"
-version = "2.0.20"
+version = "2.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Pam — PHP, Always in Memory: a persistent PHP runtime powered by Rust and the Embed SAPI"
@@ -39,6 +39,11 @@ tungstenite = "0.29.0"
 
 [profile.release]
 codegen-units = 1
-lto = "thin"
+lto = "fat"
 panic = "abort"
 strip = "symbols"
+
+[profile.performance]
+inherits = "release"
+debug = "line-tables-only"
+strip = "none"

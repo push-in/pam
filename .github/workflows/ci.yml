@@ -83,6 +83,7 @@ jobs:
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
       - name: Format
         run: |
+          bash -n scripts/build-performance.sh
           cargo fmt --all -- --check
           cargo run --locked -- docs:generate docs/cli-reference.md --check
           python3 -m json.tool docs/schemas/pam.schema.json >/dev/null

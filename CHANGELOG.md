@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 2.1.0 - 2026-08-24
+
+- Move request bodies into persistent PHP workers without an intermediate
+  allocation or byte-for-byte copy on HTTP/1 and HTTP/3 hot paths.
+- Use fat LTO and one codegen unit for public release builds.
+- Add a dedicated profiling build with symbols plus reproducible PGO training
+  and optional Linux x86_64 BOLT post-link optimization.
+- Document evidence-driven profiling and the existing HTTP load, soak,
+  startup, recovery, tail-latency, throughput, and memory gates.
+
 ## 2.0.20 - 2026-08-24
 
 - Bundle the certified PAM Native 0.9.1 SDK and Android engines so Composer

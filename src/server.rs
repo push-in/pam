@@ -1800,7 +1800,7 @@ async fn handle_http3_request(
                     &target,
                     Version::HTTP_3,
                     &headers,
-                    &body,
+                    Bytes::from(body),
                     &request_id,
                     &traceparent,
                 )
@@ -2132,7 +2132,7 @@ async fn http_dispatch(
         target,
         version,
         &headers,
-        &body,
+        body,
         &request_id,
         &traceparent,
     )
@@ -2310,7 +2310,7 @@ async fn invoke_php_http(
     target: &str,
     version: Version,
     headers: &HeaderMap,
-    body: &[u8],
+    body: Bytes,
     request_id: &str,
     traceparent: &str,
 ) -> (Response, usize) {
@@ -2323,7 +2323,7 @@ async fn invoke_php_http(
             target: target.to_owned(),
             version,
             headers: headers.clone(),
-            body: Bytes::copy_from_slice(body),
+            body,
             request_id: request_id.to_owned(),
             traceparent: traceparent.to_owned(),
         })
