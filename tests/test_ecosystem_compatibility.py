@@ -208,7 +208,12 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("repository: push-in/pam-native-php", workflow)
+        self.assertIn("github.event.repository.name == 'pam-native'", workflow)
+        self.assertIn("github.event.repository.name == 'pam-native-php'", workflow)
+        self.assertIn("repository: push-in/${{ github.event.repository.name }}", workflow)
+        self.assertIn("repository: push-in/pam-native", workflow)
+        self.assertIn("candidate_version=$(sed -n", workflow)
+        self.assertIn("pam-native-candidate/packages/native/src/Protocol.php", workflow)
         self.assertIn("ref: ${{ github.ref }}", workflow)
         self.assertIn("matrix.package.requiresNative", workflow)
         self.assertIn("repositories.pam-native-candidate", workflow)
