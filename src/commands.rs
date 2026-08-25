@@ -1023,7 +1023,7 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
             "phpunit/phpunit": "^12.5"
         },
         "autoload": {"psr-4": {"App\\": "src/"}},
-        "config": {"platform-check": true, "sort-packages": true},
+        "config": {"platform": {"php": "8.5.0"}, "platform-check": true, "sort-packages": true},
         "scripts": {
             "dev": "pam dev index.php",
             "start": "pam start index.php",
@@ -1135,7 +1135,7 @@ fn init_product(directory: &Path, options: &InitOptions) -> Result<(), String> {
     "license": "proprietary",
     "require": {"php": "^8.5"},
     "autoload": {"psr-4": {"Product\\Contracts\\": "src/"}},
-    "config": {"platform-check": true, "sort-packages": true}
+    "config": {"platform": {"php": "8.5.0"}, "platform-check": true, "sort-packages": true}
 }
 "#,
     )?;
@@ -3616,6 +3616,9 @@ fn init_desktop(directory: &Path) -> Result<(), String> {
             }
         },
         "config": {
+            "platform": {
+                "php": "8.5.0"
+            },
             "platform-check": true,
             "sort-packages": true
         },
@@ -5291,9 +5294,9 @@ fn init_mobile(
     let mut requirements = serde_json::json!({
         "php": "^8.5"
     });
-    requirements[native_package] = serde_json::json!("^0.10");
+    requirements[native_package] = serde_json::json!("^1.0");
     if with_official_ui {
-        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^0.10");
+        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^1.0");
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
@@ -5318,6 +5321,9 @@ fn init_mobile(
             }
         },
         "config": {
+            "platform": {
+                "php": "8.5.0"
+            },
             "platform-check": true,
             "sort-packages": true
         },
@@ -5948,7 +5954,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-native-ui": "0.1.0"
+                        "pushinbr/pam-native-ui": "1.0.0"
                     }
                 }
             })

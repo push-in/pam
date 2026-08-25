@@ -158,7 +158,8 @@ class RuntimeDistributionWorkflowTest(unittest.TestCase):
             "evidence_key: ${{ secrets.PAM_DISTRIBUTION_EVIDENCE_KEY }}", workflow
         )
         self.assertIn("vars.PAM_DISTRIBUTION_EVIDENCE_KEY_SHA256", workflow)
-        self.assertIn("certify-runtime-distribution]", workflow)
+        self.assertIn("certify-runtime-distribution", workflow)
+        self.assertIn("community-first-run", workflow)
         self.assertIn("docs/schemas/distribution-evidence.schema.json", workflow)
         self.assertIn("Package the signed clean-host certification", workflow)
         self.assertIn(
