@@ -18,6 +18,10 @@ class CommunityExperienceGateTest(unittest.TestCase):
         self.assertIn("init_mobile native-ui", script)
         self.assertIn("screencap -p", script)
         self.assertIn("PluginException", script)
+        self.assertIn('if [[ -f "${directory}/composer.json" ]]', script)
+        self.assertIn('composer.lock is missing in Composer project', script)
+        self.assertIn('dependency artifacts unexpectedly exist in Composer-free project', script)
+        self.assertNotIn('test -f "${directory}/composer.lock"', script)
 
     def test_release_publication_requires_a_real_first_run(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
