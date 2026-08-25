@@ -37,6 +37,25 @@ publication metadata. Performance changes must use the checked-in benchmark
 protocol and disclose the source commit, dirty state, hardware, runtime versions,
 worker count and complete results.
 
+## Mandatory release gate
+
+No PAM release may be published from repository-local tests alone. Before any
+tag is published, the release candidate must run:
+
+```bash
+scripts/community-experience-gate.sh all
+```
+
+The gate creates fresh projects in temporary directories for every official
+template (`raw`, `http`, `laravel`, `mobile`, and `native-ui`) and starts each
+one with `pam dev`. PAM itself must provision the supported Composer, PHP,
+Gradle, Android SDK/NDK, and license requirements needed by that journey; a
+developer must not need to repair the generated project manually. Mobile
+projects pass only after the application is installed and alive on an Android
+emulator, runtime errors are absent from logcat, and a real screenshot is
+captured. The release publication job must depend on this gate and must fail
+closed when any template cannot complete its first run.
+
 ## Pull requests
 
 Keep changes focused, add regression tests, update documentation and describe
