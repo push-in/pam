@@ -65,6 +65,34 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("must constrain pushinbr/pam-native", result.stderr)
 
+    def test_backend_sync_adapter_is_independent_from_the_native_frontend(self) -> None:
+        matrix = json.loads(self.run_script("matrix").stdout)
+        backend = next(
+            package
+            for package in matrix
+            if package["repository"] == "pam-native-sync-laravel"
+        )
+        self.assertEqual(backend["roleCode"], 3)
+        self.assertFalse(backend["requiresNative"])
+
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = {
+                "name": "pushinbr/pam-native-sync-laravel",
+                "require": {"php": "^8.5"},
+                "scripts": {"test": "phpunit"},
+            }
+            Path(directory, "composer.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+            workflow = Path(directory, ".github/workflows")
+            workflow.mkdir(parents=True)
+            workflow.joinpath("publication-compatibility.yml").write_text(
+                """on:\n  push:\n    tags: ['v*']\njobs:\n  compatibility:\n    uses: push-in/pam/.github/workflows/ecosystem-compatibility.yml@main\n""",
+                encoding="utf-8",
+            )
+            result = self.run_script("verify", directory, "pam-native-sync-laravel")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_reusable_workflow_certifies_the_calling_package_tag(self) -> None:
         workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
             encoding="utf-8"
