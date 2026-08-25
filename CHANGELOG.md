@@ -11,6 +11,8 @@
   and optional Linux x86_64 BOLT post-link optimization.
 - Document evidence-driven profiling and the existing HTTP load, soak,
   startup, recovery, tail-latency, throughput, and memory gates.
+- Bundle and generate projects against the canonical PAM Native 0.10 line and
+  its matching PAM Native UI 0.10 compatibility contract.
 
 ## 2.0.20 - 2026-08-24
 
