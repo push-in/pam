@@ -77,11 +77,11 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v5
         if: >-
-          github.event.repository.name == 'pam-native-php' &&
+          (github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') &&
           github.ref_type == 'tag' &&
           matrix.package.requiresNative
         with:
-          repository: push-in/pam-native-php
+          repository: push-in/${{ github.event.repository.name }}
           ref: ${{ github.ref }}
           path: pam-native-candidate
           persist-credentials: false
@@ -102,7 +102,7 @@ jobs:
       - id: native-candidate
         name: Bind dependents to the PAM Native release candidate
         if: >-
-          github.event.repository.name == 'pam-native-php' &&
+          (github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') &&
           github.ref_type == 'tag' &&
           matrix.package.requiresNative
         shell: bash
