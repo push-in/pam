@@ -22,7 +22,7 @@ class CommunityExperienceGateTest(unittest.TestCase):
     def test_release_publication_requires_a_real_first_run(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")
         self.assertIn("community-first-run:", workflow)
-        self.assertIn("scripts/community-experience-gate.sh mobile", workflow)
+        self.assertIn("scripts/community-experience-gate.sh all", workflow)
         publish = workflow.split("\n  publish:\n", maxsplit=1)[1]
         self.assertIn("community-first-run", publish.split("\n    runs-on:", maxsplit=1)[0])
 

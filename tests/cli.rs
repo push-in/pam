@@ -2341,7 +2341,7 @@ fn initializes_and_discovers_a_contextual_native_project() {
     assert_eq!(manifest["native"]["platforms"], serde_json::json!([1]));
     let composer: serde_json::Value =
         serde_json::from_slice(&fs::read(project.join("composer.json")).unwrap()).unwrap();
-    assert_eq!(composer["require"]["pushinbr/pam-native"], "^0.10");
+    assert_eq!(composer["require"]["pushinbr/pam-native"], "^1.0");
     let native: serde_json::Value =
         serde_json::from_slice(&fs::read(project.join("pam-native.json")).unwrap()).unwrap();
     assert_eq!(native["applicationId"], "com.example.shop");
@@ -3977,8 +3977,8 @@ fn initializes_mobile_with_tree_default_and_pam_components_enabled() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.php")).unwrap();
     assert!(
-        manifest_json["require"]["pushinbr/pam-native"] == "^0.10"
-            || manifest_json["require"]["pam/native"] == "^0.10"
+        manifest_json["require"]["pushinbr/pam-native"] == "^1.0"
+            || manifest_json["require"]["pam/native"] == "^1.0"
     );
     assert_eq!(manifest_json["config"]["platform"]["php"], "8.5.0");
     assert!(!manifest.contains("pushinbr/pam-native-ui"));
@@ -4167,11 +4167,11 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.pam")).unwrap();
     assert!(
-        manifest_json["require"]["pushinbr/pam-native"] == "^0.10"
-            || (manifest_json["require"]["pam/native"] == "^0.10"
+        manifest_json["require"]["pushinbr/pam-native"] == "^1.0"
+            || (manifest_json["require"]["pam/native"] == "^1.0"
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
-    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^0.10\""));
+    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^1.0\""));
     assert_eq!(manifest_json["config"]["platform"]["php"], "8.5.0");
     assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));

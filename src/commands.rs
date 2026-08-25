@@ -5294,9 +5294,9 @@ fn init_mobile(
     let mut requirements = serde_json::json!({
         "php": "^8.5"
     });
-    requirements[native_package] = serde_json::json!("^0.10");
+    requirements[native_package] = serde_json::json!("^1.0");
     if with_official_ui {
-        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^0.10");
+        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^1.0");
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
@@ -5954,7 +5954,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-native-ui": "0.10.1"
+                        "pushinbr/pam-native-ui": "1.0.0"
                     }
                 }
             })

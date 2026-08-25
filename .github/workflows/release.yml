@@ -353,10 +353,10 @@ jobs:
       evidence_key: ${{ secrets.PAM_DISTRIBUTION_EVIDENCE_KEY }}
 
   community-first-run:
-    name: Create and launch a clean community mobile app
+    name: Create and run every clean community starter
     needs: [build, android-runtime]
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v5
         with:
@@ -400,7 +400,7 @@ jobs:
           printf 'PAM_NATIVE_HOME=%s\n' "${GITHUB_WORKSPACE}/native-sdk" >>"${GITHUB_ENV}"
           printf 'PAM_NATIVE_PACKAGE_PATH=%s\n' "${GITHUB_WORKSPACE}/native-sdk/packages/native" >>"${GITHUB_ENV}"
           printf 'PAM_NATIVE_CLI=%s\n' "${GITHUB_WORKSPACE}/native-sdk/target/release/pam-native" >>"${GITHUB_ENV}"
-      - name: Prove pam init and pam dev from an empty directory
+      - name: Prove every documented pam init and pam dev journey
         uses: reactivecircus/android-emulator-runner@v2
         env:
           PAM_COMMUNITY_GATE_TIMEOUT_SECONDS: '1200'
@@ -409,7 +409,7 @@ jobs:
           arch: x86_64
           profile: pixel_6
           disable-animations: true
-          script: scripts/community-experience-gate.sh mobile
+          script: scripts/community-experience-gate.sh all
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))
