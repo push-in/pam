@@ -76,12 +76,32 @@ run_bounded_server_dev() {
   return 1
 }
 
+assert_dependency_install() {
+  local directory=$1
+  if [[ -f "${directory}/composer.json" ]]; then
+    if [[ ! -f "${directory}/composer.lock" ]]; then
+      printf 'Community gate: composer.lock is missing in Composer project %s\n' "${directory}" >&2
+      return 1
+    fi
+    if [[ ! -f "${directory}/vendor/autoload.php" ]]; then
+      printf 'Community gate: Composer dependencies were not installed in %s\n' "${directory}" >&2
+      return 1
+    fi
+    return 0
+  fi
+
+  if [[ -f "${directory}/composer.lock" || -d "${directory}/vendor" ]]; then
+    printf 'Community gate: dependency artifacts unexpectedly exist in Composer-free project %s\n' "${directory}" >&2
+    return 1
+  fi
+}
+
 init_server() {
   local template=$1
   local name=$2
   local directory=${gate_root}/${name}
   "${pam_bin}" init "${directory}" --template "${template}" --no-interaction
-  test -f "${directory}/composer.lock"
+  assert_dependency_install "${directory}"
   run_bounded_server_dev "${directory}" 31987
 }
 
@@ -94,7 +114,7 @@ init_mobile() {
   adb get-state >/dev/null
   "${pam_bin}" init "${directory}" --template "${template}" --no-interaction \
     --platform android --application-id "${application_id}" --name "Community Gate"
-  test -f "${directory}/composer.lock"
+  assert_dependency_install "${directory}"
 
   local log=${directory}/community-dev.log
   (
