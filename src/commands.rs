@@ -5291,9 +5291,9 @@ fn init_mobile(
     let mut requirements = serde_json::json!({
         "php": "^8.5"
     });
-    requirements[native_package] = serde_json::json!("^0.8");
+    requirements[native_package] = serde_json::json!("^0.9");
     if with_official_ui {
-        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^0.6");
+        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^0.9");
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
