@@ -139,6 +139,13 @@ jobs:
           PHP_CONFIG="${php_config}" \
           PAM_PHP_LIB_DIR="${php_sdk}/lib" \
             cargo build --locked
+          cargo build --locked \
+            --manifest-path pam-native/Cargo.toml \
+            --package pam-native-cli
+          test -x pam-native/target/debug/pam-native
+          printf 'PAM_NATIVE_CLI=%s\n' \
+            "${GITHUB_WORKSPACE}/pam-native/target/debug/pam-native" \
+            >>"${GITHUB_ENV}"
           printf 'DYLD_LIBRARY_PATH=%s\n' "${php_sdk}/lib" >>"${GITHUB_ENV}"
       - name: Generate isolated iOS application fixture
         run: |
