@@ -85,6 +85,16 @@ jobs:
           ref: ${{ github.ref }}
           path: pam-native-candidate
           persist-credentials: false
+      - uses: actions/checkout@v5
+        if: >-
+          matrix.package.requiresNative &&
+          (github.ref_type != 'tag' ||
+          (github.event.repository.name != 'pam-native' && github.event.repository.name != 'pam-native-php'))
+        with:
+          repository: push-in/pam-native
+          ref: main
+          path: pam-native-candidate
+          persist-credentials: false
       - uses: shivammathur/setup-php@v2
         with:
           php-version: ${{ matrix.php }}
@@ -101,17 +111,19 @@ jobs:
           composer validate "${validate[@]}"
       - id: native-candidate
         name: Bind dependents to the PAM Native release candidate
-        if: >-
-          (github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') &&
-          github.ref_type == 'tag' &&
-          matrix.package.requiresNative
+        if: matrix.package.requiresNative
         shell: bash
         env:
-          CANDIDATE_TAG: ${{ github.ref_name }}
+          CANDIDATE_TAG: ${{ (github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') && github.ref_type == 'tag' && github.ref_name || '' }}
         run: |
-          candidate_version=${CANDIDATE_TAG#v}
+          if test -n "${CANDIDATE_TAG}"; then
+            candidate_version=${CANDIDATE_TAG#v}
+          else
+            candidate_version=$(sed -n "s/.*SDK_VERSION = '\([^']*\)'.*/\1/p" \
+              pam-native-candidate/packages/native/src/Protocol.php)
+          fi
           if [[ ! "${candidate_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            printf 'Invalid PAM Native release tag: %s\n' "${CANDIDATE_TAG}" >&2
+            printf 'Invalid PAM Native candidate version: %s\n' "${candidate_version}" >&2
             exit 1
           fi
           repository=$(jq -cn --arg version "${candidate_version}" '{
