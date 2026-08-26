@@ -109,6 +109,9 @@ jobs:
             dist/pam-android-runtime.tar.gz.sha256
           if-no-files-found: error
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   build:
     needs: release-preflight
@@ -245,6 +248,9 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   build-macos:
     needs: release-preflight
@@ -337,6 +343,9 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   certify-runtime-distribution:
     name: Certify Linux and macOS runtime distributions
@@ -410,6 +419,9 @@ jobs:
           profile: pixel_6
           disable-animations: true
           script: scripts/community-experience-gate.sh all
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   publish:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && startsWith(inputs.release_tag, 'v'))

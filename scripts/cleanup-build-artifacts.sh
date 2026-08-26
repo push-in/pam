@@ -17,6 +17,8 @@ paths=(
   .pam-native/ios/App/DerivedData
   .pam-native/ios/App/build
   .pam-native/ios/HotReloadBundle
+  pam-native/target
+  native-sdk/target
 )
 
 for relative in "${paths[@]}"; do
