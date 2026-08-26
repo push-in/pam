@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.2.2 - 2026-08-26
+
+- Isolate Composer package executables and their platform-tool descendants
+  from PAM's private Linux and macOS dynamic-loader paths, preventing host
+  tools such as curl, Gradle and git from loading incompatible bundled
+  libraries during clean mobile first runs.
+- Preserve the mandatory raw, HTTP, Laravel, mobile and Native UI clean-room
+  release gate that detected the loader-boundary regression before release.
+
 ## 2.2.0 - 2026-08-25
 
 - Generate Core and UI mobile applications against the stable PAM Native 1.x
