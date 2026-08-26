@@ -16,6 +16,23 @@ else
 fi
 keep=${PAM_COMMUNITY_GATE_KEEP:-0}
 dev_pid=
+active_log=
+
+report_error() {
+  local status=$?
+  trap - ERR
+  local line=${1:-unknown}
+  local command=${2:-unknown}
+  printf 'Community gate: command failed at line %s (exit %s): %s\n' \
+    "${line}" "${status}" "${command}" >&2
+  if [[ -n "${active_log}" && -f "${active_log}" ]]; then
+    printf '%s\n' '--- pam dev log (last 240 lines) ---' >&2
+    tail -240 "${active_log}" >&2 || true
+  fi
+  return "${status}"
+}
+
+trap 'report_error "${LINENO}" "${BASH_COMMAND}"' ERR
 
 if [[ ! -x "${pam_bin}" ]]; then
   printf 'Community gate: PAM_BIN is not executable: %s\n' "${pam_bin}" >&2
@@ -57,6 +74,7 @@ run_bounded_server_dev() {
   local directory=$1
   local port=$2
   local log=${directory}/community-dev.log
+  active_log=${log}
   (
     cd "${directory}"
     exec env PAM_PORT="${port}" "${pam_bin}" dev
@@ -73,6 +91,7 @@ run_bounded_server_dev() {
     if curl -fsS --connect-timeout 1 --max-time 2 \
       "http://127.0.0.1:${port}/api/ping" | grep -q 'pong'; then
       stop_dev
+      active_log=
       return 0
     fi
     if ! kill -0 "${dev_pid}" 2>/dev/null; then
@@ -130,6 +149,7 @@ init_mobile() {
   assert_dependency_install "${directory}"
 
   local log=${directory}/community-dev.log
+  active_log=${log}
   (
     cd "${directory}"
     exec "${pam_bin}" dev .
@@ -141,17 +161,46 @@ init_mobile() {
     if adb shell pidof "${package}" 2>/dev/null | grep -Eq '[0-9]'; then
       sleep 3
       local pid
-      pid=$(adb shell pidof "${package}" | tr -d '\r')
-      if adb logcat -d --pid="${pid}" -t 400 | grep -Eiq \
-        'PluginException|FATAL EXCEPTION|E PamNative.*(error|failed)|Pam Native failed'; then
+      pid=$(adb shell pidof "${package}" 2>/dev/null | tr -d '\r' || true)
+      if [[ -z "${pid}" ]]; then
+        printf 'Community gate: %s restarted while collecting evidence; retrying readiness\n' \
+          "${package}" >&2
+        sleep 2
+        continue
+      fi
+      local logcat_file=${directory}/android-logcat.txt
+      adb logcat -d --pid="${pid}" -t 400 >"${logcat_file}" 2>&1 || true
+      if grep -Eiq \
+        'PluginException|FATAL EXCEPTION|E PamNative.*(error|failed)|Pam Native failed' \
+        "${logcat_file}"; then
         printf 'Community gate: native runtime reported an error for %s\n' "${package}" >&2
-        adb logcat -d --pid="${pid}" -t 400 >&2
+        tail -400 "${logcat_file}" >&2
         return 1
       fi
       mkdir -p "${directory}/evidence"
-      adb exec-out screencap -p >"${directory}/evidence/android.png"
-      file "${directory}/evidence/android.png" | grep -q 'PNG image data'
+      local screenshot=${directory}/evidence/android.png
+      local screenshot_ok=0
+      local screenshot_attempt
+      for screenshot_attempt in 1 2 3 4 5; do
+        if adb exec-out screencap -p >"${screenshot}" 2>/dev/null &&
+          file "${screenshot}" | grep -q 'PNG image data'; then
+          screenshot_ok=1
+          break
+        fi
+        printf 'Community gate: screenshot attempt %s/5 failed for %s; retrying\n' \
+          "${screenshot_attempt}" "${package}" >&2
+        sleep 2
+      done
+      if [[ "${screenshot_ok}" != 1 ]]; then
+        printf 'Community gate: could not capture valid Android evidence for %s\n' \
+          "${package}" >&2
+        adb devices -l >&2 || true
+        return 1
+      fi
+      printf 'Community gate: Android launch proven for %s (pid %s, screenshot %s)\n' \
+        "${package}" "${pid}" "${screenshot}"
       stop_dev
+      active_log=
       return 0
     fi
     if ! kill -0 "${dev_pid}" 2>/dev/null; then
