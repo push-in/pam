@@ -25,6 +25,10 @@ class CommunityExperienceGateTest(unittest.TestCase):
         self.assertIn('exec env PAM_PORT="${port}" "${pam_bin}" dev', script)
         self.assertIn('exec "${pam_bin}" dev .', script)
         self.assertIn("stop_dev", script)
+        self.assertIn("report_error", script)
+        self.assertIn("android-logcat.txt", script)
+        self.assertIn("screenshot attempt", script)
+        self.assertIn("Android launch proven", script)
         self.assertIn("for attempt in 1 2 3 4 5", script)
 
     def test_release_publication_requires_a_real_first_run(self) -> None:
