@@ -1560,21 +1560,21 @@ fn benchmark_options(
 
 fn finish_dev_with_artifact_budget(
     context: Option<&project::ProjectContext>,
-    budget: Option<u64>,
+    _budget: Option<u64>,
     outcome: Result<u8, CliError>,
 ) -> Result<u8, CliError> {
-    let cleanup = match (context, budget) {
-        (Some(context), Some(budget)) => project::enforce_dev_artifact_budget(context, budget),
-        _ => Ok(None),
+    let cleanup = match context {
+        Some(context) => project::clean_after_dev(context).map(|_| ()),
+        None => Ok(()),
     };
     match (outcome, cleanup) {
         (Err(error), Err(cleanup_error)) => {
             eprintln!("PAM could not complete the post-dev artifact check: {cleanup_error}");
             Err(error)
         }
-        (Err(error), Ok(_)) => Err(error),
+        (Err(error), Ok(())) => Err(error),
         (Ok(_), Err(error)) => Err(CliError::Commands(error)),
-        (Ok(code), Ok(_)) => Ok(code),
+        (Ok(code), Ok(())) => Ok(code),
     }
 }
 
@@ -1720,15 +1720,14 @@ mod tests {
     }
 
     #[test]
-    fn post_dev_budget_removes_outputs_created_during_the_session() {
+    fn post_dev_cleanup_removes_outputs_even_below_the_budget() {
         let root =
             std::env::temp_dir().join(format!("pam-post-dev-budget-{}", std::process::id(),));
         let artifact = root.join("target/debug/deps/session.bin");
         fs::create_dir_all(artifact.parent().unwrap()).unwrap();
         fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
         let file = fs::File::create(&artifact).unwrap();
-        file.set_len(project::DEFAULT_DEV_ARTIFACT_BUDGET_BYTES + 1)
-            .unwrap();
+        file.set_len(1).unwrap();
         let context = project::ProjectContext {
             root: root.clone(),
             kind: project::ProjectKind::Raw,
@@ -1743,6 +1742,31 @@ mod tests {
             .unwrap(),
             0,
         );
+        assert!(!root.join("target").exists());
+        assert!(root.join("Cargo.toml").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn post_dev_cleanup_preserves_the_original_failure() {
+        let root =
+            std::env::temp_dir().join(format!("pam-post-dev-failure-{}", std::process::id()));
+        let artifact = root.join("target/debug/session.bin");
+        fs::create_dir_all(artifact.parent().unwrap()).unwrap();
+        fs::write(&artifact, b"regenerable").unwrap();
+        fs::write(root.join("Cargo.toml"), "[workspace]\n").unwrap();
+        let context = project::ProjectContext {
+            root: root.clone(),
+            kind: project::ProjectKind::Raw,
+        };
+
+        let result = finish_dev_with_artifact_budget(
+            Some(&context),
+            Some(project::DEFAULT_DEV_ARTIFACT_BUDGET_BYTES),
+            Err(CliError::Commands("dev failed".to_owned())),
+        );
+
+        assert!(matches!(result, Err(CliError::Commands(message)) if message == "dev failed"));
         assert!(!root.join("target").exists());
         assert!(root.join("Cargo.toml").is_file());
         fs::remove_dir_all(root).unwrap();

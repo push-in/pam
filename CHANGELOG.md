@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 2.2.4 - 2026-08-26
+
+- Generate every Native UI starter and the bounded product workspace against
+  the public PAM Native UI 1.x `AppScreen` and Material `p-*` contracts,
+  preventing clean Android launches from falling through to removed legacy
+  component tags.
+- Extend the clean-project regression assertions to reject legacy
+  `PamUIProvider`, `Heading`, and `ButtonText` markup in newly generated apps.
+
 ## 2.2.3 - 2026-08-26
 
 - Complete loader isolation for Composer binaries that re-enter through the

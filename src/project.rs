@@ -115,6 +115,20 @@ struct CleanupReport<'a> {
 }
 
 pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> Result<u8, String> {
+    clean_with_output(context, all, dry_run, json, true)
+}
+
+pub fn clean_after_dev(context: &ProjectContext) -> Result<u8, String> {
+    clean_with_output(context, true, false, false, false)
+}
+
+fn clean_with_output(
+    context: &ProjectContext,
+    all: bool,
+    dry_run: bool,
+    json: bool,
+    emit_report: bool,
+) -> Result<u8, String> {
     let root = fs::canonicalize(&context.root).map_err(|error| {
         format!(
             "cannot resolve project root {}: {error}",
@@ -215,6 +229,9 @@ pub fn clean(context: &ProjectContext, all: bool, dry_run: bool, json: bool) -> 
         files,
         entries: &entries,
     };
+    if !emit_report {
+        return Ok(0);
+    }
     if json {
         println!(
             "{}",
