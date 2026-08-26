@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+## 2.2.4 - 2026-08-26
+
+- Generate every Native UI starter and the bounded product workspace against
+  the public PAM Native UI 1.x `AppScreen` and Material `p-*` contracts,
+  preventing clean Android launches from falling through to removed legacy
+  component tags.
+- Extend the clean-project regression assertions to reject legacy
+  `PamUIProvider`, `Heading`, and `ButtonText` markup in newly generated apps.
+- Always remove allowlisted regenerable build outputs after contextual
+  `pam dev` exits, including failed sessions, while preserving source,
+  dependencies, data, evidence and final `dist` deliverables.
+- Require the runtime CI job to execute the same bounded cleanup under
+  `if: always()` after validation completes.
+- Apply mandatory cleanup to every runtime release builder, required release
+  gate, and per-package ecosystem certification job after declared artifacts
+  and evidence have been retained.
+- Allow maintainers to re-run the exact CI and required-gate contracts manually
+  when GitHub does not materialize a push or pull-request event.
+
 ## 2.2.3 - 2026-08-26
 
 - Complete loader isolation for Composer binaries that re-enter through the

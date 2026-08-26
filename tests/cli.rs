@@ -4209,10 +4209,47 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));
-    assert!(hello.contains("<PamUIProvider mode=\"system\">"));
-    assert!(hello.contains("<Button size=\"lg\" on:press=\"increment\">"));
+    assert!(hello.contains("<AppScreen title=\""));
+    assert!(hello.contains("<p-card class=\"w-full gap-6 p-6\">"));
+    assert!(hello.contains("<p-btn block=\"true\" on:press=\"increment\">"));
+    assert!(hello.contains("<Text>Native taps: {{ $count }}</Text>"));
+    assert!(!hello.contains("<PamUIProvider"));
+    assert!(!hello.contains("<Heading"));
+    assert!(!hello.contains("<ButtonText"));
 
     fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn every_mobile_ui_starter_uses_the_public_one_x_component_contract() {
+    for starter in ["blank", "tabs", "auth", "ecommerce", "chat", "showcase"] {
+        let directory = temporary_path(&format!("init-mobile-ui-{starter}"));
+        let output = run_pam(&[
+            "init",
+            directory.to_str().unwrap(),
+            "--template",
+            "native-ui",
+            "--starter",
+            starter,
+            "--no-install",
+            "--no-interaction",
+        ]);
+        assert!(
+            output.status.success(),
+            "starter {starter}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let hello = fs::read_to_string(directory.join("src/Hello.pam")).unwrap();
+        assert!(hello.contains("<AppScreen"), "starter {starter}");
+        assert!(!hello.contains("<PamUIProvider"), "starter {starter}");
+        assert!(!hello.contains("<Heading"), "starter {starter}");
+        assert!(!hello.contains("<ButtonText"), "starter {starter}");
+        assert!(!hello.contains("<VStack"), "starter {starter}");
+        assert!(!hello.contains("<Card"), "starter {starter}");
+
+        fs::remove_dir_all(directory).unwrap();
+    }
 }
 
 #[test]
@@ -4460,6 +4497,12 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
     assert!(native_component.contains("ProductMutation::checkIn($key)"));
     assert!(native_component.contains("$this->outbox->retry"));
     assert!(native_component.contains("$this->outbox->prune()"));
+    assert!(native_component.contains("<AppScreen"));
+    assert!(native_component.contains("<p-card"));
+    assert!(native_component.contains("<p-btn"));
+    assert!(!native_component.contains("<PamUIProvider"));
+    assert!(!native_component.contains("<Heading"));
+    assert!(!native_component.contains("<ButtonText"));
     assert!(
         fs::read_to_string(directory.join("apps/desktop/app.php"))
             .unwrap()

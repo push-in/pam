@@ -238,11 +238,17 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         )
         self.assertIn("github.event.repository.name == 'pam-native'", workflow)
         self.assertIn("github.event.repository.name == 'pam-native-php'", workflow)
-        self.assertIn("repository: push-in/${{ github.event.repository.name }}", workflow)
+        self.assertIn(
+            "repository: push-in/${{ inputs.native_ref != '' && 'pam-native' || github.event.repository.name }}",
+            workflow,
+        )
         self.assertIn("repository: push-in/pam-native", workflow)
         self.assertIn("candidate_version=$(sed -n", workflow)
         self.assertIn("pam-native-candidate/packages/native/src/Protocol.php", workflow)
-        self.assertIn("ref: ${{ github.ref }}", workflow)
+        self.assertIn(
+            "ref: ${{ inputs.native_ref != '' && inputs.native_ref || github.ref }}",
+            workflow,
+        )
         self.assertIn("matrix.package.requiresNative", workflow)
         self.assertIn("repositories.pam-native-candidate", workflow)
         self.assertIn('versions: {"pushinbr/pam-native": $version}', workflow)
@@ -255,6 +261,18 @@ class EcosystemCompatibilityTests(unittest.TestCase):
             workflow.index("Preflight the latest compatible dependency graph"),
         )
 
+    def test_manual_native_release_binds_and_records_the_exact_requested_tag(self) -> None:
+        workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("native_ref:", workflow)
+        self.assertIn("inputs.native_ref != ''", workflow)
+        self.assertIn("CANDIDATE_TAG: ${{ inputs.native_ref", workflow)
+        self.assertIn(
+            "RECORD_NATIVE_CANDIDATE: ${{ (inputs.native_ref != ''",
+            workflow,
+        )
+
     def test_manual_runtime_release_certifies_the_exact_requested_tag(self) -> None:
         workflow = (ROOT / ".github/workflows/ecosystem-compatibility.yml").read_text(
             encoding="utf-8"
@@ -263,7 +281,7 @@ class EcosystemCompatibilityTests(unittest.TestCase):
         self.assertIn("pam_ref:", workflow)
         self.assertEqual(workflow.count("inputs.pam_ref != '' && inputs.pam_ref"), 4)
         self.assertIn(
-            "group: ecosystem-compatibility-${{ github.repository }}-${{ inputs.pam_ref != '' && inputs.pam_ref || github.ref }}",
+            "group: ecosystem-compatibility-${{ github.repository }}-${{ inputs.pam_ref != '' && inputs.pam_ref || github.ref }}-${{ inputs.native_ref != '' && inputs.native_ref || 'published-native' }}",
             workflow,
         )
         self.assertIn(

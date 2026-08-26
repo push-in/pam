@@ -24,14 +24,13 @@ Android removes only app/root build outputs and its project-local Gradle caches;
 iOS removes Xcode's actual `.pam-native/ios/App/DerivedData` directory. Both
 paths preserve generated host sources, screenshots and release evidence.
 
-Every contextual `pam dev` session enforces an 8 GiB project-local ceiling both
-before launch and after the dev process exits. If the complete regenerable
-footprint exceeds the ceiling, PAM reports the measured size and performs the
-same scoped complete cleanup as `pam clean --all`. The post-flight check runs
-after successful and failed Runtime, Native and Desktop sessions; an original
-dev failure remains the reported failure even if cleanup also cannot run. This
-prevents a large build from being left behind merely because the session ended
-between two launches. The ceiling can only be reduced—not expanded—by setting
+Every contextual `pam dev` session enforces an 8 GiB project-local ceiling
+before launch. When the dev process exits, PAM **always** performs the same
+scoped complete cleanup as `pam clean --all`, regardless of artifact size and
+after both successful and failed Runtime, Native and Desktop sessions. An
+original dev failure remains the reported failure if cleanup also cannot run.
+This mandatory post-flight rule leaves no regenerable Android, iOS, Gradle or
+Cargo build garbage behind. The ceiling can only be reduced—not expanded—by setting
 `PAM_DEV_ARTIFACT_BUDGET_BYTES` to an integer from 256 MiB through 8 GiB. An
 incomplete scan, symlink or unexpected non-directory fails closed instead of
 deleting an uncertain path.
@@ -52,6 +51,18 @@ so monorepo verification cannot escape the shared footprint or budget. Cleanup
 does not
 touch source code, `vendor`, application data, databases, sessions, `dist`,
 screenshots, release evidence, or user-level caches.
+
+PAM deliberately preserves shared user-level Android SDK, NDK, emulator and
+Composer download caches. They are reusable tool installations, not outputs of
+one project build; deleting them after every command would waste bandwidth and
+make community startup slower. Project-local Gradle caches and build trees are
+still removed unconditionally.
+
+The repository-wide build hygiene contract is mandatory: every local or CI
+build must clean all regenerable intermediates on exit. Packaging commands must
+first copy the declared APK, AAB, IPA, archive or binary into `dist`, and then
+remove their build trees. Only those final deliverables and explicit evidence
+may be retained.
 
 ```bash
 pam clean
@@ -98,6 +109,11 @@ release archives after 7 days, and reproducible benchmark or compatibility
 evidence after 30 days. Published GitHub Release assets remain the durable
 distribution channel. `scripts/check-artifact-retention.py` rejects workflow
 uploads without an explicit lifetime or with retention above 30 days.
+
+Every repository CI build also ends with the project-scoped
+`scripts/cleanup-build-artifacts.sh` under `if: always()`, after any declared
+artifact upload. This makes the local `pam dev` rule and hosted runner rule the
+same: no regenerable Cargo, Gradle or Xcode build tree survives the job.
 
 The JSON contract uses `schemaVersion: 1`, `resultCode: 1`, project type codes
 from the public PAM project enum, operation codes `1` (preview), `2` (default

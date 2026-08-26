@@ -2151,32 +2151,29 @@ final class Hello extends Component
 ?>
 
 <template>
-    <PamUIProvider mode="system">
-        <SafeAreaView class="flex-1 ui-surface">
-            <Center class="flex-1 px-6">
-                <Card class="w-full max-w-md gap-5 p-6">
-                    <Badge variant="secondary"><BadgeText>Contract v1 · Native surface 2</BadgeText></Badge>
-                    <Heading size="2xl">{{ $this->snapshot()->headline }}</Heading>
-                    <Text class="text-muted-foreground">One typed PHP contract across every PAM runtime.</Text>
-                    <Card class="gap-2 p-4">
-                        <Text>Server state · code {{ $serverStateCode }}</Text>
-                        <Heading size="md">{{ $serverHeadline }}</Heading>
-                        <Text class="text-muted-foreground">{{ $syncMessage }}</Text>
-                    </Card>
-                    <Button size="lg" on:press="refresh">
-                        <ButtonText>Sync Server · {{ $refreshCount }}</ButtonText>
-                    </Button>
-                    <Card class="gap-2 p-4">
-                        <Text>Offline outbox · {{ $pendingMutations }} pending</Text>
-                        <Text class="text-muted-foreground">{{ $mutationMessage }}</Text>
-                    </Card>
-                    <Button size="lg" variant="outline" on:press="queueCheckIn">
-                        <ButtonText>Queue resilient check-in</ButtonText>
-                    </Button>
-                </Card>
-            </Center>
-        </SafeAreaView>
-    </PamUIProvider>
+    <AppScreen
+        title="{{ $this->snapshot()->headline }}"
+        subtitle="One typed PHP contract across every PAM runtime."
+    >
+        <p-card class="w-full gap-5 p-6">
+            <p-chip variant="tonal"><Text>Contract v1 · Native surface 2</Text></p-chip>
+            <p-card class="gap-2 p-4">
+                <Text>Server state · code {{ $serverStateCode }}</Text>
+                <Text size="md">{{ $serverHeadline }}</Text>
+                <Text class="ui-text-muted">{{ $syncMessage }}</Text>
+            </p-card>
+            <p-btn block="true" on:press="refresh">
+                <Text>Sync Server · {{ $refreshCount }}</Text>
+            </p-btn>
+            <p-card class="gap-2 p-4">
+                <Text>Offline outbox · {{ $pendingMutations }} pending</Text>
+                <Text class="ui-text-muted">{{ $mutationMessage }}</Text>
+            </p-card>
+            <p-btn block="true" variant="outlined" on:press="queueCheckIn">
+                <Text>Queue resilient check-in</Text>
+            </p-btn>
+        </p-card>
+    </AppScreen>
 </template>
 "#,
     )?;
@@ -5485,95 +5482,71 @@ final class Hello extends Component
         let content = match starter {
             MobileStarter::Blank => {
                 r#"
-                <Card class="w-full max-w-md gap-6 p-6">
-                    <Heading size="2xl">__APP_NAME__</Heading>
-                    <Text class="text-muted-foreground">Your native PHP application is ready.</Text>
-                    <Button size="lg" on:press="increment">
-                        <ButtonText>Native taps: {{ $count }}</ButtonText>
-                    </Button>
-                </Card>"#
+                <AppScreen title="__APP_NAME__" subtitle="Your native PHP application is ready.">
+                    <p-card class="w-full gap-6 p-6">
+                        <Text size="xl">Persistent PHP. Native Material UI.</Text>
+                        <p-btn block="true" on:press="increment">
+                            <Text>Native taps: {{ $count }}</Text>
+                        </p-btn>
+                    </p-card>
+                </AppScreen>"#
             }
             MobileStarter::Tabs => {
                 r#"
-                <VStack class="w-full flex-1 justify-between p-6">
-                    <VStack class="gap-3">
-                        <Heading size="2xl">Home</Heading>
-                        <Text class="text-muted-foreground">A production-ready tabs starter.</Text>
-                    </VStack>
+                <AppScreen title="Home" subtitle="A production-ready tabs starter.">
                     <Row class="w-full justify-between gap-3">
-                        <Button variant="secondary">
-                            <ButtonText>Home</ButtonText>
-                        </Button>
-                        <Button variant="ghost">
-                            <ButtonText>Search</ButtonText>
-                        </Button>
-                        <Button variant="ghost">
-                            <ButtonText>Profile</ButtonText>
-                        </Button>
+                        <p-btn class="flex-1" variant="tonal"><Text>Home</Text></p-btn>
+                        <p-btn class="flex-1" variant="text"><Text>Search</Text></p-btn>
+                        <p-btn class="flex-1" variant="text"><Text>Profile</Text></p-btn>
                     </Row>
-                </VStack>"#
+                </AppScreen>"#
             }
             MobileStarter::Authentication => {
                 r#"
-                <Card class="w-full max-w-md gap-4 p-6">
-                    <Heading size="2xl">Welcome back</Heading>
-                    <Input bind:value="email" placeholder="Email" />
-                    <Input bind:value="password" placeholder="Password" secureTextEntry />
-                    <Button size="lg" on:press="submit">
-                        <ButtonText>Sign in</ButtonText>
-                    </Button>
-                </Card>"#
+                <AppScreen title="Welcome back" subtitle="Sign in to continue.">
+                    <p-card class="w-full gap-4 p-6">
+                        <p-text-field p-model="$email" label="Email" autoComplete="email" />
+                        <p-text-field p-model="$password" label="Password" type="password" />
+                        <p-btn block="true" on:press="submit"><Text>Sign in</Text></p-btn>
+                    </p-card>
+                </AppScreen>"#
             }
             MobileStarter::Ecommerce => {
                 r#"
-                <VStack class="w-full flex-1 gap-5 p-6">
-                    <Heading size="2xl">__APP_NAME__</Heading>
-                    <Input bind:value="query" placeholder="Search products" />
-                    <Card class="gap-3 p-5">
-                        <Badge variant="secondary">
-                            <BadgeText>Featured</BadgeText>
-                        </Badge>
-                        <Heading>Native commerce starter</Heading>
-                        <Text class="text-muted-foreground">
+                <AppScreen title="__APP_NAME__" subtitle="Native commerce starter">
+                    <p-text-field p-model="$query" label="Search products" />
+                    <p-card class="gap-3 p-5">
+                        <p-chip variant="tonal"><Text>Featured</Text></p-chip>
+                        <Text size="lg">Native commerce starter</Text>
+                        <Text class="ui-text-muted">
                             Catalog, cart, and checkout foundations.
                         </Text>
-                        <Button on:press="increment">
-                            <ButtonText>Add to cart · {{ $count }}</ButtonText>
-                        </Button>
-                    </Card>
-                </VStack>"#
+                        <p-btn on:press="increment"><Text>Add to cart · {{ $count }}</Text></p-btn>
+                    </p-card>
+                </AppScreen>"#
             }
             MobileStarter::Chat => {
                 r#"
-                <VStack class="w-full flex-1 justify-between gap-4 p-6">
-                    <VStack class="gap-2">
-                        <Heading size="xl">Team chat</Heading>
-                        <Text class="text-muted-foreground">Messages stay above the keyboard.</Text>
-                    </VStack>
+                <AppScreen title="Team chat" subtitle="Messages stay above the keyboard.">
                     <Row class="w-full items-center gap-3">
-                        <Input class="flex-1" bind:value="message" placeholder="Message" />
-                        <Button on:press="send">
-                            <ButtonText>Send</ButtonText>
-                        </Button>
+                        <p-text-field class="flex-1" p-model="$message" label="Message" />
+                        <p-btn on:press="send"><Text>Send</Text></p-btn>
                     </Row>
-                </VStack>"#
+                </AppScreen>"#
             }
             MobileStarter::Showcase => {
                 r#"
-                <ScrollView class="w-full flex-1">
-                    <VStack class="gap-5 p-6">
-                        <Heading size="2xl">Component showcase</Heading>
-                        <Badge variant="secondary">
-                            <BadgeText>PAM Native UI</BadgeText>
-                        </Badge>
-                        <Card class="gap-3 p-5">
-                            <Text>State, components, accessibility, and native layout.</Text>
-                            <Button on:press="increment">
-                                <ButtonText>Counter {{ $count }}</ButtonText>
-                            </Button>
-                        </Card>
-                    </VStack>
-                </ScrollView>"#
+                <AppScreen title="Component showcase" subtitle="PAM Native UI 1.x">
+                    <ScrollView class="w-full flex-1">
+                        <Column class="gap-5">
+                            <p-chip variant="tonal"><Text>PAM Native UI</Text></p-chip>
+                            <p-card class="gap-3 p-5">
+                                <Text>State, components, accessibility, and native layout.</Text>
+                                <p-btn on:press="increment"><Text>Counter {{ $count }}</Text></p-btn>
+                            </p-card>
+                        </Column>
+                    </ScrollView>
+                </AppScreen>"#
             }
         };
         r#"<?php
@@ -5609,12 +5582,7 @@ final class Hello extends Component
 ?>
 
 <template>
-    <PamUIProvider mode="system">
-        <SafeAreaView class="flex-1 ui-surface">
-            <Center class="flex-1 px-6">__CONTENT__
-            </Center>
-        </SafeAreaView>
-    </PamUIProvider>
+    __CONTENT__
 </template>
 "#
         .replace("__CONTENT__", content)

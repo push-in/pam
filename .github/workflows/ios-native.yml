@@ -332,3 +332,15 @@ jobs:
             ${{ runner.temp }}/pam-ios-fixture/crashes
           if-no-files-found: warn
           retention-days: 7
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: |
+          fixture=${RUNNER_TEMP}/pam-ios-fixture
+          if [[ -e ${fixture} || -L ${fixture} ]]; then
+            [[ ! -L ${fixture} ]]
+            resolved_fixture=$(cd "$(dirname "${fixture}")" && pwd -P)/$(basename "${fixture}")
+            resolved_temp=$(cd "${RUNNER_TEMP}" && pwd -P)
+            [[ ${resolved_fixture} == "${resolved_temp}/pam-ios-fixture" ]]
+            find "${fixture}" -depth -delete
+          fi
+          scripts/cleanup-build-artifacts.sh
