@@ -2497,15 +2497,30 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     )
     .unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    let reentry = package.join("bin/pam-reentry");
+    fs::write(
+        &reentry,
+        "#!/bin/sh\nexport LD_LIBRARY_PATH=/private/pam/lib\nexport DYLD_LIBRARY_PATH=/private/pam/lib\nexec \"$PAM_BINARY\" \"$PWD/probe.php\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&reentry, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        project.join("probe.php"),
+        "<?php printf(\"ld=%s\\ndyld=%s\\npackage=%s\\n\", getenv('LD_LIBRARY_PATH') ?: '', getenv('DYLD_LIBRARY_PATH') ?: '', getenv('PAM_PACKAGE_COMMAND') ?: '');\n",
+    )
+    .unwrap();
     fs::write(
         project.join("vendor/composer/installed.json"),
-        r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"bin":"bin/pam-tool","arguments":["fixed"],"description":"Run the package tool"}}}}}]}"#,
+        r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"bin":"bin/pam-tool","arguments":["fixed"],"description":"Run the package tool"},"tool:reentry":{"bin":"bin/pam-reentry","description":"Re-enter the packaged PHP launcher"}}}}}]}"#,
     )
     .unwrap();
 
     let names = run_pam_in(&project, &["commands", "--names"]);
     assert!(names.status.success());
-    assert_eq!(String::from_utf8_lossy(&names.stdout), "tool:run\n");
+    assert_eq!(
+        String::from_utf8_lossy(&names.stdout),
+        "tool:reentry\ntool:run\n"
+    );
 
     let output = Command::new(env!("CARGO_BIN_EXE_pam"))
         .current_dir(&project)
@@ -2532,6 +2547,20 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     assert!(
         stdout.contains(&format!("native={}", pam_home.join("native").display())),
         "{stdout}"
+    );
+    let reentered = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .current_dir(&project)
+        .arg("tool:reentry")
+        .output()
+        .unwrap();
+    assert!(
+        reentered.status.success(),
+        "{}",
+        String::from_utf8_lossy(&reentered.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&reentered.stdout),
+        "ld=\ndyld=\npackage=\n"
     );
     fs::remove_dir_all(project).unwrap();
 }
