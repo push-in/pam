@@ -52,6 +52,12 @@ does not
 touch source code, `vendor`, application data, databases, sessions, `dist`,
 screenshots, release evidence, or user-level caches.
 
+PAM deliberately preserves shared user-level Android SDK, NDK, emulator and
+Composer download caches. They are reusable tool installations, not outputs of
+one project build; deleting them after every command would waste bandwidth and
+make community startup slower. Project-local Gradle caches and build trees are
+still removed unconditionally.
+
 The repository-wide build hygiene contract is mandatory: every local or CI
 build must clean all regenerable intermediates on exit. Packaging commands must
 first copy the declared APK, AAB, IPA, archive or binary into `dist`, and then
