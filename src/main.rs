@@ -1447,6 +1447,13 @@ fn run_registered_command(
                 .args(arguments)
                 .current_dir(&context.root)
                 .env("PAM_BINARY", pam_executable)
+                // The packaged PAM launcher needs private shared libraries while
+                // loading the embedded runtime. Those loader paths must not leak
+                // into package-owned executables: their descendants (curl,
+                // Gradle, git, and platform SDK tools) must resolve against the
+                // host toolchain rather than PAM's private distribution.
+                .env_remove("LD_LIBRARY_PATH")
+                .env_remove("DYLD_LIBRARY_PATH")
                 // Composer executable proxies commonly use `#!/usr/bin/env php`.
                 // Never feed PAM's embedded PHP 8.5 ini to a different host CLI.
                 .env_remove("PHPRC")
