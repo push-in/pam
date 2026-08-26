@@ -52,6 +52,9 @@ jobs:
       - id: catalog
         name: Publish the validated matrix
         run: printf 'matrix=%s\n' "$(scripts/ecosystem-compatibility.py ci-matrix)" >>"${GITHUB_OUTPUT}"
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   packages:
     needs: inventory
@@ -273,6 +276,9 @@ jobs:
           path: evidence/*.json
           if-no-files-found: error
           retention-days: 30
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: pam/scripts/cleanup-build-artifacts.sh
 
   evidence:
     name: Aggregate compatibility evidence
@@ -300,3 +306,6 @@ jobs:
           path: evidence/ecosystem-compatibility.json
           if-no-files-found: error
           retention-days: 30
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
