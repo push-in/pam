@@ -2493,7 +2493,7 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     let executable = package.join("bin/pam-tool");
     fs::write(
         &executable,
-        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\"\nprintf 'pam=%s\\n' \"$PAM_BINARY\"\nprintf 'args=%s|%s\\n' \"$1\" \"$2\"\nprintf 'phprc=%s\\n' \"${PHPRC-}\"\nprintf 'scan=%s\\n' \"${PHP_INI_SCAN_DIR-}\"\nprintf 'native=%s\\n' \"${PAM_NATIVE_HOME-}\"\nexit 23\n",
+        "#!/bin/sh\nprintf 'cwd=%s\\n' \"$PWD\"\nprintf 'pam=%s\\n' \"$PAM_BINARY\"\nprintf 'args=%s|%s\\n' \"$1\" \"$2\"\nprintf 'phprc=%s\\n' \"${PHPRC-}\"\nprintf 'scan=%s\\n' \"${PHP_INI_SCAN_DIR-}\"\nprintf 'ld=%s\\n' \"${LD_LIBRARY_PATH-}\"\nprintf 'dyld=%s\\n' \"${DYLD_LIBRARY_PATH-}\"\nprintf 'native=%s\\n' \"${PAM_NATIVE_HOME-}\"\nexit 23\n",
     )
     .unwrap();
     fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
@@ -2512,6 +2512,8 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
         .env("PAM_HOME", &pam_home)
         .env("PHPRC", "/incompatible/php.ini")
         .env("PHP_INI_SCAN_DIR", "/incompatible/conf.d")
+        .env("LD_LIBRARY_PATH", "/private/pam/lib")
+        .env("DYLD_LIBRARY_PATH", "/private/pam/lib")
         .args(["tool:run", "value"])
         .output()
         .unwrap();
@@ -2525,6 +2527,8 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
     assert!(stdout.contains("args=fixed|value"), "{stdout}");
     assert!(stdout.contains("phprc=\n"), "{stdout}");
     assert!(stdout.contains("scan=\n"), "{stdout}");
+    assert!(stdout.contains("ld=\n"), "{stdout}");
+    assert!(stdout.contains("dyld=\n"), "{stdout}");
     assert!(
         stdout.contains(&format!("native={}", pam_home.join("native").display())),
         "{stdout}"
