@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      native_ref:
+        description: Exact push-in/pam-native ref to bind into every Native consumer
+        required: false
+        type: string
+        default: ''
   push:
     branches: [main]
   pull_request:
@@ -25,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: ecosystem-compatibility-${{ github.repository }}-${{ inputs.pam_ref != '' && inputs.pam_ref || github.ref }}
+  group: ecosystem-compatibility-${{ github.repository }}-${{ inputs.pam_ref != '' && inputs.pam_ref || github.ref }}-${{ inputs.native_ref != '' && inputs.native_ref || 'published-native' }}
   cancel-in-progress: true
 
 jobs:
@@ -80,17 +85,19 @@ jobs:
           persist-credentials: false
       - uses: actions/checkout@v5
         if: >-
-          (github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') &&
-          github.ref_type == 'tag' &&
+          (inputs.native_ref != '' ||
+          ((github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') &&
+          github.ref_type == 'tag')) &&
           matrix.package.requiresNative
         with:
-          repository: push-in/${{ github.event.repository.name }}
-          ref: ${{ github.ref }}
+          repository: push-in/${{ inputs.native_ref != '' && 'pam-native' || github.event.repository.name }}
+          ref: ${{ inputs.native_ref != '' && inputs.native_ref || github.ref }}
           path: pam-native-candidate
           persist-credentials: false
       - uses: actions/checkout@v5
         if: >-
           matrix.package.repository == 'pam-native-ui' &&
+          inputs.native_ref == '' &&
           (github.ref_type != 'tag' ||
           (github.event.repository.name != 'pam-native' && github.event.repository.name != 'pam-native-php'))
         with:
@@ -117,11 +124,12 @@ jobs:
         if: >-
           matrix.package.requiresNative &&
           (matrix.package.repository == 'pam-native-ui' ||
+          inputs.native_ref != '' ||
           ((github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') &&
           github.ref_type == 'tag'))
         shell: bash
         env:
-          CANDIDATE_TAG: ${{ (github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') && github.ref_type == 'tag' && github.ref_name || '' }}
+          CANDIDATE_TAG: ${{ inputs.native_ref != '' && inputs.native_ref || ((github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') && github.ref_type == 'tag' && github.ref_name || '') }}
         run: |
           if test -n "${CANDIDATE_TAG}"; then
             candidate_version=${CANDIDATE_TAG#v}
@@ -233,7 +241,7 @@ jobs:
           PHP_SERIES: ${{ matrix.php }}
           REPOSITORY: ${{ matrix.package.repository }}
           ROLE_CODE: ${{ matrix.package.roleCode }}
-          RECORD_NATIVE_CANDIDATE: ${{ (github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') && github.ref_type == 'tag' && '1' || '0' }}
+          RECORD_NATIVE_CANDIDATE: ${{ (inputs.native_ref != '' || ((github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') && github.ref_type == 'tag')) && '1' || '0' }}
         run: |
           mkdir -p evidence
           pam_commit=$(git -C pam rev-parse HEAD)
