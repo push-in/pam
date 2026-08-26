@@ -1,6 +1,7 @@
 name: Required release gates
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
@@ -26,6 +27,9 @@ jobs:
         run: cargo metadata --locked --format-version=1 >/dev/null
       - name: Check Rust formatting
         run: cargo fmt --all -- --check
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   octane:
     name: Required PAM Octane
@@ -46,6 +50,10 @@ jobs:
         run: composer install --no-interaction --prefer-dist
       - name: Verify the Octane package
         run: composer verify
+      - name: Remove regenerable build artifacts
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: scripts/cleanup-build-artifacts.sh
 
   pam_http:
     name: Required PAM HTTP
@@ -72,6 +80,10 @@ jobs:
             ../skeleton/src ../skeleton/tests ../skeleton/database/migrations \
             ../skeleton/bin ../skeleton/index.php --memory-limit=1G
           vendor/bin/phpunit --configuration=../skeleton/phpunit.xml
+      - name: Remove regenerable build artifacts
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: scripts/cleanup-build-artifacts.sh
 
   composer_packages:
     name: Required Composer packages
@@ -92,6 +104,9 @@ jobs:
           scripts/package-release.sh validate-package-tag pushinbr/pam-skeleton v2.0.0
           test "$(scripts/package-release.sh package-matrix pushinbr/pam-http | jq 'length')" -eq 1
           ! scripts/package-release.sh package-matrix pushinbr/not-a-package
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
 
   security:
     name: Required security
@@ -133,3 +148,6 @@ jobs:
           audit_with_retry --working-dir=compat/laravel-smoke --locked
           audit_with_retry --working-dir=packages/http --locked
           audit_with_retry --working-dir=packages/octane
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh
