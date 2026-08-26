@@ -365,3 +365,6 @@ jobs:
               '
           )
           test "${composer_child_version}" = "${embedded_version}"
+      - name: Remove regenerable build artifacts
+        if: always()
+        run: scripts/cleanup-build-artifacts.sh

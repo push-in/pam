@@ -104,6 +104,11 @@ evidence after 30 days. Published GitHub Release assets remain the durable
 distribution channel. `scripts/check-artifact-retention.py` rejects workflow
 uploads without an explicit lifetime or with retention above 30 days.
 
+Every repository CI build also ends with the project-scoped
+`scripts/cleanup-build-artifacts.sh` under `if: always()`, after any declared
+artifact upload. This makes the local `pam dev` rule and hosted runner rule the
+same: no regenerable Cargo, Gradle or Xcode build tree survives the job.
+
 The JSON contract uses `schemaVersion: 1`, `resultCode: 1`, project type codes
 from the public PAM project enum, operation codes `1` (preview), `2` (default
 cleanup), and `3` (complete cleanup), plus artifact kind codes `1` (cache) and
