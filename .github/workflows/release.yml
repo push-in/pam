@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: a09b9216b1153c53081d9cbef9ae786177b61d33
+          ref: 4c7d0174a3c4cb368fcaf3e3a33357816c9c5b90
           path: pam-native
           persist-credentials: false
       - uses: android-actions/setup-android@v4
@@ -145,7 +145,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: a09b9216b1153c53081d9cbef9ae786177b61d33
+          ref: 4c7d0174a3c4cb368fcaf3e3a33357816c9c5b90
           path: pam-native
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
@@ -274,7 +274,7 @@ jobs:
         uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: a09b9216b1153c53081d9cbef9ae786177b61d33
+          ref: 4c7d0174a3c4cb368fcaf3e3a33357816c9c5b90
           path: pam-native
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@1.88.0
@@ -365,7 +365,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           repository: push-in/pam-native
-          ref: a09b9216b1153c53081d9cbef9ae786177b61d33
+          ref: 4c7d0174a3c4cb368fcaf3e3a33357816c9c5b90
           path: native-sdk
           persist-credentials: false
       - uses: actions/download-artifact@v4
