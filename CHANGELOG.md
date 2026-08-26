@@ -15,6 +15,11 @@
   dependencies, data, evidence and final `dist` deliverables.
 - Require the runtime CI job to execute the same bounded cleanup under
   `if: always()` after validation completes.
+- Apply mandatory cleanup to every runtime release builder, required release
+  gate, and per-package ecosystem certification job after declared artifacts
+  and evidence have been retained.
+- Allow maintainers to re-run the exact CI and required-gate contracts manually
+  when GitHub does not materialize a push or pull-request event.
 
 ## 2.2.3 - 2026-08-26
 
