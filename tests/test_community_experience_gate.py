@@ -22,6 +22,10 @@ class CommunityExperienceGateTest(unittest.TestCase):
         self.assertIn('composer.lock is missing in Composer project', script)
         self.assertIn('dependency artifacts unexpectedly exist in Composer-free project', script)
         self.assertNotIn('test -f "${directory}/composer.lock"', script)
+        self.assertIn('exec env PAM_PORT="${port}" "${pam_bin}" dev', script)
+        self.assertIn('exec "${pam_bin}" dev .', script)
+        self.assertIn("stop_dev", script)
+        self.assertIn("for attempt in 1 2 3 4 5", script)
 
     def test_release_publication_requires_a_real_first_run(self) -> None:
         workflow = (ROOT / ".github/workflows/release.yml").read_text(encoding="utf-8")

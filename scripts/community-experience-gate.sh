@@ -23,17 +23,32 @@ if [[ ! -x "${pam_bin}" ]]; then
 fi
 pam_bin=$(realpath "${pam_bin}")
 
-cleanup() {
+stop_dev() {
   if [[ -n "${dev_pid}" ]]; then
     kill "${dev_pid}" 2>/dev/null || true
     wait "${dev_pid}" 2>/dev/null || true
+    dev_pid=
   fi
+}
+
+cleanup() {
+  stop_dev
   if command -v adb >/dev/null 2>&1; then
     adb shell am force-stop dev.pam.communitygate.debug >/dev/null 2>&1 || true
     adb shell am force-stop dev.pam.communityuigate.debug >/dev/null 2>&1 || true
   fi
   if [[ "${keep}" != 1 && "${owns_gate_root}" == 1 && -d "${gate_root}" ]]; then
-    rm -rf -- "${gate_root}"
+    local attempt
+    for attempt in 1 2 3 4 5; do
+      rm -rf -- "${gate_root}" 2>/dev/null || true
+      [[ ! -e "${gate_root}" ]] && break
+      sleep 1
+    done
+    if [[ -e "${gate_root}" ]]; then
+      printf 'Community gate: could not remove temporary root after stopping pam dev: %s\n' \
+        "${gate_root}" >&2
+      return 1
+    fi
   fi
 }
 trap cleanup EXIT INT TERM
@@ -44,7 +59,7 @@ run_bounded_server_dev() {
   local log=${directory}/community-dev.log
   (
     cd "${directory}"
-    PAM_PORT="${port}" "${pam_bin}" dev
+    exec env PAM_PORT="${port}" "${pam_bin}" dev
   ) >"${log}" 2>&1 &
   dev_pid=$!
 
@@ -57,9 +72,7 @@ run_bounded_server_dev() {
     fi
     if curl -fsS --connect-timeout 1 --max-time 2 \
       "http://127.0.0.1:${port}/api/ping" | grep -q 'pong'; then
-      kill "${dev_pid}" 2>/dev/null || true
-      wait "${dev_pid}" 2>/dev/null || true
-      dev_pid=
+      stop_dev
       return 0
     fi
     if ! kill -0 "${dev_pid}" 2>/dev/null; then
@@ -119,7 +132,7 @@ init_mobile() {
   local log=${directory}/community-dev.log
   (
     cd "${directory}"
-    "${pam_bin}" dev .
+    exec "${pam_bin}" dev .
   ) >"${log}" 2>&1 &
   dev_pid=$!
   local package=${application_id}.debug
@@ -138,9 +151,7 @@ init_mobile() {
       mkdir -p "${directory}/evidence"
       adb exec-out screencap -p >"${directory}/evidence/android.png"
       file "${directory}/evidence/android.png" | grep -q 'PNG image data'
-      kill "${dev_pid}" 2>/dev/null || true
-      wait "${dev_pid}" 2>/dev/null || true
-      dev_pid=
+      stop_dev
       return 0
     fi
     if ! kill -0 "${dev_pid}" 2>/dev/null; then
