@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## 2.2.3 - 2026-08-26
+
+- Complete loader isolation for Composer binaries that re-enter through the
+  packaged `php` launcher: keep PAM's private libraries only through Embed and
+  extension initialization, then restore a clean host environment before
+  package code starts curl, Gradle, git or other platform tools.
+
 ## 2.2.2 - 2026-08-26
 
 - Isolate Composer package executables and their platform-tool descendants

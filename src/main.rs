@@ -1402,6 +1402,7 @@ fn run_script(
 ) -> Result<u8, CliError> {
     let mut php =
         php::PhpRuntime::initialize(executable, script, &script_args).map_err(CliError::Runtime)?;
+    sanitize_package_command_environment();
     let status = php.execute_file(script).map_err(CliError::Runtime)?;
 
     if status != 0 {
@@ -1413,6 +1414,23 @@ fn run_script(
     }
 
     Ok(0)
+}
+
+fn sanitize_package_command_environment() {
+    if env::var_os("PAM_PACKAGE_COMMAND").is_none() {
+        return;
+    }
+    // A Composer binary using `#!/usr/bin/env php` can re-enter through the
+    // packaged PAM PHP launcher. Its private loader path is needed until the
+    // embedded PHP runtime and extensions are initialized above, but package
+    // code and every process it creates must see the host toolchain instead.
+    // SAFETY: command dispatch and embedded PHP initialization happen before
+    // PAM starts application worker threads.
+    unsafe {
+        env::remove_var("LD_LIBRARY_PATH");
+        env::remove_var("DYLD_LIBRARY_PATH");
+        env::remove_var("PAM_PACKAGE_COMMAND");
+    }
 }
 
 fn run_registered_command(
@@ -1447,6 +1465,7 @@ fn run_registered_command(
                 .args(arguments)
                 .current_dir(&context.root)
                 .env("PAM_BINARY", pam_executable)
+                .env("PAM_PACKAGE_COMMAND", "1")
                 // The packaged PAM launcher needs private shared libraries while
                 // loading the embedded runtime. Those loader paths must not leak
                 // into package-owned executables: their descendants (curl,
