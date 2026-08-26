@@ -10,6 +10,11 @@
   component tags.
 - Extend the clean-project regression assertions to reject legacy
   `PamUIProvider`, `Heading`, and `ButtonText` markup in newly generated apps.
+- Always remove allowlisted regenerable build outputs after contextual
+  `pam dev` exits, including failed sessions, while preserving source,
+  dependencies, data, evidence and final `dist` deliverables.
+- Require the runtime CI job to execute the same bounded cleanup under
+  `if: always()` after validation completes.
 
 ## 2.2.3 - 2026-08-26
 
