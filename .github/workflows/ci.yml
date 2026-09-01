@@ -15,24 +15,24 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native
           ref: 4c7d0174a3c4cb368fcaf3e3a33357816c9c5b90
           path: pam-native
           persist-credentials: false
       - name: Check out the pinned PAM Native plugin kit
-        uses: actions/checkout@v5
+        uses: actions/checkout@v7
         with:
           repository: push-in/pam-native-plugin-kit
           ref: 14413700c1379eb48cdacec8f35fe60f1c45b631
           path: ecosystem/pam-native-plugin-kit
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.100.0
         with:
           components: clippy,rustfmt
       - uses: shivammathur/setup-php@v2
@@ -190,7 +190,7 @@ jobs:
               compatibility.json schema.json verification.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-cli-catalog-contract-${{ github.sha }}
           path: artifacts/cli-catalog/
@@ -302,7 +302,7 @@ jobs:
               support-runtime.json support-manager.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-doctor-contract-${{ github.sha }}
           path: artifacts/doctor/
