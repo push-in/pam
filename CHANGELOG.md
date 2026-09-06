@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Run formatter and Composer validation gates in isolated PAM child processes,
+  preventing intermittent crashes when `pam lint` would initialize PHP Embed
+  more than once in the same process.
+
 ## 2.2.4 - 2026-08-26
 
 - Generate every Native UI starter and the bounded product workspace against
