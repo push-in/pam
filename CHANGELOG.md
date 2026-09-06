@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 2.2.6 - 2026-09-06
+
 - Pass the default `src` target explicitly through `pam format --check` and
   the isolated formatter subprocess used by `pam lint`, preserving the
   zero-argument formatting contract after PHP lifecycle isolation.
