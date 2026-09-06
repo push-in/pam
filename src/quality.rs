@@ -1,5 +1,6 @@
 use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use crate::composer;
 use crate::php::PhpRuntime;
@@ -21,25 +22,29 @@ pub fn format(
 
 pub fn lint(executable: &OsStr, project: &Path) -> Result<u8, String> {
     let mut gates = 0_u8;
-    if let Some((formatter, arguments)) = formatter_command(project, true, Vec::new()) {
+    if formatter_command(project, true, Vec::new()).is_some() {
         gates += 1;
-        let status = run_php_tool(executable, project, &formatter, &arguments)?;
+        let status = run_pam_subcommand(
+            executable,
+            project,
+            &[OsString::from("format"), OsString::from("--check")],
+        )?;
         if status != 0 {
             return Ok(status);
         }
     }
     if project.join("composer.json").is_file() {
         gates += 1;
-        let status = in_project(project, || {
-            composer::run(
-                executable,
-                &[
-                    OsString::from("validate"),
-                    OsString::from("--strict"),
-                    OsString::from("--no-interaction"),
-                ],
-            )
-        })?;
+        let status = run_pam_subcommand(
+            executable,
+            project,
+            &[
+                OsString::from("composer"),
+                OsString::from("validate"),
+                OsString::from("--strict"),
+                OsString::from("--no-interaction"),
+            ],
+        )?;
         if status != 0 {
             return Ok(status);
         }
@@ -67,6 +72,20 @@ pub fn lint(executable: &OsStr, project: &Path) -> Result<u8, String> {
         );
     }
     Ok(0)
+}
+
+fn run_pam_subcommand(
+    executable: &OsStr,
+    project: &Path,
+    arguments: &[OsString],
+) -> Result<u8, String> {
+    let status = Command::new(executable)
+        .args(arguments)
+        .current_dir(project)
+        .status()
+        .map_err(|error| format!("cannot run PAM quality gate: {error}"))?;
+
+    Ok(status.code().unwrap_or(1).clamp(0, u8::MAX as i32) as u8)
 }
 
 pub fn outdated(executable: &OsStr, project: &Path, direct: bool) -> Result<u8, String> {
@@ -166,6 +185,8 @@ fn in_project<T>(
 mod tests {
     use super::*;
     use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
 
     fn temporary(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!("pam-quality-{name}-{}", std::process::id()))
@@ -184,6 +205,29 @@ mod tests {
         let (tool, arguments) = formatter_command(&root, false, Vec::new()).unwrap();
         assert_eq!(tool, root.join("vendor/bin/pam-native-format"));
         assert_eq!(arguments, vec![OsString::from("src")]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lint_isolates_formatter_and_composer_lifecycles_in_child_processes() {
+        let root = temporary("lint-isolation");
+        fs::create_dir_all(root.join("vendor/bin")).unwrap();
+        fs::write(root.join("vendor/bin/pam-native-format"), "<?php\n").unwrap();
+        fs::write(root.join("composer.json"), "{}").unwrap();
+        let executable = root.join("pam-test");
+        fs::write(
+            &executable,
+            "#!/bin/sh\nprintf '%s\\n' \"$*\" >> lint-calls.txt\n",
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+
+        assert_eq!(lint(executable.as_os_str(), &root).unwrap(), 0);
+        assert_eq!(
+            fs::read_to_string(root.join("lint-calls.txt")).unwrap(),
+            "format --check\ncomposer validate --strict --no-interaction\n",
+        );
         fs::remove_dir_all(root).unwrap();
     }
 }
