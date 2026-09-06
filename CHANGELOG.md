@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Pass the default `src` target explicitly through `pam format --check` and
+  the isolated formatter subprocess used by `pam lint`, preserving the
+  zero-argument formatting contract after PHP lifecycle isolation.
+
 ## 2.2.5 - 2026-09-06
 
 - Run formatter and Composer validation gates in isolated PAM child processes,

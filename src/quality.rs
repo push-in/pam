@@ -27,7 +27,11 @@ pub fn lint(executable: &OsStr, project: &Path) -> Result<u8, String> {
         let status = run_pam_subcommand(
             executable,
             project,
-            &[OsString::from("format"), OsString::from("--check")],
+            &[
+                OsString::from("format"),
+                OsString::from("--check"),
+                OsString::from("src"),
+            ],
         )?;
         if status != 0 {
             return Ok(status);
@@ -226,7 +230,7 @@ mod tests {
         assert_eq!(lint(executable.as_os_str(), &root).unwrap(), 0);
         assert_eq!(
             fs::read_to_string(root.join("lint-calls.txt")).unwrap(),
-            "format --check\ncomposer validate --strict --no-interaction\n",
+            "format --check src\ncomposer validate --strict --no-interaction\n",
         );
         fs::remove_dir_all(root).unwrap();
     }

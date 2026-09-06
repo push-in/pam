@@ -1014,6 +1014,9 @@ fn run() -> Result<u8, CliError> {
                 paths.push(argument);
             }
         }
+        if paths.is_empty() {
+            paths.push(OsString::from("src"));
+        }
         return quality::format(&executable, &context.root, check, paths)
             .map_err(CliError::Commands);
     }
