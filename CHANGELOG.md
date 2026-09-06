@@ -2,9 +2,13 @@
 
 ## Unreleased
 
+## 2.2.5 - 2026-09-06
+
 - Run formatter and Composer validation gates in isolated PAM child processes,
   preventing intermittent crashes when `pam lint` would initialize PHP Embed
   more than once in the same process.
+- Update the Laravel compatibility fixture to patched CommonMark and Livewire
+  releases after their newly published security advisories.
 
 ## 2.2.4 - 2026-08-26
 
