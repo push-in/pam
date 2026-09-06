@@ -30,6 +30,42 @@ fn run_pam_in(directory: &std::path::Path, arguments: &[&str]) -> Output {
         .expect("pam should start")
 }
 
+#[test]
+fn format_and_lint_preserve_the_default_source_target() {
+    let project = temporary_path("format-default-target");
+    fs::create_dir_all(project.join("src")).unwrap();
+    fs::create_dir_all(project.join("vendor/bin")).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":2,"name":"Format target test"}"#,
+    )
+    .unwrap();
+    fs::write(project.join("src/Example.pam"), "<template></template>\n").unwrap();
+    fs::write(
+        project.join("vendor/bin/pam-native-format"),
+        "<?php file_put_contents(getcwd().'/format-arguments.txt', implode('|', array_slice($argv, 1)).PHP_EOL, FILE_APPEND);\n",
+    )
+    .unwrap();
+
+    let format = run_pam_in(&project, &["format", "--check"]);
+    assert!(
+        format.status.success(),
+        "{}",
+        String::from_utf8_lossy(&format.stderr)
+    );
+    let lint = run_pam_in(&project, &["lint"]);
+    assert!(
+        lint.status.success(),
+        "{}",
+        String::from_utf8_lossy(&lint.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(project.join("format-arguments.txt")).unwrap(),
+        "--check|src\n--check|src\n",
+    );
+    fs::remove_dir_all(project).unwrap();
+}
+
 #[cfg(unix)]
 #[test]
 fn contextual_desktop_dev_delegates_without_requiring_a_project_argument() {
