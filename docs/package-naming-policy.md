@@ -15,6 +15,25 @@ suffix, so `push-in/pam-http-auth` publishes `pushinbr/pam-http-auth`.
 PHP namespaces follow the same ownership boundary. New HTTP testing code uses
 `Pam\Http\Testing`; new HTTP authentication code will use `Pam\Http\Auth`.
 
+## Native modules are capabilities
+
+Official native extensions expose one reusable platform capability. Applications compose them
+directly, in the same way that React Native applications select independent native libraries:
+
+- camera belongs to `pushinbr/pam-native-camera`;
+- playback belongs to `pushinbr/pam-native-video`;
+- media inspection and thumbnails belong to `pushinbr/pam-native-media`;
+- telemetry belongs to `pushinbr/pam-native-observability`.
+
+Do not create product-shaped packages such as `pam-native-feed`, `pam-native-social`,
+`pam-native-commerce`, or `pam-native-streaming-app`. Do not hide unrelated capabilities behind
+one dependency. A product template may demonstrate composition outside the official package
+catalog, but it must not become the capability boundary or a required runtime dependency.
+
+When a capability becomes large enough to have an independent native lifecycle, permission set,
+vendor SDK, or release cadence, give it its own `pam-native-*` package. Existing package names are
+kept as compatibility surfaces; new APIs follow the narrower ownership boundary.
+
 ## Renames
 
 A published package is never silently repurposed. The replacement is published first. The old
