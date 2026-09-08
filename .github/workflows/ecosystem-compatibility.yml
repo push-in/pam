@@ -40,7 +40,7 @@ jobs:
     outputs:
       matrix: ${{ steps.catalog.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam
           ref: ${{ inputs.pam_ref != '' && inputs.pam_ref || (github.repository == 'push-in/pam' && github.sha || 'main') }}
@@ -71,19 +71,19 @@ jobs:
         include: ${{ fromJSON(needs.inventory.outputs.matrix) }}
     name: ${{ matrix.package.repository }} / PHP ${{ matrix.php }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam
           ref: ${{ inputs.pam_ref != '' && inputs.pam_ref || (github.repository == 'push-in/pam' && github.sha || 'main') }}
           path: pam
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/${{ matrix.package.repository }}
           ref: ${{ github.event.repository.name == matrix.package.repository && github.ref_type == 'tag' && github.ref || 'main' }}
           path: package
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: >-
           (inputs.native_ref != '' ||
           ((github.event.repository.name == 'pam-native' || github.event.repository.name == 'pam-native-php') &&
@@ -94,7 +94,7 @@ jobs:
           ref: ${{ inputs.native_ref != '' && inputs.native_ref || github.ref }}
           path: pam-native-candidate
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         if: >-
           matrix.package.repository == 'pam-native-ui' &&
           inputs.native_ref == '' &&
@@ -278,7 +278,7 @@ jobs:
                 {graphCode: 2, lockSha256: $lowestLockSha256}
               ]
             }' >"evidence/${REPOSITORY}-php${PHP_SERIES/./}.json"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ecosystem-result-${{ matrix.package.repository }}-php${{ matrix.php }}
           path: evidence/*.json
@@ -294,12 +294,12 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: push-in/pam
           ref: ${{ inputs.pam_ref != '' && inputs.pam_ref || (github.repository == 'push-in/pam' && github.sha || 'main') }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: ecosystem-result-*
           path: evidence/results
@@ -308,7 +308,7 @@ jobs:
         run: >-
           scripts/ecosystem-compatibility.py evidence evidence/results
           evidence/ecosystem-compatibility.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ecosystem-compatibility-evidence
           path: evidence/ecosystem-compatibility.json
