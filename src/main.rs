@@ -1481,12 +1481,9 @@ fn run_registered_command(
                 .env_remove("PHPRC")
                 .env("PHP_INI_SCAN_DIR", "");
             if env::var_os("PAM_NATIVE_HOME").is_none()
-                && let Some(pam_home) = env::var_os("PAM_HOME")
+                && let Some(native_home) = default_native_home(&context.root)
             {
-                let native_home = PathBuf::from(pam_home).join("native");
-                if native_home.is_dir() {
-                    process.env("PAM_NATIVE_HOME", native_home);
-                }
+                process.env("PAM_NATIVE_HOME", native_home);
             }
             process.envs(&command.environment);
             let status = process.status().map_err(|error| {
@@ -1702,8 +1699,53 @@ impl std::fmt::Display for CliError {
     }
 }
 
+/// Native SDK used by package commands when `PAM_NATIVE_HOME` is not set.
+///
+/// The Composer package `pushinbr/pam-native` ships the Android host and the
+/// engine crates that match its PHP SDK, so a project that installed it must
+/// build against that copy: the SDK bundled with the PAM distribution can be
+/// older than the project's PHP SDK and then reject render frames that use
+/// newer protocol properties. The bundled SDK remains the fallback for
+/// projects without the Composer package.
+fn default_native_home(project_root: &Path) -> Option<PathBuf> {
+    let vendored = project_root
+        .join("vendor")
+        .join("pushinbr")
+        .join("pam-native");
+    if vendored
+        .join("android")
+        .join("settings.gradle.kts")
+        .is_file()
+    {
+        return Some(vendored);
+    }
+    let bundled = PathBuf::from(env::var_os("PAM_HOME")?).join("native");
+    bundled.is_dir().then_some(bundled)
+}
+
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn package_commands_prefer_the_project_native_sdk() {
+        let root = std::env::temp_dir().join(format!("pam-native-home-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let vendored = root.join("vendor/pushinbr/pam-native/android");
+        std::fs::create_dir_all(&vendored).expect("vendored sdk");
+        std::fs::write(vendored.join("settings.gradle.kts"), "").expect("gradle settings");
+        assert_eq!(
+            default_native_home(&root),
+            Some(root.join("vendor/pushinbr/pam-native"))
+        );
+        std::fs::remove_file(vendored.join("settings.gradle.kts")).expect("remove host");
+        let bundled = default_native_home(&root);
+        assert!(
+            bundled.is_none()
+                || bundled
+                    == env::var_os("PAM_HOME").map(|home| PathBuf::from(home).join("native"))
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
     use super::*;
 
     #[test]

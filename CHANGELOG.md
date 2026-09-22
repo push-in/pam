@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Package commands now build the native host from the project's Composer
+  package (`vendor/pushinbr/pam-native`) when `PAM_NATIVE_HOME` is not set,
+  keeping the engine protocol in sync with the PHP SDK; the SDK bundled with
+  the distribution stays the fallback for projects without the package.
+
 ## 2.2.6 - 2026-09-06
 
 - Pass the default `src` target explicitly through `pam format --check` and
