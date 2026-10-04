@@ -8,6 +8,8 @@
 - Require a fresh Android process and actual rendered text in the community
   first-run gate. Detect Native template and runtime exceptions before accepting
   screenshot evidence.
+- Refresh the Laravel compatibility lock to patched Laravel, CommonMark, and
+  Flysystem releases after new security advisories.
 
 ## 2.2.6 - 2026-09-06
 
