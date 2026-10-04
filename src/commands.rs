@@ -5858,10 +5858,11 @@ fn local_native_repository() -> Option<LocalComposerRepository> {
             let composer = fs::read(path.join("composer.json")).ok()?;
             let manifest = serde_json::from_slice::<serde_json::Value>(&composer).ok()?;
             let package = manifest.get("name")?.as_str()?.to_owned();
-            let version = path
-                .parent()?
-                .parent()
-                .and_then(|root| cargo_manifest_version(&root.join("Cargo.toml")))?;
+            let version = cargo_manifest_version(&path.join("Cargo.toml")).or_else(|| {
+                path.parent()?
+                    .parent()
+                    .and_then(|root| cargo_manifest_version(&root.join("Cargo.toml")))
+            })?;
             let definition = serde_json::json!({
                 "type": "path",
                 "url": path.to_string_lossy(),

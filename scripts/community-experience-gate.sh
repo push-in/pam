@@ -148,6 +148,12 @@ init_mobile() {
     --platform android --application-id "${application_id}" --name "Community Gate"
   assert_dependency_install "${directory}"
 
+  local package=${application_id}.debug
+  adb shell am force-stop "${package}"
+  if adb shell pidof "${package}" 2>/dev/null | grep -Eq '[0-9]'; then
+    printf 'Community gate: could not stop the previous %s process\n' "${package}" >&2
+    return 1
+  fi
   local log=${directory}/community-dev.log
   active_log=${log}
   (
@@ -155,7 +161,12 @@ init_mobile() {
     exec "${pam_bin}" dev .
   ) >"${log}" 2>&1 &
   dev_pid=$!
-  local package=${application_id}.debug
+  local expected_content
+  if [[ "${template}" == native || "${template}" == mobile ]]; then
+    expected_content='Hello from persistent PHP'
+  else
+    expected_content='Persistent PHP. Native Material UI.'
+  fi
   local deadline=$((SECONDS + ${PAM_COMMUNITY_GATE_TIMEOUT_SECONDS:-1200}))
   while (( SECONDS < deadline )); do
     if adb shell pidof "${package}" 2>/dev/null | grep -Eq '[0-9]'; then
@@ -176,6 +187,14 @@ init_mobile() {
         printf 'Community gate: native runtime reported an error for %s\n' "${package}" >&2
         tail -400 "${logcat_file}" >&2
         return 1
+      fi
+      local ui_dump
+      ui_dump=$(adb shell uiautomator dump /sdcard/pam-community-window.xml 2>/dev/null && \
+        adb shell cat /sdcard/pam-community-window.xml 2>/dev/null) || true
+      if [[ "${ui_dump}" != *"${expected_content}"* ]]; then
+        printf 'Community gate: waiting for rendered content in %s\n' "${package}"
+        sleep 2
+        continue
       fi
       mkdir -p "${directory}/evidence"
       local screenshot=${directory}/evidence/android.png
