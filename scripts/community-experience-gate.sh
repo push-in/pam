@@ -42,7 +42,7 @@ pam_bin=$(realpath "${pam_bin}")
 
 stop_dev() {
   if [[ -n "${dev_pid}" ]]; then
-    kill "${dev_pid}" 2>/dev/null || true
+    kill -- "-${dev_pid}" 2>/dev/null || true
     wait "${dev_pid}" 2>/dev/null || true
     dev_pid=
   fi
@@ -77,7 +77,7 @@ run_bounded_server_dev() {
   active_log=${log}
   (
     cd "${directory}"
-    exec env PAM_PORT="${port}" "${pam_bin}" dev
+    exec setsid env PAM_PORT="${port}" "${pam_bin}" dev
   ) >"${log}" 2>&1 &
   dev_pid=$!
 
@@ -160,7 +160,7 @@ init_mobile() {
   active_log=${log}
   (
     cd "${directory}"
-    exec "${pam_bin}" dev .
+    exec setsid "${pam_bin}" dev .
   ) >"${log}" 2>&1 &
   dev_pid=$!
   local expected_content
