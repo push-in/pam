@@ -11,7 +11,8 @@
   first-run gate. Detect Native template and runtime exceptions before accepting
   screenshot evidence. Keep gate logs outside generated apps so a development
   watcher cannot reload itself from its own log writes, and stop the complete
-  development process group between Core and UI starters.
+  development process group between Core and UI starters. Launch the Laravel
+  starter with its generated `pam.php` entrypoint.
 - Refresh the Laravel compatibility lock to patched Laravel, CommonMark, and
   Flysystem releases after new security advisories.
 

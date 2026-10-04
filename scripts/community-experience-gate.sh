@@ -73,11 +73,12 @@ trap cleanup EXIT INT TERM
 run_bounded_server_dev() {
   local directory=$1
   local port=$2
+  local entrypoint=$3
   local log=${gate_root}/$(basename "${directory}")-community-dev.log
   active_log=${log}
   (
     cd "${directory}"
-    exec setsid env PAM_PORT="${port}" "${pam_bin}" dev
+    exec setsid env PAM_PORT="${port}" "${pam_bin}" dev "${entrypoint}"
   ) >"${log}" 2>&1 &
   dev_pid=$!
 
@@ -134,7 +135,11 @@ init_server() {
   local directory=${gate_root}/${name}
   "${pam_bin}" init "${directory}" --template "${template}" --no-interaction
   assert_dependency_install "${directory}"
-  run_bounded_server_dev "${directory}" 31987
+  local entrypoint=index.php
+  if [[ "${template}" == laravel ]]; then
+    entrypoint=pam.php
+  fi
+  run_bounded_server_dev "${directory}" 31987 "${entrypoint}"
 }
 
 init_mobile() {
