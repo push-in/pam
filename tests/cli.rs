@@ -2603,6 +2603,75 @@ fn executes_composer_package_binary_commands_from_canonical_metadata() {
 
 #[cfg(unix)]
 #[test]
+fn native_package_commands_use_the_composer_sdk_instead_of_an_older_bundled_sdk() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = temporary_path("native-composer-sdk");
+    let package = project.join("vendor/pushinbr/pam-native");
+    let pam_home = project.join("pam-home");
+    fs::create_dir_all(package.join("android")).unwrap();
+    fs::create_dir_all(package.join("packages/native/bin")).unwrap();
+    fs::create_dir_all(project.join("vendor/composer")).unwrap();
+    fs::create_dir_all(pam_home.join("native")).unwrap();
+    fs::write(
+        project.join("pam.json"),
+        r#"{"schema":1,"type":2,"name":"Native SDK path"}"#,
+    )
+    .unwrap();
+    fs::write(package.join("android/settings.gradle.kts"), "").unwrap();
+    let executable = package.join("packages/native/bin/pam-native");
+    fs::write(
+        &executable,
+        "#!/bin/sh\nprintf '%s\\n' \"$PAM_NATIVE_HOME\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+    fs::write(
+        project.join("vendor/composer/installed.json"),
+        r#"{"packages":[{"name":"pushinbr/pam-native","install-path":"../pushinbr/pam-native","extra":{"pam":{"commands":{"sdk:path":{"bin":"packages/native/bin/pam-native","description":"Inspect Native SDK path"}}}}}]}"#,
+    )
+    .unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .current_dir(&project)
+        .env("PAM_HOME", &pam_home)
+        .env_remove("PAM_NATIVE_HOME")
+        .arg("sdk:path")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        package.display().to_string()
+    );
+
+    let explicit = project.join("custom-sdk");
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .current_dir(&project)
+        .env("PAM_HOME", &pam_home)
+        .env("PAM_NATIVE_HOME", &explicit)
+        .arg("sdk:path")
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        explicit.display().to_string()
+    );
+
+    fs::remove_dir_all(project).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
 fn production_certify_dispatches_to_the_project_native_certifier() {
     use std::os::unix::fs::PermissionsExt;
 
