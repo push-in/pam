@@ -171,7 +171,7 @@ init_mobile() {
       local logcat_file=${directory}/android-logcat.txt
       adb logcat -d --pid="${pid}" -t 400 >"${logcat_file}" 2>&1 || true
       if grep -Eiq \
-        'PluginException|FATAL EXCEPTION|E PamNative.*(error|failed)|Pam Native failed' \
+        'PluginException|TemplateException|FATAL EXCEPTION|E PamNative:|PAMERR1|Pam Native failed' \
         "${logcat_file}"; then
         printf 'Community gate: native runtime reported an error for %s\n' "${package}" >&2
         tail -400 "${logcat_file}" >&2
@@ -221,17 +221,17 @@ case "${surface}" in
   raw) init_server raw raw-app ;;
   http) init_server http http-app ;;
   laravel) init_server laravel laravel-app ;;
-  mobile) init_mobile mobile mobile-app dev.pam.communitygate ;;
+  native|mobile) init_mobile native mobile-app dev.pam.communitygate ;;
   native-ui|mobile-ui) init_mobile native-ui native-ui-app dev.pam.communityuigate ;;
   all)
     init_server raw raw-app
     init_server http http-app
     init_server laravel laravel-app
-    init_mobile mobile mobile-app dev.pam.communitygate
+    init_mobile native mobile-app dev.pam.communitygate
     init_mobile native-ui native-ui-app dev.pam.communityuigate
     ;;
   *)
-    printf 'Usage: %s [raw|http|laravel|mobile|native-ui|all]\n' "$0" >&2
+    printf 'Usage: %s [raw|http|laravel|native|native-ui|all]\n' "$0" >&2
     exit 64
     ;;
 esac
