@@ -6,6 +6,7 @@ set -euo pipefail
 
 surface=${1:-all}
 pam_bin=${PAM_BIN:-target/debug/pam}
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 owns_gate_root=0
 if [[ -n "${PAM_COMMUNITY_GATE_ROOT:-}" ]]; then
   gate_root=${PAM_COMMUNITY_GATE_ROOT}
@@ -200,6 +201,17 @@ init_mobile() {
       ui_dump=$(adb shell uiautomator dump /sdcard/pam-community-window.xml 2>/dev/null && \
         adb shell cat /sdcard/pam-community-window.xml 2>/dev/null) || true
       last_ui_dump=${ui_dump}
+      local wait_point
+      wait_point=$(printf '%s' "${ui_dump}" | \
+        python3 "${script_dir}/parse-system-anr-wait.py")
+      if [[ -n "${wait_point}" ]]; then
+        local wait_x wait_y
+        read -r wait_x wait_y <<<"${wait_point}"
+        printf 'Community gate: dismissing launcher ANR dialog and retrying %s\n' "${package}" >&2
+        adb shell input tap "${wait_x}" "${wait_y}"
+        sleep 2
+        continue
+      fi
       if [[ "${ui_dump}" != *"${expected_content}"* ]]; then
         printf 'Community gate: waiting for rendered content in %s\n' "${package}"
         sleep 2
