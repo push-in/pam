@@ -73,7 +73,7 @@ trap cleanup EXIT INT TERM
 run_bounded_server_dev() {
   local directory=$1
   local port=$2
-  local log=${directory}/community-dev.log
+  local log=${gate_root}/$(basename "${directory}")-community-dev.log
   active_log=${log}
   (
     cd "${directory}"
@@ -149,12 +149,14 @@ init_mobile() {
   assert_dependency_install "${directory}"
 
   local package=${application_id}.debug
+  adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
   adb shell am force-stop "${package}"
   if adb shell pidof "${package}" 2>/dev/null | grep -Eq '[0-9]'; then
     printf 'Community gate: could not stop the previous %s process\n' "${package}" >&2
     return 1
   fi
-  local log=${directory}/community-dev.log
+  local log=${gate_root}/$(basename "${directory}")-community-dev.log
   active_log=${log}
   (
     cd "${directory}"
@@ -168,6 +170,7 @@ init_mobile() {
     expected_content='Persistent PHP. Native Material UI.'
   fi
   local deadline=$((SECONDS + ${PAM_COMMUNITY_GATE_TIMEOUT_SECONDS:-1200}))
+  local last_ui_dump=
   while (( SECONDS < deadline )); do
     if adb shell pidof "${package}" 2>/dev/null | grep -Eq '[0-9]'; then
       sleep 3
@@ -191,6 +194,7 @@ init_mobile() {
       local ui_dump
       ui_dump=$(adb shell uiautomator dump /sdcard/pam-community-window.xml 2>/dev/null && \
         adb shell cat /sdcard/pam-community-window.xml 2>/dev/null) || true
+      last_ui_dump=${ui_dump}
       if [[ "${ui_dump}" != *"${expected_content}"* ]]; then
         printf 'Community gate: waiting for rendered content in %s\n' "${package}"
         sleep 2
@@ -232,6 +236,9 @@ init_mobile() {
     sleep 2
   done
   printf 'Community gate: Android launch timed out for %s\n' "${package}" >&2
+  if [[ -n "${last_ui_dump}" ]]; then
+    printf 'Community gate: last UI hierarchy: %.3000s\n' "${last_ui_dump}" >&2
+  fi
   tail -240 "${log}" >&2
   return 1
 }
