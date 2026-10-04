@@ -10,7 +10,8 @@
 - Require a fresh Android process and actual rendered text in the community
   first-run gate. Detect Native template and runtime exceptions before accepting
   screenshot evidence. Keep gate logs outside generated apps so a development
-  watcher cannot reload itself from its own log writes.
+  watcher cannot reload itself from its own log writes, and stop the complete
+  development process group between Core and UI starters.
 - Refresh the Laravel compatibility lock to patched Laravel, CommonMark, and
   Flysystem releases after new security advisories.
 
