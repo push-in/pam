@@ -1,6 +1,13 @@
 # Changelog
 
-## Unreleased
+## 2.2.7 - 2026-10-03
+
+- Resolve released PAM Native and Native UI packages by default. Local Composer
+  paths now require an explicit environment variable, and release candidates
+  can use the full PAM Native repository as their package root.
+- Require a fresh Android process and actual rendered text in the community
+  first-run gate. Detect Native template and runtime exceptions before accepting
+  screenshot evidence.
 
 ## 2.2.6 - 2026-09-06
 
