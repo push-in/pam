@@ -1,6 +1,17 @@
 # Changelog
 
-## Unreleased
+## 2.2.7 - 2026-10-03
+
+- Resolve released PAM Native and Native UI packages by default. Local Composer
+  paths now require an explicit environment variable, and release candidates
+  can use the full PAM Native repository as their package root.
+- Dispatch Native package commands against the SDK installed by Composer when
+  present, while preserving an explicitly configured SDK path.
+- Require a fresh Android process and actual rendered text in the community
+  first-run gate. Detect Native template and runtime exceptions before accepting
+  screenshot evidence.
+- Refresh the Laravel compatibility lock to patched Laravel, CommonMark, and
+  Flysystem releases after new security advisories.
 
 ## 2.2.6 - 2026-09-06
 

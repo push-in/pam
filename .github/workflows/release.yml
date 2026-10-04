@@ -371,12 +371,6 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}
           persist-credentials: false
-      - uses: actions/checkout@v5
-        with:
-          repository: push-in/pam-native
-          ref: 4c7d0174a3c4cb368fcaf3e3a33357816c9c5b90
-          path: native-sdk
-          persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
           name: pam-linux-x86_64
@@ -390,7 +384,6 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v4
-      - uses: dtolnay/rust-toolchain@1.88.0
       - name: Assemble the exact candidate toolchain
         run: |
           pam_archive=$(find candidate-pam -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
@@ -401,14 +394,8 @@ jobs:
           test -x "${pam_bin}"
           (cd candidate-runtime && sha256sum --check pam-android-runtime.tar.gz.sha256)
           tar -xzf candidate-runtime/pam-android-runtime.tar.gz -C "${RUNNER_TEMP}/pam-home"
-          cargo build --locked --release --manifest-path native-sdk/Cargo.toml -p pam-native-cli
-          mkdir -p native-sdk/target
-          cp -a "${RUNNER_TEMP}/pam-home/native/target/." native-sdk/target/
           printf 'PAM_BIN=%s\n' "${pam_bin}" >>"${GITHUB_ENV}"
           printf 'PAM_HOME=%s\n' "${RUNNER_TEMP}/pam-home" >>"${GITHUB_ENV}"
-          printf 'PAM_NATIVE_HOME=%s\n' "${GITHUB_WORKSPACE}/native-sdk" >>"${GITHUB_ENV}"
-          printf 'PAM_NATIVE_PACKAGE_PATH=%s\n' "${GITHUB_WORKSPACE}/native-sdk/packages/native" >>"${GITHUB_ENV}"
-          printf 'PAM_NATIVE_CLI=%s\n' "${GITHUB_WORKSPACE}/native-sdk/target/release/pam-native" >>"${GITHUB_ENV}"
       - name: Prove every documented pam init and pam dev journey
         uses: reactivecircus/android-emulator-runner@v2
         env:

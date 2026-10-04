@@ -5846,14 +5846,10 @@ struct LocalComposerRepository {
 }
 
 fn local_native_repository() -> Option<LocalComposerRepository> {
-    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let configured = std::env::var_os("PAM_NATIVE_PACKAGE_PATH").map(PathBuf::from);
-    let candidates = [
-        configured,
-        Some(manifest_root.join("pam-native/packages/native")),
-        Some(manifest_root.join("../pam-native/packages/native")),
-    ];
-    candidates
+    // Source checkouts may contain an unpublished version whose CLI assets do
+    // not exist yet. Local packages must be explicitly selected by developers.
+    [configured]
         .into_iter()
         .flatten()
         .find(|path| path.join("composer.json").is_file())
@@ -5862,10 +5858,11 @@ fn local_native_repository() -> Option<LocalComposerRepository> {
             let composer = fs::read(path.join("composer.json")).ok()?;
             let manifest = serde_json::from_slice::<serde_json::Value>(&composer).ok()?;
             let package = manifest.get("name")?.as_str()?.to_owned();
-            let version = path
-                .parent()?
-                .parent()
-                .and_then(|root| cargo_manifest_version(&root.join("Cargo.toml")))?;
+            let version = cargo_manifest_version(&path.join("Cargo.toml")).or_else(|| {
+                path.parent()?
+                    .parent()
+                    .and_then(|root| cargo_manifest_version(&root.join("Cargo.toml")))
+            })?;
             let definition = serde_json::json!({
                 "type": "path",
                 "url": path.to_string_lossy(),
@@ -5897,20 +5894,10 @@ fn cargo_manifest_version(path: &Path) -> Option<String> {
 }
 
 fn local_mobile_ui_repository() -> Option<serde_json::Value> {
-    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let configured = std::env::var_os("PAM_MOBILE_UI_PACKAGE_PATH").map(PathBuf::from);
-    let installed = std::env::current_exe().ok().and_then(|executable| {
-        executable
-            .parent()
-            .map(|binary| binary.join("../share/pam/mobile-ui"))
-    });
-    let candidates = [
-        configured,
-        installed,
-        Some(manifest_root.join("pam-native-ui")),
-        Some(manifest_root.join("../pam-native-ui")),
-    ];
-    candidates
+    // Use the published UI by default. A sibling checkout can include build
+    // caches and unpublished files that Composer cannot safely copy.
+    [configured]
         .into_iter()
         .flatten()
         .find(|path| path.join("composer.json").is_file())

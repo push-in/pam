@@ -1480,12 +1480,17 @@ fn run_registered_command(
                 // Never feed PAM's embedded PHP 8.5 ini to a different host CLI.
                 .env_remove("PHPRC")
                 .env("PHP_INI_SCAN_DIR", "");
-            if env::var_os("PAM_NATIVE_HOME").is_none()
-                && let Some(pam_home) = env::var_os("PAM_HOME")
-            {
-                let native_home = PathBuf::from(pam_home).join("native");
-                if native_home.is_dir() {
-                    process.env("PAM_NATIVE_HOME", native_home);
+            if env::var_os("PAM_NATIVE_HOME").is_none() {
+                let composer_sdk = context.root.join("vendor/pushinbr/pam-native");
+                if context.kind == project::ProjectKind::Native
+                    && composer_sdk.join("android/settings.gradle.kts").is_file()
+                {
+                    process.env("PAM_NATIVE_HOME", composer_sdk);
+                } else if let Some(pam_home) = env::var_os("PAM_HOME") {
+                    let bundled_sdk = PathBuf::from(pam_home).join("native");
+                    if bundled_sdk.is_dir() {
+                        process.env("PAM_NATIVE_HOME", bundled_sdk);
+                    }
                 }
             }
             process.envs(&command.environment);
