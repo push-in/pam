@@ -4241,6 +4241,12 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
     assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^1.0\""));
+    assert!(
+        manifest_json["repositories"]
+            .as_array()
+            .is_none_or(|repositories| repositories.is_empty()),
+        "a community starter should resolve the published Native packages"
+    );
     assert_eq!(manifest_json["config"]["platform"]["php"], "8.5.0");
     assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
