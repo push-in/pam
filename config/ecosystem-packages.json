@@ -9,6 +9,7 @@
     {"repository": "pam-native-bluetooth", "composerName": "pushinbr/pam-native-bluetooth", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-camera", "composerName": "pushinbr/pam-native-camera", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-canvas", "composerName": "pushinbr/pam-native-canvas", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-charts", "composerName": "pushinbr/pam-native-charts", "roleCode": 4, "requiresNative": false, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-3d", "composerName": "pushinbr/pam-native-3d", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-devtools", "composerName": "pushinbr/pam-native-devtools", "roleCode": 4, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-feature-flags", "composerName": "pushinbr/pam-native-feature-flags", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
