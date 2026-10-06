@@ -27,14 +27,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pam-product-android-visual-${{ github.sha }}
           path: visual/android
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pam-product-desktop-visual-${{ github.sha }}
           path: visual/desktop
@@ -102,7 +102,7 @@ jobs:
               | xargs -0 sha256sum >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pam-product-visual-certified-${{ github.sha }}
           path: product-visual-evidence/
