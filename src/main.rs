@@ -92,7 +92,15 @@ fn run() -> Result<u8, CliError> {
 
     let mut ini_entries = Vec::new();
     let mut ini_file = None::<OsString>;
+    let mut ignore_ini = false;
     loop {
+        if script_arg == "-n" {
+            ignore_ini = true;
+            script_arg = raw_args.next().ok_or_else(|| {
+                CliError::Commands("a PHP script or -r is required after -n".to_owned())
+            })?;
+            continue;
+        }
         if script_arg == "-c" {
             ini_file = Some(
                 raw_args
@@ -141,6 +149,15 @@ fn run() -> Result<u8, CliError> {
     if !ini_entries.is_empty() {
         // SAFETY: CLI parsing happens before PHP or the Tokio runtime starts threads.
         unsafe { env::set_var("PAM_INI_ENTRIES", ini_entries.join("\n") + "\n") };
+    }
+    if ignore_ini {
+        // PHP CLI workers use `-n` to isolate extension and ini discovery.
+        // Parsing happens before PHP or any worker threads are initialized.
+        unsafe {
+            env::remove_var("PHPRC");
+            env::set_var("PHP_INI_SCAN_DIR", "");
+            env::set_var("PAM_INI_IGNORE", "1");
+        }
     }
     if let Some(ini_file) = ini_file {
         let ini_file = ini_file

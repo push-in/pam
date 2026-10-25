@@ -497,6 +497,7 @@ mod tests {
         assert!(INSTALLER.contains("prune_old_releases"));
         assert!(INSTALLER.contains("probe_runtime_identity"));
         assert!(INSTALLER.contains("ulimit -t 5"));
+        assert!(INSTALLER.contains("identity_probe_wall_seconds=30"));
         assert!(INSTALLER.contains("identity_bytes"));
         assert!(INSTALLER.contains("identity_watchdog"));
         assert!(INSTALLER.contains("-type f -links +1"));

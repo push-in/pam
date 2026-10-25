@@ -173,6 +173,13 @@ static int pam_embed_init(int argc, char **argv)
     }
     pam_ini_entries[defaults_length + overrides_length] = '\0';
     php_embed_module.ini_entries = pam_ini_entries;
+    /* `pam -n`: like the PHP CLI, skip php.ini discovery (the compiled-in
+     * prefix path, PHPRC and the scan directory) while keeping -d entries. */
+    const char *ignore_ini = getenv("PAM_INI_IGNORE");
+    if (ignore_ini != NULL && ignore_ini[0] == '1' && ignore_ini[1] == '\0') {
+        php_embed_module.php_ini_ignore = 1;
+        php_embed_module.php_ini_ignore_cwd = 1;
+    }
     if (argv != NULL && argc > 0) {
         php_embed_module.executable_location = argv[0];
     }

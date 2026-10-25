@@ -20,6 +20,16 @@ pam --version
 pam doctor
 ```
 
+On macOS, a checked-out release also provides an explicit host entrypoint:
+
+```bash
+./install-macos.sh
+```
+
+It delegates to the same verified, atomic installer used on Linux while
+requiring a Darwin host. The CLI runs on macOS and builds applications for
+iOS; it is not installed inside an iPhone or Simulator.
+
 Official releases include a private PHP runtime and acquire a verified Composer
 PHAR when required. A separately installed PHP CLI, Composer, Rust, Gradle, or
 Xcode is not needed merely to explore PAM. Platform build tools are diagnosed
@@ -65,10 +75,11 @@ downgrade. Recovery to an older version requires both an explicit version and
 `--allow-downgrade`; the flag is invalid with `--check` or automatic latest
 selection.
 Before activation, the candidate must report the exact requested PAM version;
-the probe has a five-second wall/CPU budget, a bounded regular-file transcript
-and exactly one expected identity line. Silence, output flooding, timeout or
-extra diagnostics fail before activation. The launcher symlink is then replaced
-with a same-directory atomic rename.
+the probe has a five-second CPU budget and a 30-second wall-clock budget for
+slow external or virtualized storage, a bounded regular-file transcript and
+exactly one expected identity line. Silence, output flooding, timeout or extra
+diagnostics fail before activation. The launcher symlink is then replaced with
+a same-directory atomic rename.
 The version directory uses a destination-filesystem `.installing` lock/stage as
 well, so cross-filesystem copies and concurrent installers are never published
 partially. After successful activation, PAM retains the current release and the

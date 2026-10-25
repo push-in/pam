@@ -36,7 +36,7 @@ jobs:
         include:
           - profile: php85-extensions
             php: '8.5'
-            runtime_id: 8.5.8-r1
+            runtime_id: 8.5.12-r1
             ios_minimum: '18.0'
             plugins: share-extension health media widgets intents live-activities
             foundation_extensions: PamShareExtension PamWidgets PamLiveActivities

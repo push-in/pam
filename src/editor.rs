@@ -318,7 +318,7 @@ mod tests {
         assert!(root.join("helix-languages.toml").is_file());
         assert_eq!(
             extension_identifier(&root.join("vscode")).unwrap(),
-            "pushin.pam-native-0.1.0"
+            "pushin.pam-native-0.1.1"
         );
     }
 

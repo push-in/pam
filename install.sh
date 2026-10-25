@@ -12,6 +12,7 @@ release_checksum_max_bytes=16384
 release_extracted_max_bytes=4294967296
 release_extracted_max_entries=100000
 release_retained_previous=2
+identity_probe_wall_seconds=30
 
 fail() {
     printf 'pam installer: %s\n' "$*" >&2
@@ -189,7 +190,7 @@ probe_runtime_identity() {
             fi
             exit 0
         ' HUP INT TERM
-        sleep 5 &
+        sleep "${identity_probe_wall_seconds}" &
         identity_sleep=$!
         wait "${identity_sleep}" || exit 0
         identity_sleep=

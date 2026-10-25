@@ -2339,6 +2339,28 @@ fn accepts_php_cli_ini_options_for_composer_tool_workers() {
 }
 
 #[test]
+fn accepts_php_cli_no_ini_option_for_isolated_workers() {
+    let ini = temporary_path("tool-worker-disabled.ini");
+    fs::write(&ini, "precision=7\n").unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .env("PHPRC", &ini)
+        .args([
+            "-n",
+            "-r",
+            "echo php_ini_loaded_file() === false ? 'none' : 'loaded';",
+        ])
+        .output()
+        .expect("pam should start");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "none");
+    fs::remove_file(ini).unwrap();
+}
+
+#[test]
 fn initializes_and_discovers_a_contextual_native_project() {
     let parent = temporary_path("contextual-native");
     let project = parent.join("shop");

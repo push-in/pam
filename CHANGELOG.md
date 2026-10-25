@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+- macOS runtime: the embedded PHP now ships the same working extension set as
+  the Linux CLI where the macOS SDK provides the libraries: mbstring, iconv,
+  openssl, zlib, curl, sqlite3/pdo_sqlite, libxml (dom, xml, xmlreader,
+  xmlwriter, SimpleXML, xsl), fileinfo, posix, pcntl, sockets, bcmath,
+  calendar, exif, ftp and the System V IPC extensions. Composer and Laravel
+  refused to start on the previous macOS runtime (`iconv OR mbstring ... missing`).
+- Composer bootstrap: the installer and its signature are downloaded by PAM
+  with curl over TLS 1.2+, bounded in size, and verified before the embedded
+  PHP runs the installer, so a runtime without `openssl` stream wrappers can
+  still install Composer.
+- `pam -n <script>` ignores php.ini like the PHP CLI (`php_ini_ignore` in the
+  Embed SAPI, so the compiled-in prefix `php.ini`, `PHPRC` and the scan
+  directory are all skipped while `-d` entries still apply); `pam doctor` no
+  longer reports a bogus `cannot open -n` error when comparing with a host PHP
+  CLI.
+- Composer bootstrap files are named per process, so two concurrent
+  `pam composer` runs cannot verify one process's signature against the
+  other's installer.
+- `install-macos.sh` is an explicit macOS entrypoint for the verified
+  installer; the identity probe now allows 30 s wall-clock on slow or
+  virtualized storage while keeping the 5 s CPU budget.
+
 ## 2.2.7 - 2026-10-03
 
 - Resolve released PAM Native and Native UI packages by default. Local Composer
