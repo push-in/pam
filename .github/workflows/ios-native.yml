@@ -170,10 +170,10 @@ jobs:
           composer config --working-dir="${fixture}" repositories.certification-native \
             "{\"type\":\"path\",\"url\":\"${PAM_NATIVE_HOME}\",\"options\":{\"symlink\":false,\"versions\":{\"pushinbr/pam-native\":\"1.44.0-dev\"}}}"
           composer require --working-dir="${fixture}" \
-            pushinbr/pam-native:1.44.0-dev \
+            'pushinbr/pam-native:^1.44@dev' \
             --update-no-dev --no-interaction --prefer-dist --dry-run
           composer require --working-dir="${fixture}" \
-            pushinbr/pam-native:1.44.0-dev \
+            'pushinbr/pam-native:^1.44@dev' \
             --update-no-dev --no-interaction --prefer-dist
           composer validate --working-dir="${fixture}" --strict
           packages=()
