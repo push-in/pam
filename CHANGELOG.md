@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- iOS runtime: the cross-compiled PHP 8.5 slices had OPcache linked but no
+  shared memory model (Autoconf cannot run the SHM probes in a cross build), so
+  OPcache refused to start on devices and the Simulator. The builder now
+  declares `mmap(MAP_ANON)` (supported by iOS) and verifies every slice has
+  OPcache SHM and the file cache and no JIT.
 - macOS runtime: the embedded PHP now ships the same working extension set as
   the Linux CLI where the macOS SDK provides the libraries: mbstring, iconv,
   openssl, zlib, curl, sqlite3/pdo_sqlite, libxml (dom, xml, xmlreader,

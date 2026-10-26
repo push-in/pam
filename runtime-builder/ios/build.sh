@@ -151,6 +151,9 @@ build_php_slice() {
         ac_cv_func_arc4random_buf=no \
         ac_cv_func_getrandom=no \
         php_cv_sizeof_intmax_t=8 \
+        php_cv_shm_mmap_anon=${opcache_enabled} \
+        php_cv_shm_ipc=no \
+        php_cv_shm_mmap_posix=no \
         "${source_root}/configure" \
             --build="$(uname -m)-apple-darwin" \
             --host="${host}" \
@@ -184,6 +187,31 @@ build_php_slice() {
         make -j"${PAM_BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}"
         make install
     )
+    verify_ios_opcache "${install}" "${name}"
+}
+
+# A cross build cannot run OPcache's shared memory probes, so Autoconf used to
+# report no SHM model and OPcache refused to start on devices. iOS supports
+# mmap(MAP_ANON | MAP_SHARED) (the configure cache values above). Fail the
+# build if OPcache, its SHM model or the file cache is missing, or if JIT
+# (forbidden by iOS code signing) slipped in.
+verify_ios_opcache() {
+    local install=$1
+    local name=$2
+    local config=${install}/include/php/main/php_config.h
+    if grep -q '^#define HAVE_JIT 1' "${config}"; then
+        echo "iOS ${name} PHP runtime must not enable the OPcache JIT." >&2
+        return 1
+    fi
+    [[ ${opcache_enabled} == yes ]] || return 0
+    if ! grep -q '^#define HAVE_SHM_MMAP_ANON 1' "${config}"; then
+        echo "iOS ${name} PHP runtime has no OPcache shared memory model." >&2
+        return 1
+    fi
+    if ! nm -g "${install}/lib/libphp.a" 2>/dev/null | grep -q ' T _zend_file_cache_script_load$'; then
+        echo "iOS ${name} PHP runtime is missing the OPcache file cache." >&2
+        return 1
+    fi
 }
 
 build_engine_slice() {

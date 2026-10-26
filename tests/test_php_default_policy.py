@@ -22,6 +22,17 @@ class PhpDefaultPolicyTest(unittest.TestCase):
         self.assertIn('runtime_selector="${PAM_PHP_VERSION:-8.5}"', android)
         self.assertIn("runtime_selector=${PAM_PHP_VERSION:-8.5}", ios)
 
+    def test_ios_runtime_ships_opcache_with_shared_memory_and_without_jit(self) -> None:
+        ios = (ROOT / "runtime-builder/ios/build.sh").read_text(encoding="utf-8")
+
+        self.assertIn("opcache_options=(--disable-opcache-jit)", ios)
+        self.assertIn("php_cv_shm_mmap_anon=${opcache_enabled}", ios)
+        self.assertIn("php_cv_shm_ipc=no", ios)
+        self.assertIn('verify_ios_opcache "${install}" "${name}"', ios)
+        self.assertIn("^#define HAVE_SHM_MMAP_ANON 1", ios)
+        self.assertIn("^#define HAVE_JIT 1", ios)
+        self.assertIn("_zend_file_cache_script_load$", ios)
+
     def test_generated_projects_require_php_85(self) -> None:
         skeleton = json.loads(
             (ROOT / "packages/skeleton/composer.json").read_text(encoding="utf-8")
