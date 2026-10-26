@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.8 - 2026-10-26
 
 - macOS runtime: the embedded PHP now ships the same working extension set as
   the Linux CLI where the macOS SDK provides the libraries: mbstring, iconv,
