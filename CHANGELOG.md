@@ -23,6 +23,10 @@
 - `install-macos.sh` is an explicit macOS entrypoint for the verified
   installer; the identity probe now allows 30 s wall-clock on slow or
   virtualized storage while keeping the 5 s CPU budget.
+- CI and release builders are pinned to the certified PAM Native iOS parity
+  commit, including its VS Code extension 0.1.1 assets. Compatibility locks
+  update Symfony HttpFoundation to 8.1.9 and Livewire to 4.4.8, clearing the
+  CVE-2026-108082 and GHSA-mhf7-xp6r-6qrc advisories.
 
 ## 2.2.7 - 2026-10-03
 

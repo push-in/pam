@@ -1025,80 +1025,6 @@
             "time": "2026-08-10T17:21:54+00:00"
         },
         {
-            "name": "illuminate/database",
-            "version": "v13.26.1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/illuminate/database.git",
-                "reference": "29ef3c5467662dc019a5bf40b1555c3659a5afe8"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/database/zipball/29ef3c5467662dc019a5bf40b1555c3659a5afe8",
-                "reference": "29ef3c5467662dc019a5bf40b1555c3659a5afe8",
-                "shasum": ""
-            },
-            "require": {
-                "brick/math": "^0.14.2 || ^0.15 || ^0.16 || ^0.17 || ^0.18 || ^0.19",
-                "ext-pdo": "*",
-                "illuminate/collections": "^13.0",
-                "illuminate/conditionable": "^13.0",
-                "illuminate/container": "^13.0",
-                "illuminate/contracts": "^13.0",
-                "illuminate/macroable": "^13.0",
-                "illuminate/support": "^13.0",
-                "laravel/serializable-closure": "^2.0.10",
-                "php": "^8.3",
-                "symfony/polyfill-php84": "^1.36",
-                "symfony/polyfill-php85": "^1.36",
-                "symfony/polyfill-php86": "^1.36"
-            },
-            "suggest": {
-                "ext-filter": "Required to use the Postgres database driver.",
-                "fakerphp/faker": "Required to use the eloquent factory builder (^1.24).",
-                "illuminate/console": "Required to use the database commands (^13.0).",
-                "illuminate/events": "Required to use the observers with Eloquent (^13.0).",
-                "illuminate/filesystem": "Required to use the migrations (^13.0).",
-                "illuminate/http": "Required to convert Eloquent models to API resources (^13.0).",
-                "illuminate/pagination": "Required to paginate the result set (^13.0).",
-                "symfony/finder": "Required to use Eloquent model factories (^7.4 || ^8.0)."
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "13.0.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Illuminate\\Database\\": ""
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Taylor Otwell",
-                    "email": "taylor@laravel.com"
-                }
-            ],
-            "description": "The Illuminate Database package.",
-            "homepage": "https://laravel.com",
-            "keywords": [
-                "database",
-                "laravel",
-                "orm",
-                "sql"
-            ],
-            "support": {
-                "issues": "https://github.com/laravel/framework/issues",
-                "source": "https://github.com/laravel/framework"
-            },
-            "time": "2026-08-18T20:28:14+00:00"
-        },
-        {
             "name": "illuminate/events",
             "version": "v13.26.1",
             "source": {
@@ -1155,75 +1081,6 @@
             "time": "2026-08-13T15:21:29+00:00"
         },
         {
-            "name": "illuminate/filesystem",
-            "version": "v13.26.1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/illuminate/filesystem.git",
-                "reference": "b42bc51118a4041dd243cab78340dcdc7c5e06c8"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/filesystem/zipball/b42bc51118a4041dd243cab78340dcdc7c5e06c8",
-                "reference": "b42bc51118a4041dd243cab78340dcdc7c5e06c8",
-                "shasum": ""
-            },
-            "require": {
-                "illuminate/collections": "^13.0",
-                "illuminate/conditionable": "^13.0",
-                "illuminate/contracts": "^13.0",
-                "illuminate/macroable": "^13.0",
-                "illuminate/support": "^13.0",
-                "php": "^8.3",
-                "symfony/finder": "^7.4.0 || ^8.0.0"
-            },
-            "suggest": {
-                "ext-fileinfo": "Required to use the Filesystem class.",
-                "ext-ftp": "Required to use the Flysystem FTP driver.",
-                "ext-hash": "Required to use the Filesystem class.",
-                "illuminate/http": "Required for handling uploaded files (^13.0).",
-                "illuminate/image": "Required to create images from stored files (^13.0).",
-                "league/flysystem": "Required to use the Flysystem local driver (^3.25.1).",
-                "league/flysystem-aws-s3-v3": "Required to use the Flysystem S3 driver (^3.25.1).",
-                "league/flysystem-ftp": "Required to use the Flysystem FTP driver (^3.25.1).",
-                "league/flysystem-sftp-v3": "Required to use the Flysystem SFTP driver (^3.25.1).",
-                "psr/http-message": "Required to allow Storage::put to accept a StreamInterface (^1.0 || ^2.0).",
-                "symfony/filesystem": "Required to enable support for relative symbolic links (^7.4 || ^8.0).",
-                "symfony/mime": "Required to enable support for guessing extensions (^7.4 || ^8.0)."
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "13.0.x-dev"
-                }
-            },
-            "autoload": {
-                "files": [
-                    "functions.php"
-                ],
-                "psr-4": {
-                    "Illuminate\\Filesystem\\": ""
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Taylor Otwell",
-                    "email": "taylor@laravel.com"
-                }
-            ],
-            "description": "The Illuminate Filesystem package.",
-            "homepage": "https://laravel.com",
-            "support": {
-                "issues": "https://github.com/laravel/framework/issues",
-                "source": "https://github.com/laravel/framework"
-            },
-            "time": "2026-08-18T06:38:02+00:00"
-        },
-        {
             "name": "illuminate/macroable",
             "version": "v13.26.1",
             "source": {
@@ -1268,56 +1125,6 @@
                 "source": "https://github.com/laravel/framework"
             },
             "time": "2026-04-29T09:35:06+00:00"
-        },
-        {
-            "name": "illuminate/pagination",
-            "version": "v13.26.1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/illuminate/pagination.git",
-                "reference": "0847cb3408d2ac92b96793e6e308a90973cb7fd2"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/pagination/zipball/0847cb3408d2ac92b96793e6e308a90973cb7fd2",
-                "reference": "0847cb3408d2ac92b96793e6e308a90973cb7fd2",
-                "shasum": ""
-            },
-            "require": {
-                "ext-filter": "*",
-                "illuminate/collections": "^13.0",
-                "illuminate/contracts": "^13.0",
-                "illuminate/support": "^13.0",
-                "php": "^8.3"
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "13.0.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Illuminate\\Pagination\\": ""
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Taylor Otwell",
-                    "email": "taylor@laravel.com"
-                }
-            ],
-            "description": "The Illuminate Pagination package.",
-            "homepage": "https://laravel.com",
-            "support": {
-                "issues": "https://github.com/laravel/framework/issues",
-                "source": "https://github.com/laravel/framework"
-            },
-            "time": "2026-08-02T20:48:08+00:00"
         },
         {
             "name": "illuminate/pipeline",
@@ -1501,67 +1308,6 @@
                 "source": "https://github.com/laravel/framework"
             },
             "time": "2026-08-14T21:23:27+00:00"
-        },
-        {
-            "name": "laravel/serializable-closure",
-            "version": "v2.0.15",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/laravel/serializable-closure.git",
-                "reference": "dccd8bcb851bb03fcc005df650b708b57cc52661"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/laravel/serializable-closure/zipball/dccd8bcb851bb03fcc005df650b708b57cc52661",
-                "reference": "dccd8bcb851bb03fcc005df650b708b57cc52661",
-                "shasum": ""
-            },
-            "require": {
-                "php": "^8.1"
-            },
-            "require-dev": {
-                "illuminate/support": "^10.0|^11.0|^12.0|^13.0",
-                "nesbot/carbon": "^2.67|^3.0",
-                "pestphp/pest": "^2.36|^3.0|^4.0",
-                "phpstan/phpstan": "^2.0",
-                "symfony/var-dumper": "^6.2.0|^7.0.0|^8.0.0"
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "2.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Laravel\\SerializableClosure\\": "src/"
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Taylor Otwell",
-                    "email": "taylor@laravel.com"
-                },
-                {
-                    "name": "Nuno Maduro",
-                    "email": "nuno@laravel.com"
-                }
-            ],
-            "description": "Laravel Serializable Closure provides an easy and secure way to serialize closures in PHP.",
-            "keywords": [
-                "closure",
-                "laravel",
-                "serializable"
-            ],
-            "support": {
-                "issues": "https://github.com/laravel/serializable-closure/issues",
-                "source": "https://github.com/laravel/serializable-closure"
-            },
-            "time": "2026-07-21T16:49:22+00:00"
         },
         {
             "name": "monolog/monolog",
@@ -2947,21 +2693,25 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http",
-                "reference": "69d822daf3e0e055f6f7bc8e1ca54c23c05320cd"
+                "reference": "fd40e393e125b2166c6fe2ed25e254e1bfefa44d"
             },
             "require": {
-                "illuminate/database": "^13.0",
-                "illuminate/events": "^13.0",
-                "illuminate/filesystem": "^13.0",
-                "illuminate/pagination": "^13.0",
                 "php": "^8.4",
                 "pushinbr/pam-contracts": "^1.1"
             },
             "require-dev": {
+                "illuminate/database": "^13.0",
+                "illuminate/events": "^13.0",
+                "illuminate/filesystem": "^13.0",
+                "illuminate/pagination": "^13.0",
                 "phpstan/phpstan": "^2.1",
                 "phpunit/phpunit": "^11.5"
             },
             "suggest": {
+                "illuminate/database": "Required by the deprecated built-in Eloquent bridge; use the dedicated PAM database adapter when available.",
+                "illuminate/events": "Required by the deprecated built-in Eloquent bridge.",
+                "illuminate/filesystem": "Required by the deprecated built-in migration bridge.",
+                "illuminate/pagination": "Required by the deprecated built-in Eloquent resource pagination bridge.",
                 "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
                 "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
             },
@@ -3016,7 +2766,7 @@
                 "Apache-2.0"
             ],
             "description": "Elegant HTTP routing and middleware for the Pam runtime.",
-            "homepage": "https://github.com/push-in/pam",
+            "homepage": "https://github.com/push-in/pam-http",
             "keywords": [
                 "api",
                 "dependency-injection",
@@ -3030,7 +2780,7 @@
             ],
             "support": {
                 "docs": "https://push-in.github.io/pam-docs/packages/http/",
-                "issues": "https://github.com/push-in/pam/issues",
+                "issues": "https://github.com/push-in/pam-http/issues",
                 "source": "https://github.com/push-in/pam-http"
             },
             "transport-options": {
@@ -3044,7 +2794,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-psr",
-                "reference": "c6ef35ed2bf6c69b6c007f111df2f646d382109c"
+                "reference": "4fecce4352b3f422b0cb0361ae87827c234b9604"
             },
             "require": {
                 "php": "^8.4",
@@ -3057,6 +2807,12 @@
             "autoload": {
                 "files": [
                     "src/psr.php"
+                ]
+            },
+            "scripts": {
+                "test": [
+                    "@php -l src/psr.php",
+                    "@php tests/run.php"
                 ]
             },
             "license": [
@@ -3962,85 +3718,17 @@
             "time": "2026-06-05T06:23:12+00:00"
         },
         {
-            "name": "symfony/finder",
-            "version": "v8.1.5",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/symfony/finder.git",
-                "reference": "8d7acede2b2ae07605783d1c43e49b5767036474"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/symfony/finder/zipball/8d7acede2b2ae07605783d1c43e49b5767036474",
-                "reference": "8d7acede2b2ae07605783d1c43e49b5767036474",
-                "shasum": ""
-            },
-            "require": {
-                "php": ">=8.4.1"
-            },
-            "require-dev": {
-                "symfony/filesystem": "^7.4|^8.0"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Symfony\\Component\\Finder\\": ""
-                },
-                "exclude-from-classmap": [
-                    "/Tests/"
-                ]
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Fabien Potencier",
-                    "email": "fabien@symfony.com"
-                },
-                {
-                    "name": "Symfony Community",
-                    "homepage": "https://symfony.com/contributors"
-                }
-            ],
-            "description": "Finds files and directories via an intuitive fluent interface",
-            "homepage": "https://symfony.com",
-            "support": {
-                "source": "https://github.com/symfony/finder/tree/v8.1.5"
-            },
-            "funding": [
-                {
-                    "url": "https://symfony.com/sponsor",
-                    "type": "custom"
-                },
-                {
-                    "url": "https://github.com/fabpot",
-                    "type": "github"
-                },
-                {
-                    "url": "https://github.com/nicolas-grekas",
-                    "type": "github"
-                },
-                {
-                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
-                    "type": "tidelift"
-                }
-            ],
-            "time": "2026-08-21T12:16:08+00:00"
-        },
-        {
             "name": "symfony/http-foundation",
-            "version": "v8.1.5",
+            "version": "v8.1.9",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/http-foundation.git",
-                "reference": "ee16f97e95cfa011a742714d7c8c8f70fe7423f4"
+                "reference": "7850897fb8659f98491b03be79ac48600bdaf9ab"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/http-foundation/zipball/ee16f97e95cfa011a742714d7c8c8f70fe7423f4",
-                "reference": "ee16f97e95cfa011a742714d7c8c8f70fe7423f4",
+                "url": "https://api.github.com/repos/symfony/http-foundation/zipball/7850897fb8659f98491b03be79ac48600bdaf9ab",
+                "reference": "7850897fb8659f98491b03be79ac48600bdaf9ab",
                 "shasum": ""
             },
             "require": {
@@ -4088,7 +3776,7 @@
             "description": "Defines an object-oriented layer for the HTTP specification",
             "homepage": "https://symfony.com",
             "support": {
-                "source": "https://github.com/symfony/http-foundation/tree/v8.1.5"
+                "source": "https://github.com/symfony/http-foundation/tree/v8.1.9"
             },
             "funding": [
                 {
@@ -4108,7 +3796,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-08-20T09:59:12+00:00"
+            "time": "2026-10-08T16:57:43+00:00"
         },
         {
             "name": "symfony/http-kernel",
@@ -7194,7 +6882,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-testing",
-                "reference": "c59ab7cce8d0e55034a100d0b188b862718f4b0a"
+                "reference": "e1e2efa1cb9acbc462d0130aebcfd7acc75a9c67"
             },
             "require": {
                 "php": "^8.4",
@@ -7207,6 +6895,13 @@
                 },
                 "files": [
                     "src/legacy-aliases.php"
+                ]
+            },
+            "scripts": {
+                "test": [
+                    "@php -l src/TestClient.php",
+                    "@php -l src/TestResponse.php",
+                    "@php tests/run.php"
                 ]
             },
             "license": [
@@ -8323,6 +8018,74 @@
                 }
             ],
             "time": "2026-08-21T14:29:57+00:00"
+        },
+        {
+            "name": "symfony/finder",
+            "version": "v8.1.5",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/symfony/finder.git",
+                "reference": "8d7acede2b2ae07605783d1c43e49b5767036474"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/symfony/finder/zipball/8d7acede2b2ae07605783d1c43e49b5767036474",
+                "reference": "8d7acede2b2ae07605783d1c43e49b5767036474",
+                "shasum": ""
+            },
+            "require": {
+                "php": ">=8.4.1"
+            },
+            "require-dev": {
+                "symfony/filesystem": "^7.4|^8.0"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Symfony\\Component\\Finder\\": ""
+                },
+                "exclude-from-classmap": [
+                    "/Tests/"
+                ]
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Fabien Potencier",
+                    "email": "fabien@symfony.com"
+                },
+                {
+                    "name": "Symfony Community",
+                    "homepage": "https://symfony.com/contributors"
+                }
+            ],
+            "description": "Finds files and directories via an intuitive fluent interface",
+            "homepage": "https://symfony.com",
+            "support": {
+                "source": "https://github.com/symfony/finder/tree/v8.1.5"
+            },
+            "funding": [
+                {
+                    "url": "https://symfony.com/sponsor",
+                    "type": "custom"
+                },
+                {
+                    "url": "https://github.com/fabpot",
+                    "type": "github"
+                },
+                {
+                    "url": "https://github.com/nicolas-grekas",
+                    "type": "github"
+                },
+                {
+                    "url": "https://tidelift.com/funding/github/packagist/symfony/symfony",
+                    "type": "tidelift"
+                }
+            ],
+            "time": "2026-08-21T12:16:08+00:00"
         },
         {
             "name": "symfony/polyfill-intl-grapheme",

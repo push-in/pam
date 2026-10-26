@@ -718,8 +718,18 @@ mod tests {
             );
             let started = std::time::Instant::now();
             let output = invoke_installer(None);
+            let elapsed = started.elapsed();
             assert!(!output.status.success());
-            assert!(started.elapsed() < std::time::Duration::from_secs(8));
+            assert!(
+                elapsed < std::time::Duration::from_secs(35),
+                "identity probe exceeded its 30-second wall-clock budget: {elapsed:?}"
+            );
+            if hostile_identity == "__hang__" {
+                assert!(
+                    elapsed >= std::time::Duration::from_secs(25),
+                    "hanging runtime escaped before the watchdog: {elapsed:?}"
+                );
+            }
             assert!(
                 String::from_utf8_lossy(&output.stderr).contains("did not report its identity")
             );
