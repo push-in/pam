@@ -168,12 +168,12 @@ jobs:
           test "$(jq -r '.runtime.php' "${fixture}/pam-native.json")" = "${{ matrix.php }}"
           test "$(jq -r '.ios.minimumVersion' "${fixture}/pam-native.json")" = "${{ matrix.ios_minimum }}"
           composer config --working-dir="${fixture}" repositories.certification-native \
-            "{\"type\":\"path\",\"url\":\"${PAM_NATIVE_HOME}\",\"options\":{\"symlink\":false}}"
+            "{\"type\":\"path\",\"url\":\"${PAM_NATIVE_HOME}\",\"options\":{\"symlink\":false,\"versions\":{\"pushinbr/pam-native\":\"1.44.0-dev\"}}}"
           composer require --working-dir="${fixture}" \
-            pushinbr/pam-native:@dev \
+            pushinbr/pam-native:1.44.0-dev \
             --update-no-dev --no-interaction --prefer-dist --dry-run
           composer require --working-dir="${fixture}" \
-            pushinbr/pam-native:@dev \
+            pushinbr/pam-native:1.44.0-dev \
             --update-no-dev --no-interaction --prefer-dist
           composer validate --working-dir="${fixture}" --strict
           packages=()
