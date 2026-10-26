@@ -8,10 +8,17 @@ if (!is_string($target) || $target === '') {
     exit(64);
 }
 
-$signature = @file_get_contents('https://composer.github.io/installer.sig');
-$installer = @file_get_contents('https://getcomposer.org/installer');
+$signaturePath = $argv[2] ?? null;
+$installerPath = $argv[3] ?? null;
+if (!is_string($signaturePath) || !is_string($installerPath)) {
+    fwrite(STDERR, "pam: Composer bootstrap inputs are missing.\n");
+    exit(64);
+}
+
+$signature = @file_get_contents($signaturePath);
+$installer = @file_get_contents($installerPath);
 if (!is_string($signature) || !is_string($installer)) {
-    fwrite(STDERR, "pam: unable to download the verified Composer installer.\n");
+    fwrite(STDERR, "pam: unable to read the downloaded Composer installer.\n");
     exit(69);
 }
 
@@ -27,11 +34,7 @@ if (!hash_equals($signature, $actual)) {
     exit(70);
 }
 
-$setup = dirname($target) . '/composer-setup.php';
-if (file_put_contents($setup, $installer, LOCK_EX) === false) {
-    fwrite(STDERR, "pam: unable to write the Composer installer cache.\n");
-    exit(73);
-}
+$setup = $installerPath;
 
 try {
     $argv = [

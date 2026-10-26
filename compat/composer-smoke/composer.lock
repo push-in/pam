@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3a2eb729835ed618f5d53f3abd872767",
+    "content-hash": "31ada800f86aad39d6e10266308b0767",
     "packages": [
         {
             "name": "amphp/amp",
@@ -1026,20 +1026,20 @@
         },
         {
             "name": "illuminate/database",
-            "version": "v13.26.1",
+            "version": "v13.38.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/database.git",
-                "reference": "29ef3c5467662dc019a5bf40b1555c3659a5afe8"
+                "reference": "add3b4602c77c38edbee26be9ab55e7eec621182"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/database/zipball/29ef3c5467662dc019a5bf40b1555c3659a5afe8",
-                "reference": "29ef3c5467662dc019a5bf40b1555c3659a5afe8",
+                "url": "https://api.github.com/repos/illuminate/database/zipball/add3b4602c77c38edbee26be9ab55e7eec621182",
+                "reference": "add3b4602c77c38edbee26be9ab55e7eec621182",
                 "shasum": ""
             },
             "require": {
-                "brick/math": "^0.14.2 || ^0.15 || ^0.16 || ^0.17 || ^0.18 || ^0.19",
+                "brick/math": "^0.14.2 || ^0.15 || ^0.16 || ^0.17 || ^0.18 || ^0.19 || ^0.20 || ^1.0",
                 "ext-pdo": "*",
                 "illuminate/collections": "^13.0",
                 "illuminate/conditionable": "^13.0",
@@ -1096,7 +1096,7 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-08-18T20:28:14+00:00"
+            "time": "2026-10-19T14:22:29+00:00"
         },
         {
             "name": "illuminate/events",
@@ -1156,16 +1156,16 @@
         },
         {
             "name": "illuminate/filesystem",
-            "version": "v13.26.1",
+            "version": "v13.38.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/illuminate/filesystem.git",
-                "reference": "b42bc51118a4041dd243cab78340dcdc7c5e06c8"
+                "reference": "399ba4c3adb954f197853a207199d401dc27aec2"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/filesystem/zipball/b42bc51118a4041dd243cab78340dcdc7c5e06c8",
-                "reference": "b42bc51118a4041dd243cab78340dcdc7c5e06c8",
+                "url": "https://api.github.com/repos/illuminate/filesystem/zipball/399ba4c3adb954f197853a207199d401dc27aec2",
+                "reference": "399ba4c3adb954f197853a207199d401dc27aec2",
                 "shasum": ""
             },
             "require": {
@@ -1221,7 +1221,7 @@
                 "issues": "https://github.com/laravel/framework/issues",
                 "source": "https://github.com/laravel/framework"
             },
-            "time": "2026-08-18T06:38:02+00:00"
+            "time": "2026-10-14T15:45:27+00:00"
         },
         {
             "name": "illuminate/macroable",
@@ -1268,56 +1268,6 @@
                 "source": "https://github.com/laravel/framework"
             },
             "time": "2026-04-29T09:35:06+00:00"
-        },
-        {
-            "name": "illuminate/pagination",
-            "version": "v13.26.1",
-            "source": {
-                "type": "git",
-                "url": "https://github.com/illuminate/pagination.git",
-                "reference": "0847cb3408d2ac92b96793e6e308a90973cb7fd2"
-            },
-            "dist": {
-                "type": "zip",
-                "url": "https://api.github.com/repos/illuminate/pagination/zipball/0847cb3408d2ac92b96793e6e308a90973cb7fd2",
-                "reference": "0847cb3408d2ac92b96793e6e308a90973cb7fd2",
-                "shasum": ""
-            },
-            "require": {
-                "ext-filter": "*",
-                "illuminate/collections": "^13.0",
-                "illuminate/contracts": "^13.0",
-                "illuminate/support": "^13.0",
-                "php": "^8.3"
-            },
-            "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "13.0.x-dev"
-                }
-            },
-            "autoload": {
-                "psr-4": {
-                    "Illuminate\\Pagination\\": ""
-                }
-            },
-            "notification-url": "https://packagist.org/downloads/",
-            "license": [
-                "MIT"
-            ],
-            "authors": [
-                {
-                    "name": "Taylor Otwell",
-                    "email": "taylor@laravel.com"
-                }
-            ],
-            "description": "The Illuminate Pagination package.",
-            "homepage": "https://laravel.com",
-            "support": {
-                "issues": "https://github.com/laravel/framework/issues",
-                "source": "https://github.com/laravel/framework"
-            },
-            "time": "2026-08-02T20:48:08+00:00"
         },
         {
             "name": "illuminate/pipeline",
@@ -1504,16 +1454,16 @@
         },
         {
             "name": "laravel/serializable-closure",
-            "version": "v2.0.15",
+            "version": "v2.1.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/laravel/serializable-closure.git",
-                "reference": "dccd8bcb851bb03fcc005df650b708b57cc52661"
+                "reference": "2d5869a838bbcf37e0d8b0568fc41914e81374b5"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/laravel/serializable-closure/zipball/dccd8bcb851bb03fcc005df650b708b57cc52661",
-                "reference": "dccd8bcb851bb03fcc005df650b708b57cc52661",
+                "url": "https://api.github.com/repos/laravel/serializable-closure/zipball/2d5869a838bbcf37e0d8b0568fc41914e81374b5",
+                "reference": "2d5869a838bbcf37e0d8b0568fc41914e81374b5",
                 "shasum": ""
             },
             "require": {
@@ -1561,7 +1511,7 @@
                 "issues": "https://github.com/laravel/serializable-closure/issues",
                 "source": "https://github.com/laravel/serializable-closure"
             },
-            "time": "2026-07-21T16:49:22+00:00"
+            "time": "2026-09-22T14:32:34+00:00"
         },
         {
             "name": "monolog/monolog",
@@ -2947,21 +2897,25 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http",
-                "reference": "69d822daf3e0e055f6f7bc8e1ca54c23c05320cd"
+                "reference": "fd40e393e125b2166c6fe2ed25e254e1bfefa44d"
             },
             "require": {
-                "illuminate/database": "^13.0",
-                "illuminate/events": "^13.0",
-                "illuminate/filesystem": "^13.0",
-                "illuminate/pagination": "^13.0",
                 "php": "^8.4",
                 "pushinbr/pam-contracts": "^1.1"
             },
             "require-dev": {
+                "illuminate/database": "^13.0",
+                "illuminate/events": "^13.0",
+                "illuminate/filesystem": "^13.0",
+                "illuminate/pagination": "^13.0",
                 "phpstan/phpstan": "^2.1",
                 "phpunit/phpunit": "^11.5"
             },
             "suggest": {
+                "illuminate/database": "Required by the deprecated built-in Eloquent bridge; use the dedicated PAM database adapter when available.",
+                "illuminate/events": "Required by the deprecated built-in Eloquent bridge.",
+                "illuminate/filesystem": "Required by the deprecated built-in migration bridge.",
+                "illuminate/pagination": "Required by the deprecated built-in Eloquent resource pagination bridge.",
                 "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
                 "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
             },
@@ -3016,7 +2970,7 @@
                 "Apache-2.0"
             ],
             "description": "Elegant HTTP routing and middleware for the Pam runtime.",
-            "homepage": "https://github.com/push-in/pam",
+            "homepage": "https://github.com/push-in/pam-http",
             "keywords": [
                 "api",
                 "dependency-injection",
@@ -3030,7 +2984,7 @@
             ],
             "support": {
                 "docs": "https://push-in.github.io/pam-docs/packages/http/",
-                "issues": "https://github.com/push-in/pam/issues",
+                "issues": "https://github.com/push-in/pam-http/issues",
                 "source": "https://github.com/push-in/pam-http"
             },
             "transport-options": {
@@ -3044,7 +2998,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-psr",
-                "reference": "c6ef35ed2bf6c69b6c007f111df2f646d382109c"
+                "reference": "4fecce4352b3f422b0cb0361ae87827c234b9604"
             },
             "require": {
                 "php": "^8.4",
@@ -3057,6 +3011,12 @@
             "autoload": {
                 "files": [
                     "src/psr.php"
+                ]
+            },
+            "scripts": {
+                "test": [
+                    "@php -l src/psr.php",
+                    "@php tests/run.php"
                 ]
             },
             "license": [
@@ -4031,16 +3991,16 @@
         },
         {
             "name": "symfony/http-foundation",
-            "version": "v8.1.5",
+            "version": "v8.1.9",
             "source": {
                 "type": "git",
                 "url": "https://github.com/symfony/http-foundation.git",
-                "reference": "ee16f97e95cfa011a742714d7c8c8f70fe7423f4"
+                "reference": "7850897fb8659f98491b03be79ac48600bdaf9ab"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/symfony/http-foundation/zipball/ee16f97e95cfa011a742714d7c8c8f70fe7423f4",
-                "reference": "ee16f97e95cfa011a742714d7c8c8f70fe7423f4",
+                "url": "https://api.github.com/repos/symfony/http-foundation/zipball/7850897fb8659f98491b03be79ac48600bdaf9ab",
+                "reference": "7850897fb8659f98491b03be79ac48600bdaf9ab",
                 "shasum": ""
             },
             "require": {
@@ -4088,7 +4048,7 @@
             "description": "Defines an object-oriented layer for the HTTP specification",
             "homepage": "https://symfony.com",
             "support": {
-                "source": "https://github.com/symfony/http-foundation/tree/v8.1.5"
+                "source": "https://github.com/symfony/http-foundation/tree/v8.1.9"
             },
             "funding": [
                 {
@@ -4108,7 +4068,7 @@
                     "type": "tidelift"
                 }
             ],
-            "time": "2026-08-20T09:59:12+00:00"
+            "time": "2026-10-08T16:57:43+00:00"
         },
         {
             "name": "symfony/http-kernel",
@@ -7194,7 +7154,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-testing",
-                "reference": "c59ab7cce8d0e55034a100d0b188b862718f4b0a"
+                "reference": "e1e2efa1cb9acbc462d0130aebcfd7acc75a9c67"
             },
             "require": {
                 "php": "^8.4",
@@ -7207,6 +7167,13 @@
                 },
                 "files": [
                     "src/legacy-aliases.php"
+                ]
+            },
+            "scripts": {
+                "test": [
+                    "@php -l src/TestClient.php",
+                    "@php -l src/TestResponse.php",
+                    "@php tests/run.php"
                 ]
             },
             "license": [

@@ -71,13 +71,13 @@ jobs:
         timeout-minutes: 12
         run: |
           repository_added=false
-          for attempt in 1 2 3; do
-            if timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php; then
+          for attempt in 1 2 3 4 5; do
+            if timeout 35s sudo add-apt-repository --no-update -y ppa:ondrej/php; then
               repository_added=true
               break
             fi
-            if [ "${attempt}" -lt 3 ]; then
-              sleep "$((attempt * 5))"
+            if [ "${attempt}" -lt 5 ]; then
+              sleep 5
             fi
           done
           test "${repository_added}" = true

@@ -3,12 +3,15 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::Value;
 
 use crate::php::PhpRuntime;
 
 const COMPOSER_BOOTSTRAP: &str = include_str!("../runtime/composer_bootstrap.php");
+const MAX_COMPOSER_SIGNATURE_BYTES: usize = 1_024;
+const MAX_COMPOSER_INSTALLER_BYTES: usize = 1_048_576;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ComposerProject {
@@ -141,14 +144,41 @@ fn install_composer(executable: &OsStr, target: &Path) -> Result<(), String> {
         )
     })?;
 
-    let bootstrap = directory.join("pam-composer-bootstrap.php");
+    // Per-process names: two concurrent `pam composer` bootstraps must not
+    // verify one process's signature against the other's installer.
+    let pid = std::process::id();
+    let bootstrap = directory.join(format!("pam-composer-bootstrap-{pid}.php"));
+    let signature = directory.join(format!("composer-installer-{pid}.sig"));
+    let installer = directory.join(format!("composer-setup-{pid}.php"));
     fs::write(&bootstrap, COMPOSER_BOOTSTRAP)
         .map_err(|error| format!("cannot write Composer bootstrap: {error}"))?;
     fs::set_permissions(&bootstrap, fs::Permissions::from_mode(0o600))
         .map_err(|error| format!("cannot secure Composer bootstrap: {error}"))?;
 
     eprintln!("Pam is downloading and verifying Composer...");
-    let arguments = [target.as_os_str().to_os_string()];
+    let downloads = download_composer_file(
+        "https://composer.github.io/installer.sig",
+        &signature,
+        MAX_COMPOSER_SIGNATURE_BYTES,
+    )
+    .and_then(|()| {
+        download_composer_file(
+            "https://getcomposer.org/installer",
+            &installer,
+            MAX_COMPOSER_INSTALLER_BYTES,
+        )
+    });
+    if let Err(error) = downloads {
+        let _ = fs::remove_file(&bootstrap);
+        let _ = fs::remove_file(&signature);
+        let _ = fs::remove_file(&installer);
+        return Err(error);
+    }
+    let arguments = [
+        target.as_os_str().to_os_string(),
+        signature.as_os_str().to_os_string(),
+        installer.as_os_str().to_os_string(),
+    ];
     // SAFETY: Bootstrap owns the single-threaded Embed lifecycle.
     unsafe { env::set_var("PAM_COMPOSER_MODE", "1") };
     let result = (|| {
@@ -158,7 +188,8 @@ fn install_composer(executable: &OsStr, target: &Path) -> Result<(), String> {
     // SAFETY: See the set_var safety note above.
     unsafe { env::remove_var("PAM_COMPOSER_MODE") };
     let _ = fs::remove_file(&bootstrap);
-    let _ = fs::remove_file(directory.join("composer-setup.php"));
+    let _ = fs::remove_file(&signature);
+    let _ = fs::remove_file(&installer);
     let status = result?;
     if status != 0 || !target.is_file() {
         return Err(format!("Composer bootstrap failed with status {status}"));
@@ -167,6 +198,52 @@ fn install_composer(executable: &OsStr, target: &Path) -> Result<(), String> {
         .map_err(|error| format!("cannot secure Composer PHAR: {error}"))?;
     eprintln!("Composer installed at {}", target.display());
     Ok(())
+}
+
+fn download_composer_file(url: &str, target: &Path, maximum_bytes: usize) -> Result<(), String> {
+    let _ = fs::remove_file(target);
+    let output = Command::new("curl")
+        .args([
+            "--proto",
+            "=https",
+            "--proto-redir",
+            "=https",
+            "--tlsv1.2",
+            "--connect-timeout",
+            "15",
+            "--max-time",
+            "120",
+            "--max-filesize",
+            &maximum_bytes.to_string(),
+            "--fail",
+            "--silent",
+            "--show-error",
+            "--location",
+            "--output",
+        ])
+        .arg(target)
+        .arg(url)
+        .output()
+        .map_err(|error| format!("cannot download Composer bootstrap with curl: {error}"))?;
+    if !output.status.success() {
+        let _ = fs::remove_file(target);
+        return Err(format!(
+            "Composer bootstrap download failed with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let metadata = fs::symlink_metadata(target)
+        .map_err(|error| format!("cannot inspect Composer bootstrap download: {error}"))?;
+    if !metadata.file_type().is_file()
+        || metadata.len() == 0
+        || metadata.len() > maximum_bytes as u64
+    {
+        let _ = fs::remove_file(target);
+        return Err("Composer bootstrap download is empty, unsafe, or oversized".to_owned());
+    }
+    fs::set_permissions(target, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("cannot secure Composer bootstrap download: {error}"))
 }
 
 fn composer_cache() -> Result<PathBuf, String> {

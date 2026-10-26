@@ -14,18 +14,18 @@ while (($# > 0)); do
             runtime_selector=${2:?--php requires 8.4, 8.5, or an exact runtime id}
             shift 2
             ;;
-        all|device|simulator|macos)
+        all|ios|device|simulator|macos)
             slice_selector=$1
             shift
             ;;
         *)
-            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|device|simulator|macos]" >&2
+            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|ios|device|simulator|macos]" >&2
             exit 64
             ;;
     esac
 done
 
-for command in python3 curl shasum tar make xcrun xcodebuild cargo rustup lipo; do
+for command in python3 curl shasum tar make perl xcrun xcodebuild cargo rustup lipo; do
     command -v "${command}" >/dev/null || {
         echo "Required iOS build command is missing: ${command}" >&2
         exit 1
@@ -73,6 +73,47 @@ tar -xf "${archive}" -C "${build_root}"
 source_root=${build_root}/php-${php_version}
 destination=${pam_root}/runtime/ios/${runtime_id}
 mkdir -p "${destination}"
+
+openssl_version=3.5.9
+openssl_url=https://github.com/openssl/openssl/releases/download/openssl-${openssl_version}/openssl-${openssl_version}.tar.gz
+openssl_sha256=603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a
+openssl_source_root=
+macos_openssl_install=
+
+prepare_openssl_source() {
+    [[ -n ${openssl_source_root} ]] && return
+    local openssl_archive=${build_root}/openssl-${openssl_version}.tar.gz
+    curl --fail --location --retry 3 "${openssl_url}" --output "${openssl_archive}"
+    echo "${openssl_sha256}  ${openssl_archive}" | shasum -a 256 --check
+    tar -xf "${openssl_archive}" -C "${build_root}"
+    openssl_source_root=${build_root}/openssl-${openssl_version}
+}
+
+build_macos_openssl() {
+    local host_arch=$1
+    local sdk_path=$2
+    local target
+    local install=${build_root}/openssl-macos-${host_arch}
+    prepare_openssl_source
+    case "${host_arch}" in
+        arm64) target=darwin64-arm64-cc ;;
+        x86_64) target=darwin64-x86_64-cc ;;
+        *) echo "Unsupported macOS OpenSSL architecture: ${host_arch}" >&2; return 1 ;;
+    esac
+    (
+        cd "${openssl_source_root}"
+        make clean >/dev/null 2>&1 || true
+        CC="$(xcrun --sdk macosx --find clang)" \
+        CFLAGS="-O2 -fPIC -arch ${host_arch} -isysroot ${sdk_path}" \
+        ./Configure "${target}" no-shared no-tests no-module \
+            --prefix="${install}" --openssldir="${install}/ssl" --libdir=lib
+        make -j"${PAM_BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}"
+        make install_sw
+    )
+    test -f "${install}/lib/libssl.a"
+    test -f "${install}/lib/libcrypto.a"
+    macos_openssl_install=${install}
+}
 
 # iOS forbids the writable/executable memory transitions used by PHP's JIT.
 # PHP 8.5 made OPcache part of the core build, so disable JIT on every series
@@ -126,9 +167,20 @@ build_php_slice() {
         # annotation during a cross build, so remove only those unsupported
         # feature probes before compilation.
         sed -i '' \
+            -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCHDIR 1$/d' \
             -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDCHDIR_NP 1$/d' \
+            -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR 1$/d' \
             -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR_NP 1$/d' \
             main/php_config.h
+        if [[ ${name} == simulator-x86_64 ]]; then
+            # The distinct iOS host triplet is required to keep Autoconf in
+            # cross-compilation mode, but PHP classifies only darwin* as
+            # Mach-O when selecting its fiber assembly. Correct that generated
+            # build rule without changing target CPU or calling convention.
+            sed -i '' \
+                's/x86_64_sysv_elf_gas/combined_sysv_macho_gas/g' \
+                Makefile Makefile.objects
+        fi
         make -j"${PAM_BUILD_JOBS:-$(sysctl -n hw.logicalcpu)}"
         make install
     )
@@ -146,8 +198,11 @@ build_macos_embed_sdk() {
     local sdk_path
     local build=${build_root}/build-macos-host
     local install=${pam_root}/runtime/macos/${runtime_id}
+    local openssl_install
     host_arch=$(uname -m)
     sdk_path=$(xcrun --sdk macosx --show-sdk-path)
+    build_macos_openssl "${host_arch}" "${sdk_path}"
+    openssl_install=${macos_openssl_install}
     rm -rf -- "${install}"
     mkdir -p "${build}" "${install}"
     (
@@ -157,15 +212,34 @@ build_macos_embed_sdk() {
         AR="$(xcrun --sdk macosx --find ar)" \
         RANLIB="$(xcrun --sdk macosx --find ranlib)" \
         CFLAGS="-O2 -fPIC -arch ${host_arch} -isysroot ${sdk_path}" \
-        CPPFLAGS="-arch ${host_arch} -isysroot ${sdk_path}" \
-        LDFLAGS="-arch ${host_arch} -isysroot ${sdk_path}" \
+        CPPFLAGS="-arch ${host_arch} -isysroot ${sdk_path} -I${openssl_install}/include" \
+        LDFLAGS="-arch ${host_arch} -isysroot ${sdk_path} -L${openssl_install}/lib" \
+        PKG_CONFIG_PATH="${openssl_install}/lib/pkgconfig" \
+        OPENSSL_CFLAGS="-I${openssl_install}/include" \
+        OPENSSL_LIBS="-L${openssl_install}/lib -lssl -lcrypto" \
+        LIBXML_CFLAGS="-I${sdk_path}/usr/include/libxml2" \
+        LIBXML_LIBS="-lxml2" \
+        XSL_CFLAGS="-I${sdk_path}/usr/include" \
+        XSL_LIBS="-lxslt -lxml2" \
+        SQLITE_CFLAGS="-I${sdk_path}/usr/include" \
+        SQLITE_LIBS="-lsqlite3" \
+        ZLIB_CFLAGS="-I${sdk_path}/usr/include" \
+        ZLIB_LIBS="-lz" \
+        CURL_CFLAGS="-I${sdk_path}/usr/include" \
+        CURL_LIBS="-lcurl" \
         "${source_root}/configure" \
             --prefix="${install}" \
             --enable-embed=shared \
             --disable-cli --disable-cgi --disable-phpdbg --disable-fpm --disable-all \
             --enable-ctype --enable-filter --enable-session --enable-tokenizer --enable-phar \
-            --without-pear --without-iconv --without-libxml --without-openssl \
-            --without-zlib --without-curl --without-sqlite3 --without-pdo-sqlite \
+            --enable-mbstring --disable-mbregex --enable-fileinfo --enable-posix --enable-pcntl --enable-sockets \
+            --enable-bcmath --enable-calendar --enable-exif --enable-ftp \
+            --enable-shmop --enable-sysvmsg --enable-sysvsem --enable-sysvshm \
+            --enable-pdo --with-sqlite3 --with-pdo-sqlite \
+            --with-libxml --enable-dom --enable-xml --enable-xmlreader --enable-xmlwriter \
+            --enable-simplexml --with-xsl \
+            --without-pear --with-iconv="${sdk_path}/usr" --with-openssl \
+            --with-zlib --with-curl \
             "${opcache_options[@]}" --with-pcre-jit=no; then
             tail -n 120 config.log >&2
             return 1
@@ -175,6 +249,8 @@ build_macos_embed_sdk() {
     )
     test -x "${install}/bin/php-config"
     test -f "${install}/lib/libphp.dylib"
+    grep -q "^#define HAVE_OPENSSL_EXT 1" "${install}/include/php/main/php_config.h"
+    grep -q "^#define HAVE_MBSTRING 1" "${install}/include/php/main/php_config.h"
     xcrun install_name_tool -id @rpath/libphp.dylib "${install}/lib/libphp.dylib"
     python3 - "${install}/runtime.json" <<PY
 import json
@@ -186,6 +262,9 @@ manifest = {
     "sourceSha256": "${php_sha256}",
     "platform": "macos",
     "architecture": "${host_arch}",
+    "opensslVersion": "${openssl_version}",
+    "opensslSourceSha256": "${openssl_sha256}",
+    "extensions": ["bcmath", "calendar", "ctype", "curl", "dom", "exif", "fileinfo", "filter", "ftp", "iconv", "mbstring", "openssl", "opcache", "pcntl", "PDO", "pdo_sqlite", "phar", "posix", "session", "shmop", "SimpleXML", "sockets", "sqlite3", "sysvmsg", "sysvsem", "sysvshm", "tokenizer", "uri", "xml", "xmlreader", "xmlwriter", "xsl", "zlib"],
 }
 with open("${install}/runtime.json", "w", encoding="utf-8") as stream:
     json.dump(manifest, stream, indent=4)
@@ -196,18 +275,21 @@ PY
 if [[ ${slice_selector} == all || ${slice_selector} == macos ]]; then
     build_macos_embed_sdk
 fi
-if [[ ${slice_selector} == all || ${slice_selector} == device ]]; then
+if [[ ${slice_selector} == all || ${slice_selector} == ios || ${slice_selector} == device ]]; then
     build_php_slice device-arm64 iphoneos arm64 aarch64-apple-darwin -miphoneos-version-min
     build_engine_slice aarch64-apple-ios
 fi
-if [[ ${slice_selector} == all || ${slice_selector} == simulator ]]; then
+if [[ ${slice_selector} == all || ${slice_selector} == ios || ${slice_selector} == simulator ]]; then
     build_php_slice simulator-arm64 iphonesimulator arm64 aarch64-apple-darwin -mios-simulator-version-min
-    build_php_slice simulator-x86_64 iphonesimulator x86_64 x86_64-apple-darwin -mios-simulator-version-min
+    # Keep host distinct from the x86_64 macOS build machine. Otherwise
+    # Autoconf treats this as a native build and tries to execute an iOS
+    # Simulator probe binary on macOS during configure.
+    build_php_slice simulator-x86_64 iphonesimulator x86_64 x86_64-apple-ios -mios-simulator-version-min
     build_engine_slice aarch64-apple-ios-sim
     build_engine_slice x86_64-apple-ios
 fi
 
-if [[ ${slice_selector} == all ]]; then
+if [[ ${slice_selector} == all || ${slice_selector} == ios ]]; then
     simulator=${build_root}/simulator
     mkdir -p "${simulator}/php" "${simulator}/engine"
     lipo -create \
