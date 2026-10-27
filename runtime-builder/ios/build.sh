@@ -64,6 +64,13 @@ php_sha256=${runtime_values_array[4]}
 ios_minimum=${runtime_values_array[5]}
 php_extensions=${runtime_values_array[6]}
 
+# The iOS slices link the PAM Native engine: fail before the long PHP build
+# instead of after it when that checkout is missing.
+if [[ ${slice_selector} != macos && ! -f ${pam_root}/pam-native/Cargo.toml ]]; then
+    echo "PAM Native checkout is missing: expected ${pam_root}/pam-native/Cargo.toml" >&2
+    exit 1
+fi
+
 build_root=$(mktemp -d "${TMPDIR:-/tmp}/pam-php-ios.XXXXXX")
 trap 'rm -rf -- "${build_root}"' EXIT
 archive=${build_root}/php-${php_version}.tar.xz
@@ -208,7 +215,11 @@ verify_ios_opcache() {
         echo "iOS ${name} PHP runtime has no OPcache shared memory model." >&2
         return 1
     fi
-    if ! nm -g "${install}/lib/libphp.a" 2>/dev/null | grep -q ' T _zend_file_cache_script_load$'; then
+    # Read the symbol table first: `nm | grep -q` under pipefail fails the
+    # check when grep exits early and nm dies of SIGPIPE.
+    local symbols
+    symbols=$(nm -g "${install}/lib/libphp.a" 2>/dev/null)
+    if ! grep -q ' T _zend_file_cache_script_load$' <<<"${symbols}"; then
         echo "iOS ${name} PHP runtime is missing the OPcache file cache." >&2
         return 1
     fi
