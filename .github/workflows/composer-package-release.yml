@@ -37,7 +37,7 @@ jobs:
       matrix: ${{ steps.package.outputs.matrix }}
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -80,7 +80,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -123,7 +123,7 @@ jobs:
             --arg composerLockSha256 "${lock_sha}" \
             '{schemaVersion: 1, package: $package, tag: $tag, sourceSha: $sourceSha, splitSha: $splitSha, composerJsonSha256: $composerJsonSha256, composerLockSha256: (if $composerLockSha256 == "" then null else $composerLockSha256 end)}' \
             > independent-package-release.json
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@v7
         with:
           name: composer-package-${{ matrix.repository }}-${{ inputs.package_tag }}
           path: independent-package-release.json
@@ -141,7 +141,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false

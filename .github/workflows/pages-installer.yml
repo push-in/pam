@@ -26,15 +26,15 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/configure-pages@v5
+      - uses: actions/configure-pages@v6
       - name: Build stable installer endpoint
         run: |
           install -d site
           install -m 0644 install.sh site/install.sh
           printf '%s\n' '<!doctype html><title>PAM installer</title><p>Use <code>curl -fsSL https://push-in.github.io/pam/install.sh | sh</code>.</p>' >site/index.html
-      - uses: actions/upload-pages-artifact@v4
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: site
       - name: Deploy GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
