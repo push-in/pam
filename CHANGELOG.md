@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.9 - 2026-10-28
+
+- First published release of the 2.2.8 changes below; the `v2.2.8` tag was
+  never released because its ecosystem certification failed.
+- The ecosystem catalog registers `pam-native-analytics` and
+  `pam-native-lottie`, so the release inventory gate matches the public
+  push-in plugin set (40 packages).
+
 ## 2.2.8 - 2026-10-26
 
 - macOS runtime: the embedded PHP now ships the same working extension set as
