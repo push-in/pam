@@ -5,6 +5,7 @@
   "packages": [
     {"repository": "pam-native-ui", "composerName": "pushinbr/pam-native-ui", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-auth", "composerName": "pushinbr/pam-native-auth", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-analytics", "composerName": "pushinbr/pam-native-analytics", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-audio", "composerName": "pushinbr/pam-native-audio", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-background-transfer", "composerName": "pushinbr/pam-native-background-transfer", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-bluetooth", "composerName": "pushinbr/pam-native-bluetooth", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
@@ -22,6 +23,7 @@
     {"repository": "pam-native-intents", "composerName": "pushinbr/pam-native-intents", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-sync-laravel", "composerName": "pushinbr/pam-native-sync-laravel", "roleCode": 3, "requiresNative": false, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-live-activities", "composerName": "pushinbr/pam-native-live-activities", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-lottie", "composerName": "pushinbr/pam-native-lottie", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-maps", "composerName": "pushinbr/pam-native-maps", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-media", "composerName": "pushinbr/pam-native-media", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-media-editor", "composerName": "pushinbr/pam-native-media-editor", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
