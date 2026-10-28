@@ -33,6 +33,13 @@ jobs:
           PAM_NEXT_EVIDENCE_KEY_IDENTITY: ${{ vars.PAM_DISTRIBUTION_NEXT_EVIDENCE_KEY_SHA256 }}
         run: |
           scripts/package-release.sh validate-tag "${PAM_RELEASE_TAG}"
+          # Build attestations record the workflow ref; the runtime distribution
+          # certification requires it to be the release tag itself.
+          if test "${GITHUB_REF}" != "refs/tags/${PAM_RELEASE_TAG}"; then
+            printf 'Release must run on refs/tags/%s, not %s; dispatch with: gh workflow run release.yml --ref %s -f release_tag=%s\n' \
+              "${PAM_RELEASE_TAG}" "${GITHUB_REF}" "${PAM_RELEASE_TAG}" "${PAM_RELEASE_TAG}" >&2
+            exit 1
+          fi
           checked_out_revision=$(git rev-parse HEAD)
           tagged_revision=$(git rev-parse "refs/tags/${PAM_RELEASE_TAG}^{commit}")
           test "${checked_out_revision}" = "${tagged_revision}"
@@ -392,14 +399,27 @@ jobs:
         run: |
           pam_archive=$(find candidate-pam -maxdepth 1 -type f -name '*.tar.gz' -print -quit)
           test -n "${pam_archive}"
-          mkdir -p "${RUNNER_TEMP}/pam-candidate" "${RUNNER_TEMP}/pam-home"
+          mkdir -p "${RUNNER_TEMP}/pam-candidate"
           tar -xzf "${pam_archive}" -C "${RUNNER_TEMP}/pam-candidate"
           pam_bin=$(find "${RUNNER_TEMP}/pam-candidate" -type f -path '*/bin/pam-run' -print -quit)
           test -x "${pam_bin}"
           (cd candidate-runtime && sha256sum --check pam-android-runtime.tar.gz.sha256)
-          tar -xzf candidate-runtime/pam-android-runtime.tar.gz -C "${RUNNER_TEMP}/pam-home"
+          # bin/pam-run always exports PAM_HOME=<install>/share/pam, so the
+          # candidate Android runtime must live there. Installing it anywhere
+          # else makes PAM Native fall back to the runtime of the previous
+          # published release instead of certifying this candidate.
+          pam_home=$(CDPATH= cd -- "$(dirname -- "${pam_bin}")/../share/pam" && pwd)
+          test -f "${pam_home}/runtime/catalog.json"
+          tar -xzf candidate-runtime/pam-android-runtime.tar.gz -C "${pam_home}"
+          cmp runtime/catalog.json "${pam_home}/runtime/catalog.json"
+          jq -r '.releases | keys[]' "${pam_home}/runtime/catalog.json" | while IFS= read -r runtime_id; do
+            test -f "${pam_home}/runtime/android/${runtime_id}/x86_64/lib/libphp.a"
+          done
           printf 'PAM_BIN=%s\n' "${pam_bin}" >>"${GITHUB_ENV}"
-          printf 'PAM_HOME=%s\n' "${RUNNER_TEMP}/pam-home" >>"${GITHUB_ENV}"
+          printf 'PAM_HOME=%s\n' "${pam_home}" >>"${GITHUB_ENV}"
+          # Never let a missing runtime be repaired from the latest public
+          # release: any repair must come from this candidate artifact.
+          printf 'PAM_RELEASE_BASE_URL=file://%s\n' "${GITHUB_WORKSPACE}/candidate-runtime" >>"${GITHUB_ENV}"
       - name: Prove every documented pam init and pam dev journey
         uses: reactivecircus/android-emulator-runner@v2
         env:
