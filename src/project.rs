@@ -929,7 +929,8 @@ pub fn registered_commands(context: &ProjectContext) -> Result<Vec<RegisteredCom
                     .or_else(|| package.get("install_path"))
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(".");
-                let package_root = vendor_directory.join("composer").join(install_path);
+                let package_root =
+                    package_command_root(&vendor_directory, install_path, &context.root)?;
                 // A package's commands must stay inside that package. Composer
                 // path repositories install packages as symlinks to a checkout
                 // elsewhere, so the boundary is the resolved package, not the
@@ -978,6 +979,44 @@ fn collect_manifest_commands(
         collect_commands(commands, base, project_root, output)?;
     }
     Ok(())
+}
+
+/// Resolves the directory that bounds a package's commands. The package may be
+/// a symlink to a checkout outside the project (Composer path repositories),
+/// but it must not resolve to a directory broad enough to make the boundary
+/// meaningless: the filesystem root, the user's home, or the project itself or
+/// one of its ancestors.
+fn package_command_root(
+    vendor_directory: &Path,
+    install_path: &str,
+    project_root: &Path,
+) -> Result<PathBuf, String> {
+    if Path::new(install_path).is_absolute() {
+        return Err(format!(
+            "package install path {install_path:?} must be relative to the vendor directory"
+        ));
+    }
+    let package_root = vendor_directory
+        .join("composer")
+        .join(install_path)
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve package {install_path:?}: {error}"))?;
+    let project_root = project_root
+        .canonicalize()
+        .map_err(|error| format!("cannot resolve {}: {error}", project_root.display()))?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .and_then(|home| home.canonicalize().ok());
+    if package_root.parent().is_none()
+        || home.as_deref() == Some(package_root.as_path())
+        || project_root.starts_with(&package_root)
+    {
+        return Err(format!(
+            "package {install_path:?} resolves to {}, which is too broad to bound its commands",
+            package_root.display()
+        ));
+    }
+    Ok(package_root)
 }
 
 fn collect_commands(
@@ -1574,6 +1613,35 @@ mod tests {
             registered_commands(&context)
                 .unwrap_err()
                 .contains("escapes")
+        );
+
+        // A package that resolves to an ancestor of the project is refused.
+        fs::remove_file(project.join("vendor/pushinbr/tool")).unwrap();
+        std::os::unix::fs::symlink(&root, project.join("vendor/pushinbr/tool")).unwrap();
+        fs::write(
+            project.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"script":"checkout/tool/bin/tool.php"}}}}}]}"#,
+        )
+        .unwrap();
+        assert!(
+            registered_commands(&context)
+                .unwrap_err()
+                .contains("too broad")
+        );
+
+        // An absolute install path is refused.
+        fs::write(
+            project.join("vendor/composer/installed.json"),
+            format!(
+                r#"{{"packages":[{{"name":"pushinbr/tool","install-path":{:?},"extra":{{"pam":{{"commands":{{"tool:run":{{"script":"bin/tool.php"}}}}}}}}}}]}}"#,
+                checkout.display().to_string()
+            ),
+        )
+        .unwrap();
+        assert!(
+            registered_commands(&context)
+                .unwrap_err()
+                .contains("must be relative")
         );
         fs::remove_dir_all(root).unwrap();
     }

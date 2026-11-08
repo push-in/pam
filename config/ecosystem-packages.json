@@ -26,7 +26,6 @@
     {"repository": "pam-native-lottie", "composerName": "pushinbr/pam-native-lottie", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-maps", "composerName": "pushinbr/pam-native-maps", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-media", "composerName": "pushinbr/pam-native-media", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
-    {"repository": "pam-native-media-editor", "composerName": "pushinbr/pam-native-media-editor", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-nfc", "composerName": "pushinbr/pam-native-nfc", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-nitro", "composerName": "pushinbr/pam-native-nitro", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-observability", "composerName": "pushinbr/pam-native-observability", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
@@ -42,6 +41,14 @@
     {"repository": "pam-native-testing", "composerName": "pushinbr/pam-native-testing", "roleCode": 4, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-video", "composerName": "pushinbr/pam-native-video", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-webrtc", "composerName": "pushinbr/pam-native-webrtc", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
-    {"repository": "pam-native-widgets", "composerName": "pushinbr/pam-native-widgets", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]}
+    {"repository": "pam-native-widgets", "composerName": "pushinbr/pam-native-widgets", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-contacts", "composerName": "pushinbr/pam-native-contacts", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-drawer", "composerName": "pushinbr/pam-native-drawer", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-i18n", "composerName": "pushinbr/pam-native-i18n", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-location", "composerName": "pushinbr/pam-native-location", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-notifications", "composerName": "pushinbr/pam-native-notifications", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-sensors", "composerName": "pushinbr/pam-native-sensors", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-toast", "composerName": "pushinbr/pam-native-toast", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-webview", "composerName": "pushinbr/pam-native-webview", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]}
   ]
 }
