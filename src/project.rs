@@ -930,7 +930,11 @@ pub fn registered_commands(context: &ProjectContext) -> Result<Vec<RegisteredCom
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(".");
                 let package_root = vendor_directory.join("composer").join(install_path);
-                collect_commands(extra, &package_root, &context.root, &mut commands)?;
+                // A package's commands must stay inside that package. Composer
+                // path repositories install packages as symlinks to a checkout
+                // elsewhere, so the boundary is the resolved package, not the
+                // project directory.
+                collect_commands(extra, &package_root, &package_root, &mut commands)?;
             }
         }
     }
@@ -1529,6 +1533,48 @@ mod tests {
         assert_eq!(commands.len(), 1);
         assert_eq!(commands[0].name, "tool:run");
         assert!(matches!(commands[0].target, CommandTarget::PhpScript(_)));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn loads_commands_of_a_symlinked_path_repository_package() {
+        let root = temporary("symlinked-package-commands");
+        let project = root.join("app");
+        let checkout = root.join("checkout/tool");
+        fs::create_dir_all(checkout.join("bin")).unwrap();
+        fs::write(checkout.join("bin/tool.php"), "<?php\n").unwrap();
+        fs::create_dir_all(project.join("vendor/composer")).unwrap();
+        fs::create_dir_all(project.join("vendor/pushinbr")).unwrap();
+        std::os::unix::fs::symlink(&checkout, project.join("vendor/pushinbr/tool")).unwrap();
+        fs::write(project.join("composer.json"), r#"{"name":"app/desktop"}"#).unwrap();
+        fs::write(project.join("vendor/autoload.php"), "<?php\n").unwrap();
+        fs::write(
+            project.join("pam.json"),
+            r#"{"schema":1,"type":1,"name":"Linked"}"#,
+        )
+        .unwrap();
+        fs::write(
+            project.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"script":"bin/tool.php"}}}}}]}"#,
+        )
+        .unwrap();
+        let context = discover(&project).unwrap();
+        let commands = registered_commands(&context).unwrap();
+        assert_eq!(commands.len(), 1);
+
+        // Leaving the package itself is still refused.
+        fs::write(root.join("checkout/outside.php"), "<?php\n").unwrap();
+        fs::write(
+            project.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"script":"../outside.php"}}}}}]}"#,
+        )
+        .unwrap();
+        assert!(
+            registered_commands(&context)
+                .unwrap_err()
+                .contains("escapes")
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
