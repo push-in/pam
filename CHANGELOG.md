@@ -34,7 +34,11 @@
   load: each package's commands are bounded by the resolved package
   directory instead of the project root, so `pam desktop dev` and other
   package commands work in projects developed against a local framework
-  checkout. A script that leaves its own package is still refused.
+  checkout. A script that leaves its own package is still refused, and a
+  package whose resolved directory is the filesystem root, the user's home
+  or an ancestor of the project, or whose `install-path` is absolute, is
+  refused. Packages that pointed a command at a script outside their own
+  directory must move that script into the package.
 - Security: updated dependencies with published advisories — h2 0.4.20,
   quinn-proto 0.11.19, rustls 0.23.46, rustls-webpki 0.103.16,
   webpki-roots 1.0.11, tokio 1.54.1 and chacha20 0.10.2 — and patch
