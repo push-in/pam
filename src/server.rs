@@ -3184,15 +3184,22 @@ async fn wait_for_observed_file_descriptor(
     readable: bool,
     writable: bool,
 ) -> Result<(), String> {
-    let descriptor = AsyncFd::new(ObservedFileDescriptor(file_descriptor)).map_err(|error| {
-        format!("cannot register PHP stream file descriptor {file_descriptor}: {error}")
-    })?;
     let interest = match (readable, writable) {
         (true, true) => Interest::READABLE.add(Interest::WRITABLE),
         (true, false) => Interest::READABLE,
         (false, true) => Interest::WRITABLE,
         (false, false) => return Err("PHP stream operation has no readiness interest".to_owned()),
     };
+    // SAFETY: the descriptor belongs to a PHP stream held by the suspended
+    // request Fiber. That Fiber resumes only after this future completes or is
+    // dropped (timeout or another descriptor becoming ready first), so the
+    // descriptor stays open and unchanged for the whole lifetime of `descriptor`.
+    let descriptor = unsafe {
+        AsyncFd::register_with_interest(ObservedFileDescriptor(file_descriptor), interest)
+    }
+    .map_err(|error| {
+        format!("cannot register PHP stream file descriptor {file_descriptor}: {error}")
+    })?;
     let _readiness = descriptor
         .ready(interest)
         .await
