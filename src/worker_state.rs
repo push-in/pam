@@ -1,15 +1,20 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, Weak};
+use std::sync::{Arc, Condvar, Mutex, Weak};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde::{Deserialize, Serialize};
 
 pub const WORKER_STATE_PATH_ENV: &str = "PAM_WORKER_STATE_PATH";
 const WORKER_STATE_VERSION: u8 = 1;
+/// Busy/Ready flips and metrics are coalesced into at most one write per
+/// interval. The master samples worker state every 200 ms and the watchdog only
+/// needs deadlines far coarser than this, while lifecycle changes such as
+/// readiness and draining are still published immediately.
+const ROUTINE_PUBLISH_INTERVAL: Duration = Duration::from_millis(100);
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,6 +136,52 @@ struct ReporterInner {
     startup_milestones: Option<crate::php::StartupMilestones>,
     pending: Mutex<PendingRecord>,
     background_writer: AtomicBool,
+    signal: Arc<PublishSignal>,
+}
+
+/// Wakes the publisher thread only when there is something to write, so an
+/// idle worker performs no periodic wakeups.
+#[derive(Debug, Default)]
+struct PublishSignal {
+    state: Mutex<SignalState>,
+    wake: Condvar,
+}
+
+#[derive(Debug, Default)]
+struct SignalState {
+    dirty: bool,
+    urgent: bool,
+    closed: bool,
+}
+
+impl PublishSignal {
+    fn notify(&self, urgent: bool) {
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let wake = !state.dirty || (urgent && !state.urgent);
+        state.dirty = true;
+        state.urgent |= urgent;
+        drop(state);
+        if wake {
+            self.wake.notify_one();
+        }
+    }
+
+    fn close(&self) {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .closed = true;
+        self.wake.notify_one();
+    }
+}
+
+impl Drop for ReporterInner {
+    fn drop(&mut self) {
+        self.signal.close();
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -167,12 +218,14 @@ impl WorkerStateReporter {
             startup_milestones: crate::php::startup_milestones(),
             pending: Mutex::new(PendingRecord::default()),
             background_writer: AtomicBool::new(false),
+            signal: Arc::new(PublishSignal::default()),
         });
 
         let weak = Arc::downgrade(&inner);
+        let signal = inner.signal.clone();
         match thread::Builder::new()
             .name("pam-worker-state".to_owned())
-            .spawn(move || publish_pending_records(weak))
+            .spawn(move || publish_pending_records(weak, signal))
         {
             Ok(_) => inner.background_writer.store(true, Ordering::Release),
             Err(error) => {
@@ -196,19 +249,23 @@ impl WorkerStateReporter {
         let Some(inner) = &self.inner else {
             return Ok(());
         };
-        {
+        let urgent = {
             let mut pending = inner
                 .pending
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            pending.lifecycle = Some(lifecycle);
-            if lifecycle == WorkerLifecycle::Ready && pending.startup_phases.is_none() {
+            let first_ready =
+                lifecycle == WorkerLifecycle::Ready && pending.startup_phases.is_none();
+            if first_ready {
                 pending.startup_phases = inner.startup_phases(epoch_millis());
             }
+            pending.lifecycle = Some(lifecycle);
             pending.deadline_at_millis = deadline_at_millis;
             pending.request_id = request_id.map(str::to_owned);
             pending.revision = pending.revision.wrapping_add(1);
-        }
+            first_ready || !matches!(lifecycle, WorkerLifecycle::Busy | WorkerLifecycle::Ready)
+        };
+        inner.signal.notify(urgent);
         self.publish_synchronously_if_needed(inner)
     }
 
@@ -224,6 +281,7 @@ impl WorkerStateReporter {
             pending.metrics = metrics;
             pending.revision = pending.revision.wrapping_add(1);
         }
+        inner.signal.notify(false);
         self.publish_synchronously_if_needed(inner)
     }
 
@@ -298,9 +356,42 @@ fn startup_phases(
     }
 }
 
-fn publish_pending_records(inner: Weak<ReporterInner>) {
+fn publish_pending_records(inner: Weak<ReporterInner>, signal: Arc<PublishSignal>) {
     let mut published_revision = 0;
+    let mut last_publish: Option<Instant> = None;
     loop {
+        {
+            let mut state = signal
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            loop {
+                if state.closed {
+                    return;
+                }
+                if state.dirty {
+                    let due = last_publish.map(|published| published + ROUTINE_PUBLISH_INTERVAL);
+                    let now = Instant::now();
+                    match due {
+                        Some(due) if !state.urgent && due > now => {
+                            state = signal
+                                .wake
+                                .wait_timeout(state, due - now)
+                                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                                .0;
+                            continue;
+                        }
+                        _ => break,
+                    }
+                }
+                state = signal
+                    .wake
+                    .wait(state)
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+            }
+            state.dirty = false;
+            state.urgent = false;
+        }
         let Some(inner) = inner.upgrade() else {
             return;
         };
@@ -318,7 +409,7 @@ fn publish_pending_records(inner: Weak<ReporterInner>) {
             published_revision = pending.revision;
         }
         drop(inner);
-        thread::sleep(Duration::from_millis(5));
+        last_publish = Some(Instant::now());
     }
 }
 

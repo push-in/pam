@@ -1482,6 +1482,24 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
             .await
             .map_err(ServerError::Serve)
     } else {
+        // Workers forked by one zygote share connection counts and move new
+        // connections to the least loaded sibling (see `balance`).
+        #[cfg(target_os = "linux")]
+        let hand_off = crate::balance::Balancer::from_environment().map(|(balancer, socket)| {
+            let tracker = crate::balance::HandOffTracker::default();
+            crate::balance::spawn_receiver(
+                socket,
+                balancer.clone(),
+                app.clone(),
+                state.shutdown.subscribe(),
+                crate::balance::HandOffHttp {
+                    header_read_timeout: Duration::from_millis(header_read_timeout),
+                    graceful_timeout: Duration::from_secs(30),
+                },
+                tracker.clone(),
+            );
+            (balancer, tracker)
+        });
         let handle = axum_server::Handle::new();
         let shutdown_handle = handle.clone();
         let signal_sender = shutdown_sender.clone();
@@ -1489,9 +1507,12 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
             shutdown_signal(recycle, signal_sender, state.clone()).await;
             shutdown_handle.graceful_shutdown(Some(Duration::from_secs(30)));
         });
-        let mut server = axum_server::from_tcp(listener)
-            .map_err(ServerError::Serve)?
-            .handle(handle);
+        let server = axum_server::from_tcp(listener).map_err(ServerError::Serve)?;
+        #[cfg(target_os = "linux")]
+        let server = server.acceptor(crate::balance::BalancingAcceptor::new(
+            hand_off.as_ref().map(|(balancer, _)| balancer.clone()),
+        ));
+        let mut server = server.handle(handle);
         server
             .http_builder()
             .http1()
@@ -1503,10 +1524,15 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
             .timer(TokioTimer::new())
             .keep_alive_interval(Some(Duration::from_secs(15)))
             .keep_alive_timeout(Duration::from_secs(10));
-        server
+        let result = server
             .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await
-            .map_err(ServerError::Serve)
+            .map_err(ServerError::Serve);
+        #[cfg(target_os = "linux")]
+        if let Some((_, tracker)) = &hand_off {
+            tracker.wait_idle(Duration::from_secs(30)).await;
+        }
+        result
     };
 
     let _ = shutdown_sender.send(true);

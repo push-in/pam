@@ -5,7 +5,7 @@ use std::os::unix::fs::PermissionsExt;
 #[cfg(target_os = "linux")]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::admin_auth::{self, ADMIN_TOKEN_ENV, ADMIN_TOKEN_FILE_ENV};
 use crate::control_plane::{ClusterSnapshot, ControlPlane, SharedClusterSnapshot};
 use crate::ingress::{Ingress, Route as IngressRoute};
+use crate::prefork::WorkerProcess;
 use crate::worker_state::{
     WORKER_STATE_PATH_ENV, WorkerLifecycle, WorkerRuntimeRecord, WorkerStartupPhases, epoch_millis,
     read,
@@ -260,7 +261,7 @@ pub const STOP_SIGNAL: i32 = SIGTERM;
 struct Worker {
     id: usize,
     generation: u64,
-    child: Child,
+    process: WorkerProcess,
     state_path: PathBuf,
     spawned_at_millis: u64,
     started: Instant,
@@ -279,30 +280,91 @@ struct RuntimePool {
 struct RuntimeDirectory(PathBuf);
 
 impl RuntimeDirectory {
+    /// Creates a fresh private directory for worker state files and hand-off
+    /// sockets. The name carries 128 random bits and the directory is created
+    /// with mode 0700 in a single `mkdir(2)`, so no other user can predict it,
+    /// pre-create it or observe it with wider permissions. An existing entry is
+    /// never reused: a collision retries with a new name.
     fn create() -> Result<Self, String> {
-        let path = std::env::temp_dir().join(format!(
-            "pam-master-{}-{}",
-            std::process::id(),
-            epoch_millis()
-        ));
-        fs::create_dir(&path).map_err(|error| {
-            format!(
-                "cannot create runtime directory {}: {error}",
-                path.display()
-            )
-        })?;
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).map_err(|error| {
-            format!(
-                "cannot secure runtime directory {}: {error}",
-                path.display()
-            )
-        })?;
-        Ok(Self(path))
+        Self::create_in(&std::env::temp_dir())
+    }
+
+    fn create_in(parent: &Path) -> Result<Self, String> {
+        use std::os::unix::fs::DirBuilderExt;
+        for _ in 0..8 {
+            let path = parent.join(format!(
+                "pam-master-{}-{}",
+                std::process::id(),
+                random_token()?
+            ));
+            match fs::DirBuilder::new().mode(0o700).create(&path) {
+                Ok(()) => {
+                    verify_private_directory(&path)?;
+                    return Ok(Self(path));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => {
+                    return Err(format!(
+                        "cannot create runtime directory {}: {error}",
+                        path.display()
+                    ));
+                }
+            }
+        }
+        Err(format!(
+            "cannot create a unique runtime directory in {}",
+            parent.display()
+        ))
     }
 
     fn path(&self) -> &Path {
         &self.0
     }
+}
+
+fn random_token() -> Result<String, String> {
+    let mut bytes = [0_u8; 16];
+    let mut filled = 0;
+    while filled < bytes.len() {
+        // SAFETY: the pointer and length describe the unfilled tail of `bytes`.
+        let read = unsafe {
+            libc::getrandom(bytes[filled..].as_mut_ptr().cast(), bytes.len() - filled, 0)
+        };
+        if read < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(format!("cannot read system randomness: {error}"));
+        }
+        filled += read as usize;
+    }
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+/// Refuses a runtime directory that is a symlink, belongs to another user or is
+/// reachable by group/other (a hostile umask cannot widen `mkdir`'s mode, but
+/// the check also guards against a filesystem that ignores it).
+fn verify_private_directory(path: &Path) -> Result<(), String> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = fs::symlink_metadata(path).map_err(|error| {
+        format!(
+            "cannot inspect runtime directory {}: {error}",
+            path.display()
+        )
+    })?;
+    // SAFETY: geteuid has no preconditions.
+    let owner = unsafe { libc::geteuid() };
+    if !metadata.file_type().is_dir()
+        || metadata.uid() != owner
+        || metadata.permissions().mode() & 0o077 != 0
+    {
+        return Err(format!(
+            "runtime directory {} is not a private directory owned by this user",
+            path.display()
+        ));
+    }
+    Ok(())
 }
 
 impl Drop for RuntimeDirectory {
@@ -443,10 +505,10 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             "pam: worker {} generation {} exceeded the hard request deadline ({request}); killing it",
                             workers[index].id, workers[index].generation,
                         );
-                        send_signal(&workers[index].child, SIGKILL);
+                        workers[index].process.signal(SIGKILL);
                     }
                     let status = workers[index]
-                        .child
+                        .process
                         .try_wait()
                         .map_err(|error| format!("cannot inspect worker: {error}"))?;
                     if let Some(status) = status {
@@ -466,7 +528,14 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             .saturating_mul(multiplier)
                             .min(MAX_RESTART_BACKOFF);
                         tokio::time::sleep(backoff).await;
-                        workers.push(spawn_worker(
+                        #[cfg(target_os = "linux")]
+                        let zygote = failed
+                            .process
+                            .zygote()
+                            .filter(|zygote| zygote.borrow_mut().is_running());
+                        #[cfg(not(target_os = "linux"))]
+                        let zygote: Option<SharedZygote> = None;
+                        workers.push(launch_worker(
                             executable,
                             &options,
                             failed.id,
@@ -474,6 +543,7 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             runtime_directory.path(),
                             failures,
                             failed.pool.clone(),
+                            zygote.as_ref(),
                         )?);
                     }
                 }
@@ -572,6 +642,11 @@ fn linux_process_state(pid: u32) -> Option<char> {
     stat.rsplit_once(") ")?.1.chars().next()
 }
 
+#[cfg(target_os = "linux")]
+type SharedZygote = std::rc::Rc<std::cell::RefCell<crate::prefork::Zygote>>;
+#[cfg(not(target_os = "linux"))]
+type SharedZygote = std::convert::Infallible;
+
 fn spawn_generation(
     executable: &OsStr,
     options: &StartOptions,
@@ -579,10 +654,12 @@ fn spawn_generation(
     generation: u64,
     runtime_directory: &Path,
 ) -> Result<Vec<Worker>, String> {
+    let zygote = start_zygote(executable, options)?;
+    let zygote = zygote.as_ref();
     if pools.is_empty() {
         return (1..=options.workers)
             .map(|id| {
-                spawn_worker(
+                launch_worker(
                     executable,
                     options,
                     id,
@@ -590,6 +667,7 @@ fn spawn_generation(
                     runtime_directory,
                     0,
                     None,
+                    zygote,
                 )
             })
             .collect();
@@ -599,7 +677,7 @@ fn spawn_generation(
     for pool in pools {
         for _ in 0..pool.workers {
             id += 1;
-            workers.push(spawn_worker(
+            workers.push(launch_worker(
                 executable,
                 options,
                 id,
@@ -607,63 +685,53 @@ fn spawn_generation(
                 runtime_directory,
                 0,
                 Some(pool.clone()),
+                zygote,
             )?);
         }
     }
     Ok(workers)
 }
 
-fn spawn_worker(
+/// Prefork shares one OPcache/JIT segment between the workers of a generation.
+/// It needs Linux and at least two workers, and `PAM_PREFORK=0` disables it.
+#[cfg(target_os = "linux")]
+fn start_zygote(
     executable: &OsStr,
     options: &StartOptions,
-    id: usize,
-    generation: u64,
-    runtime_directory: &Path,
-    consecutive_failures: u32,
-    pool: Option<RuntimePool>,
-) -> Result<Worker, String> {
-    let state_path = runtime_directory.join(format!("worker-{id}-generation-{generation}.json"));
-    if let Err(error) = fs::remove_file(&state_path)
-        && error.kind() != std::io::ErrorKind::NotFound
-    {
-        return Err(format!(
-            "cannot reset worker state {}: {error}",
-            state_path.display()
-        ));
+) -> Result<Option<SharedZygote>, String> {
+    if options.workers < 2 || std::env::var_os("PAM_PREFORK").is_some_and(|value| value == "0") {
+        return Ok(None);
     }
-    let max_requests = staggered_max_requests(options, id);
-    let spawned_at_millis = epoch_millis();
     let mut command = Command::new(executable);
     command
-        .arg("__worker")
+        .arg("__zygote")
         .arg(&options.script)
         .args(&options.script_args)
-        .env("PAM_WORKER_ID", id.to_string())
-        .env("PAM_WORKER_GENERATION", generation.to_string())
-        .env("PAM_MAX_REQUESTS", max_requests.to_string())
-        .env(
-            "PAM_WORKER_SPAWNED_AT_MILLIS",
-            spawned_at_millis.to_string(),
-        )
-        .env_remove(ADMIN_TOKEN_ENV)
-        .env_remove(ADMIN_TOKEN_FILE_ENV)
-        .env(
-            "PAM_CACHE_INVALIDATION_LOG",
-            runtime_directory.join("cache-invalidations.log"),
-        )
-        .env(WORKER_STATE_PATH_ENV, &state_path)
         .stdin(Stdio::null())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
+    configure_runtime_command(&mut command, options);
+    let zygote = crate::prefork::Zygote::start(command)?;
+    Ok(Some(std::rc::Rc::new(std::cell::RefCell::new(zygote))))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn start_zygote(
+    _executable: &OsStr,
+    _options: &StartOptions,
+) -> Result<Option<SharedZygote>, String> {
+    Ok(None)
+}
+
+/// Settings shared by exec'd workers and the zygote that forks them.
+fn configure_runtime_command(command: &mut Command, options: &StartOptions) {
+    command
+        .env_remove(ADMIN_TOKEN_ENV)
+        .env_remove(ADMIN_TOKEN_FILE_ENV);
     if let Some(extensions) = options.php_extensions.as_deref() {
         command
             .env("PHP_INI_SCAN_DIR", "")
             .env("PAM_INI_ENTRIES", php_extension_ini_entries(extensions));
-    }
-    if let Some(pool) = &pool {
-        command
-            .env("PAM_WORKER_POOL", &pool.name)
-            .env("PAM_INTERNAL_LISTEN_ADDRESS", pool.address.to_string());
     }
     #[cfg(target_os = "linux")]
     {
@@ -684,13 +752,121 @@ fn spawn_worker(
             });
         }
     }
-    let child = command
-        .spawn()
-        .map_err(|error| format!("cannot start worker {id}: {error}"))?;
+}
+
+/// Per-worker identity, applied with `exec` or after a zygote fork.
+struct WorkerEnvironment {
+    state_path: PathBuf,
+    spawned_at_millis: u64,
+    variables: Vec<(String, String)>,
+}
+
+fn worker_environment(
+    options: &StartOptions,
+    id: usize,
+    generation: u64,
+    runtime_directory: &Path,
+    pool: Option<&RuntimePool>,
+) -> Result<WorkerEnvironment, String> {
+    let state_path = runtime_directory.join(format!("worker-{id}-generation-{generation}.json"));
+    if let Err(error) = fs::remove_file(&state_path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        return Err(format!(
+            "cannot reset worker state {}: {error}",
+            state_path.display()
+        ));
+    }
+    let path_text = |path: &Path| {
+        path.to_str()
+            .map(str::to_owned)
+            .ok_or_else(|| format!("runtime path is not UTF-8: {}", path.display()))
+    };
+    let spawned_at_millis = epoch_millis();
+    let mut environment = vec![
+        ("PAM_WORKER_ID".to_owned(), id.to_string()),
+        ("PAM_WORKER_GENERATION".to_owned(), generation.to_string()),
+        (
+            "PAM_MAX_REQUESTS".to_owned(),
+            staggered_max_requests(options, id).to_string(),
+        ),
+        (
+            "PAM_WORKER_SPAWNED_AT_MILLIS".to_owned(),
+            spawned_at_millis.to_string(),
+        ),
+        (
+            "PAM_CACHE_INVALIDATION_LOG".to_owned(),
+            path_text(&runtime_directory.join("cache-invalidations.log"))?,
+        ),
+        (WORKER_STATE_PATH_ENV.to_owned(), path_text(&state_path)?),
+    ];
+    if let Some(pool) = pool {
+        environment.push(("PAM_WORKER_POOL".to_owned(), pool.name.clone()));
+        environment.push((
+            "PAM_INTERNAL_LISTEN_ADDRESS".to_owned(),
+            pool.address.to_string(),
+        ));
+    }
+    Ok(WorkerEnvironment {
+        state_path,
+        spawned_at_millis,
+        variables: environment,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn launch_worker(
+    executable: &OsStr,
+    options: &StartOptions,
+    id: usize,
+    generation: u64,
+    runtime_directory: &Path,
+    consecutive_failures: u32,
+    pool: Option<RuntimePool>,
+    zygote: Option<&SharedZygote>,
+) -> Result<Worker, String> {
+    let WorkerEnvironment {
+        state_path,
+        spawned_at_millis,
+        variables: environment,
+    } = worker_environment(options, id, generation, runtime_directory, pool.as_ref())?;
+    let process = match zygote {
+        #[cfg(target_os = "linux")]
+        Some(zygote) => {
+            let pid = zygote
+                .borrow_mut()
+                .fork_worker(environment)
+                .map_err(|error| format!("cannot start worker {id}: {error}"))?;
+            WorkerProcess::Forked {
+                pid,
+                zygote: zygote.clone(),
+                status: None,
+            }
+        }
+        #[cfg(not(target_os = "linux"))]
+        Some(never) => match *never {},
+        None => {
+            let mut command = Command::new(executable);
+            command
+                .arg("__worker")
+                .arg(&options.script)
+                .args(&options.script_args)
+                .envs(environment)
+                .stdin(Stdio::null())
+                .stdout(Stdio::inherit())
+                .stderr(Stdio::inherit());
+            configure_runtime_command(&mut command, options);
+            WorkerProcess::Spawned(
+                command
+                    .spawn()
+                    .map_err(|error| format!("cannot start worker {id}: {error}"))?,
+            )
+        }
+    };
     Ok(Worker {
         id,
         generation,
-        child,
+        process,
         state_path,
         spawned_at_millis,
         started: Instant::now(),
@@ -735,7 +911,7 @@ async fn wait_generation_ready(workers: &mut [Worker], timeout: Duration) -> Res
         let mut ready = 0;
         for worker in workers.iter_mut() {
             if let Some(status) = worker
-                .child
+                .process
                 .try_wait()
                 .map_err(|error| format!("cannot inspect worker {}: {error}", worker.id))?
             {
@@ -888,7 +1064,7 @@ fn worker_record(worker: &Worker) -> Option<WorkerRuntimeRecord> {
         })
         .ok()
         .filter(|record| {
-            record.pid == worker.child.id()
+            record.pid == worker.process.id()
                 && record.worker_id == worker.id
                 && record.generation == worker.generation
         })
@@ -922,15 +1098,15 @@ fn set_cluster_health(
 }
 
 async fn terminate_workers(workers: &mut Vec<Worker>, timeout: Duration) {
-    for worker in workers.iter() {
-        send_signal(&worker.child, SIGTERM);
+    for worker in workers.iter_mut() {
+        worker.process.signal(SIGTERM);
     }
 
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         let mut running = false;
         for worker in workers.iter_mut() {
-            if worker.child.try_wait().ok().flatten().is_none() {
+            if worker.process.try_wait().ok().flatten().is_none() {
                 running = true;
             }
         }
@@ -942,22 +1118,12 @@ async fn terminate_workers(workers: &mut Vec<Worker>, timeout: Duration) {
     }
 
     for worker in workers.iter_mut() {
-        if worker.child.try_wait().ok().flatten().is_none() {
-            let _ = worker.child.kill();
+        if worker.process.try_wait().ok().flatten().is_none() {
+            worker.process.kill();
         }
-        let _ = worker.child.wait();
+        let _ = worker.process.wait();
     }
     workers.clear();
-}
-
-fn send_signal(child: &Child, signal: i32) {
-    let Ok(pid) = i32::try_from(child.id()) else {
-        return;
-    };
-    // SAFETY: kill is called with the exact PID returned by Child and a valid signal.
-    unsafe {
-        kill(pid, signal);
-    }
 }
 
 fn parse_positive(value: Option<OsString>, option: &str) -> Result<usize, String> {
@@ -1020,6 +1186,38 @@ fn parse_pool(value: Option<OsString>) -> Result<PoolSpec, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_directory_is_private_random_and_never_reused() {
+        use std::os::unix::fs::MetadataExt;
+        let parent =
+            std::env::temp_dir().join(format!("pam-rtdir-test-{}", random_token().unwrap()));
+        fs::create_dir(&parent).unwrap();
+        let first = RuntimeDirectory::create_in(&parent).unwrap();
+        let second = RuntimeDirectory::create_in(&parent).unwrap();
+        assert_ne!(first.path(), second.path());
+        let metadata = fs::symlink_metadata(first.path()).unwrap();
+        assert_eq!(metadata.mode() & 0o777, 0o700);
+        let name = first
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert_eq!(name.rsplit('-').next().unwrap().len(), 32);
+
+        // A pre-planted entry (here a symlink) is refused by verification.
+        let planted = parent.join("planted");
+        std::os::unix::fs::symlink(first.path(), &planted).unwrap();
+        assert!(verify_private_directory(&planted).is_err());
+        let wide = parent.join("wide");
+        fs::create_dir(&wide).unwrap();
+        fs::set_permissions(&wide, fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(verify_private_directory(&wide).is_err());
+        drop(first);
+        drop(second);
+        fs::remove_dir_all(&parent).unwrap();
+    }
 
     #[test]
     fn production_default_avoids_continuous_worker_recycling() {

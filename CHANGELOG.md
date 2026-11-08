@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+- Prefork workers (Linux, `--workers` > 1): a zygote starts the Zend Engine and
+  OPcache/JIT once per generation and forks workers before any PHP code runs, so
+  workers share one OPcache/JIT segment instead of one copy each. With 8 Laravel
+  workers this cut last-level cache misses per request from ~1,160 to ~160,
+  raised throughput ~10%, and lowered total RSS from ~840 MB to ~627 MB and PSS
+  from ~535 MB to ~167 MB. If the zygote dies, its workers die with it and the
+  master restarts them with `exec`, without sharing, until the next reload.
+  `PAM_PREFORK=0` keeps the previous exec-per-worker model.
+- Least-connections balancing between sibling workers for plain HTTP: a worker
+  that accepts a connection while holding 2+ more than its least loaded sibling
+  hands the socket over with `SCM_RIGHTS` (once per connection). Per-worker
+  keep-alive connections went from 10-23 to 15-17 for 128 clients on 8 workers.
+  Together with prefork, p99 went from 26-37 ms to 14-15 ms on the same workload.
+  TLS connections are not balanced yet. `PAM_BALANCE=0` disables it.
+  Hand-off hardening: only connected (non-listening) TCP sockets are served,
+  rejected descriptors release the count the sender reserved, counters
+  saturate at zero, and a draining worker unlinks its inbox and serves what is
+  already queued instead of closing it with a reset.
+- Forked workers are signalled through their zygote, which only signals PIDs
+  it has not reaped (no `kill()` on a possibly recycled PID), and the zygote
+  refuses to fork unless it is single-threaded.
+- The master's runtime directory is created atomically with mode 0700 and a
+  random name, and is verified (owner, mode, not a symlink) before use.
+- The worker state publisher no longer polls every 5 ms: it sleeps until the
+  state changes and coalesces Busy/Ready flips and metrics into at most one
+  write per 100 ms, while readiness and draining are still published at once.
+  Idle workers now perform no periodic wakeups and busy workers no longer write
+  their state file on every request.
+
 ## 2.2.9 - 2026-10-28
 
 - First published release of the 2.2.8 changes below; the `v2.2.8` tag was

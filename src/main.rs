@@ -6,6 +6,8 @@ use std::process::ExitCode;
 
 mod admin_auth;
 mod api_generator;
+#[cfg(target_os = "linux")]
+mod balance;
 mod catalog;
 mod cluster;
 mod commands;
@@ -23,6 +25,7 @@ mod ingress;
 mod manager_dashboard;
 mod otlp;
 mod php;
+mod prefork;
 mod process_manager;
 mod project;
 mod prometheus;
@@ -1372,6 +1375,14 @@ fn run() -> Result<u8, CliError> {
         return run_script(&executable, &script, raw_args.collect());
     }
 
+    if script_arg == "__zygote" {
+        let worker_script = raw_args
+            .next()
+            .ok_or_else(|| CliError::Cluster("worker script is missing".to_owned()))?;
+        let script = resolve_script(&worker_script)?;
+        return run_zygote(&script, raw_args.collect());
+    }
+
     if let Some(context) = current_project() {
         let command_name = script_arg.to_string_lossy();
         if let Some(command) = project::registered_commands(&context)
@@ -1420,8 +1431,33 @@ fn run_script(
     script: &Path,
     script_args: Vec<OsString>,
 ) -> Result<u8, CliError> {
-    let mut php =
+    let php =
         php::PhpRuntime::initialize(executable, script, &script_args).map_err(CliError::Runtime)?;
+    run_initialized_script(php, script)
+}
+
+/// Starts the Zend engine once and forks HTTP workers on the master's request,
+/// so all workers of a generation share one OPcache/JIT segment.
+#[cfg(target_os = "linux")]
+fn run_zygote(script: &Path, script_args: Vec<OsString>) -> Result<u8, CliError> {
+    let engine = php::PhpEngine::start(script, &script_args).map_err(CliError::Runtime)?;
+    match prefork::serve(engine).map_err(CliError::Cluster)? {
+        prefork::ZygoteOutcome::Exit => Ok(0),
+        prefork::ZygoteOutcome::Worker(engine) => {
+            let php = engine.into_runtime(true).map_err(CliError::Runtime)?;
+            run_initialized_script(php, script)
+        }
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn run_zygote(_script: &Path, _script_args: Vec<OsString>) -> Result<u8, CliError> {
+    Err(CliError::Cluster(
+        "prefork workers are only supported on Linux".to_owned(),
+    ))
+}
+
+fn run_initialized_script(mut php: php::PhpRuntime, script: &Path) -> Result<u8, CliError> {
     sanitize_package_command_environment();
     let status = php.execute_file(script).map_err(CliError::Runtime)?;
 

@@ -16,6 +16,9 @@ return [
         'requestTimeoutMs' => (int) env('PAM_REQUEST_TIMEOUT_MS', 30_000),
         'maxConcurrentRequests' => 1,
         'phpExecutorQueueCapacity' => (int) env('PAM_PHP_QUEUE_CAPACITY', 1_024),
+        'gcCollectCyclesEvery' => (int) env('PAM_GC_COLLECT_CYCLES_EVERY', 256),
+        'gcMemCachesEvery' => (int) env('PAM_GC_MEM_CACHES_EVERY', 1_024),
+        'leakDetectionSampleRate' => (int) env('PAM_LEAK_DETECTION_SAMPLE_RATE', 1_024),
         'routeMetrics' => (bool) env('PAM_ROUTE_METRICS', false),
         'routeMetricsMaxEntries' => (int) env('PAM_ROUTE_METRICS_MAX_ENTRIES', 256),
         'responseCachePaths' => array_values(array_filter(array_map(
