@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 560" width="960" height="560" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-label="PAM architecture: a supervised master runs worker processes; in each worker Rust and Tokio own the network and I/O while the Zend Engine keeps the Composer application in memory and runs each request in a Fiber; Composer packages add HTTP, Laravel, Native and Desktop.">
+<defs><marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#818b98"/></marker><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0L10,5L0,10z" fill="#2a78d6"/></marker></defs>
+<rect x="40" y="20" width="250" height="74" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="54" y="42" font-size="13" font-weight="600" fill="#1f2328">pamd · process manager</text>
+<text x="54" y="62" font-size="11.5" fill="#59636e">pam up · reload · scale · logs</text>
+<text x="54" y="79" font-size="11.5" fill="#59636e">canary traffic · health checks</text>
+<rect x="360" y="20" width="560" height="74" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="374" y="42" font-size="13" font-weight="600" fill="#1f2328">Master control plane</text>
+<text x="374" y="62" font-size="11.5" fill="#59636e">crash recovery · watchdog · graceful drain · generational reload</text>
+<text x="374" y="79" font-size="11.5" fill="#59636e">/live · /ready · /metrics served outside PHP</text>
+<line x1="290" y1="57" x2="358" y2="57" stroke="#818b98" stroke-width="1.6" marker-end="url(#m)"/>
+<text x="324.0" y="51.0" font-size="11" text-anchor="middle" fill="#59636e">manages</text>
+<line x1="640" y1="94" x2="640" y2="130" stroke="#818b98" stroke-width="1.6" marker-end="url(#m)"/>
+<text x="652" y="116" font-size="11" text-anchor="start" fill="#59636e">supervises N workers · SO_REUSEPORT</text>
+<rect x="260" y="134" width="660" height="206" rx="10" fill="none" stroke="#d1d9e0" stroke-width="1.2" stroke-dasharray="5 4"/>
+<text x="274" y="156" font-size="13" font-weight="600" fill="#1f2328">Worker process</text>
+<rect x="30" y="200" width="140" height="74" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="44" y="222" font-size="13" font-weight="600" fill="#1f2328">Clients</text>
+<text x="44" y="242" font-size="11.5" fill="#59636e">browsers · apps · APIs</text>
+<line x1="170" y1="237" x2="278" y2="237" stroke="#818b98" stroke-width="1.6" marker-end="url(#m)"/>
+<text x="224.0" y="228" font-size="11" text-anchor="middle" fill="#59636e">TCP · TLS · QUIC</text>
+<rect x="280" y="168" width="270" height="152" rx="10" fill="#ddf4ff" stroke="#2a78d6" stroke-width="1.2"/>
+<text x="294" y="190" font-size="13" font-weight="600" fill="#1f2328">Rust · Tokio</text>
+<text x="294" y="210" font-size="11.5" fill="#59636e">HTTP/1.1 · HTTP/2 · HTTP/3</text>
+<text x="294" y="227" font-size="11.5" fill="#59636e">WebSocket · Rustls TLS</text>
+<text x="294" y="244" font-size="11.5" fill="#59636e">timers · sockets · async I/O</text>
+<text x="294" y="261" font-size="11.5" fill="#59636e">limits · backpressure · metrics</text>
+<rect x="670" y="168" width="230" height="152" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="684" y="190" font-size="13" font-weight="600" fill="#1f2328">Zend Engine · Embed SAPI</text>
+<text x="684" y="210" font-size="11.5" fill="#59636e">application booted once</text>
+<text x="684" y="227" font-size="11.5" fill="#59636e">Composer autoloaded once</text>
+<rect x="684" y="262" width="62" height="40" rx="7" fill="#ddf4ff" stroke="#2a78d6" stroke-width="1"/>
+<text x="715" y="279" font-size="11" text-anchor="middle" font-weight="600" fill="#1f2328">Fiber</text>
+<text x="715" y="294" font-size="10" text-anchor="middle" fill="#59636e">request 1</text>
+<rect x="754" y="262" width="62" height="40" rx="7" fill="#ddf4ff" stroke="#2a78d6" stroke-width="1"/>
+<text x="785" y="279" font-size="11" text-anchor="middle" font-weight="600" fill="#1f2328">Fiber</text>
+<text x="785" y="294" font-size="10" text-anchor="middle" fill="#59636e">request 2</text>
+<rect x="824" y="262" width="62" height="40" rx="7" fill="#ddf4ff" stroke="#2a78d6" stroke-width="1"/>
+<text x="855" y="279" font-size="11" text-anchor="middle" font-weight="600" fill="#1f2328">Fiber</text>
+<text x="855" y="294" font-size="10" text-anchor="middle" fill="#59636e">request N</text>
+<line x1="550" y1="214" x2="668" y2="214" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#a)"/>
+<text x="609.0" y="206" font-size="11" text-anchor="middle" fill="#2a78d6">dispatch request</text>
+<line x1="668" y1="272" x2="552" y2="272" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#a)"/>
+<text x="610.0" y="264" font-size="11" text-anchor="middle" fill="#2a78d6">suspend on I/O</text>
+<text x="610" y="290" font-size="11" text-anchor="middle" fill="#2a78d6">resume with result</text>
+<rect x="40" y="400" width="200" height="36" rx="8" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="140" y="423" font-size="12" text-anchor="middle" fill="#1f2328">pushinbr/pam-http</text>
+<rect x="250" y="400" width="200" height="36" rx="8" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="350" y="423" font-size="12" text-anchor="middle" fill="#1f2328">pam-laravel · pam-octane</text>
+<rect x="490" y="400" width="200" height="36" rx="8" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="590" y="423" font-size="12" text-anchor="middle" fill="#1f2328">pushinbr/pam-native</text>
+<rect x="710" y="400" width="210" height="36" rx="8" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="815" y="423" font-size="12" text-anchor="middle" fill="#1f2328">pushinbr/pam-desktop</text>
+<path d="M140,398 V374 H785 M350,398 V374 M785,374 V324" fill="none" stroke="#818b98" stroke-width="1.6" marker-end="url(#m)"/>
+<text x="460" y="366" font-size="11" text-anchor="middle" fill="#59636e">server packages load once into the warm process</text>
+<rect x="490" y="470" width="200" height="74" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="504" y="492" font-size="13" font-weight="600" fill="#1f2328">Android Views · UIKit</text>
+<text x="504" y="512" font-size="11.5" fill="#59636e">PHP tree → Rust diff + Yoga</text>
+<text x="504" y="529" font-size="11.5" fill="#59636e">→ UI-thread commit</text>
+<rect x="710" y="470" width="210" height="74" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="724" y="492" font-size="13" font-weight="600" fill="#1f2328">GTK 4 · AppKit · Win32</text>
+<text x="724" y="512" font-size="11.5" fill="#59636e">PAM Desktop 2.0 preview</text>
+<text x="724" y="529" font-size="11.5" fill="#59636e">no web view in the path</text>
+<line x1="590" y1="436" x2="590" y2="468" stroke="#818b98" stroke-width="1.6" marker-end="url(#m)"/>
+<text x="600" y="456" font-size="11" text-anchor="start" fill="#59636e">renders</text>
+<line x1="815" y1="436" x2="815" y2="468" stroke="#818b98" stroke-width="1.6" marker-end="url(#m)"/>
+<text x="825" y="456" font-size="11" text-anchor="start" fill="#59636e">renders</text>
+<rect x="40" y="470" width="410" height="74" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
+<text x="54" y="492" font-size="13" font-weight="600" fill="#1f2328">Your PHP stays PHP</text>
+<text x="54" y="512" font-size="11.5" fill="#59636e">PSR-7/15/17 · Laravel 12/13 · Pest · PHPUnit · Eloquent</text>
+<text x="54" y="529" font-size="11.5" fill="#59636e">no fork, no new language, no second package manager</text>
+</svg>

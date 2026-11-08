@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 250" width="960" height="250" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-label="PAM, PHP Always in Memory: one persistent PHP runtime for servers, Laravel, Android and iOS, and desktop.">
+<rect x="1" y="1" width="958" height="248" rx="18" fill="#151b23" stroke="#3d444d"/>
+<circle cx="96" cy="96" r="44" fill="none" stroke="#4493f8" stroke-width="10"/>
+<circle cx="96" cy="96" r="16" fill="#4493f8"/>
+<text x="164" y="92" font-size="56" font-weight="800" letter-spacing="2" fill="#f0f6fc">PAM</text>
+<text x="168" y="126" font-size="18" font-weight="600" fill="#4493f8">PHP, Always in Memory</text>
+<text x="480" y="78" font-size="20" font-weight="600" fill="#f0f6fc">Boot PHP once. Keep it warm.</text>
+<text x="480" y="106" font-size="14" fill="#9198a1">A Rust + Tokio runtime that keeps the Zend Engine and</text>
+<text x="480" y="126" font-size="14" fill="#9198a1">your Composer app warm, then ships it to every surface.</text>
+<rect x="40" y="164" width="208" height="58" rx="10" fill="none" stroke="#3d444d"/>
+<text x="56" y="188" font-size="14" font-weight="700" fill="#f0f6fc">Server</text>
+<text x="56" y="208" font-size="12" fill="#9198a1">HTTP/1.1 · 2 · 3 · WebSocket</text>
+<rect x="264" y="164" width="208" height="58" rx="10" fill="none" stroke="#3d444d"/>
+<text x="280" y="188" font-size="14" font-weight="700" fill="#f0f6fc">Laravel</text>
+<text x="280" y="208" font-size="12" fill="#9198a1">warm kernel · Octane bridge</text>
+<rect x="488" y="164" width="208" height="58" rx="10" fill="none" stroke="#3d444d"/>
+<text x="504" y="188" font-size="14" font-weight="700" fill="#f0f6fc">Android · iOS</text>
+<text x="504" y="208" font-size="12" fill="#9198a1">native views, no web view</text>
+<rect x="712" y="164" width="208" height="58" rx="10" fill="none" stroke="#3d444d"/>
+<text x="728" y="188" font-size="14" font-weight="700" fill="#f0f6fc">Desktop</text>
+<text x="728" y="208" font-size="12" fill="#9198a1">Linux · macOS · Windows</text>
+</svg>
