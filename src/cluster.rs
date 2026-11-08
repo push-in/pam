@@ -323,22 +323,12 @@ impl RuntimeDirectory {
 }
 
 fn random_token() -> Result<String, String> {
+    use std::io::Read;
+    // /dev/urandom is the portable kernel CSPRNG interface on Linux and macOS.
     let mut bytes = [0_u8; 16];
-    let mut filled = 0;
-    while filled < bytes.len() {
-        // SAFETY: the pointer and length describe the unfilled tail of `bytes`.
-        let read = unsafe {
-            libc::getrandom(bytes[filled..].as_mut_ptr().cast(), bytes.len() - filled, 0)
-        };
-        if read < 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::Interrupted {
-                continue;
-            }
-            return Err(format!("cannot read system randomness: {error}"));
-        }
-        filled += read as usize;
-    }
+    fs::File::open("/dev/urandom")
+        .and_then(|mut source| source.read_exact(&mut bytes))
+        .map_err(|error| format!("cannot read system randomness: {error}"))?;
     Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
 }
 

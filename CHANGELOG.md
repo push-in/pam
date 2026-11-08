@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.2.11 - 2026-11-08
+
+- First published release of the 2.2.10 changes below; the `v2.2.10` tag was
+  never released because the macOS build used Linux-only `getrandom(2)` for
+  the runtime directory name. The name now comes from `/dev/urandom`, which
+  both platforms provide, and the Linux-only prefork hook no longer trips
+  `-D warnings` on macOS.
+- Cluster integration tests allow slower shared CI runners to boot and
+  replace workers instead of failing on timing alone.
+
 ## 2.2.10 - 2026-11-08
 
 - Prefork workers (Linux, `--workers` > 1): a zygote starts the Zend Engine and

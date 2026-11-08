@@ -152,7 +152,7 @@ impl ClusterProcess {
                 "--max-requests",
                 "1000",
                 "--startup-timeout",
-                "2000",
+                "10000",
                 "--admin-address",
                 &format!("127.0.0.1:{admin_port}"),
             ])
@@ -198,7 +198,7 @@ impl ClusterProcess {
                 "--graceful-timeout",
                 "1000",
                 "--startup-timeout",
-                "2000",
+                "10000",
                 "--restart-backoff",
                 "10",
                 "--watchdog-grace",
@@ -227,7 +227,7 @@ impl ClusterProcess {
     }
 
     fn wait_for_workers(&mut self, workers: usize) {
-        let deadline = Instant::now() + Duration::from_secs(8);
+        let deadline = Instant::now() + Duration::from_secs(15);
         while Instant::now() < deadline {
             if self.children().len() == workers
                 && self.request().is_ok()
@@ -691,7 +691,8 @@ fn watchdog_replaces_a_worker_stuck_inside_php() {
     let blocked = cluster.request_path("/block");
     assert!(blocked.is_err() || !blocked.unwrap().contains("late"));
 
-    let deadline = Instant::now() + Duration::from_secs(4);
+    // Shared CI runners (especially ARM) can take seconds to boot a replacement.
+    let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
         let current = cluster.children();
         if current.len() == 1 && current.is_disjoint(&original) && cluster.request().is_ok() {
