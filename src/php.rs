@@ -489,6 +489,7 @@ impl PhpEngine {
     }
 
     /// Records that this engine now belongs to a freshly forked worker process.
+    #[cfg(target_os = "linux")]
     pub fn adopt_after_fork(&mut self) {
         let now = epoch_millis();
         self.process_started_at_millis = Some(now);
