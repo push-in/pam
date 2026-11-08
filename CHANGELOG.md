@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.10 - 2026-11-08
 
 - Prefork workers (Linux, `--workers` > 1): a zygote starts the Zend Engine and
   OPcache/JIT once per generation and forks workers before any PHP code runs, so
@@ -30,6 +30,23 @@
   write per 100 ms, while readiness and draining are still published at once.
   Idle workers now perform no periodic wakeups and busy workers no longer write
   their state file on every request.
+- Package commands of Composer path repositories installed as symlinks now
+  load: each package's commands are bounded by the resolved package
+  directory instead of the project root, so `pam desktop dev` and other
+  package commands work in projects developed against a local framework
+  checkout. A script that leaves its own package is still refused.
+- Security: updated dependencies with published advisories — h2 0.4.20,
+  quinn-proto 0.11.19, rustls 0.23.46, rustls-webpki 0.103.16,
+  webpki-roots 1.0.11, tokio 1.54.1 and chacha20 0.10.2 — and patch
+  releases of the Symfony packages in the Composer compatibility fixtures.
+  `cargo audit` and `composer audit` are clean again.
+- PHP stream readiness registers descriptors through
+  `AsyncFd::register_with_interest`, replacing the API tokio 1.54
+  deprecates as unsound.
+- The ecosystem catalog registers pam-native-contacts, -drawer, -i18n,
+  -location, -notifications, -sensors, -toast and -webview, and drops the
+  now private pam-native-media-editor, so the release inventory gate
+  matches the public push-in plugin set (47 repositories).
 
 ## 2.2.9 - 2026-10-28
 
