@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 368" width="920" height="368" font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif" role="img" aria-label="Laravel throughput and p99 latency for PAM, FrankenPHP and OpenSwoole, one worker each. PAM 2.2.9 · hosted Performance evidence run 41623674573 · 1 worker · 128 connections · median of 5 × 15 s rounds.">
+<rect x="0" y="2" width="12" height="12" rx="3" fill="#3987e5"/>
+<text x="18" y="12.5" font-size="12.5" fill="#f0f6fc">PAM</text>
+<rect x="62.8" y="2" width="12" height="12" rx="3" fill="#d95926"/>
+<text x="80.8" y="12.5" font-size="12.5" fill="#f0f6fc">FrankenPHP</text>
+<rect x="178.8" y="2" width="12" height="12" rx="3" fill="#199e70"/>
+<text x="196.8" y="12.5" font-size="12.5" fill="#f0f6fc">OpenSwoole</text>
+<text x="0" y="44" font-size="14" font-weight="600" fill="#f0f6fc">Throughput</text>
+<text x="0" y="62" font-size="12" fill="#9198a1">requests per second · higher is better</text>
+<line x1="96.0" y1="76" x2="96.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="96.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">0</text>
+<line x1="174.0" y1="76" x2="174.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="174.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">500</text>
+<line x1="252.0" y1="76" x2="252.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="252.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">1,000</text>
+<line x1="330.0" y1="76" x2="330.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="330.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">1,500</text>
+<line x1="408.0" y1="76" x2="408.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="408.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">2,000</text>
+<line x1="96" y1="76" x2="96" y2="310" stroke="#656c76" stroke-width="1"/>
+<text x="86" y="105.5" font-size="12" text-anchor="end" fill="#f0f6fc">Minimal JSON</text>
+<path d="M97.0,80.0h255.9a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-255.9z" fill="#3987e5"/>
+<text x="361.9" y="90.5" font-size="11" font-weight="600" fill="#f0f6fc">1,666</text>
+<path d="M97.0,95.0h241.3a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-241.3z" fill="#d95926"/>
+<text x="347.3" y="105.5" font-size="11" fill="#f0f6fc">1,573</text>
+<path d="M97.0,110.0h186.7a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-186.7z" fill="#199e70"/>
+<text x="292.7" y="120.5" font-size="11" fill="#f0f6fc">1,222</text>
+<text x="86" y="166.5" font-size="12" text-anchor="end" fill="#f0f6fc">Blade view</text>
+<path d="M97.0,141.0h193.6a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-193.6z" fill="#3987e5"/>
+<text x="299.6" y="151.5" font-size="11" font-weight="600" fill="#f0f6fc">1,267</text>
+<path d="M97.0,156.0h178.8a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-178.8z" fill="#d95926"/>
+<text x="284.8" y="166.5" font-size="11" fill="#f0f6fc">1,172</text>
+<path d="M97.0,171.0h142.6a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-142.6z" fill="#199e70"/>
+<text x="248.6" y="181.5" font-size="11" fill="#f0f6fc">940</text>
+<text x="86" y="227.5" font-size="12" text-anchor="end" fill="#f0f6fc">SQLite query</text>
+<path d="M97.0,202.0h196.1a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-196.1z" fill="#3987e5"/>
+<text x="302.1" y="212.5" font-size="11" font-weight="600" fill="#f0f6fc">1,283</text>
+<path d="M97.0,217.0h180.7a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-180.7z" fill="#d95926"/>
+<text x="286.7" y="227.5" font-size="11" fill="#f0f6fc">1,184</text>
+<path d="M97.0,232.0h147.4a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-147.4z" fill="#199e70"/>
+<text x="253.4" y="242.5" font-size="11" fill="#f0f6fc">971</text>
+<text x="86" y="288.5" font-size="12" text-anchor="end" fill="#f0f6fc">Large JSON</text>
+<path d="M97.0,263.0h237.9a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-237.9z" fill="#3987e5"/>
+<text x="343.9" y="273.5" font-size="11" font-weight="600" fill="#f0f6fc">1,551</text>
+<path d="M97.0,278.0h218.3a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-218.3z" fill="#d95926"/>
+<text x="324.3" y="288.5" font-size="11" fill="#f0f6fc">1,425</text>
+<path d="M97.0,293.0h173.6a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-173.6z" fill="#199e70"/>
+<text x="279.6" y="303.5" font-size="11" fill="#f0f6fc">1,139</text>
+<text x="470" y="44" font-size="14" font-weight="600" fill="#f0f6fc">p99 latency</text>
+<text x="470" y="62" font-size="12" fill="#9198a1">milliseconds · lower is better</text>
+<line x1="566.0" y1="76" x2="566.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="566.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">0</text>
+<line x1="641.5" y1="76" x2="641.5" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="641.5" y="324" font-size="11" text-anchor="middle" fill="#9198a1">40</text>
+<line x1="717.0" y1="76" x2="717.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="717.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">80</text>
+<line x1="792.5" y1="76" x2="792.5" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="792.5" y="324" font-size="11" text-anchor="middle" fill="#9198a1">120</text>
+<line x1="868.0" y1="76" x2="868.0" y2="310" stroke="#3d444d" stroke-width="1"/>
+<text x="868.0" y="324" font-size="11" text-anchor="middle" fill="#9198a1">160</text>
+<line x1="566" y1="76" x2="566" y2="310" stroke="#656c76" stroke-width="1"/>
+<text x="556" y="105.5" font-size="12" text-anchor="end" fill="#f0f6fc">Minimal JSON</text>
+<path d="M567.0,80.0h149.3a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-149.3z" fill="#3987e5"/>
+<text x="725.3" y="90.5" font-size="11" font-weight="600" fill="#f0f6fc">81.2</text>
+<path d="M567.0,95.0h174.9a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-174.9z" fill="#d95926"/>
+<text x="750.9" y="105.5" font-size="11" fill="#f0f6fc">94.8</text>
+<path d="M567.0,110.0h210.4a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-210.4z" fill="#199e70"/>
+<text x="786.4" y="120.5" font-size="11" fill="#f0f6fc">113.6</text>
+<text x="556" y="166.5" font-size="12" text-anchor="end" fill="#f0f6fc">Blade view</text>
+<path d="M567.0,141.0h195.7a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-195.7z" fill="#3987e5"/>
+<text x="771.7" y="151.5" font-size="11" font-weight="600" fill="#f0f6fc">105.8</text>
+<path d="M567.0,156.0h225.4a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-225.4z" fill="#d95926"/>
+<text x="801.4" y="166.5" font-size="11" fill="#f0f6fc">121.5</text>
+<path d="M567.0,171.0h272.0a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-272.0z" fill="#199e70"/>
+<text x="848.0" y="181.5" font-size="11" fill="#f0f6fc">146.2</text>
+<text x="556" y="227.5" font-size="12" text-anchor="end" fill="#f0f6fc">SQLite query</text>
+<path d="M567.0,202.0h192.0a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-192.0z" fill="#3987e5"/>
+<text x="768.0" y="212.5" font-size="11" font-weight="600" fill="#f0f6fc">103.8</text>
+<path d="M567.0,217.0h232.2a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-232.2z" fill="#d95926"/>
+<text x="808.2" y="227.5" font-size="11" fill="#f0f6fc">125.2</text>
+<path d="M567.0,232.0h266.9a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-266.9z" fill="#199e70"/>
+<text x="842.9" y="242.5" font-size="11" fill="#f0f6fc">143.5</text>
+<text x="556" y="288.5" font-size="12" text-anchor="end" fill="#f0f6fc">Large JSON</text>
+<path d="M567.0,263.0h160.4a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-160.4z" fill="#3987e5"/>
+<text x="736.4" y="273.5" font-size="11" font-weight="600" fill="#f0f6fc">87.1</text>
+<path d="M567.0,278.0h192.1a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-192.1z" fill="#d95926"/>
+<text x="768.1" y="288.5" font-size="11" fill="#f0f6fc">103.9</text>
+<path d="M567.0,293.0h228.0a4,4 0 0 1 4,4v5.0a4,4 0 0 1 -4,4h-228.0z" fill="#199e70"/>
+<text x="804.0" y="303.5" font-size="11" fill="#f0f6fc">122.9</text>
+<text x="0" y="346" font-size="11" fill="#9198a1">PAM 2.2.9 · hosted Performance evidence run 41623674573 · 1 worker · 128 connections · median of 5 × 15 s rounds</text>
+<text x="0" y="362" font-size="11" fill="#9198a1">PAM ran PHP 8.5.12; FrankenPHP and OpenSwoole ran PHP 8.4.24 (OPcache + JIT on all three). Not a certified result: see the README.</text>
+</svg>
