@@ -293,39 +293,14 @@ Product features ship as Composer packages. You install them with `pam composer 
 
 ## Benchmarks
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/benchmark-laravel-dark.svg">
-  <img src="docs/assets/readme/benchmark-laravel-light.svg" width="920" alt="Laravel throughput and p99 latency, one worker each. PAM 2.2.9: 1,666 / 1,267 / 1,283 / 1,551 requests per second for minimal JSON, Blade, SQLite and large JSON; FrankenPHP: 1,573 / 1,172 / 1,184 / 1,425; OpenSwoole: 1,222 / 940 / 971 / 1,139.">
-</picture>
+PAM ships a reproducible [Laravel comparison protocol](benchmarks/octane/README.md) against
+FrankenPHP and OpenSwoole: the same Laravel fixture and worker count on every runtime, digest-pinned
+images, OPcache and the tracing JIT everywhere, rotated scenario order, five rounds and a zero-error
+gate. It reports throughput, p50/p95/p99 latency and process-tree memory, and a release is only
+certified when the runtimes use the same PHP version from a clean tree.
 
-The chart shows the most recent hosted run of the [Laravel comparison protocol](benchmarks/octane/README.md).
-It is [Performance evidence run 41623674573](https://github.com/push-in/pam/actions/runs/41623674573)
-from 2026-11-03, on the PAM **2.2.9** release commit `91d3ba8`. All three servers ran the same Laravel
-fixture with **one worker**. Each request executes the full Laravel kernel.
-
-| Scenario (req/s, median) | PAM 2.2.9 | FrankenPHP | OpenSwoole 25.2 |
-| --- | ---: | ---: | ---: |
-| Minimal JSON | **1,666** | 1,573 | 1,222 |
-| Blade view | **1,267** | 1,172 | 940 |
-| SQLite query | **1,283** | 1,184 | 971 |
-| Large JSON | **1,551** | 1,425 | 1,139 |
-| Process-tree RSS, p50 | 151.5 MB | 146.6 MB | 321.6 MB |
-
-**Method.** The run used a GitHub-hosted runner (AMD EPYC 7763, 4 vCPUs). The server was pinned to 2 CPUs and `wrk` to the other 2.
-`wrk` ran with 4 threads and 128 connections, for 5 rounds of 15 s each after a 5 s warmup, with the scenario order rotated every round.
-The FrankenPHP image is pinned by digest. OPcache and the tracing JIT were on everywhere, and every runtime finished with zero errors.
-
-**Read it honestly:**
-
-- The comparison is not like-for-like. PAM ran PHP **8.5.12**, while the FrankenPHP and OpenSwoole containers ran PHP **8.4.24**.
-- The protocol's own release gate did **not** pass. Runtime preflight failed on the PHP mismatch, and the tree was flagged as dirty.
-  This is published evidence, not a certified result.
-- p99 is between 81 and 146 ms because 128 connections queue on a single worker. Compare the runtimes against each other, not
-  against your production latency. PAM's Blade and SQLite p99 values went over the protocol's 100 ms gate.
-- The opt-in PAM response cache served a cacheable route at **71,804 req/s** (p99 2.7 ms). That run measures different work
-  from full Laravel execution, so it is not in the chart.
-
-Run it yourself with `benchmarks/octane/run.sh`, or dispatch the
+Certified results for the current release will be published here. Until then, run the protocol on
+your own hardware with `benchmarks/octane/run.sh`, or dispatch the
 [Performance evidence workflow](.github/workflows/evidence.yml). The
 [benchmark protocol](benchmarks/README.md) also covers process-manager crash recovery, including a
 clean hosted comparison against PM2 that is documented in [docs/process-manager.md](docs/process-manager.md).
