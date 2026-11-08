@@ -318,12 +318,28 @@ impl ClusterProcess {
     }
 
     fn children(&self) -> HashSet<u32> {
-        let pid = self.child.id();
-        fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
-            .unwrap_or_default()
-            .split_whitespace()
-            .filter_map(|value| value.parse().ok())
-            .collect()
+        // Multi-worker clusters fork their workers from a prefork zygote, so
+        // workers are the zygote's children rather than the master's.
+        let direct = |pid: u32| {
+            fs::read_to_string(format!("/proc/{pid}/task/{pid}/children"))
+                .unwrap_or_default()
+                .split_whitespace()
+                .filter_map(|value| value.parse::<u32>().ok())
+                .collect::<Vec<_>>()
+        };
+        let mut workers = HashSet::new();
+        for pid in direct(self.child.id()) {
+            let command = fs::read(format!("/proc/{pid}/cmdline")).unwrap_or_default();
+            if command
+                .split(|byte| *byte == 0)
+                .any(|argument| argument == b"__zygote")
+            {
+                workers.extend(direct(pid));
+            } else {
+                workers.insert(pid);
+            }
+        }
+        workers
     }
 
     fn signal(&self, signal: i32) {
@@ -451,6 +467,75 @@ fn propagates_tagged_cache_purges_to_every_worker() {
         }
     }
     assert_eq!(refreshed.len(), 2, "purge must reach both workers");
+    cluster.stop();
+}
+
+/// Reads one keep-alive HTTP response without waiting for the connection to end.
+fn read_keep_alive_response(stream: &mut TcpStream) -> String {
+    let mut bytes = Vec::new();
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = stream.read(&mut chunk).unwrap();
+        assert!(read > 0, "connection closed before a full response");
+        bytes.extend_from_slice(&chunk[..read]);
+        let Some(end) = bytes.windows(4).position(|window| window == b"\r\n\r\n") else {
+            continue;
+        };
+        let head = String::from_utf8_lossy(&bytes[..end]).to_ascii_lowercase();
+        let length = head
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length:"))
+            .and_then(|value| value.trim().parse::<usize>().ok())
+            .expect("response should declare its content length");
+        if bytes.len() >= end + 4 + length {
+            return String::from_utf8_lossy(&bytes).into_owned();
+        }
+    }
+}
+
+#[test]
+fn balances_keep_alive_connections_between_workers() {
+    let workers = 4;
+    let per_worker = 10;
+    let mut cluster = ClusterProcess::start_with(1_000_000, workers, None, None);
+    let mut connections = (0..workers * per_worker)
+        .map(|_| {
+            let stream = TcpStream::connect(("127.0.0.1", cluster.port)).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
+            stream
+        })
+        .collect::<Vec<_>>();
+
+    let mut owners = Vec::new();
+    for round in 0..2 {
+        for (index, stream) in connections.iter_mut().enumerate() {
+            stream
+                .write_all(b"GET /ping?query=balance HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")
+                .unwrap();
+            let response = read_keep_alive_response(stream);
+            assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+            let (worker, _) = request_identity(&response);
+            if round == 0 {
+                owners.push(worker);
+            } else {
+                // A connection, moved or not, stays with the worker serving it.
+                assert_eq!(owners[index], worker);
+            }
+        }
+    }
+
+    let mut counts = std::collections::HashMap::<&str, usize>::new();
+    for owner in &owners {
+        *counts.entry(owner).or_default() += 1;
+    }
+    let most = counts.values().copied().max().unwrap();
+    let least = counts.values().copied().min().unwrap();
+    assert_eq!(counts.len(), workers, "{counts:?}");
+    assert!(most - least <= 4, "unbalanced connections: {counts:?}");
+
+    drop(connections);
     cluster.stop();
 }
 

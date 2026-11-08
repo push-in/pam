@@ -111,6 +111,53 @@ facades possuem estado process-global. `Pam\Laravel` fixa
 concorrência. Uma requisição excedente naquele worker recebe `503`, permitindo que
 o proxy faça retry apenas quando o método for idempotente.
 
+### Prefork e balanceamento de conexões (Linux)
+
+Com `--workers` maior que 1 no Linux, o master inicia um processo zygote por
+geração. O zygote inicializa o Zend Engine e o OPcache/JIT uma única vez e faz
+`fork` de cada worker antes de qualquer código PHP rodar. Assim todos os workers
+da geração compartilham o mesmo segmento de OPcache/JIT, como os filhos do
+PHP-FPM, em vez de manter uma cópia por processo disputando cache L3 e RAM.
+Composer, runtime e aplicação continuam inicializando em cada worker, com estado
+PHP limpo. Um `SIGHUP` cria um zygote novo, então a nova geração enxerga o código
+atualizado mesmo com `opcache.validate_timestamps=0`.
+
+Os workers de um mesmo zygote também balanceiam conexões HTTP (sem TLS) pelo
+menor número de conexões: quando um worker aceita uma conexão com 2 ou mais
+conexões acima do irmão menos carregado, ele repassa o socket para esse irmão
+(`SCM_RIGHTS`, uma vez por conexão, nunca por requisição). Isso corrige o
+desequilíbrio do hash do `SO_REUSEPORT` com clientes keep-alive, que é o que
+define o p99. O canal de repasse fica no diretório de runtime privado (0700) do
+master.
+
+- `PAM_PREFORK=0` volta a iniciar cada worker com `exec`, cada um com o próprio
+  OPcache.
+- `PAM_BALANCE=0` desliga só o balanceamento de conexões.
+- Em `ps`, os workers aparecem como filhos do processo `pam __zygote`.
+- Se o zygote morrer, os workers da geração morrem junto e o master os recria com
+  `exec`, sem compartilhar OPcache, até o próximo reload.
+- Conexões TLS terminadas pelo próprio Pam ainda não são balanceadas.
+
+Garantias de segurança e robustez:
+
+- O diretório de runtime do master é criado de forma atômica com modo 0700
+  (`mkdir` com o modo final, sem `chmod` depois) e nome com 128 bits aleatórios em
+  `$TMPDIR`. O Pam nunca reaproveita uma entrada existente e recusa um diretório
+  que seja symlink, de outro usuário ou acessível por grupo/outros.
+- Sinais para workers forkados (`SIGTERM` de drenagem, `SIGKILL` do watchdog) são
+  entregues pelo zygote, que é o pai do worker e só sinaliza PIDs que ainda não
+  reapou. O master nunca chama `kill()` num PID que pode ter sido reciclado.
+- O zygote confere em `/proc/self/status` que tem uma única thread antes de cada
+  `fork()` e recusa o fork caso contrário.
+- Um descritor recebido de um irmão só é servido se for um socket TCP
+  (`SO_PROTOCOL`) IPv4/IPv6 do tipo stream e conectado, nunca um socket em escuta
+  (`SO_ACCEPTCONN`). Um descritor recusado libera na hora a contagem que o
+  remetente reservou; os contadores nunca ficam abaixo de zero.
+- Ao drenar, o worker remove o nome do seu socket de repasse antes de esvaziar a
+  fila: um irmão que ainda o escolha recebe erro no `sendmsg` e atende a conexão
+  ele mesmo. O que já estava na fila é atendido (uma requisição, depois
+  `Connection: close`) em vez de ser fechado com reset.
+
 Use `SIGTERM` para shutdown e `SIGHUP` para trocar a geração:
 
 ```bash

@@ -337,116 +337,7 @@ impl PhpRuntime {
         arguments: &[OsString],
         preload_composer: bool,
     ) -> Result<Self, String> {
-        // SAFETY: This pure function returns the constant compiled into the C shim.
-        let native_abi = unsafe { pam_native_abi_version() };
-        if native_abi != NATIVE_ABI_VERSION {
-            return Err(format!(
-                "Pam Native ABI mismatch: Rust expects {NATIVE_ABI_VERSION}, C shim provides {native_abi}"
-            ));
-        }
-        let current_thread = thread::current().id();
-        let owner = OWNER.get_or_init(|| current_thread);
-        if *owner != current_thread {
-            return Err("PHP must be initialized on its original thread".to_owned());
-        }
-
-        let mut native_args = Vec::with_capacity(arguments.len() + 2);
-        let executable_path = std::env::current_exe()
-            .map_err(|error| format!("cannot locate the Pam executable: {error}"))?;
-        native_args.push(to_c_buffer(executable_path.as_os_str())?);
-        native_args.push(to_c_buffer(script.as_os_str())?);
-        for argument in arguments {
-            native_args.push(to_c_buffer(argument)?);
-        }
-
-        let mut pointers = native_args
-            .iter_mut()
-            .map(|argument| argument.as_mut_ptr().cast::<c_char>())
-            .collect::<Vec<_>>();
-        let argc = c_int::try_from(pointers.len()).map_err(|_| "too many arguments")?;
-        let composer = composer::discover(script)?;
-        if ACTIVE.swap(true, Ordering::SeqCst) {
-            return Err("the PHP runtime is already active".to_owned());
-        }
-
-        // SAFETY: Argument buffers are writable and NUL-terminated, and remain owned
-        // by PhpRuntime until shutdown.
-        let status = unsafe { pam_php_init(argc, pointers.as_mut_ptr()) };
-
-        if status != 0 {
-            // The C boundary tracks partial initialization and makes this idempotent.
-            unsafe { pam_php_shutdown() };
-            ACTIVE.store(false, Ordering::SeqCst);
-            return Err(format!("PHP initialization failed with status {status}"));
-        }
-        let engine_ready_at_millis = epoch_millis();
-
-        if preload_composer
-            && let Some(project) = composer.as_ref()
-            && project.autoload.is_file()
-        {
-            let status = match execute_file_raw(&project.autoload) {
-                Ok(status) => status,
-                Err(error) => {
-                    unsafe { pam_php_shutdown() };
-                    ACTIVE.store(false, Ordering::SeqCst);
-                    return Err(error);
-                }
-            };
-            if status != 0 {
-                unsafe { pam_php_shutdown() };
-                ACTIVE.store(false, Ordering::SeqCst);
-                return Err(format!(
-                    "Composer autoload failed with status {status}: {}",
-                    project.autoload.display()
-                ));
-            }
-        }
-        let composer_ready_at_millis = epoch_millis();
-
-        if let Err(error) = evaluate_runtime_source(ASYNC_BOOTSTRAP, b"Pam async bootstrap\0")
-            .and_then(|()| evaluate_runtime_source(IO_BOOTSTRAP, b"Pam I/O bootstrap\0"))
-            .and_then(|()| evaluate_runtime_source(STREAMS_BOOTSTRAP, b"Pam streams bootstrap\0"))
-            .and_then(|()| {
-                evaluate_runtime_source(HTTP_CLIENT_BOOTSTRAP, b"Pam HTTP client bootstrap\0")
-            })
-            .and_then(|()| evaluate_runtime_source(REDIS_BOOTSTRAP, b"Pam Redis bootstrap\0"))
-            .and_then(|()| evaluate_runtime_source(TASKS_BOOTSTRAP, b"Pam tasks bootstrap\0"))
-            .and_then(|()| evaluate_runtime_source(DATABASE_BOOTSTRAP, b"Pam database bootstrap\0"))
-            .and_then(|()| evaluate_runtime_source(WS_BOOTSTRAP, b"Pam WebSocket bootstrap\0"))
-            .and_then(|()| {
-                evaluate_runtime_source(OBSERVABILITY_BOOTSTRAP, b"Pam observability bootstrap\0")
-            })
-            .and_then(|()| {
-                evaluate_runtime_source(SCOPE_BOOTSTRAP, b"Pam request scope bootstrap\0")
-            })
-            .and_then(|()| evaluate_runtime_source(NATIVE_BOOTSTRAP, b"Pam Native API bootstrap\0"))
-            .and_then(|()| {
-                evaluate_runtime_source(DIAGNOSTICS_BOOTSTRAP, b"Pam diagnostics bootstrap\0")
-            })
-            .and_then(|()| evaluate_runtime_source(BOOTSTRAP, b"Pam runtime bootstrap\0"))
-            .and_then(|()| evaluate_runtime_source(LARAVEL_BOOTSTRAP, b"Pam Laravel bootstrap\0"))
-        {
-            unsafe { pam_php_shutdown() };
-            ACTIVE.store(false, Ordering::SeqCst);
-            return Err(error);
-        }
-        let runtime_ready_at_millis = epoch_millis();
-        let _ = STARTUP_MILESTONES.set(StartupMilestones {
-            process_started_at_millis: PROCESS_STARTED_AT_MILLIS
-                .get()
-                .copied()
-                .unwrap_or(engine_ready_at_millis),
-            engine_ready_at_millis,
-            composer_ready_at_millis,
-            runtime_ready_at_millis,
-        });
-
-        Ok(Self {
-            _native_args: native_args,
-            composer,
-            _not_send_or_sync: PhantomData,
-        })
+        PhpEngine::start(script, arguments)?.into_runtime(preload_composer)
     }
 
     pub fn execute_file(&mut self, script: &Path) -> Result<u8, String> {
@@ -526,6 +417,171 @@ impl PhpRuntime {
         })?;
         serde_json::from_str(&json)
             .map_err(|error| format!("invalid runtime diagnostics from PHP: {error}"))
+    }
+}
+
+/// A started Zend engine (with OPcache) that has not executed any PHP code yet.
+///
+/// A prefork zygote keeps this value alive and forks workers from it, so every
+/// worker shares one OPcache/JIT segment while still bootstrapping Composer, the
+/// PAM runtime and the application in its own pristine PHP state.
+pub struct PhpEngine {
+    native_args: Vec<Vec<u8>>,
+    composer: Option<ComposerProject>,
+    process_started_at_millis: Option<u64>,
+    engine_ready_at_millis: u64,
+    owns_lifecycle: bool,
+    _not_send_or_sync: PhantomData<Rc<()>>,
+}
+
+impl PhpEngine {
+    pub fn start(script: &Path, arguments: &[OsString]) -> Result<Self, String> {
+        // SAFETY: This pure function returns the constant compiled into the C shim.
+        let native_abi = unsafe { pam_native_abi_version() };
+        if native_abi != NATIVE_ABI_VERSION {
+            return Err(format!(
+                "Pam Native ABI mismatch: Rust expects {NATIVE_ABI_VERSION}, C shim provides {native_abi}"
+            ));
+        }
+        let current_thread = thread::current().id();
+        let owner = OWNER.get_or_init(|| current_thread);
+        if *owner != current_thread {
+            return Err("PHP must be initialized on its original thread".to_owned());
+        }
+
+        let mut native_args = Vec::with_capacity(arguments.len() + 2);
+        let executable_path = std::env::current_exe()
+            .map_err(|error| format!("cannot locate the Pam executable: {error}"))?;
+        native_args.push(to_c_buffer(executable_path.as_os_str())?);
+        native_args.push(to_c_buffer(script.as_os_str())?);
+        for argument in arguments {
+            native_args.push(to_c_buffer(argument)?);
+        }
+
+        let mut pointers = native_args
+            .iter_mut()
+            .map(|argument| argument.as_mut_ptr().cast::<c_char>())
+            .collect::<Vec<_>>();
+        let argc = c_int::try_from(pointers.len()).map_err(|_| "too many arguments")?;
+        let composer = composer::discover(script)?;
+        if ACTIVE.swap(true, Ordering::SeqCst) {
+            return Err("the PHP runtime is already active".to_owned());
+        }
+
+        // SAFETY: Argument buffers are writable and NUL-terminated, and remain owned
+        // by PhpRuntime until shutdown.
+        let status = unsafe { pam_php_init(argc, pointers.as_mut_ptr()) };
+
+        if status != 0 {
+            // The C boundary tracks partial initialization and makes this idempotent.
+            unsafe { pam_php_shutdown() };
+            ACTIVE.store(false, Ordering::SeqCst);
+            return Err(format!("PHP initialization failed with status {status}"));
+        }
+        Ok(Self {
+            native_args,
+            composer,
+            process_started_at_millis: None,
+            engine_ready_at_millis: epoch_millis(),
+            owns_lifecycle: true,
+            _not_send_or_sync: PhantomData,
+        })
+    }
+
+    /// Records that this engine now belongs to a freshly forked worker process.
+    pub fn adopt_after_fork(&mut self) {
+        let now = epoch_millis();
+        self.process_started_at_millis = Some(now);
+        self.engine_ready_at_millis = now;
+    }
+
+    pub fn into_runtime(mut self, preload_composer: bool) -> Result<PhpRuntime, String> {
+        // From here on the PHP lifecycle belongs to the returned PhpRuntime or is
+        // shut down explicitly on each error path below.
+        self.owns_lifecycle = false;
+        let native_args = std::mem::take(&mut self.native_args);
+        let composer = self.composer.take();
+        let engine_ready_at_millis = self.engine_ready_at_millis;
+        let process_started_at_millis = self.process_started_at_millis;
+
+        if preload_composer
+            && let Some(project) = composer.as_ref()
+            && project.autoload.is_file()
+        {
+            let status = match execute_file_raw(&project.autoload) {
+                Ok(status) => status,
+                Err(error) => {
+                    unsafe { pam_php_shutdown() };
+                    ACTIVE.store(false, Ordering::SeqCst);
+                    return Err(error);
+                }
+            };
+            if status != 0 {
+                unsafe { pam_php_shutdown() };
+                ACTIVE.store(false, Ordering::SeqCst);
+                return Err(format!(
+                    "Composer autoload failed with status {status}: {}",
+                    project.autoload.display()
+                ));
+            }
+        }
+        let composer_ready_at_millis = epoch_millis();
+
+        if let Err(error) = evaluate_runtime_source(ASYNC_BOOTSTRAP, b"Pam async bootstrap\0")
+            .and_then(|()| evaluate_runtime_source(IO_BOOTSTRAP, b"Pam I/O bootstrap\0"))
+            .and_then(|()| evaluate_runtime_source(STREAMS_BOOTSTRAP, b"Pam streams bootstrap\0"))
+            .and_then(|()| {
+                evaluate_runtime_source(HTTP_CLIENT_BOOTSTRAP, b"Pam HTTP client bootstrap\0")
+            })
+            .and_then(|()| evaluate_runtime_source(REDIS_BOOTSTRAP, b"Pam Redis bootstrap\0"))
+            .and_then(|()| evaluate_runtime_source(TASKS_BOOTSTRAP, b"Pam tasks bootstrap\0"))
+            .and_then(|()| evaluate_runtime_source(DATABASE_BOOTSTRAP, b"Pam database bootstrap\0"))
+            .and_then(|()| evaluate_runtime_source(WS_BOOTSTRAP, b"Pam WebSocket bootstrap\0"))
+            .and_then(|()| {
+                evaluate_runtime_source(OBSERVABILITY_BOOTSTRAP, b"Pam observability bootstrap\0")
+            })
+            .and_then(|()| {
+                evaluate_runtime_source(SCOPE_BOOTSTRAP, b"Pam request scope bootstrap\0")
+            })
+            .and_then(|()| evaluate_runtime_source(NATIVE_BOOTSTRAP, b"Pam Native API bootstrap\0"))
+            .and_then(|()| {
+                evaluate_runtime_source(DIAGNOSTICS_BOOTSTRAP, b"Pam diagnostics bootstrap\0")
+            })
+            .and_then(|()| evaluate_runtime_source(BOOTSTRAP, b"Pam runtime bootstrap\0"))
+            .and_then(|()| evaluate_runtime_source(LARAVEL_BOOTSTRAP, b"Pam Laravel bootstrap\0"))
+        {
+            unsafe { pam_php_shutdown() };
+            ACTIVE.store(false, Ordering::SeqCst);
+            return Err(error);
+        }
+        let runtime_ready_at_millis = epoch_millis();
+        let _ = STARTUP_MILESTONES.set(StartupMilestones {
+            process_started_at_millis: process_started_at_millis
+                .or_else(|| PROCESS_STARTED_AT_MILLIS.get().copied())
+                .unwrap_or(engine_ready_at_millis),
+            engine_ready_at_millis,
+            composer_ready_at_millis,
+            runtime_ready_at_millis,
+        });
+
+        Ok(PhpRuntime {
+            _native_args: native_args,
+            composer,
+            _not_send_or_sync: PhantomData,
+        })
+    }
+}
+
+impl Drop for PhpEngine {
+    fn drop(&mut self) {
+        if !self.owns_lifecycle {
+            return;
+        }
+        if ensure_owner().is_ok() {
+            // SAFETY: PhpEngine uniquely owns the active PHP lifecycle.
+            unsafe { pam_php_shutdown() };
+        }
+        ACTIVE.store(false, Ordering::SeqCst);
     }
 }
 
