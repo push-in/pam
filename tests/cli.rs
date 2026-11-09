@@ -2302,6 +2302,63 @@ fn executes_inline_php_with_ini_entries() {
     assert_eq!(String::from_utf8_lossy(&output.stdout), "embed|6|pam");
 }
 
+fn run_pam_with_stdin(arguments: &[&str], stdin: &str) -> Output {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(arguments)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("pam should start");
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(stdin.as_bytes())
+        .unwrap();
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn executes_a_php_script_from_stdin_like_php_cli() {
+    // PHPUnit process isolation runs `php -d ... ` and pipes the job on stdin.
+    let source = "<?php echo ini_get('precision'), '|', $argv[1] ?? 'none', '|', is_file(__FILE__) ? 'file' : 'missing';";
+    for arguments in [
+        vec!["-d", "precision=9"],
+        vec!["-d", "precision=9", "-"],
+        vec!["-d", "precision=9", "-", "--", "x"],
+    ] {
+        let output = run_pam_with_stdin(&arguments, source);
+        assert!(
+            output.status.success(),
+            "args={arguments:?} stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        let expected = if arguments.len() == 5 {
+            "9|x|file"
+        } else {
+            "9|none|file"
+        };
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            expected,
+            "{arguments:?}"
+        );
+    }
+
+    let output = run_pam_with_stdin(&[], "<?php echo 'bare';");
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "bare");
+}
+
+#[test]
+fn executes_a_php_script_given_with_dash_f() {
+    let script = temporary_path("dash-f.php");
+    fs::write(&script, "<?php echo 'via -f|', $argv[1] ?? '';").unwrap();
+    let output = run_pam(&["-d", "precision=5", "-f", script.to_str().unwrap(), "arg"]);
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "via -f|arg");
+}
+
 #[test]
 fn accepts_php_cli_ini_options_for_composer_tool_workers() {
     let ini = temporary_path("tool-worker.ini");

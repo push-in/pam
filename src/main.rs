@@ -81,6 +81,11 @@ fn run() -> Result<u8, CliError> {
     let mut raw_args = env::args_os().peekable();
     let executable = raw_args.next().unwrap_or_else(|| OsString::from("pam"));
     let Some(mut script_arg) = raw_args.next() else {
+        if !std::io::IsTerminal::is_terminal(&std::io::stdin())
+            && let Some(script) = read_stdin_script().map_err(CliError::Commands)?
+        {
+            return run_stdin_script(&executable, script, Vec::new());
+        }
         if terminal::Terminal::stdout().interactive() {
             return terminal::launcher(&executable).map_err(CliError::Commands);
         }
@@ -99,9 +104,7 @@ fn run() -> Result<u8, CliError> {
     loop {
         if script_arg == "-n" {
             ignore_ini = true;
-            script_arg = raw_args.next().ok_or_else(|| {
-                CliError::Commands("a PHP script or -r is required after -n".to_owned())
-            })?;
+            script_arg = raw_args.next().unwrap_or_else(|| OsString::from("-"));
             continue;
         }
         if script_arg == "-c" {
@@ -110,17 +113,13 @@ fn run() -> Result<u8, CliError> {
                     .next()
                     .ok_or_else(|| CliError::Commands("-c requires a php.ini path".to_owned()))?,
             );
-            script_arg = raw_args.next().ok_or_else(|| {
-                CliError::Commands("a PHP script or -r is required after -c".to_owned())
-            })?;
+            script_arg = raw_args.next().unwrap_or_else(|| OsString::from("-"));
             continue;
         }
         if script_arg.to_string_lossy().starts_with("-c") && script_arg.to_string_lossy().len() > 2
         {
             ini_file = Some(OsString::from(&script_arg.to_string_lossy()[2..]));
-            script_arg = raw_args.next().ok_or_else(|| {
-                CliError::Commands("a PHP script or -r is required after -c".to_owned())
-            })?;
+            script_arg = raw_args.next().unwrap_or_else(|| OsString::from("-"));
             continue;
         }
         let directive = if script_arg == "-d" || script_arg == "--define" {
@@ -145,9 +144,9 @@ fn run() -> Result<u8, CliError> {
             return Err(CliError::Commands("invalid -d directive".to_owned()));
         }
         ini_entries.push(directive);
-        script_arg = raw_args.next().ok_or_else(|| {
-            CliError::Commands("a PHP script or -r is required after -d".to_owned())
-        })?;
+        // Like PHP CLI, a missing script means "read the script from stdin"
+        // (PHPUnit process isolation relies on this).
+        script_arg = raw_args.next().unwrap_or_else(|| OsString::from("-"));
     }
     if !ini_entries.is_empty() {
         // SAFETY: CLI parsing happens before PHP or the Tokio runtime starts threads.
@@ -171,6 +170,21 @@ fn run() -> Result<u8, CliError> {
         }
         // SAFETY: CLI parsing occurs before PHP or worker threads are initialized.
         unsafe { env::set_var("PHPRC", ini_file) };
+    }
+
+    if script_arg == "-f" {
+        script_arg = raw_args
+            .next()
+            .ok_or_else(|| CliError::Commands("-f requires a PHP script".to_owned()))?;
+    }
+    if script_arg == "-" {
+        let script = read_stdin_script()
+            .map_err(CliError::Commands)?
+            .unwrap_or_default();
+        let arguments = raw_args
+            .skip_while(|argument| argument == "--")
+            .collect::<Vec<_>>();
+        return run_stdin_script(&executable, script, arguments);
     }
 
     if script_arg == "--help" || script_arg == "-h" {
@@ -1564,6 +1578,55 @@ fn project_command_alias(kind: project::ProjectKind, requested: &str) -> &str {
     } else {
         requested
     }
+}
+
+/// Reads a PHP script from stdin; `None` when stdin is empty.
+fn read_stdin_script() -> Result<Option<Vec<u8>>, String> {
+    use std::io::Read;
+
+    const MAX_STDIN_SCRIPT_BYTES: u64 = 64 * 1024 * 1024;
+    let mut source = Vec::new();
+    std::io::stdin()
+        .take(MAX_STDIN_SCRIPT_BYTES + 1)
+        .read_to_end(&mut source)
+        .map_err(|error| format!("cannot read PHP script from stdin: {error}"))?;
+    if source.len() as u64 > MAX_STDIN_SCRIPT_BYTES {
+        return Err("PHP script on stdin exceeds 64 MiB".to_owned());
+    }
+    Ok((!source.is_empty()).then_some(source))
+}
+
+/// Executes stdin code like `php` does: the code is materialized in a private
+/// temporary file (PHP needs a real path for the Embed SAPI) and removed after.
+fn run_stdin_script(
+    executable: &OsStr,
+    source: Vec<u8>,
+    arguments: Vec<OsString>,
+) -> Result<u8, CliError> {
+    use std::io::Write;
+    #[cfg(unix)]
+    use std::os::unix::fs::OpenOptionsExt;
+
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos());
+    let path = env::temp_dir().join(format!("pam-stdin-{}-{nonce}.php", std::process::id()));
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    options.mode(0o600);
+    let written = options
+        .open(&path)
+        .and_then(|mut file| file.write_all(&source));
+    if let Err(error) = written {
+        let _ = fs::remove_file(&path);
+        return Err(CliError::Commands(format!(
+            "cannot stage PHP script from stdin: {error}"
+        )));
+    }
+    let result = run_script(executable, &path, arguments);
+    let _ = fs::remove_file(&path);
+    result
 }
 
 fn resolve_script(script: &OsStr) -> Result<PathBuf, CliError> {
