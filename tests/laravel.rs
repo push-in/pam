@@ -701,10 +701,14 @@ fn serves_laravel_with_isolated_requests_and_bounded_memory() {
     let port = pam.port;
     let suspended = thread::spawn(move || request(port, "GET", "/api/hold/isolated", "", &[]));
     thread::sleep(Duration::from_millis(75));
-    let rejected = request(pam.port, "GET", "/api/ping", "", &[]).unwrap();
+    // Laravel must never interleave inside a worker: a request that arrives
+    // while another one is suspended waits for the slot and runs afterwards.
+    let queued_at = std::time::Instant::now();
+    let queued = request(pam.port, "GET", "/api/ping", "", &[]).unwrap();
+    assert!(queued.starts_with("HTTP/1.1 200"), "{queued}");
     assert!(
-        rejected.starts_with("HTTP/1.1 503"),
-        "Laravel must reject interleaving inside a worker: {rejected}"
+        queued_at.elapsed() >= Duration::from_millis(100),
+        "the queued request ran while the suspended request held the worker"
     );
     let suspended = suspended.join().unwrap().unwrap();
     assert!(suspended.contains(r#"{"value":"isolated"}"#), "{suspended}");
