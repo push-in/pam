@@ -64,7 +64,7 @@ jobs:
             -o Dpkg::Options::=--force-confnew \
             libphp8.5-embed php8.5-dev php8.5-bcmath php8.5-curl php8.5-gd \
             php8.5-intl php8.5-mbstring php8.5-mysql php8.5-pgsql \
-            php8.5-sqlite3 php8.5-xml php8.5-zip
+            php8.5-sqlite3 php8.5-xml php8.5-zip patchelf
       - uses: Swatinem/rust-cache@v2
       - name: Validate locked Composer dependencies
         run: |

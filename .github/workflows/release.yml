@@ -142,8 +142,8 @@ jobs:
         run: |
           apt-get update
           DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            ca-certificates curl git gnupg software-properties-common sudo \
-            unzip zstd
+            ca-certificates curl git gnupg patchelf software-properties-common \
+            sudo unzip zstd
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.ref }}

@@ -114,13 +114,37 @@ done
 copy_dependencies "${package_root}/bin/pam"
 copy_dependencies "${package_root}/lib/libphp.so"
 
+# Every bundled ELF finds its bundled dependencies through its own RUNPATH,
+# so the launcher needs no LD_LIBRARY_PATH. An exported LD_LIBRARY_PATH leaks
+# into every process PAM starts (curl, git, a package's host tool) and makes
+# the host's programs load PAM's private libraries: on a newer distribution
+# than the build host, `curl` then fails with "undefined symbol".
+command -v patchelf >/dev/null 2>&1 || {
+    echo "patchelf is required to package the runtime." >&2
+    exit 69
+}
+patchelf --set-rpath '$ORIGIN/../lib' "${package_root}/bin/pam"
+for bundled_library in "${package_root}"/lib/*.so*; do
+    patchelf --set-rpath '$ORIGIN' "${bundled_library}"
+done
+for extension in "${package_root}"/lib/php/extensions/*.so; do
+    patchelf --set-rpath '$ORIGIN/../..' "${extension}"
+done
+for elf in "${package_root}/bin/pam" "${package_root}"/lib/*.so* \
+    "${package_root}"/lib/php/extensions/*.so; do
+    if env -u LD_LIBRARY_PATH ldd "${elf}" | grep -q 'not found'; then
+        echo "Bundled dependency not resolvable without LD_LIBRARY_PATH: ${elf}" >&2
+        env -u LD_LIBRARY_PATH ldd "${elf}" | grep 'not found' >&2
+        exit 69
+    fi
+done
+
 cat > "${package_root}/bin/pam-run" <<'EOF'
 #!/bin/sh
 set -eu
 PAM_LAUNCHER=$(readlink -f -- "$0")
 PAM_INSTALL_ROOT=$(CDPATH= cd -- "$(dirname -- "$PAM_LAUNCHER")/.." && pwd)
 export PAM_HOME="$PAM_INSTALL_ROOT/share/pam"
-export LD_LIBRARY_PATH="$PAM_INSTALL_ROOT/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
 export PAM_EXTENSION_DIR="$PAM_INSTALL_ROOT/lib/php/extensions"
 export PHPRC="$PAM_INSTALL_ROOT/etc/php.ini"
 export PHP_INI_SCAN_DIR="$PAM_INSTALL_ROOT/etc/conf.d${PAM_PHP_INI_SCAN_DIR:+:$PAM_PHP_INI_SCAN_DIR}"
