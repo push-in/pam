@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 246" width="880" height="246" role="img" aria-label="The same app launching: PAM Desktop is ready in 138 ms, Electron in 1,563 ms (real time, looping)">
+<title>PAM Desktop 138 ms vs Electron 1,563 ms cold start</title>
+<g transform="translate(10 10)">
+<rect x="0.5" y="0.5" width="419" height="199" rx="8" fill="#ffffff" stroke="#d0d7de"/>
+<path d="M0.5 30.5 H419.5" stroke="#d0d7de"/>
+<circle cx="16" cy="15.5" r="4.5" fill="#d0d7de"/><circle cx="30" cy="15.5" r="4.5" fill="#d0d7de"/><circle cx="44" cy="15.5" r="4.5" fill="#d0d7de"/>
+<text x="60" y="19.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#59636e">PAM Desktop</text>
+<rect x="14" y="44" width="392" height="6" rx="3" fill="#eaeef2"/>
+<rect x="14" y="44" width="0" height="6" rx="3" fill="#1a7f37"><animate attributeName="width" values="0;392;392" keyTimes="0;0.0345;1" dur="4.0s" repeatCount="indefinite"/></rect>
+<g opacity="0"><animate attributeName="opacity" values="0;1" keyTimes="0;0.0345" calcMode="discrete" dur="4.0s" repeatCount="indefinite"/>
+<rect x="14" y="66" width="48" height="118" rx="5" fill="#eaeef2"/><rect x="22" y="76" width="32" height="7" rx="3" fill="#f53003"/>
+<rect x="74" y="66" width="104" height="38" rx="5" fill="#eaeef2"/><rect x="188" y="66" width="104" height="38" rx="5" fill="#eaeef2"/><rect x="302" y="66" width="104" height="38" rx="5" fill="#eaeef2"/>
+<rect x="74" y="116" width="300" height="8" rx="4" fill="#eaeef2"/><rect x="74" y="134" width="250" height="8" rx="4" fill="#eaeef2"/><rect x="74" y="152" width="280" height="8" rx="4" fill="#eaeef2"/>
+<rect x="296" y="166" width="110" height="24" rx="12" fill="#ffffff" stroke="#1a7f37"/><text x="351" y="182" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="700" fill="#1a7f37">138 ms</text>
+</g>
+<g><animate attributeName="opacity" values="1;0" keyTimes="0;0.0345" calcMode="discrete" dur="4.0s" repeatCount="indefinite"/>
+<text x="210" y="128" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#59636e">loading…</text></g>
+<text x="210" y="226" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#59636e">PAM · 138 ms</text>
+</g><g transform="translate(450 10)">
+<rect x="0.5" y="0.5" width="419" height="199" rx="8" fill="#ffffff" stroke="#d0d7de"/>
+<path d="M0.5 30.5 H419.5" stroke="#d0d7de"/>
+<circle cx="16" cy="15.5" r="4.5" fill="#d0d7de"/><circle cx="30" cy="15.5" r="4.5" fill="#d0d7de"/><circle cx="44" cy="15.5" r="4.5" fill="#d0d7de"/>
+<text x="60" y="19.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11" fill="#59636e">Electron</text>
+<rect x="14" y="44" width="392" height="6" rx="3" fill="#eaeef2"/>
+<rect x="14" y="44" width="0" height="6" rx="3" fill="#cf222e"><animate attributeName="width" values="0;392;392" keyTimes="0;0.39075;1" dur="4.0s" repeatCount="indefinite"/></rect>
+<g opacity="0"><animate attributeName="opacity" values="0;1" keyTimes="0;0.39075" calcMode="discrete" dur="4.0s" repeatCount="indefinite"/>
+<rect x="14" y="66" width="48" height="118" rx="5" fill="#eaeef2"/><rect x="22" y="76" width="32" height="7" rx="3" fill="#f53003"/>
+<rect x="74" y="66" width="104" height="38" rx="5" fill="#eaeef2"/><rect x="188" y="66" width="104" height="38" rx="5" fill="#eaeef2"/><rect x="302" y="66" width="104" height="38" rx="5" fill="#eaeef2"/>
+<rect x="74" y="116" width="300" height="8" rx="4" fill="#eaeef2"/><rect x="74" y="134" width="250" height="8" rx="4" fill="#eaeef2"/><rect x="74" y="152" width="280" height="8" rx="4" fill="#eaeef2"/>
+<rect x="296" y="166" width="110" height="24" rx="12" fill="#ffffff" stroke="#cf222e"/><text x="351" y="182" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="700" fill="#cf222e">1,563 ms</text>
+</g>
+<g><animate attributeName="opacity" values="1;0" keyTimes="0;0.39075" calcMode="discrete" dur="4.0s" repeatCount="indefinite"/>
+<text x="210" y="128" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="13" fill="#59636e">loading…</text></g>
+<text x="210" y="226" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" fill="#59636e">Electron · 1,563 ms</text>
+</g>
+</svg>
