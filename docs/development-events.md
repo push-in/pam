@@ -11,7 +11,7 @@ Enable it for any development command:
 PAM_DEV_EVENTS=1 pam dev public/index.php
 PAM_DEV_EVENTS=1 pam mobile dev
 PAM_DEV_EVENTS=1 pam mobile ios:dev
-PAM_DEV_EVENTS=1 pam-desktop dev
+PAM_DEV_EVENTS=1 pam desktop dev
 ```
 
 `json` and `jsonl` are accepted as aliases for `1`. Events are written to

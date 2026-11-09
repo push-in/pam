@@ -262,9 +262,9 @@ pam desktop build --format deb                # bundle and installers
 ```
 
 On Linux the host needs GTK 4 (`sudo apt install libgtk-4-1 gstreamer1.0-plugins-good` on
-Debian and Ubuntu). The `vendor/bin/pam-desktop` launcher downloads the host of the installed
-version and verifies its SHA-256. PAM Desktop 1.x, the earlier Servo web view line, is in
-maintenance; the `product` template still generates a 1.x desktop surface.
+Debian and Ubuntu). `pam desktop` downloads the host of the installed version on first use and
+verifies its SHA-256. The `product` template's desktop app is PAM Desktop 2 as well. PAM Desktop
+1.x, the earlier Servo web view line, is in maintenance.
 
 <p align="center">
   <img src="docs/assets/readme/desktop-showcase.png" width="900" alt="PAM Desktop 2: marketplace, finance and chat screens on Linux with GTK 4, and a 2,000-row virtualized list on macOS with AppKit.">

@@ -32,7 +32,7 @@ The report contract is embedded and available offline with
 | PAM Laravel | Laravel hosted by the persistent runtime | [`laravel.md`](laravel.md) |
 | PAM Octane | Laravel Octane on the PAM transport | [`../packages/octane/README.md`](../packages/octane/README.md) |
 | PAM Native | Android and iOS applications in PHP | [`../pam-native/README.md`](../pam-native/README.md) |
-| PAM Desktop | Servo-hosted desktop applications | `pam init app --template desktop` |
+| PAM Desktop | Native desktop applications from PHP components (GTK 4, AppKit, Win32) | `pam init app --template desktop` |
 
 PAM Native is certified with real generated hosts on Android and iOS. The
 operational contracts and release checklists live in [Android](android.md) and
