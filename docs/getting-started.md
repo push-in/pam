@@ -20,6 +20,14 @@ pam --version
 pam doctor
 ```
 
+The installer links `pam` into `~/.local/bin`; add it to `PATH` if your shell
+does not find `pam` (most distributions do so at the next login). PAM does not
+put a `php` executable on `PATH`: run PHP scripts with `pam script.php`,
+Composer with `pam composer ...` and package commands with `pam <command>`
+(for example `pam desktop dev`). On minimal Linux images without time zone
+data, PHP warns `Invalid date.timezone value 'UTC'` at startup; installing
+`tzdata` removes it.
+
 On macOS, a checked-out release also provides an explicit host entrypoint:
 
 ```bash
@@ -145,11 +153,15 @@ Use `pam clean --dry-run` at the workspace root to inspect cross-surface caches
 and builds, then `pam clean --all` to remove them without touching source,
 Composer manifests, lockfiles, or the shared contract.
 
-The Desktop preset opens with a responsive PAM workbench that demonstrates the
-typed PHP command bridge, explicit native capabilities, signed updates and the
-runtime inspector. Its local-only assets include keyboard focus, reduced-motion,
-high-contrast and forced-color behavior; the runtime status becomes “online”
-only after the authenticated bridge handshake.
+The Desktop preset creates a PAM Desktop 2 application: it writes a
+`composer.json` that requires `pushinbr/pam-desktop` `^2.1`, installs it, then
+runs `pam desktop init`, so the screens, router, design tokens and test come
+from the installed release. Run it with `pam desktop dev`, check templates and
+CSS with `pam desktop check`, run its test with `pam composer test` and build
+installers with `pam desktop build`. On Linux the native host needs GTK 4
+(`sudo apt install libgtk-4-1 gstreamer1.0-plugins-good` on Debian and Ubuntu).
+See the [PAM Desktop getting started](https://github.com/push-in/pam-desktop/blob/main/docs/getting-started.md).
+The `product` template still generates a PAM Desktop 1.x (web view) surface.
 
 Every generated project contains `pam.json`. This lets the CLI select the right
 implementation when you use the same short commands everywhere:
@@ -206,8 +218,9 @@ pam release:verify
 ```
 
 Desktop host installation and diagnostics belong to `pushinbr/pam-desktop`.
-Install that package with Composer to add its commands and their autocomplete
-to the project; the PAM runtime does not download or proxy a Desktop host.
+Install that package with Composer to add its commands (`pam desktop ...`) and
+their autocomplete to the project; the package's launcher downloads and
+verifies the native host, the PAM runtime does not proxy it.
 
 The aggregation command refuses missing, symbolic-link, or non-portably named artifacts, hashes files by
 streaming them in 64 KiB chunks, verifies that they did not change during the

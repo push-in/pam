@@ -42,7 +42,7 @@ Composer. Laravel stays Laravel. Your code stays PHP.
 | **Laravel without PHP-FPM** | A warm Laravel kernel with per-request sandboxes, or your existing Octane app on PAM's transport |
 | **Production clusters** | A pm2-style manager with zero-downtime reload, canary traffic, health checks and rollback |
 | **Android and iOS apps** | Real Android Views and UIKit controls driven by PHP components, with no JavaScript runtime and no web view |
-| **Desktop apps** | Self-contained Linux, macOS and Windows apps, with a native GTK 4, AppKit and Win32 renderer coming in 2.0 |
+| **Desktop apps** | Linux, macOS and Windows apps written as PHP components and drawn with GTK 4, AppKit and Win32: no web view, no Electron |
 
 ## Quick start
 
@@ -60,6 +60,11 @@ $ curl http://127.0.0.1:3000/api/ping
 {"message":"pong"}
 ```
 
+The installer links `pam` into `~/.local/bin`. If `pam` is not found afterwards, add that
+directory to `PATH` (most distributions do it at the next login). On minimal Linux images
+without time zone data, PHP prints `Invalid date.timezone value 'UTC'` once at startup;
+installing `tzdata` (`sudo apt install tzdata`) removes the warning.
+
 The generated `index.php` is plain PHP:
 
 ```php
@@ -76,7 +81,7 @@ The same CLI creates any other kind of project:
 ```bash
 pam init my-laravel-app --template laravel  # persistent Laravel
 pam init my-native-app  --template native   # Android + iOS
-pam init my-desktop-app --template desktop  # Linux + macOS + Windows
+pam init my-desktop-app --template desktop  # Linux + macOS + Windows (PAM Desktop 2)
 pam init my-product     --template product  # server + native + desktop, one workspace
 ```
 
@@ -242,24 +247,29 @@ read the [Native docs](https://push-in.github.io/pam-docs/native/overview/) and 
 <p align="center">
   <img src="docs/assets/readme/one-codebase.png" width="820" alt="The same marketplace screen from the PAM showcase on an Android phone and in a PAM Desktop window on Linux.">
 </p>
-<p align="center"><sub>The same showcase screen in PAM Native on Android (left) and in the PAM Desktop 2.0 preview on Linux with GTK 4 (right). Both are written as PHP components with the same syntax.</sub></p>
+<p align="center"><sub>The same showcase screen in PAM Native on Android (left) and in PAM Desktop 2 on Linux with GTK 4 (right). Both are written as PHP components with the same syntax.</sub></p>
 
-**PAM Desktop 1.2** is the released line ([v1.2.9](https://github.com/push-in/pam-desktop/releases)).
-It runs typed PHP application logic behind a Rust capability boundary and renders local
-HTML/CSS in native windows through Servo, with no Electron or Node.js. It ships with multiple
-windows, background jobs, hot reload, crash recovery, signed updates with rollback, and DEB, DMG and MSIX packaging.
-Power is explicit: filesystem roots, dialogs, clipboard and notifications are granted one by one.
+**PAM Desktop 2** ([releases](https://github.com/push-in/pam-desktop/releases), Packagist
+`pushinbr/pam-desktop`) renders a native interface from PHP components with the same syntax as
+PAM Native: **GTK 4 on Linux, AppKit on macOS and Win32 + Direct2D on Windows**. Rust lays out
+and diffs the tree, so every control is a platform view; there is no web view in the rendering path.
 
-**PAM Desktop 2.0** is in development on the public
-[`feat/native-2.0`](https://github.com/push-in/pam-desktop/tree/feat/native-2.0) branch, and it removes the
-web view entirely. PHP components with the same syntax as PAM Native drive **GTK 4 on Linux, AppKit on
-macOS and Win32 + Direct2D on Windows**. Rust lays out and diffs the tree, so every control
-is a platform view.
+```bash
+pam init my-desktop-app --template desktop   # composer install + pam desktop init
+cd my-desktop-app && pam desktop dev          # a window with hot reload
+pam desktop check                             # template and CSS diagnostics, no window
+pam desktop build --format deb                # bundle and installers
+```
+
+On Linux the host needs GTK 4 (`sudo apt install libgtk-4-1 gstreamer1.0-plugins-good` on
+Debian and Ubuntu). The `vendor/bin/pam-desktop` launcher downloads the host of the installed
+version and verifies its SHA-256. PAM Desktop 1.x, the earlier Servo web view line, is in
+maintenance; the `product` template still generates a 1.x desktop surface.
 
 <p align="center">
-  <img src="docs/assets/readme/desktop-showcase.png" width="900" alt="PAM Desktop 2.0 preview: marketplace, finance and chat screens on Linux with GTK 4, and a 2,000-row virtualized list on macOS with AppKit.">
+  <img src="docs/assets/readme/desktop-showcase.png" width="900" alt="PAM Desktop 2: marketplace, finance and chat screens on Linux with GTK 4, and a 2,000-row virtualized list on macOS with AppKit.">
 </p>
-<p align="center"><sub>PAM Desktop 2.0 preview, captured from the public <code>examples/</code>: showcase screens on Linux with GTK 4, plus a 2,000-row virtualized list on macOS with AppKit (bottom right).</sub></p>
+<p align="center"><sub>PAM Desktop 2, captured from the public <code>examples/</code>: showcase screens on Linux with GTK 4, plus a 2,000-row virtualized list on macOS with AppKit (bottom right).</sub></p>
 
 See the [Desktop docs](https://push-in.github.io/pam-docs/desktop/overview/) and the
 [pam-desktop repository](https://github.com/push-in/pam-desktop).
