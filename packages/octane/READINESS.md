@@ -3,30 +3,49 @@
 Goal: decide whether PAM is solid enough to be proposed to `laravel/octane` as
 an official server next to Swoole, RoadRunner and FrankenPHP.
 
-- Date: 2026-11-09. Branch `test/octane-readiness` (not pushed).
-- Package under test: `pushinbr/pam-octane` (`packages/octane`, 1.1.0 plus the
-  fixes on this branch). Runtime: PAM 2.2.11 plus the runtime fixes on this
-  branch, built from source.
+- Date: 2026-11-09. Branch `test/octane-readiness`, rebased on PAM 2.2.12.
+- Package under test: `pushinbr/pam-octane` 1.2.0 (`packages/octane`).
+  Runtime: PAM 2.2.13 (this branch), release build (`lto = "fat"`).
 - PHP: PAM embeds PHP 8.5.12. As with FrankenPHP, there is no PHP version
   matrix: PAM always runs its own PHP.
 - `laravel/octane` v2.23.0, Laravel 12.71 and 13.40.
 - Machine: Intel Core Ultra 9 185H (22 threads), 30 GiB RAM, Linux 7.0.11,
-  `powersave` governor, Docker 28.1.1. Headless Chrome ran on the RTX 4070
+  CPU governor `powersave`, Docker 28.1.1. Headless Chrome ran on the RTX 4070
   (ANGLE/EGL).
 
 ## Verdict
 
-Most of it is ready. Every Octane feature that is not Swoole-only works on
-Laravel 12 and 13. The real ecosystem app passes the same 17 steps as
-FrankenPHP. PAM is the fastest of the four servers in the benchmark.
+Ready on the server side. Every Octane feature that is not Swoole-only works
+on Laravel 12 and 13, Octane's own suite passes through the PAM client, the
+real ecosystem app passes the same 17 steps as FrankenPHP, and PAM is the
+fastest of the four servers in the benchmark.
 
-Before this branch it was not ready. Fifteen real bugs turned up, and some of
-them broke basic production paths: any streamed response took the worker down
-for good, a memory-limit fatal error left a worker that answered 500 forever,
-`--max-requests` could take a whole cluster offline, and Vite assets returned
-404. All fifteen are fixed on this branch with tests. Before talking to the
-Octane team, they need to ship as a PAM release, and a few gaps listed below
-need to be closed.
+The first pass of this suite found fifteen real bugs, some in basic production
+paths (streamed responses took a worker down for good, a `memory_limit` fatal
+left a worker answering 500 forever, `--max-requests` could take a whole
+cluster offline, Vite assets returned 404). They are fixed with tests. The
+three production gaps that remained are closed in PAM 2.2.13:
+
+- **Zero-loss reload and recycling.** `--max-requests` is make-before-break and
+  draining never closes a connection with a request in flight or in the socket
+  buffer. With the recommended `net.ipv4.tcp_migrate_req=1`: **0 failed of
+  812k requests** under `wrk` (4 workers, `--max-requests=2000`, a reload every
+  4 s, 28 reloads), and 0 of 275k in the per-request and keep-alive recycling
+  checks at `--max-requests=500`. With the kernel default (`0`), only clients
+  that open a new connection in the instant a listener closes can still see a
+  reset: 1 of 786k under `wrk`, and 0 to 3 per 60k at `--max-requests=500`
+  with a new connection per request.
+- **Timeouts answer 504.** A handler that blocks past the timeout gets
+  `504 Gateway Timeout` after 2.1 s (2 s limit); the stuck worker is replaced
+  and 20/20 requests right after succeed. The limit follows Octane's
+  `octane.max_execution_time`.
+- **Uploads are streamed to disk.** 100 MB and 1 GB uploads with the default
+  `memory_limit` (128M): sha256 verified, PHP peak 18 MiB, worker peak RSS
+  86 MiB, `move()` works, no temporary file is left behind; PHP's
+  `upload_max_filesize` and `post_max_size` are enforced while streaming.
+
+What is left before approaching the Octane team is integration work (see the
+end of this report), not server behavior.
 
 ## How to reproduce
 
@@ -34,6 +53,7 @@ need to be closed.
 PAM=/path/to/pam packages/octane/readiness/run-local.sh            # every stage
 packages/octane/readiness/run-local.sh suite matrix                 # chosen stages
 READINESS_MIGRATE=1 ... run-local.sh matrix                         # with net.ipv4.tcp_migrate_req=1
+BENCH_PAM_RUNTIME=/path/to/runtime ... run-local.sh bench           # benchmark an unreleased PAM build
 READINESS_CLEAN=1  ... run-local.sh                                 # delete apps, vendor and images afterwards
 ```
 
@@ -44,7 +64,7 @@ requests and on manual dispatch, and uploads `results/`.
 | Stage | Location | What it does |
 |---|---|---|
 | 1. Octane's own suite | `readiness/octane-suite/` | Clones `laravel/octane` at its latest tag and runs the upstream suite on PAM's PHP. It then runs the suite again with every Octane request and response routed through the real `PamClient`: `PamFakeClient` is the only hook in `TestCase`, and it compares each PAM-emitted response with what Laravel produced. Also adds `PamClientTest`, a port of `FrankenPhpClientTest`. |
-| 2. Feature matrix | `readiness/matrix/` | Provisions fresh Laravel 12 and 13 apps (`laravel/octane` plus this package), adds probe routes, and drives `pam octane:start/status/reload/stop` through 28 checks. |
+| 2. Feature matrix | `readiness/matrix/` | Provisions fresh Laravel 12 and 13 apps (`laravel/octane` plus this package), adds probe routes, and drives `pam octane:start/status/reload/stop` through 34 checks, including a `wrk` zero-loss run. |
 | 3. Ecosystem app | `readiness/ecosystem/` | One Laravel 12 app with Livewire 3, Inertia 2 (Vue), Filament 4, Sanctum 4, Horizon 5 (Redis in a disposable container), Reverb 1, Redis queues, the scheduler, the public disk and log mail. Runs an HTTP plus headless Chrome flow under PAM Octane and under FrankenPHP. |
 | 4. Benchmark | `readiness/bench/` | Public-ready harness: pinned versions, Dockerfiles, machine capture and sequential `wrk` runs. See `bench/README.md`. |
 
@@ -64,8 +84,8 @@ requests and on manual dispatch, and uploads `results/`.
 
 ## 2. Feature matrix (Laravel 12 and 13)
 
-Default Linux settings: every check passes except two, which pass with
-`net.ipv4.tcp_migrate_req=1` on some runs (see gaps).
+34 checks per Laravel version; 28 PASS, 6 N/A (Swoole-only) on both, except
+the recycling check marked below, which depends on the kernel setting.
 
 | Feature | Laravel 12 | Laravel 13 | Notes |
 |---|---|---|---|
@@ -76,33 +96,64 @@ Default Linux settings: every check passes except two, which pass with
 | `Octane::table()` | N/A | N/A | **Swoole-only in Octane itself** |
 | `Octane::tick()` / intervals | N/A | N/A | **Swoole-only in Octane itself** |
 | Task workers (`--task-workers`) | N/A | N/A | **Swoole-only in Octane itself** |
-| Streamed responses (`response()->stream()`, generators, `eventStream` SSE) | PASS | PASS | First byte in 2 to 6 ms, last byte at 1 s, chunked |
+| Streamed responses (`response()->stream()`, generators, `eventStream` SSE) | PASS | PASS | First byte in 3 to 5 ms, last byte at 1 s, chunked |
 | 50 MB `download()` and 16 MB `streamDownload()` | PASS | PASS | |
-| Requests reaching a busy, streaming worker are queued instead of rejected | PASS | PASS | 20/20. PAM 2.2.11 answered 0/20 (all 503). |
+| Requests reaching a busy, streaming worker are queued instead of rejected | PASS | PASS | 20/20 |
 | Static files: Vite build, `robots.txt`, `storage:link`, ETag/304, Range | PASS | PASS | No PHP source and nothing outside `public/` is served |
 | HTTP/1.1 keep-alive | PASS | PASS | 50 requests on one connection |
 | Trusted proxies (`X-Forwarded-*`) | PASS | PASS | |
-| 100 MB multipart upload | PASS | PASS | sha256 verified, 0.36 s. Needs the limits raised (see below). |
+| 100 MB multipart upload, `memory_limit=128M` (plain and `move()`) | PASS | PASS | sha256 verified, 0.18 s, PHP peak 18 MiB, worker RSS 78 to 84 MiB, 0 temp files left |
+| 1 GB multipart upload, `memory_limit=128M` (plain and `move()`) | PASS | PASS | sha256 verified, 1.8 to 2.1 s, PHP peak 18 MiB, worker RSS 84 to 86 MiB, 0 temp files left |
+| `upload_max_filesize` / `post_max_size` while streaming | PASS | PASS | 2 MB file over `1M` gets `UPLOAD_ERR_INI_SIZE` with the form fields kept; 9 MB body over `8M` gets Laravel's 413 |
 | 5 MB raw JSON body | PASS | PASS | |
-| Memory over 50k requests, one worker | PASS | PASS | PHP heap 15,452 KiB before and after; RSS 108 MiB before and after; same worker; 0 errors |
-| `--max-requests` recycling under load (4 workers, limit 2000) | 2 of 44k failed | 1 of 44k failed | Was 85% failed on 2.2.11 (whole cluster down). See gaps. |
-| `octane:reload` under load (3 reloads) | 1 of 48k failed | 5 of 48k failed | See gaps |
-| `octane:status`, `octane:stop`, then start again | PASS | PASS | Stop followed by start failed before the fix |
-| Request timeout (2 s limit, handler blocks for 6 s) | PASS | PASS | Answered in 2.4 s and the worker is replaced, but the client gets a dropped connection rather than a 504 (see gaps) |
+| Memory over 50k requests, one worker | PASS | PASS | PHP heap 15,060 / 15,492 KiB before and after; RSS 104 / 105 MiB before and after; same worker; 0 errors |
+| `--max-requests=500`, 4 workers, keep-alive | PASS | PASS | 0 of 77k to 83k failed |
+| `--max-requests=500`, 4 workers, new connection per request | see below | see below | 0 failed with `tcp_migrate_req=1`; 0 to 3 of 41k to 63k with the kernel default |
+| `octane:reload` under load (4 reloads, keep-alive) | PASS | PASS | 0 of 88k to 92k failed |
+| Zero-loss: `wrk -c64`, `--max-requests=2000`, a reload every 4 s, 40 s | PASS | PASS | 0 of 273k and 0 of 253k failed (9 reloads each) |
+| `octane:status`, `octane:stop`, then start again | PASS | PASS | |
+| Request timeout (2 s limit, handler blocks for 6 s) | PASS | PASS | `504` after 2.1 s with `Connection: close`; the stuck worker is replaced; 20/20 healthy right after |
 | Worker crash recovery: `SIGKILL`, `memory_limit` fatal, `exit()`, exception | PASS | PASS | 20/20 healthy afterwards in each case |
 | `WorkerStopping` runs on shutdown, not at boot | PASS | PASS | |
 | HTTPS (`PAM_TLS_CERT`/`PAM_TLS_KEY`) | PASS | PASS | Negotiates HTTP/2 |
 | `--watch` | PASS | PASS | Runs `pam dev` in the foreground |
 
-With `READINESS_MIGRATE=1` (a private network namespace with
-`tcp_migrate_req=1`):
+### Zero-loss recycling, 60 s runs
 
-- Laravel 12: reload passes (0 of 50.5k failed) and `--max-requests` loses 2
-  of 45k.
-- Laravel 13: `--max-requests` passes and reload loses 2 of 48.5k.
+`READINESS_ZERO_LOSS_SECONDS=60`, `wrk -t4 -c64` keep-alive on `/_r/hello`,
+4 workers, `--max-requests=2000`, `octane:reload` every 4 s (14 reloads per
+run).
 
-The kernel-queue resets disappear. What remains is the race described in the
-gaps.
+| Kernel setting | Laravel 12 | Laravel 13 |
+|---|---|---|
+| `net.ipv4.tcp_migrate_req=1` (recommended) | 394,329 requests, **0 errors** | 417,857 requests, **0 errors** |
+| `net.ipv4.tcp_migrate_req=0` (default) | 389,769 requests, 1 socket error | 396,525 requests, 0 errors |
+
+With `tcp_migrate_req=1`, the `--max-requests=500` checks also lose nothing:
+0 of 57,672 and 0 of 58,648 with a new connection per request, 0 of 81,291
+and 0 of 77,252 with keep-alive.
+
+How recycling works now:
+
+1. A worker that reaches `--max-requests` asks the master for a replacement and
+   keeps serving. The master forks the replacement from the generation's
+   zygote, waits until it is ready, then sends `SIGTERM` to the old worker.
+   Reload starts the whole new generation first, as before.
+2. The draining worker leaves the balancer at once, and every HTTP/1 response
+   it writes carries `Connection: close`: each connection finishes its
+   in-flight request, or the next one it receives, and closes cleanly.
+   Connections idle for `PAM_DRAIN_IDLE_MS` (1 s) and HTTP/2 connections get
+   the graceful shutdown. A connection accepted just before the drain, with
+   its first request still in the socket buffer, is served instead of reset
+   (that was the in-worker race of the previous report).
+3. The accept loop runs on the I/O threads (it used to run on the thread that
+   executes PHP). It keeps accepting and handing connections to live siblings
+   while the old worker's clients reconnect, sweeps the kernel queue, and only
+   then closes the listener.
+4. The one window left is in the kernel: Linux resets a handshake that
+   completes on a `SO_REUSEPORT` listener in the instant it closes.
+   `net.ipv4.tcp_migrate_req=1` moves it to a sibling listener instead; it is
+   the recommended production setting and CI sets it.
 
 ## 3. Ecosystem app: PAM Octane vs FrankenPHP 1.13.5 (same app, same PHP 8.5.12)
 
@@ -137,11 +188,11 @@ every run.
 
 | Endpoint | PAM Octane | FrankenPHP | Swoole | RoadRunner |
 |---|---|---|---|---|
-| hello | **9,328** · 6.66 / 8.44 ms | 7,188 · 8.69 / 13.79 ms | 7,066 · 8.66 / 11.09 ms | 5,890 · 10.69 / 14.06 ms |
-| json | **9,040** · 7.10 / 8.39 ms | 7,106 · 8.83 / 13.48 ms | 6,895 · 9.14 / 11.14 ms | 5,775 · 10.87 / 14.81 ms |
-| db (SQLite row) | **7,816** · 7.92 / 9.99 ms | 6,233 · 10.04 / 15.05 ms | 5,985 · 12.66 / 14.67 ms | 4,961 · 12.66 / 16.80 ms |
-| view (Blade) | **7,691** · 8.62 / 10.08 ms | 6,389 · 9.85 / 14.24 ms | 5,960 · 10.64 / 11.71 ms | 5,279 · 11.93 / 15.48 ms |
-| Container memory after the run (cgroup, page cache included) | 411 MiB | 402 MiB | 484 MiB | 768 MiB |
+| hello | **9,119** · 7.26 / 8.80 ms | 6,865 · 9.21 / 14.44 ms | 7,042 · 9.00 / 11.24 ms | 5,586 · 11.27 / 15.11 ms |
+| json | **8,890** · 7.15 / 8.89 ms | 6,624 · 9.52 / 14.84 ms | 6,777 · 9.18 / 18.74 ms | 5,526 · 11.37 / 15.40 ms |
+| db (SQLite row) | **7,500** · 8.07 / 16.58 ms | 6,118 · 10.24 / 15.61 ms | 5,907 · 10.83 / 13.61 ms | 4,428 · 14.27 / 18.84 ms |
+| view (Blade) | **6,963** · 8.55 / 19.05 ms | 6,336 · 9.90 / 14.54 ms | 5,752 · 11.12 / 13.55 ms | 4,698 · 13.44 / 17.67 ms |
+| Container memory after the run (cgroup, page cache included) | 451 MiB | 473 MiB | 487 MiB | 749 MiB |
 
 How it was run:
 
@@ -149,11 +200,17 @@ How it was run:
 - PHP 8.5.12 everywhere, with the same OPcache and JIT settings.
 - 8 workers on CPUs 0-7.
 - `wrk -t4 -c64`: a 5 s warmup, then 20 s on CPUs 8-11. Runs were sequential.
-- Images: `pam-octane-bench/pam:2.2.11` (the PAM release), FrankenPHP 1.13.5,
+- Images: `pam-octane-bench/pam:local-2.2.13` (this branch's release build,
+  through `BENCH_PAM_RUNTIME`), FrankenPHP 1.13.5,
   `php:8.5.12-cli-bookworm` with Swoole 6.2.3 and RoadRunner 2025.1.15.
+- CPU governor `powersave` on a laptop, `tcp_migrate_req=0`. The numbers are
+  valid only relative to each other.
+- The PAM p99 of `db` and `view` in this run is noise from the governor: a
+  PAM-only rerun gave 10.07 / 18.03 ms, and an A/B on the same image build
+  gave `view` 10.79 ms on PAM 2.2.12 against 9.94 ms on 2.2.13, `db` 10.24 ms
+  against 11.22 ms, with the same throughput (7,620 to 7,660 requests/s).
+  The changes do not cost throughput on any endpoint.
 - Raw `wrk` output and `machine.json` are written to `results/bench/`.
-- The numbers come from a laptop on the `powersave` governor. They are valid
-  only relative to each other.
 
 ## Bugs found and fixed (all with tests)
 
@@ -174,68 +231,47 @@ How it was run:
 | 13 | Medium | runtime | `pamd` inherited the caller's pipes, so `pam octane:start \| tee` and CI log capture hung | Inherited descriptors are marked close-on-exec |
 | 14 | Medium | package | The package's own test suite failed on PAM's PHP: it was only green on system PHP 8.4. Also, `pam:octane` was not registered under `pam dev`. | SAPI fast path only inside a native dispatch; the command is registered under every SAPI |
 | 15 | Low | package | Octane flags (`--workers=4`, `--max-requests=500`, `--host=`, `--watch`) were rejected | Octane spellings accepted; `pam up --max-requests` added; TLS through the environment |
+| 16 | High | runtime | Reload and recycling lost about 1 request in 20k to 50k: a connection accepted just before graceful shutdown was closed before its first request was read, and `--max-requests` was break-before-make | Make-before-break recycling, `Connection: close` draining, accept loop off the PHP thread, listener kept open while clients reconnect |
+| 17 | High | runtime | A handler blocking past the timeout was killed by the watchdog and the client saw a reset | The transport answers `504` itself and the worker is replaced make-before-break; requests queued behind it get `503` with `Retry-After` |
+| 18 | High | runtime | Upload bodies were held in memory three times (Rust, PHP string, `php://input`); a 100 MB upload needed `memory_limit` of about 164 MB and 1 GB was impossible | Multipart bodies are streamed to `upload_tmp_dir` with PHP's limits, registered for `is_uploaded_file()`, deleted after the request |
+| 19 | Medium | package | `octane.max_execution_time` was ignored | It sets the request timeout (0 disables it) unless `PAM_REQUEST_TIMEOUT_MS` is set |
 
-Commits on `test/octane-readiness`:
-
-| Commit | Change |
-|---|---|
-| `9bf7abeb` | runtime: shutdown and recycling |
-| `c6b9f539` | runtime: streaming and multipart |
-| `c20187fc` | CLI: stdin and `-f` |
-| `a3d3e32f` | package: streaming, `WorkerStopping`, names, options |
-| `d52b5230` | package: static files |
-| `3dc93ed1` | CLI: artisan identity |
-| `3e6e5cab`, `593fc314` | server: slot queueing |
-| last commit on the branch | the readiness suite and this report |
+All of these ship in PAM 2.2.13 (runtime, server, CLI: bugs 3 to 6, 8, 11
+to 13, 16 to 18) and pam-octane 1.2.0 (package: bugs 1, 2, 7, 9, 10, 14, 15,
+19). Each fix has a regression test in `tests/` (Rust), `packages/octane/tests`
+(PHPUnit) or this readiness suite.
 
 ## Remaining gaps
 
-1. **Hand-over is not fully lossless yet.** A reload or a recycle still loses
-   about 1 request in 20k to 50k under constant load.
-   - With default kernel settings, part of the loss is the kernel resetting
-     connections queued on a closing `SO_REUSEPORT` listener. Setting
-     `tcp_migrate_req=1` removes that part. It is documented, and CI sets it.
-   - The rest is a race inside the worker. A connection accepted just before
-     graceful shutdown is closed by hyper before its first request is read.
-   - What would close it:
-     - Serve the first request of connections accepted while draining.
-     - Or recycle make-before-break: the master starts the replacement before
-       the old worker stops listening, as reload already does.
-     - Or have the master own one shared listener.
-   - Today `--max-requests` is break-before-make. With very low limits and few
-     workers, capacity dips. PAM's own default limit is 10M, while Octane's is
-     500; the bridge does not read `octane.max_requests`.
-2. **Hard timeouts drop the connection.** A handler that blocks past the
-   deadline is killed by the watchdog and the client sees a reset. It should
-   receive a 504. `octane.max_execution_time` is not mapped to
-   `PAM_REQUEST_TIMEOUT_MS`.
-3. **Upload bodies are held in memory.** The body is buffered in Rust and in
-   PHP. A 100 MB upload needs `PAM_MAX_BODY_BYTES`, `upload_max_filesize`,
-   `post_max_size` and `memory_limit` of roughly the body size plus 64 MB.
-   FrankenPHP and RoadRunner stream uploads to disk.
-4. **Static files go through the PHP worker.** This matches Swoole, but it
+Gaps 1 to 3 of the previous report (lossless hand-over, hard timeouts, upload
+memory) are closed in PAM 2.2.13, see above. Still open:
+
+1. **Static files go through the PHP worker.** This matches Swoole, but it
    uses the single request slot. Serving `public/` from Rust would be faster
    and would leave PHP free.
-5. **`Octane::concurrently()` is sequential**, as on RoadRunner and FrankenPHP.
+2. **`Octane::concurrently()` is sequential**, as on RoadRunner and FrankenPHP.
    PAM has Fibers and process pools and could offer a real `DispatchesTasks`.
-6. **No automatic certificates.** FrankenPHP's `--https` uses ACME through
+3. **No automatic certificates.** FrankenPHP's `--https` uses ACME through
    Caddy; PAM needs certificate files. `--admin-port`, `--log-level` and
    `--poll` are accepted and ignored.
-7. **Status output does not follow Octane.** `octane:status` prints PAM's
+4. **Status output does not follow Octane.** `octane:status` prints PAM's
    format instead of Octane's "Octane server is running". Octane's own
    `ServerStateFile` and `ServerProcessInspector` are not used.
-8. **Platforms.** Only Linux x86_64 was validated here. Prefork and balancing
+5. **Platforms.** Only Linux x86_64 was validated here. Prefork and balancing
    are Linux-only.
+6. **Kernel setting.** Zero loss under constant new connections needs
+   `net.ipv4.tcp_migrate_req=1` (Linux 5.14+). Without it a handshake that
+   lands on a closing listener can still be reset (rare: 1 in 786k above).
+7. **The bridge does not read `--max-requests` from Octane's config.** Octane
+   has no config key for it (only the command option, default 500); PAM's own
+   default limit is 10M.
 
 ## What is needed before approaching laravel/octane
 
-1. **Release the fixes.** Ship PAM 2.2.12 with the runtime fixes and
-   pam-octane 1.2 with the package fixes. Run this suite against the released
-   artifacts and publish the results.
-2. **Close gaps 1 and 2.** Make recycling lossless, ideally make-before-break
-   with a hard-timeout 504. Map `octane.max_requests` and
-   `octane.max_execution_time`.
-3. **Integrate like the other servers.** Prepare the upstream pull request in
+1. **Ship the fixes.** PAM 2.2.13 and pam-octane 1.2.0 carry everything in
+   this report. Run this suite against the released artifacts in CI
+   (`octane-readiness.yml`) and publish the results.
+2. **Integrate like the other servers.** Prepare the upstream pull request in
    the shape of the FrankenPHP integration:
    - `octane:start --server=pam` through a `StartPamCommand`.
    - `octane:install --server=pam`, which downloads and verifies the PAM
@@ -249,7 +285,7 @@ Commits on `test/octane-readiness`:
    - Today PAM can only plug in from outside, because `StartCommand` hardcodes
      its list of servers. A small driver-registration hook in Octane is the
      alternative to ask for.
-4. **Keep the evidence running.** Keep `octane-readiness.yml` green on main.
+3. **Keep the evidence running.** Keep `octane-readiness.yml` green on main.
    Add Laravel 11 if Octane still supports it, and macOS and arm64 runners.
-5. **Write the docs and threat model.** Cover static file serving, upload
-   limits, TLS and the `tcp_migrate_req` recommendation.
+4. **Write the docs and threat model.** Cover static file serving, upload
+   limits and temporary files, TLS and the `tcp_migrate_req` recommendation.

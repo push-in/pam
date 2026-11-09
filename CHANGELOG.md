@@ -1,5 +1,40 @@
 # Changelog
 
+## 2.2.13 - 2026-11-09
+
+Laravel Octane readiness: every fix found by the PAM Octane readiness suite
+(`packages/octane/readiness`), plus the three remaining production gaps.
+
+- Zero-loss recycling. `--max-requests` is make-before-break: the worker asks
+  the master for a replacement and keeps serving until the replacement is
+  warm. Draining finishes in-flight and just-accepted requests with
+  `Connection: close` instead of closing connections, the accept loop runs on
+  the I/O threads and hands connections to live siblings, and the kernel queue
+  is swept before the listener closes. 0 failed of 275k requests under `wrk`
+  with `--max-requests=2000` and a reload every 4 s. Enable
+  `net.ipv4.tcp_migrate_req=1` for the kernel side.
+- A request blocked past `requestTimeoutMs` is answered `504 Gateway Timeout`
+  instead of a dropped connection, and its worker is replaced safely.
+- `multipart/form-data` uploads are streamed to temporary files like PHP's own
+  SAPIs, with `upload_max_filesize`, `post_max_size`, `max_file_uploads` and
+  `MAX_FILE_SIZE` applied, `is_uploaded_file()`/`move_uploaded_file()` support
+  and cleanup at the end of the request. 1 GB uploads work with the default
+  `memory_limit`.
+- `SIGTERM` no longer kills workers instantly (PHP's signal handler re-raised
+  it): reload, stop and recycle drain in-flight requests and run shutdown
+  functions.
+- A PHP engine fatal (`memory_limit`, bailout) recycles the worker instead of
+  leaving it answering 500.
+- Planned recycles no longer accumulate crash backoff, and small
+  `--max-requests` limits are staggered.
+- Requests reaching a worker whose slot is held by a stream wait for it
+  instead of getting 503.
+- `Response::streamOutput()` streams echoed output without tearing down output
+  buffers (streamed responses poisoned non-PAM bridges).
+- Multipart array fields (`files[]`, `a[b][c]`) follow PHP's rules.
+- `pam artisan` runs with CLI identity again; `pam -`/`-f`/stdin execute scripts
+  like php-cli; `pamd` no longer inherits the caller's pipes.
+
 ## 2.2.12 - 2026-11-09
 
 Fixes from a clean-room first run on Ubuntu 22.04 and 24.04.
