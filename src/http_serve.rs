@@ -37,7 +37,6 @@ use axum::body::Body;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use futures_util::FutureExt;
 use http::{HeaderValue, StatusCode, Version, header};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use tokio::io::{AsyncRead, AsyncWrite};
@@ -276,14 +275,24 @@ pub async fn accept_loop<P, S, H, F, T>(
         }
     }
     // Take everything the kernel already queued before the listener closes.
-    while let Some(accepted) = listener.accept().now_or_never() {
-        match accepted {
-            Ok((stream, remote)) => serve(stream, remote),
-            Err(error) if is_connection_error(&error) => {}
-            Err(_) => break,
+    // `accept()` on the Tokio listener only tries the syscall when the
+    // reactor already saw readiness, so sweep with plain non-blocking
+    // accept(2) calls until the queue is empty.
+    if let Ok(listener) = listener.into_std() {
+        loop {
+            match listener.accept() {
+                Ok((stream, remote)) => {
+                    if stream.set_nonblocking(true).is_ok()
+                        && let Ok(stream) = TcpStream::from_std(stream)
+                    {
+                        serve(stream, remote);
+                    }
+                }
+                Err(error) if is_connection_error(&error) => {}
+                Err(_) => break,
+            }
         }
     }
-    drop(listener);
     tracker
         .wait_idle(http.graceful_timeout.saturating_add(drain.idle_grace))
         .await;

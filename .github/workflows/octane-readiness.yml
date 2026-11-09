@@ -58,14 +58,24 @@ jobs:
           CARGO_PROFILE_RELEASE_LTO: 'false'
           CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
         run: cargo build --release --bin pam
+      - name: Package the build like a release runtime
+        # The Embed SAPI from the PPA lacks CLI-only extensions such as pcntl
+        # (Horizon, Reverb). Run the new binary inside the latest released
+        # runtime, which bundles them, exactly as a release package does.
+        run: |
+          curl --proto '=https' --tlsv1.2 -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh -o "$RUNNER_TEMP/install.sh"
+          PAM_INSTALL_DIR="$RUNNER_TEMP/pam" PAM_BIN_DIR="$RUNNER_TEMP/pam-bin" sh "$RUNNER_TEMP/install.sh"
+          runtime=$(dirname "$(dirname "$(readlink -f "$RUNNER_TEMP/pam-bin/pam")")")
+          cp target/release/pam "$runtime/bin/pam"
+          echo "PAM=$runtime/bin/pam-run" >> "$GITHUB_ENV"
+          "$runtime/bin/pam-run" --version
+          "$runtime/bin/pam-run" -r 'exit(function_exists("pcntl_async_signals") ? 0 : 1);'
       - name: Lossless SO_REUSEPORT hand-over (recommended production setting)
         run: sudo sysctl -w net.ipv4.tcp_migrate_req=1
       - uses: actions/setup-node@v5
         with:
           node-version: '22'
       - name: Run readiness stages
-        env:
-          PAM: ${{ github.workspace }}/target/release/pam
         run: packages/octane/readiness/run-local.sh ${{ github.event.inputs.stages || 'suite matrix ecosystem' }}
       - name: Upload results
         if: always()

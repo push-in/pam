@@ -31,10 +31,10 @@ three production gaps that remained are closed in PAM 2.2.13:
   buffer. With the recommended `net.ipv4.tcp_migrate_req=1`: **0 failed of
   812k requests** under `wrk` (4 workers, `--max-requests=2000`, a reload every
   4 s, 28 reloads), and 0 of 275k in the per-request and keep-alive recycling
-  checks at `--max-requests=500`. With the kernel default (`0`), only clients
-  that open a new connection in the instant a listener closes can still see a
-  reset: 1 of 786k under `wrk`, and 0 to 3 per 60k at `--max-requests=500`
-  with a new connection per request.
+  checks at `--max-requests=500`. With the kernel default (`0`): 0 of
+  825k under `wrk`; only a client that opens a new connection in the instant
+  a listener closes can still see a reset, 0 to 1 per 55k at
+  `--max-requests=500` with a new connection per request.
 - **Timeouts answer 504.** A handler that blocks past the timeout gets
   `504 Gateway Timeout` after 2.1 s (2 s limit); the stuck worker is replaced
   and 20/20 requests right after succeed. The limit follows Octane's
@@ -108,7 +108,7 @@ the recycling check marked below, which depends on the kernel setting.
 | 5 MB raw JSON body | PASS | PASS | |
 | Memory over 50k requests, one worker | PASS | PASS | PHP heap 15,060 / 15,492 KiB before and after; RSS 104 / 105 MiB before and after; same worker; 0 errors |
 | `--max-requests=500`, 4 workers, keep-alive | PASS | PASS | 0 of 77k to 83k failed |
-| `--max-requests=500`, 4 workers, new connection per request | see below | see below | 0 failed with `tcp_migrate_req=1`; 0 to 3 of 41k to 63k with the kernel default |
+| `--max-requests=500`, 4 workers, new connection per request | see below | see below | 0 failed with `tcp_migrate_req=1`; 0 to 1 of 54k to 57k with the kernel default |
 | `octane:reload` under load (4 reloads, keep-alive) | PASS | PASS | 0 of 88k to 92k failed |
 | Zero-loss: `wrk -c64`, `--max-requests=2000`, a reload every 4 s, 40 s | PASS | PASS | 0 of 273k and 0 of 253k failed (9 reloads each) |
 | `octane:status`, `octane:stop`, then start again | PASS | PASS | |
@@ -127,7 +127,7 @@ run).
 | Kernel setting | Laravel 12 | Laravel 13 |
 |---|---|---|
 | `net.ipv4.tcp_migrate_req=1` (recommended) | 394,329 requests, **0 errors** | 417,857 requests, **0 errors** |
-| `net.ipv4.tcp_migrate_req=0` (default) | 389,769 requests, 1 socket error | 396,525 requests, 0 errors |
+| `net.ipv4.tcp_migrate_req=0` (default) | 413,514 requests, 0 errors | 411,597 requests, 0 errors |
 
 With `tcp_migrate_req=1`, the `--max-requests=500` checks also lose nothing:
 0 of 57,672 and 0 of 58,648 with a new connection per request, 0 of 81,291
@@ -148,8 +148,9 @@ How recycling works now:
    (that was the in-worker race of the previous report).
 3. The accept loop runs on the I/O threads (it used to run on the thread that
    executes PHP). It keeps accepting and handing connections to live siblings
-   while the old worker's clients reconnect, sweeps the kernel queue, and only
-   then closes the listener.
+   while the old worker's clients reconnect, sweeps the kernel queue with
+   plain `accept(2)` calls until it is empty, and only then closes the
+   listener.
 4. The one window left is in the kernel: Linux resets a handshake that
    completes on a `SO_REUSEPORT` listener in the instant it closes.
    `net.ipv4.tcp_migrate_req=1` moves it to a sibling listener instead; it is
@@ -261,7 +262,9 @@ memory) are closed in PAM 2.2.13, see above. Still open:
    are Linux-only.
 6. **Kernel setting.** Zero loss under constant new connections needs
    `net.ipv4.tcp_migrate_req=1` (Linux 5.14+). Without it a handshake that
-   lands on a closing listener can still be reset (rare: 1 in 786k above).
+   lands on a closing listener can still be reset (about 1 in 55k requests
+   when every request opens a new connection while workers recycle every 500
+   requests; none with keep-alive clients).
 7. **The bridge does not read `--max-requests` from Octane's config.** Octane
    has no config key for it (only the command option, default 500); PAM's own
    default limit is 10M.
