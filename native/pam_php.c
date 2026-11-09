@@ -138,6 +138,57 @@ static void pam_reset_runtime_cache(void)
     pam_dispatch_ws_function = NULL;
 }
 
+#ifndef PHP_WIN32
+#include <unistd.h>
+#endif
+
+/* The computer's IANA time zone: TZ, then the /etc/localtime link
+ * (".../zoneinfo/America/Sao_Paulo"). Empty when unknown. */
+static bool pam_system_timezone(char *zone, size_t size)
+{
+    const char *environment = getenv("TZ");
+    const char *name = NULL;
+    char link[512];
+    if (environment != NULL && environment[0] != '\0') {
+        name = environment[0] == ':' ? environment + 1 : environment;
+    }
+#ifndef PHP_WIN32
+    if (name == NULL || name[0] == '\0') {
+        ssize_t length = readlink("/etc/localtime", link, sizeof(link) - 1);
+        if (length > 0) {
+            link[length] = '\0';
+            const char *marker = strstr(link, "zoneinfo/");
+            name = marker == NULL ? NULL : marker + strlen("zoneinfo/");
+        }
+    }
+#endif
+    if (name == NULL || name[0] == '\0' || name[0] == '/' || strlen(name) >= size) {
+        return false;
+    }
+    for (const char *c = name; *c != '\0'; ++c) {
+        bool allowed = (*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z') ||
+            (*c >= '0' && *c <= '9') || *c == '/' || *c == '_' || *c == '-' || *c == '+';
+        if (!allowed) {
+            return false;
+        }
+    }
+    strcpy(zone, name);
+    return true;
+}
+
+/* Defaults php.ini can override: PHP ignores the system zone and falls back
+ * to UTC, so date() was hours off wherever the user is not on UTC. */
+static void pam_ini_defaults(HashTable *configuration_hash)
+{
+    char zone[128];
+    zval value;
+    if (!pam_system_timezone(zone, sizeof(zone))) {
+        return;
+    }
+    ZVAL_NEW_STR(&value, zend_string_init(zone, strlen(zone), 1));
+    zend_hash_str_update(configuration_hash, "date.timezone", sizeof("date.timezone") - 1, &value);
+}
+
 static int pam_embed_init(int argc, char **argv)
 {
     static const char defaults[] =
@@ -173,6 +224,7 @@ static int pam_embed_init(int argc, char **argv)
     }
     pam_ini_entries[defaults_length + overrides_length] = '\0';
     php_embed_module.ini_entries = pam_ini_entries;
+    php_embed_module.ini_defaults = pam_ini_defaults;
     /* `pam -n`: like the PHP CLI, skip php.ini discovery (the compiled-in
      * prefix path, PHPRC and the scan directory) while keeping -d entries. */
     const char *ignore_ini = getenv("PAM_INI_IGNORE");
