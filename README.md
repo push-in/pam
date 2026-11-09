@@ -5,6 +5,11 @@
   <img src=".github/assets/orbit-light.svg" width="460" alt="PAM Runtime at the core, powering PAM Desktop and PAM Native, Laravel, and Windows, macOS, Linux, Android and iOS">
 </picture>
 
+<p><picture>
+  <source media="(prefers-color-scheme: dark)" srcset=".github/assets/pam-wordmark-dark.svg">
+  <img src=".github/assets/pam-wordmark-light.svg" height="64" alt="pam">
+</picture></p>
+
 # The native runtime for PHP.
 
 **Servers, desktop and mobile from one PHP codebase.**<br>
