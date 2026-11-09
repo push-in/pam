@@ -188,7 +188,9 @@ init_mobile() {
         sleep 2
         continue
       fi
-      local logcat_file=${directory}/android-logcat.txt
+      # Outside the project: a file in it would be synced and hot-reloaded on
+      # every poll, keeping the app busy while the gate waits for it.
+      local logcat_file=${gate_root}/$(basename "${directory}")-android-logcat.txt
       adb logcat -d --pid="${pid}" -t 400 >"${logcat_file}" 2>&1 || true
       if grep -Eiq \
         'PluginException|TemplateException|FATAL EXCEPTION|E PamNative:|PAMERR1|Pam Native failed' \
