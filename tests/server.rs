@@ -1010,6 +1010,45 @@ fn serves_rest_and_websocket_events_on_the_same_port() {
         "{response}"
     );
 
+    // PHP semantics for array field names, as sent by `<input name="x[]">`,
+    // Livewire uploads (`files[]`) and nested Laravel form requests.
+    let part = |name: &str, filename: Option<&str>, value: &str| match filename {
+        Some(filename) => format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"; filename=\"{filename}\"\r\nContent-Type: text/plain\r\n\r\n{value}\r\n"
+        ),
+        None => format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+        ),
+    };
+    let body = [
+        part("tags[]", None, "a"),
+        part("tags[]", None, "b"),
+        part("meta[owner][id]", None, "7"),
+        part("photos[]", Some("one.txt"), "first\r\n--almost-a-boundary"),
+        part("photos[]", Some("two.txt"), "second"),
+        part("profile[avatar]", Some("me.png"), "png"),
+        format!("--{boundary}--\r\n"),
+    ]
+    .concat();
+    let response = server.http_request(&format!(
+        "POST /upload-nested HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: multipart/form-data; boundary={boundary}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len(),
+    ));
+    assert!(
+        response.contains(r#""post":{"tags":["a","b"],"meta":{"owner":{"id":"7"}}}"#),
+        "{response}"
+    );
+    assert!(
+        response.contains(r#""names":["one.txt","two.txt"]"#),
+        "{response}"
+    );
+    assert!(response.contains(r#""sizes":[26,6]"#), "{response}");
+    assert!(
+        response.contains(r#""contents":["first\r\n--almost-a-boundary","second"]"#),
+        "{response}"
+    );
+    assert!(response.contains(r#""avatar":"me.png""#), "{response}");
+
     let response = server
         .http_request("GET /session HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     assert!(response.contains(r#""visits":1"#), "{response}");

@@ -270,11 +270,9 @@ namespace Pam\Laravel {
     final class ResponseFactory
     {
         private const OUTPUT_CHUNK_BYTES = 64 * 1024;
-        private static int $activeStreams = 0;
-
         public static function isStreaming(): bool
         {
-            return self::$activeStreams > 0;
+            return Response::isStreamingOutput();
         }
 
         public static function toPam(
@@ -330,27 +328,12 @@ namespace Pam\Laravel {
                 $target->writeChunk($capturedOutput);
             }
 
-            $outputLevel = ob_get_level();
-            ++self::$activeStreams;
-
-            try {
-                ob_start(
-                    static function (string $buffer) use ($target): string {
-                        $target->writeChunk($buffer);
-                        return '';
-                    },
-                    self::OUTPUT_CHUNK_BYTES,
-                );
-                $response->sendContent();
-                if (ob_get_level() > $outputLevel) {
-                    ob_end_flush();
-                }
-            } finally {
-                while (ob_get_level() > $outputLevel) {
-                    ob_end_clean();
-                }
-                --self::$activeStreams;
-            }
+            $target->streamOutput(
+                static function () use ($response): void {
+                    $response->sendContent();
+                },
+                self::OUTPUT_CHUNK_BYTES,
+            );
         }
 
     }
