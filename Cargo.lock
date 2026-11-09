@@ -958,6 +958,7 @@ dependencies = [
  "hyper-rustls",
  "hyper-util",
  "libc",
+ "memchr",
  "quinn",
  "rustls-pki-types",
  "semver",

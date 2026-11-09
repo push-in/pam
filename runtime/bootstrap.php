@@ -735,6 +735,33 @@ namespace Pam\Internal {
                 ),
                 'websocketResumeSecret' => self::nullableStringOption($options, 'websocketResumeSecret'),
                 'websocketResumeTtlSeconds' => self::integerOption($options, 'websocketResumeTtlSeconds', 86_400),
+                // The transport streams multipart uploads to disk with PHP's
+                // own upload settings.
+                'uploads' => self::uploadLimits(),
+            ];
+        }
+
+        /** @return array{enabled: bool, maxFileBytes: int, maxPostBytes: int, maxFiles: int, temporaryDirectory: string} */
+        private static function uploadLimits(): array
+        {
+            $bytes = static function (string $name): int {
+                $value = ini_get($name);
+                if (!is_string($value) || trim($value) === '') {
+                    return 0;
+                }
+
+                return max(0, (int) @ini_parse_quantity($value));
+            };
+            $directory = ini_get('upload_tmp_dir');
+
+            return [
+                'enabled' => filter_var(ini_get('file_uploads'), FILTER_VALIDATE_BOOL),
+                'maxFileBytes' => $bytes('upload_max_filesize'),
+                'maxPostBytes' => $bytes('post_max_size'),
+                'maxFiles' => max(0, (int) ini_get('max_file_uploads')),
+                'temporaryDirectory' => is_string($directory) && $directory !== ''
+                    ? $directory
+                    : sys_get_temp_dir(),
             ];
         }
 
@@ -1082,6 +1109,7 @@ namespace Pam\Internal {
                 [$cookies, $parsedBody, $files, $psrUploads, $temporaryUploads] = self::requestData(
                     $headers,
                     $body,
+                    is_array($context['multipart'] ?? null) ? $context['multipart'] : null,
                 );
                 self::populateSuperglobals(
                     strtoupper($method),
@@ -1560,7 +1588,7 @@ namespace Pam\Internal {
          *   list<string>
          * }
          */
-        private static function requestData(array $headers, string $body): array
+        private static function requestData(array $headers, string $body, ?array $multipart = null): array
         {
             $cookies = [];
             foreach ($headers['cookie'] ?? [] as $line) {
@@ -1584,6 +1612,9 @@ namespace Pam\Internal {
             } elseif (str_starts_with($normalizedContentType, 'application/json') && $body !== '') {
                 $decoded = json_decode($body, true, 512, JSON_THROW_ON_ERROR);
                 $parsedBody = is_array($decoded) ? $decoded : null;
+            } elseif ($multipart !== null) {
+                // The transport already streamed the body: files are on disk.
+                [$parsedBody, $files, $uploads, $temporaryUploads] = self::streamedMultipart($multipart);
             } elseif (str_starts_with($normalizedContentType, 'multipart/form-data')) {
                 [$parsedBody, $files, $uploads, $temporaryUploads] = self::parseMultipart($contentType, $body);
             }
@@ -1713,6 +1744,73 @@ namespace Pam\Internal {
             $fields = [];
             if ($fieldPairs !== []) {
                 parse_str(implode('&', $fieldPairs), $fields);
+            }
+
+            return [$fields, $files, $uploads, $temporaryUploads];
+        }
+
+        /**
+         * Builds $_POST and $_FILES from a body the transport streamed to
+         * temporary files, the same way PHP's rfc1867 handler does.
+         *
+         * @param array<string, mixed> $multipart
+         * @return array{
+         *   array<array-key, mixed>,
+         *   array<string, mixed>,
+         *   array<string, mixed>,
+         *   list<string>
+         * }
+         */
+        private static function streamedMultipart(array $multipart): array
+        {
+            $fields = [];
+            if (($multipart['postLimitExceeded'] ?? false) === true) {
+                return [$fields, [], [], []];
+            }
+            $encoded = $multipart['fields'] ?? '';
+            if (is_string($encoded) && $encoded !== '') {
+                parse_str($encoded, $fields);
+            }
+            $files = [];
+            $uploads = [];
+            $temporaryUploads = [];
+            foreach (is_array($multipart['files'] ?? null) ? $multipart['files'] : [] as $upload) {
+                if (!is_array($upload) || !is_string($upload['field'] ?? null)) {
+                    continue;
+                }
+                $temporary = is_string($upload['tmpName'] ?? null) ? $upload['tmpName'] : '';
+                $error = is_int($upload['error'] ?? null) ? $upload['error'] : UPLOAD_ERR_NO_FILE;
+                $size = is_int($upload['size'] ?? null) ? $upload['size'] : 0;
+                $filename = is_string($upload['name'] ?? null) ? $upload['name'] : '';
+                $mediaType = is_string($upload['type'] ?? null) ? $upload['type'] : '';
+                $file = [
+                    'name' => $filename,
+                    'full_path' => is_string($upload['fullPath'] ?? null) ? $upload['fullPath'] : $filename,
+                    'type' => $mediaType,
+                    'tmp_name' => $temporary,
+                    'error' => $error,
+                    'size' => $size,
+                ];
+                if ($temporary !== '') {
+                    $temporaryUploads[] = $temporary;
+                }
+                [$base, $path] = self::multipartFieldPath($upload['field']);
+                foreach ($file as $property => $value) {
+                    self::assignPath($files, [$base, $property, ...$path], $value);
+                }
+                if (class_exists(PsrUploadedFile::class)) {
+                    $resource = $temporary !== '' ? fopen($temporary, 'rb') : fopen('php://temp', 'rb');
+                    if ($resource === false) {
+                        throw new \RuntimeException('Unable to open a temporary upload.');
+                    }
+                    self::assignPath($uploads, [$base, ...$path], new PsrUploadedFile(
+                        new PsrStream($resource),
+                        $size,
+                        $error,
+                        $filename,
+                        $mediaType,
+                    ));
+                }
             }
 
             return [$fields, $files, $uploads, $temporaryUploads];

@@ -22,7 +22,6 @@ use axum::routing::any;
 use bytes::Buf;
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
-use hyper_util::rt::TokioTimer;
 use quinn::crypto::rustls::QuicServerConfig;
 use rustls_pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 use serde::{Deserialize, Serialize};
@@ -114,6 +113,7 @@ struct ServerState {
     cache_invalidation_log: Option<Arc<PathBuf>>,
     cache_invalidation_offset: Arc<AtomicU64>,
     next_cache_invalidation_at: Arc<AtomicU64>,
+    drain: Arc<crate::http_serve::Drain>,
     php: PhpExecutor,
 }
 
@@ -168,6 +168,7 @@ impl ServerState {
                 .map(Arc::new),
             cache_invalidation_offset: Arc::new(AtomicU64::new(0)),
             next_cache_invalidation_at: Arc::new(AtomicU64::new(0)),
+            drain: crate::http_serve::Drain::new(),
             php,
         })
     }
@@ -212,8 +213,52 @@ impl ServerState {
         self.recycle_if_engine_failed();
         let requests = self.request_count.fetch_add(1, Ordering::Relaxed) + 1;
         if requests >= self.max_requests {
+            self.request_recycle();
+        }
+    }
+
+    /// Recycles this worker without losing capacity: a supervised worker asks
+    /// the master for a replacement and keeps serving until the master starts
+    /// its drain; a standalone server drains by itself.
+    fn request_recycle(&self) {
+        if !self.worker_state.request_recycle() {
             let _ = self.shutdown.send(true);
         }
+    }
+
+    /// The PHP thread is stuck past a request's hard deadline. Requests queued
+    /// behind it can no longer run here: they are answered at once, and the
+    /// worker is replaced. The process exits after its connections drained.
+    fn php_wedged(&self, request_id: &str) {
+        if !self.drain.mark_wedged() {
+            return;
+        }
+        self.request_slots.close();
+        eprintln!(
+            "{}",
+            serde_json::json!({
+                "level": "error",
+                "event": "php_request_timeout",
+                "requestId": request_id,
+                "timeoutMs": self.config.request_timeout_ms,
+                "message": "a request exceeded its hard deadline; answered 504 and recycling this worker",
+            })
+        );
+        self.report_worker_state(WorkerLifecycle::Draining, None, None);
+        // Stop taking work at once: siblings stop handing connections to this
+        // worker, new connections it accepts are handed to them, and HTTP/1
+        // connections close after their current response.
+        self.drain.start();
+        self.request_recycle();
+    }
+
+    /// The hard deadline of a request whose PHP execution already started.
+    fn php_execution_deadline(&self, request_id: &str) -> Option<u64> {
+        self.active_php_executions
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .get(request_id)
+            .copied()
     }
 
     async fn rate_limited(&self, client: &str) -> bool {
@@ -655,6 +700,7 @@ struct OwnedHttpRequest {
     version: Version,
     headers: HeaderMap,
     body: Bytes,
+    upload: Option<Arc<crate::upload::MultipartBody>>,
     request_id: String,
     traceparent: String,
 }
@@ -725,6 +771,54 @@ impl PhpExecutor {
             return php::RuntimeMetrics::default();
         }
         receiver.await.unwrap_or_default()
+    }
+}
+
+/// Streamed uploads registered with PHP for one request. Dropped on the PHP
+/// thread when the request ends: files the application did not move are
+/// deleted, like PHP deletes uploads at the end of a request.
+struct RegisteredUploads {
+    upload: Option<Arc<crate::upload::MultipartBody>>,
+    registered: Vec<String>,
+}
+
+impl RegisteredUploads {
+    fn register(upload: Option<Arc<crate::upload::MultipartBody>>) -> Result<Self, String> {
+        let mut uploads = Self {
+            upload,
+            registered: Vec::new(),
+        };
+        if let Some(upload) = &uploads.upload {
+            upload.mark_registered();
+            let mut failure = None;
+            for path in upload.temporary_files() {
+                if failure.is_none() {
+                    match php::register_upload(path) {
+                        Ok(()) => {
+                            uploads.registered.push(path.to_owned());
+                            continue;
+                        }
+                        Err(error) => failure = Some(error),
+                    }
+                }
+                let _ = std::fs::remove_file(path);
+            }
+            if let Some(error) = failure {
+                return Err(error);
+            }
+        }
+        Ok(uploads)
+    }
+}
+
+impl Drop for RegisteredUploads {
+    fn drop(&mut self) {
+        for path in &self.registered {
+            if php::release_upload(path) {
+                let _ = std::fs::remove_file(path);
+            }
+        }
+        self.upload.take();
     }
 }
 
@@ -1476,6 +1570,10 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
         .route("/ws", any(websocket_upgrade))
         .fallback(http_dispatch)
         .layer(DefaultBodyLimit::max(state.config.max_body_bytes))
+        .layer(axum::middleware::from_fn_with_state(
+            state.drain.clone(),
+            crate::http_serve::close_when_draining,
+        ))
         .with_state(state.clone());
 
     schedule_worker_ready(state.clone());
@@ -1495,88 +1593,134 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
         ui.muted(http3_label)
     );
 
-    let result = if let Some((certificate, key)) = tls_files {
+    let http_settings = crate::http_serve::HttpSettings {
+        header_read_timeout: Duration::from_millis(header_read_timeout),
+        graceful_timeout: Duration::from_secs(30),
+    };
+    let tracker = crate::http_serve::ConnectionTracker::default();
+    let (stop_accepting, stop_accepting_receiver) = watch::channel(false);
+    let accepting_stopped = stop_accepting_receiver.clone();
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            let quiesce = shutdown_signal(recycle).await;
+            state.report_worker_state(WorkerLifecycle::Draining, None, None);
+            // From here on responses close their HTTP/1 connections and the
+            // balancer stops routing connections to this worker.
+            state.drain.start();
+            // With SO_REUSEPORT a connection may already be queued on this
+            // listener when the replacement becomes ready. Keep accepting
+            // briefly so those are served (or handed to a live sibling)
+            // instead of being reset when the listener closes.
+            if quiesce {
+                let quiesce = std::env::var("PAM_DRAIN_QUIESCE_MS")
+                    .ok()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or(100)
+                    .min(5_000);
+                tokio::time::sleep(Duration::from_millis(quiesce)).await;
+            }
+            let _ = stop_accepting.send(true);
+            // WebSocket sessions and HTTP/3 close now, as before.
+            let _ = state.shutdown.send(true);
+        });
+    }
+    let listener = tokio::net::TcpListener::from_std(listener).map_err(ServerError::Serve)?;
+    // The accept loop and every connection run on the I/O threads: the main
+    // thread runs PHP and must never delay accepting or draining.
+    let serving = if let Some((certificate, key)) = tls_files {
         let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(certificate, key)
             .await
             .map_err(|error| ServerError::Tls(error.to_string()))?;
-        let handle = axum_server::Handle::new();
-        let shutdown_handle = handle.clone();
-        let signal_sender = shutdown_sender.clone();
-        tokio::spawn(async move {
-            shutdown_signal(recycle, signal_sender, state.clone()).await;
-            shutdown_handle.graceful_shutdown(Some(Duration::from_secs(30)));
-        });
-        let mut server = axum_server::from_tcp_rustls(listener, tls)
-            .map_err(ServerError::Serve)?
-            .handle(handle);
-        server
-            .http_builder()
-            .http1()
-            .timer(TokioTimer::new())
-            .header_read_timeout(Duration::from_millis(header_read_timeout));
-        server
-            .http_builder()
-            .http2()
-            .timer(TokioTimer::new())
-            .keep_alive_interval(Some(Duration::from_secs(15)))
-            .keep_alive_timeout(Duration::from_secs(10));
-        server
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .map_err(ServerError::Serve)
+        let acceptor = axum_server::tls_rustls::RustlsAcceptor::new(tls);
+        let handshake = move |stream: tokio::net::TcpStream| {
+            let accept = axum_server::accept::Accept::accept(&acceptor, stream, ());
+            async move { accept.await.map(|(stream, ())| stream) }
+        };
+        tokio::spawn(crate::http_serve::accept_loop(
+            listener,
+            Some,
+            handshake,
+            app,
+            state.drain.clone(),
+            http_settings,
+            tracker.clone(),
+            stop_accepting_receiver,
+        ))
     } else {
         // Workers forked by one zygote share connection counts and move new
         // connections to the least loaded sibling (see `balance`).
         #[cfg(target_os = "linux")]
-        let hand_off = crate::balance::Balancer::from_environment().map(|(balancer, socket)| {
-            let tracker = crate::balance::HandOffTracker::default();
-            crate::balance::spawn_receiver(
-                socket,
-                balancer.clone(),
-                app.clone(),
-                state.shutdown.subscribe(),
-                crate::balance::HandOffHttp {
-                    header_read_timeout: Duration::from_millis(header_read_timeout),
-                    graceful_timeout: Duration::from_secs(30),
-                },
+        {
+            let balancer =
+                crate::balance::Balancer::from_environment().map(|(balancer, socket)| {
+                    crate::balance::spawn_receiver(
+                        socket,
+                        balancer.clone(),
+                        app.clone(),
+                        state.drain.clone(),
+                        http_settings,
+                        tracker.clone(),
+                    );
+                    balancer
+                });
+            let place = move |stream: tokio::net::TcpStream| match &balancer {
+                Some(balancer) => balancer
+                    .place(stream)
+                    .map(|(stream, guard)| crate::balance::TrackedStream::new(stream, guard)),
+                None => Some(crate::balance::TrackedStream::new(
+                    stream,
+                    crate::balance::ConnectionGuard::untracked(),
+                )),
+            };
+            tokio::spawn(crate::http_serve::accept_loop(
+                listener,
+                place,
+                |stream| std::future::ready(Ok(stream)),
+                app,
+                state.drain.clone(),
+                http_settings,
                 tracker.clone(),
-            );
-            (balancer, tracker)
-        });
-        let handle = axum_server::Handle::new();
-        let shutdown_handle = handle.clone();
-        let signal_sender = shutdown_sender.clone();
-        tokio::spawn(async move {
-            shutdown_signal(recycle, signal_sender, state.clone()).await;
-            shutdown_handle.graceful_shutdown(Some(Duration::from_secs(30)));
-        });
-        let server = axum_server::from_tcp(listener).map_err(ServerError::Serve)?;
-        #[cfg(target_os = "linux")]
-        let server = server.acceptor(crate::balance::BalancingAcceptor::new(
-            hand_off.as_ref().map(|(balancer, _)| balancer.clone()),
-        ));
-        let mut server = server.handle(handle);
-        server
-            .http_builder()
-            .http1()
-            .timer(TokioTimer::new())
-            .header_read_timeout(Duration::from_millis(header_read_timeout));
-        server
-            .http_builder()
-            .http2()
-            .timer(TokioTimer::new())
-            .keep_alive_interval(Some(Duration::from_secs(15)))
-            .keep_alive_timeout(Duration::from_secs(10));
-        let result = server
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .map_err(ServerError::Serve);
-        #[cfg(target_os = "linux")]
-        if let Some((_, tracker)) = &hand_off {
-            tracker.wait_idle(Duration::from_secs(30)).await;
+                stop_accepting_receiver,
+            ))
         }
-        result
+        #[cfg(not(target_os = "linux"))]
+        tokio::spawn(crate::http_serve::accept_loop(
+            listener,
+            Some,
+            |stream| std::future::ready(Ok(stream)),
+            app,
+            state.drain.clone(),
+            http_settings,
+            tracker.clone(),
+            stop_accepting_receiver,
+        ))
     };
+    {
+        // A wedged PHP thread never returns to this function: exit from an
+        // I/O thread once every connection was answered and drained.
+        let state = state.clone();
+        let tracker = tracker.clone();
+        let mut stopped = accepting_stopped;
+        tokio::spawn(async move {
+            let mut wedged = state.drain.subscribe_wedged();
+            crate::http_serve::raised(&mut wedged).await;
+            // Wait for the stop (the master replaced this worker) so the
+            // listener keeps handing connections to siblings until then.
+            crate::http_serve::raised(&mut stopped).await;
+            tracker.wait_idle(Duration::from_secs(30)).await;
+            // Give the accept loop time to sweep and close the listener.
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            eprintln!("pam: worker drained after a request timeout; exiting");
+            let _ = std::io::stderr().flush();
+            // SAFETY: _exit terminates the process without running PHP's
+            // shutdown on a thread that is still executing PHP.
+            unsafe { libc::_exit(0) };
+        });
+    }
+    let result = serving
+        .await
+        .map_err(|error| ServerError::Serve(std::io::Error::other(error)));
 
     let _ = shutdown_sender.send(true);
     if let Some(http3) = http3 {
@@ -1861,17 +2005,22 @@ async fn handle_http3_request(
                     .metrics
                     .request_bytes
                     .fetch_add(body.len() as u64, Ordering::Relaxed);
-                let (response, bytes) = invoke_php_http(
+                let (response, bytes) = with_hard_deadline(
                     &state,
-                    remote,
-                    &client,
-                    &method,
-                    &target,
-                    Version::HTTP_3,
-                    &headers,
-                    Bytes::from(body),
                     &request_id,
-                    &traceparent,
+                    invoke_php_http(
+                        &state,
+                        remote,
+                        &client,
+                        &method,
+                        &target,
+                        Version::HTTP_3,
+                        &headers,
+                        Bytes::from(body),
+                        None,
+                        &request_id,
+                        &traceparent,
+                    ),
                 )
                 .await;
                 (response, bytes, cors_origin)
@@ -1913,48 +2062,32 @@ async fn send_http3_response(
     stream.finish().await.map_err(|error| error.to_string())
 }
 
-async fn shutdown_signal(
-    mut recycle: watch::Receiver<bool>,
-    shutdown: watch::Sender<bool>,
-    state: ServerState,
-) {
+/// Resolves when this worker must stop: SIGTERM or Ctrl-C (reload, recycle
+/// after the replacement is ready, `pam stop`) or a self-initiated recycle.
+/// Returns whether the listener should keep accepting for a quiesce window.
+async fn shutdown_signal(mut recycle: watch::Receiver<bool>) -> bool {
     #[cfg(unix)]
-    let quiesce_listener = {
+    {
         let terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
         let Ok(mut terminate) = terminate else {
             let _ = tokio::signal::ctrl_c().await;
-            return;
+            return true;
         };
         tokio::select! {
             _ = tokio::signal::ctrl_c() => true,
             _ = terminate.recv() => true,
-            // A max-requests recycle closes this worker's SO_REUSEPORT
-            // listener too, so it must quiesce the same way. A failed engine
-            // cannot serve the quiesce window and closes immediately.
+            // A self-initiated recycle (standalone server) closes this
+            // worker's listener too, so it must quiesce the same way. A failed
+            // engine cannot serve the quiesce window and closes immediately.
             _ = recycle.changed() => !php::engine_failed(),
         }
-    };
+    }
 
     #[cfg(not(unix))]
-    let quiesce_listener = tokio::select! {
+    tokio::select! {
         _ = tokio::signal::ctrl_c() => true,
         _ = recycle.changed() => !php::engine_failed(),
-    };
-
-    state.report_worker_state(WorkerLifecycle::Draining, None, None);
-    // With SO_REUSEPORT a connection may already be queued on the old worker's
-    // listener when the replacement becomes ready. Keep accepting briefly so
-    // that those kernel-queued connections are promoted to graceful tasks before
-    // the listener closes.
-    if quiesce_listener {
-        let quiesce = std::env::var("PAM_DRAIN_QUIESCE_MS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .unwrap_or(100)
-            .min(5_000);
-        tokio::time::sleep(Duration::from_millis(quiesce)).await;
     }
-    let _ = shutdown.send(true);
 }
 
 async fn http_dispatch(
@@ -2060,9 +2193,59 @@ async fn http_dispatch(
         );
     }
 
-    let body = if body.is_end_stream() {
+    let content_type = headers
+        .get(http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    // Like PHP's SAPIs, multipart uploads are streamed to temporary files
+    // (bounded by post_max_size and upload_max_filesize) instead of being
+    // buffered; `maxBodyBytes` bounds the bodies that are held in memory.
+    let streams_upload = method == Method::POST
+        && crate::upload::is_multipart(content_type)
+        && state.config.response_cache_purge_path.as_deref() != Some(uri.path());
+    let mut body = Some(body);
+    let upload = if streams_upload {
+        let body = body.take().unwrap_or_else(Body::empty);
+        let content_length = headers
+            .get(http::header::CONTENT_LENGTH)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.parse::<u64>().ok());
+        match crate::upload::read(
+            body,
+            content_type,
+            content_length,
+            &state.config.uploads,
+            Duration::from_millis(state.config.body_read_timeout_ms),
+        )
+        .await
+        {
+            Ok(upload) => Some(Arc::new(upload)),
+            Err(error) => {
+                let response = error_response(error.status(), &error.message());
+                return telemetry.finish(
+                    response,
+                    0,
+                    &request_id,
+                    &traceparent,
+                    &method,
+                    target,
+                    cors_origin.as_deref(),
+                );
+            }
+        }
+    } else {
+        None
+    };
+    let body = if let Some(upload) = &upload {
+        state
+            .metrics
+            .request_bytes
+            .fetch_add(upload.received_bytes, Ordering::Relaxed);
+        Bytes::new()
+    } else if body.as_ref().is_none_or(HttpBody::is_end_stream) {
         Bytes::new()
     } else {
+        let body = body.take().unwrap_or_else(Body::empty);
         match tokio::time::timeout(
             Duration::from_millis(state.config.body_read_timeout_ms),
             to_bytes(body, state.config.max_body_bytes),
@@ -2196,17 +2379,22 @@ async fn http_dispatch(
         None
     };
 
-    let (mut response, mut response_bytes) = invoke_php_http(
+    let (mut response, mut response_bytes) = with_hard_deadline(
         &state,
-        remote,
-        &client,
-        &method,
-        target,
-        version,
-        &headers,
-        body,
         &request_id,
-        &traceparent,
+        invoke_php_http(
+            &state,
+            remote,
+            &client,
+            &method,
+            target,
+            version,
+            &headers,
+            body,
+            upload,
+            &request_id,
+            &traceparent,
+        ),
     )
     .await;
     let cache_tags = extract_cache_tags(&mut response, &state.config.response_cache_tag_header);
@@ -2374,6 +2562,71 @@ fn advertised_http3(config: &ServerConfig) -> Option<HeaderValue> {
 }
 
 #[allow(clippy::too_many_arguments)]
+/// Time after a request's hard deadline before the transport answers 504 by
+/// itself. A request suspended in a Fiber answers its own 504 at the deadline;
+/// only a PHP thread that is blocked (a sleeping or looping handler) is left.
+const HARD_TIMEOUT_GRACE_MILLIS: u64 = 100;
+
+/// Waits for PHP's response, enforcing the request timeout even when the PHP
+/// thread is blocked. A blocked request is answered `504 Gateway Timeout` (the
+/// connection then closes) and the worker is recycled make-before-break;
+/// requests queued behind it are answered `503` with `Retry-After`.
+async fn with_hard_deadline(
+    state: &ServerState,
+    request_id: &str,
+    php: impl Future<Output = (Response, usize)>,
+) -> (Response, usize) {
+    tokio::pin!(php);
+    let mut wedged = state.drain.subscribe_wedged();
+    // The execution deadline is at least a full timeout away, so a request
+    // that completes in time costs a single timer.
+    let mut wait = Duration::from_millis(
+        state
+            .config
+            .request_timeout_ms
+            .saturating_add(HARD_TIMEOUT_GRACE_MILLIS),
+    );
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut php => return result,
+            _ = crate::http_serve::raised(&mut wedged) => {
+                let mut response = error_response(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "worker is restarting after a request timeout",
+                );
+                response
+                    .headers_mut()
+                    .insert("retry-after", HeaderValue::from_static("1"));
+                return (crate::http_serve::closing(response), 0);
+            }
+            _ = tokio::time::sleep(wait) => {
+                let now = worker_epoch_millis();
+                wait = match state.php_execution_deadline(request_id) {
+                    Some(deadline)
+                        if now >= deadline.saturating_add(HARD_TIMEOUT_GRACE_MILLIS) =>
+                    {
+                        state.php_wedged(request_id);
+                        let response = error_response(
+                            StatusCode::GATEWAY_TIMEOUT,
+                            "request execution exceeded its timeout",
+                        );
+                        return (crate::http_serve::closing(response), 0);
+                    }
+                    Some(deadline) => Duration::from_millis(
+                        deadline
+                            .saturating_add(HARD_TIMEOUT_GRACE_MILLIS)
+                            .saturating_sub(now),
+                    ),
+                    // Still queued for the PHP thread, or finishing.
+                    None => Duration::from_millis(100),
+                };
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 async fn invoke_php_http(
     state: &ServerState,
     remote: SocketAddr,
@@ -2383,6 +2636,7 @@ async fn invoke_php_http(
     version: Version,
     headers: &HeaderMap,
     body: Bytes,
+    upload: Option<Arc<crate::upload::MultipartBody>>,
     request_id: &str,
     traceparent: &str,
 ) -> (Response, usize) {
@@ -2396,6 +2650,7 @@ async fn invoke_php_http(
             version,
             headers: headers.clone(),
             body,
+            upload,
             request_id: request_id.to_owned(),
             traceparent: traceparent.to_owned(),
         })
@@ -2421,23 +2676,20 @@ async fn invoke_php_http_local(
     // it streamed; wait instead (bounded by the request timeout) so it is
     // served next, like a busy Octane/FrankenPHP worker queues requests.
     let slot_timeout = Duration::from_millis(state.config.request_timeout_ms);
-    let _request_slot = match tokio::time::timeout(
-        slot_timeout,
-        state.request_slots.clone().acquire_owned(),
-    )
-    .await
-    {
-        Ok(Ok(permit)) => permit,
-        _ => {
-            return (
-                error_response(
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "worker concurrent request limit reached",
-                ),
-                0,
-            );
-        }
-    };
+    let _request_slot =
+        match tokio::time::timeout(slot_timeout, state.request_slots.clone().acquire_owned()).await
+        {
+            Ok(Ok(permit)) => permit,
+            _ => {
+                return (
+                    error_response(
+                        StatusCode::SERVICE_UNAVAILABLE,
+                        "worker concurrent request limit reached",
+                    ),
+                    0,
+                );
+            }
+        };
     let mut normalized_headers = HashMap::<String, Vec<String>>::new();
     for name in headers.keys() {
         let values = headers
@@ -2474,6 +2726,7 @@ async fn invoke_php_http_local(
         },
         request_id,
         traceparent,
+        multipart: request.upload.as_deref(),
     };
     let context_json = match serde_json::to_string(&context) {
         Ok(json) => json,
@@ -2485,6 +2738,10 @@ async fn invoke_php_http_local(
         }
     };
 
+    let _uploads = match RegisteredUploads::register(request.upload.clone()) {
+        Ok(uploads) => uploads,
+        Err(error) => return (internal_error(error), 0),
+    };
     let started = Instant::now();
     let _execution = PhpExecutionGuard::begin(state, request_id);
     let mut cancellation = PhpHttpDispatchGuard::new(request_id);
@@ -3721,6 +3978,8 @@ struct HttpRequestContext<'a> {
     scheme: &'a str,
     request_id: &'a str,
     traceparent: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    multipart: Option<&'a crate::upload::MultipartBody>,
 }
 
 #[repr(i32)]

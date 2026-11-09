@@ -1049,6 +1049,57 @@ fn serves_rest_and_websocket_events_on_the_same_port() {
     );
     assert!(response.contains(r#""avatar":"me.png""#), "{response}");
 
+    // Uploads are streamed to temporary files like PHP's SAPIs do: far larger
+    // than maxBodyBytes (1 KiB here), registered for is_uploaded_file() and
+    // move_uploaded_file(), and deleted when the request ends.
+    for moved in [false, true] {
+        let payload: Vec<u8> = (0..1_500_000_u32)
+            .map(|index| (index % 251) as u8)
+            .collect();
+        let mut body = format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"move\"\r\n\r\n{}\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"document\"; filename=\"big.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n",
+            u8::from(moved)
+        )
+        .into_bytes();
+        body.extend_from_slice(&payload);
+        body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+        let mut request = format!(
+            "POST /upload-stream HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: multipart/form-data; boundary={boundary}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        request.extend_from_slice(&body);
+        let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+        stream.write_all(&request).unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+        let json: serde_json::Value =
+            serde_json::from_str(response.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        let digest = format!("{:x}", <sha2::Sha256 as sha2::Digest>::digest(&payload));
+        assert_eq!(json["size"], 1_500_000, "{response}");
+        assert_eq!(json["error"], 0, "{response}");
+        assert_eq!(json["uploaded"], true, "{response}");
+        assert_eq!(
+            json["input"], 0,
+            "php://input is empty for multipart: {response}"
+        );
+        assert_eq!(json["sha256"], digest.as_str(), "{response}");
+        assert_eq!(json["moved"], moved, "{response}");
+        if moved {
+            assert_eq!(json["uploadedAfterMove"], false, "{response}");
+        }
+        let temporary = json["tmp"].as_str().unwrap().to_owned();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while std::path::Path::new(&temporary).exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            !std::path::Path::new(&temporary).exists(),
+            "{temporary} was not deleted"
+        );
+    }
+
     let response = server
         .http_request("GET /session HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     assert!(response.contains(r#""visits":1"#), "{response}");

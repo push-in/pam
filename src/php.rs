@@ -119,6 +119,8 @@ unsafe extern "C" {
         output_length: *mut usize,
     ) -> c_int;
     fn pam_php_cancel_http(request_id: *const c_char, request_id_length: usize) -> c_int;
+    fn pam_php_register_upload(path: *const c_char, path_length: usize) -> c_int;
+    fn pam_php_release_upload(path: *const c_char, path_length: usize) -> c_int;
     fn pam_php_dispatch_ws(
         event_kind: c_int,
         socket_id: *const c_char,
@@ -217,6 +219,8 @@ pub struct ServerConfig {
     pub websocket_resume_secret: Option<String>,
     #[serde(default = "default_websocket_resume_ttl_seconds")]
     pub websocket_resume_ttl_seconds: u64,
+    #[serde(default)]
+    pub uploads: crate::upload::UploadLimits,
 }
 
 fn default_max_body_bytes() -> usize {
@@ -678,6 +682,29 @@ pub fn cancel_http(request_id: &str) -> Result<(), String> {
     } else {
         Err(format!("PHP HTTP cancellation failed with status {status}"))
     }
+}
+
+/// Registers a streamed upload with PHP so `is_uploaded_file()` and
+/// `move_uploaded_file()` accept it, like PHP's own multipart handler.
+pub fn register_upload(path: &str) -> Result<(), String> {
+    ensure_owner()?;
+    // SAFETY: the path bytes stay valid for this synchronous owner-thread call.
+    let status = unsafe { pam_php_register_upload(path.as_ptr().cast::<c_char>(), path.len()) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err("PHP refused a temporary upload".to_owned())
+    }
+}
+
+/// Forgets a registered upload. Returns true when the application did not
+/// move the file, so the caller must delete it.
+pub fn release_upload(path: &str) -> bool {
+    if ensure_owner().is_err() {
+        return true;
+    }
+    // SAFETY: the path bytes stay valid for this synchronous owner-thread call.
+    unsafe { pam_php_release_upload(path.as_ptr().cast::<c_char>(), path.len()) == 1 }
 }
 
 pub fn runtime_metrics() -> Result<RuntimeMetrics, String> {

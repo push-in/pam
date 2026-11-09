@@ -21,6 +21,7 @@ mod doctor_contract;
 mod ecosystem;
 mod editor;
 mod extension_profile;
+mod http_serve;
 mod ingress;
 mod manager_dashboard;
 mod otlp;
@@ -39,6 +40,7 @@ mod support;
 mod terminal;
 mod timeline;
 mod traffic;
+mod upload;
 mod worker_state;
 
 const EX_NOINPUT: u8 = 66;

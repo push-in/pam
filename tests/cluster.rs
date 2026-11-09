@@ -179,6 +179,22 @@ impl ClusterProcess {
         request_timeout_ms: Option<u64>,
         failed_generation: Option<u64>,
     ) -> Self {
+        Self::start_with_env(
+            max_requests,
+            workers,
+            request_timeout_ms,
+            failed_generation,
+            &[],
+        )
+    }
+
+    fn start_with_env(
+        max_requests: u64,
+        workers: usize,
+        request_timeout_ms: Option<u64>,
+        failed_generation: Option<u64>,
+        environment: &[(&str, &str)],
+    ) -> Self {
         let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let port = probe.local_addr().unwrap().port();
         drop(probe);
@@ -216,6 +232,7 @@ impl ClusterProcess {
         if let Some(generation) = failed_generation {
             command.env("PAM_TEST_FAIL_GENERATION", generation.to_string());
         }
+        command.envs(environment.iter().copied());
         let child = command.spawn().unwrap();
         let mut cluster = Self {
             child,
@@ -563,6 +580,53 @@ fn recycles_workers_after_the_request_limit() {
 }
 
 #[test]
+fn recycles_workers_make_before_break_without_dropping_requests() {
+    // Tiny limits recycle each worker many times while clients keep sending
+    // requests without retrying: every request must still succeed.
+    let cluster = std::sync::Arc::new(ClusterProcess::start_with_env(
+        40,
+        2,
+        None,
+        None,
+        &[("PAM_TEST_RATE_LIMIT", "0")],
+    ));
+    let clients: Vec<_> = (0..4)
+        .map(|_| {
+            let cluster = cluster.clone();
+            thread::spawn(move || {
+                let mut failures = Vec::new();
+                let mut processes = HashSet::new();
+                for _ in 0..150 {
+                    match cluster.request() {
+                        Ok(response) => {
+                            processes.insert(request_identity(&response).1);
+                        }
+                        Err(error) => {
+                            failures.push(error.lines().next().unwrap_or_default().to_owned())
+                        }
+                    }
+                }
+                (failures, processes)
+            })
+        })
+        .collect();
+    let mut failures = Vec::new();
+    let mut processes = HashSet::new();
+    for client in clients {
+        let (client_failures, client_processes) = client.join().unwrap();
+        failures.extend(client_failures);
+        processes.extend(client_processes);
+    }
+    assert!(failures.is_empty(), "dropped requests: {failures:?}");
+    assert!(
+        processes.len() > 2,
+        "workers were not recycled: {processes:?}"
+    );
+    let mut cluster = std::sync::Arc::into_inner(cluster).unwrap();
+    cluster.stop();
+}
+
+#[test]
 fn recycles_a_worker_whose_engine_hit_a_fatal_error() {
     let mut cluster = ClusterProcess::start(1_000);
     let before = cluster.children();
@@ -720,8 +784,15 @@ fn watchdog_replaces_a_worker_stuck_inside_php() {
     let original = cluster.children();
     assert_eq!(original.len(), 1);
 
-    let blocked = cluster.request_path("/block");
-    assert!(blocked.is_err() || !blocked.unwrap().contains("late"));
+    // The transport answers the blocked request itself (the PHP thread is
+    // stuck), closes the connection and recycles the worker.
+    let blocked =
+        cluster.raw_request("GET /block HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(blocked.starts_with("HTTP/1.1 504"), "{blocked}");
+    assert!(
+        blocked.to_ascii_lowercase().contains("connection: close"),
+        "{blocked}"
+    );
 
     // Shared CI runners (especially ARM) can take seconds to boot a replacement.
     let deadline = Instant::now() + Duration::from_secs(15);
