@@ -2415,9 +2415,20 @@ async fn invoke_php_http_local(
     let body = request.body.as_ref();
     let request_id = request.request_id.as_str();
     let traceparent = request.traceparent.as_str();
-    let _request_slot = match state.request_slots.clone().try_acquire_owned() {
-        Ok(permit) => permit,
-        Err(_) => {
+    // A request slot stays held while a response streams (downloads, SSE,
+    // static files) or the PHP Fiber awaits I/O. With Laravel's single slot,
+    // rejecting here answered 503 to any request that reached a worker while
+    // it streamed; wait instead (bounded by the request timeout) so it is
+    // served next, like a busy Octane/FrankenPHP worker queues requests.
+    let slot_timeout = Duration::from_millis(state.config.request_timeout_ms);
+    let _request_slot = match tokio::time::timeout(
+        slot_timeout,
+        state.request_slots.clone().acquire_owned(),
+    )
+    .await
+    {
+        Ok(Ok(permit)) => permit,
+        _ => {
             return (
                 error_response(
                     StatusCode::SERVICE_UNAVAILABLE,
