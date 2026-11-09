@@ -2352,6 +2352,24 @@ fn executes_a_php_script_from_stdin_like_php_cli() {
 }
 
 #[test]
+fn artisan_scripts_run_with_cli_identity() {
+    let project = temporary_path("artisan-identity");
+    fs::create_dir_all(&project).unwrap();
+    fs::write(
+        project.join("artisan"),
+        "<?php echo PHP_SAPI, '|', getenv('APP_RUNNING_IN_CONSOLE'), '|', $argv[1] ?? '';",
+    )
+    .unwrap();
+    let output = run_pam_in(&project, &["artisan", "list"]);
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "cli|true|list",
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn executes_a_php_script_given_with_dash_f() {
     let script = temporary_path("dash-f.php");
     fs::write(&script, "<?php echo 'via -f|', $argv[1] ?? '';").unwrap();

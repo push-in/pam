@@ -1409,7 +1409,30 @@ fn run() -> Result<u8, CliError> {
     }
     let script = resolve_script(&script_arg)?;
     let script_args = raw_args.collect::<Vec<_>>();
+    if script.file_name() == Some(OsStr::new("artisan")) {
+        enter_artisan_console_identity(&script_args);
+    }
     run_script(&executable, &script, script_args)
+}
+
+/// `pam artisan ...` runs with PHP CLI identity, exactly like `pam start
+/// artisan`. Laravel only detects the console for the cli/phpdbg SAPIs, and
+/// packages such as Reverb, Filament and Livewire register their Artisan
+/// commands (or publishables) only when `runningInConsole()` is true.
+fn enter_artisan_console_identity(arguments: &[OsString]) {
+    if arguments
+        .first()
+        .is_some_and(|command| command == "pam:octane")
+    {
+        enable_server_opcache();
+    }
+    // SAFETY: called before PHP initializes or any thread is started.
+    unsafe {
+        env::set_var("PAM_CLI_MODE", "1");
+        if env::var_os("APP_RUNNING_IN_CONSOLE").is_none() {
+            env::set_var("APP_RUNNING_IN_CONSOLE", "true");
+        }
+    }
 }
 
 fn current_project() -> Option<project::ProjectContext> {
