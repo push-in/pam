@@ -20,6 +20,14 @@ pam --version
 pam doctor
 ```
 
+The installer links `pam` into `~/.local/bin`; add it to `PATH` if your shell
+does not find `pam` (most distributions do so at the next login). PAM does not
+put a `php` executable on `PATH`: run PHP scripts with `pam script.php`,
+Composer with `pam composer ...` and package commands with `pam <command>`
+(for example `pam desktop dev`). On minimal Linux images without time zone
+data, PHP warns `Invalid date.timezone value 'UTC'` at startup; installing
+`tzdata` removes it.
+
 On macOS, a checked-out release also provides an explicit host entrypoint:
 
 ```bash
@@ -135,21 +143,25 @@ Light/dark themes use sequential integer mode codes, semantic color roles, a
 contract without guessing. The generated Native app reads that bounded document,
 validates its exact schema/mode order and derives both PAM Native UI themes from
 the framework defaults, so unspecified framework roles remain forward-compatible.
-The generated Desktop worker exposes the same bounded contract through an
-authenticated typed command; its renderer validates the exact response, applies
-semantic CSS variables, follows system light/dark changes, and retains its safe
-built-in theme if loading fails. Full screenshot parity certification remains a
-separate gate.
+The generated Desktop app is a PAM Desktop 2 application (`pushinbr/pam-desktop`
+`^2.1`, the same as `--template desktop`). Its home screen reads the Server's
+`GET /api/status` in PHP, caps the response at 64 KiB, rejects redirects and
+cleartext remote origins, and validates it through `ProductSnapshot::fromArray()`.
+Run it with `cd apps/desktop && pam desktop dev`. Full screenshot parity
+certification remains a separate gate.
 
 Use `pam clean --dry-run` at the workspace root to inspect cross-surface caches
 and builds, then `pam clean --all` to remove them without touching source,
 Composer manifests, lockfiles, or the shared contract.
 
-The Desktop preset opens with a responsive PAM workbench that demonstrates the
-typed PHP command bridge, explicit native capabilities, signed updates and the
-runtime inspector. Its local-only assets include keyboard focus, reduced-motion,
-high-contrast and forced-color behavior; the runtime status becomes “online”
-only after the authenticated bridge handshake.
+The Desktop preset creates a PAM Desktop 2 application: it writes a
+`composer.json` that requires `pushinbr/pam-desktop` `^2.1`, installs it, then
+runs `pam desktop init`, so the screens, router, design tokens and test come
+from the installed release. Run it with `pam desktop dev`, check templates and
+CSS with `pam desktop check`, run its test with `pam composer test` and build
+installers with `pam desktop build`. On Linux the native host needs GTK 4
+(`sudo apt install libgtk-4-1 gstreamer1.0-plugins-good` on Debian and Ubuntu).
+See the [PAM Desktop getting started](https://github.com/push-in/pam-desktop/blob/main/docs/getting-started.md).
 
 Every generated project contains `pam.json`. This lets the CLI select the right
 implementation when you use the same short commands everywhere:
@@ -205,9 +217,11 @@ cd ../.. && pam package
 pam release:verify
 ```
 
-Desktop host installation and diagnostics belong to `pushinbr/pam-desktop`.
-Install that package with Composer to add its commands and their autocomplete
-to the project; the PAM runtime does not download or proxy a Desktop host.
+Desktop host installation and diagnostics belong to `pushinbr/pam-desktop`,
+which the `desktop` and `product` templates install for you; it adds the
+`pam desktop ...` commands and their autocomplete to the project. On first use
+it downloads the native host and verifies its SHA-256; the PAM runtime does not
+proxy it.
 
 The aggregation command refuses missing, symbolic-link, or non-portably named artifacts, hashes files by
 streaming them in 64 KiB chunks, verifies that they did not change during the
@@ -223,16 +237,11 @@ symbolic links, and streams each artifact again to verify its recorded size and
 SHA-256. An optional manifest path verifies a separately staged copy, for
 example `pam release:verify dist-copy/product-release.json`.
 
-The generated Desktop application includes a responsive Product Control Center.
-It reports only locally verified signals: Server readiness, Desktop worker
-availability, contract codes, request latency, sample time, and bounded outbox
-occupancy. Native remains visibly “not monitored” instead of receiving a
-misleading healthy state. The console is keyboard accessible, uses semantic
-live regions and a native `meter`, preserves 48 px controls, and honors reduced
-motion. Its PHP worker keeps at most 24 local Server observations in a
-versioned, 16 KiB file written through temporary-file replacement. Each sample
-contains only integer readiness, latency, and observation time; the accessible
-chart always retains exact textual values and a summary.
+The generated Desktop home screen reports only verified signals: Server
+readiness and headline from the shared contract, the Desktop worker itself, and
+Native as “not monitored” instead of a misleading healthy state. Its test
+(`pam composer test` in `apps/desktop`) checks the endpoint policy and the
+offline state.
 
 `pam release --check` at the Product root is also cross-surface: it runs Doctor,
 lint, and tests independently in all three applications, then executes the

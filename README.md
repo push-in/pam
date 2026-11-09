@@ -81,6 +81,8 @@ PAM Runtime serves Laravel and plain PHP from preforked workers with a shared OP
 curl -fsSL https://github.com/push-in/pam/releases/latest/download/install.sh | sh
 ```
 
+<sub>`pam` lands in `~/.local/bin` (add it to `PATH` if needed). There is no `php` on `PATH`: use `pam script.php` and `pam composer ...`. Desktop apps on Debian/Ubuntu need GTK 4: `sudo apt install libgtk-4-1 gstreamer1.0-plugins-good`.</sub>
+
 <details open>
 <summary><b>Desktop app</b> · Linux, macOS, Windows</summary>
 

@@ -411,20 +411,43 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     {
         return Err(format!("{} is not empty", directory.display()));
     }
+    let created = !directory.exists();
     fs::create_dir_all(directory)
         .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let result = init_project(executable, directory, template, socket, &options);
+    if let Err(error) = result {
+        // A half-written project would make the retry fail with "not empty".
+        if created && fs::remove_dir_all(directory).is_ok() {
+            return Err(format!(
+                "{error}; the partial project {} was removed, so the same command can be run again",
+                directory.display()
+            ));
+        }
+        return Err(error);
+    }
+    print_init_success(directory, template, socket, options.install);
+    Ok(0)
+}
+
+fn init_project(
+    executable: &OsStr,
+    directory: &Path,
+    template: InitTemplate,
+    socket: bool,
+    options: &InitOptions,
+) -> Result<(), String> {
     if template == InitTemplate::Raw {
         init_raw(directory, socket)?;
     } else if template == InitTemplate::Desktop {
         init_desktop(directory)?;
     } else if template == InitTemplate::Product {
-        init_product(directory, &options)?;
+        init_product(directory, options)?;
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
-        init_mobile(directory, template == InitTemplate::MobileUi, &options)?;
+        init_mobile(directory, template == InitTemplate::MobileUi, options)?;
     } else {
         init_api(directory, socket)?;
     }
-    write_pam_manifest(directory, template, &options)?;
+    write_pam_manifest(directory, template, options)?;
 
     if options.install {
         if template == InitTemplate::Product {
@@ -438,9 +461,28 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
         } else if directory.join("composer.json").is_file() {
             run_composer_in(executable, directory, &["install", "--no-interaction"])?;
         }
+        if template == InitTemplate::Desktop {
+            run_desktop_init(executable, directory)?;
+        }
     }
-    print_init_success(directory, template, socket);
-    Ok(0)
+    Ok(())
+}
+
+/// PAM Desktop 2 owns its application skeleton: once the package is
+/// installed, `pam desktop init` (the package's own command) writes it, so a
+/// new project always matches the installed release.
+fn run_desktop_init(executable: &OsStr, directory: &Path) -> Result<(), String> {
+    let status = std::process::Command::new(executable)
+        .args(["desktop", "init"])
+        .current_dir(directory)
+        .status()
+        .map_err(|error| format!("cannot run `pam desktop init`: {error}"))?;
+    if !status.success() {
+        return Err(format!(
+            "`pam desktop init` failed with {status}; on Linux the PAM Desktop host needs GTK 4 (Debian and Ubuntu: `sudo apt install libgtk-4-1`)"
+        ));
+    }
+    Ok(())
 }
 
 fn configure_mobile_options(options: &mut InitOptions) -> Result<(), String> {
@@ -917,7 +959,7 @@ fn choose_template(
         "  {}  {} {}",
         ui.accent("06"),
         ui.heading(format!("{:<25}", "Desktop")),
-        ui.muted("Servo shell + PHP")
+        ui.muted("PAM Desktop 2, native widgets + PHP")
     );
     println!(
         "  {}  {} {}",
@@ -1689,7 +1731,7 @@ echo "Cross-surface product contract verified.\n";
     fs::create_dir_all(&desktop).map_err(|error| format!("cannot create desktop app: {error}"))?;
     init_api(&server, false)?;
     init_mobile(&native, true, options)?;
-    init_desktop(&desktop)?;
+    init_product_desktop(&desktop)?;
     add_product_contract(&server.join("composer.json"))?;
     add_product_contract(&native.join("composer.json"))?;
     add_product_contract(&desktop.join("composer.json"))?;
@@ -2177,830 +2219,6 @@ final class Hello extends Component
 </template>
 "#,
     )?;
-    replace_generated_once(
-        &desktop.join("app.php"),
-        "use Pam\\Desktop\\WindowTheme;",
-        "use Pam\\Desktop\\WindowTheme;\nuse Product\\Contracts\\MutationDeliveryState;\nuse Product\\Contracts\\ProductMutation;\nuse Product\\Contracts\\ProductMutationReceipt;\nuse Product\\Contracts\\ProductSnapshot;\nuse Product\\Contracts\\ProductSurface;\nuse Product\\Contracts\\ReadinessState;",
-        "desktop contract import",
-    )?;
-    replace_generated_once(
-        &desktop.join("app.php"),
-        "}\n\nHelloApp::run();",
-        r#"    #[Command('product.status')]
-    public function productStatus(): array
-    {
-        return ProductSnapshot::operational(ProductSurface::Desktop)->toArray();
-    }
-
-    #[Command('product.theme')]
-    public function productTheme(int $modeCode): array
-    {
-        if (!in_array($modeCode, [1, 2], true)) {
-            throw new \InvalidArgumentException('Product theme mode must be 1 or 2.');
-        }
-        $path = dirname(__DIR__, 2).'/packages/contracts/design-tokens.json';
-        $contents = file_get_contents($path, false, null, 0, 32_769);
-        if (!is_string($contents) || strlen($contents) > 32_768) {
-            throw new \RuntimeException('Product design token contract is missing or too large.');
-        }
-        $document = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($document)
-            || array_keys($document) !== ['schemaVersion', 'themes', 'spacing', 'radii', 'motionMs', 'minimumTouchTarget']
-            || $document['schemaVersion'] !== 1
-            || !is_array($document['themes'])
-            || count($document['themes']) !== 2) {
-            throw new \UnexpectedValueException('Product design token contract is incompatible.');
-        }
-        $theme = $document['themes'][$modeCode - 1] ?? null;
-        $roles = ['background', 'surface', 'surfaceRaised', 'foreground', 'mutedForeground', 'border', 'primary', 'onPrimary', 'success', 'warning', 'danger', 'focus'];
-        if (!is_array($theme)
-            || array_keys($theme) !== ['modeCode', 'name', 'colors']
-            || $theme['modeCode'] !== $modeCode
-            || $theme['name'] !== ($modeCode === 1 ? 'light' : 'dark')
-            || !is_array($theme['colors'])
-            || array_keys($theme['colors']) !== $roles) {
-            throw new \UnexpectedValueException('Product theme is incompatible.');
-        }
-        foreach ($theme['colors'] as $color) {
-            if (!is_string($color) || preg_match('/^#[0-9a-f]{6}$/D', $color) !== 1) {
-                throw new \UnexpectedValueException('Product theme contains an invalid color.');
-            }
-        }
-
-        return $theme;
-    }
-
-    #[Command('product.server-status')]
-    public function productServerStatus(): array
-    {
-        $startedAt = hrtime(true);
-        try {
-            $snapshot = $this->fetchProductServerStatus();
-            $this->recordProductTelemetrySample(
-                $snapshot->state->value,
-                self::elapsedProductMilliseconds($startedAt),
-            );
-            return $snapshot->toArray();
-        } catch (\Throwable $error) {
-            $this->recordProductTelemetrySample(
-                ReadinessState::Offline->value,
-                self::elapsedProductMilliseconds($startedAt),
-            );
-            throw $error;
-        }
-    }
-
-    #[Command('product.telemetry-history')]
-    public function productTelemetryHistory(): array
-    {
-        return [
-            'versionCode' => 1,
-            'samples' => $this->readProductTelemetryHistory(),
-        ];
-    }
-
-    private function fetchProductServerStatus(): ProductSnapshot
-    {
-        $endpoint = self::productEndpoint('PAM_PRODUCT_SERVER_URL', 'http://127.0.0.1:3000/api/status');
-
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'GET',
-                'header' => "Accept: application/json\r\n",
-                'timeout' => 5,
-                'follow_location' => 0,
-                'max_redirects' => 0,
-            ],
-            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-        ]);
-        $body = @file_get_contents($endpoint, false, $context, 0, 65_537);
-        if (!is_string($body) || strlen($body) > 65_536) {
-            throw new \RuntimeException('Server is unavailable or returned too much data.');
-        }
-
-        $payload = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($payload)) {
-            throw new \UnexpectedValueException('Server returned an invalid document.');
-        }
-
-        $snapshot = ProductSnapshot::fromArray($payload);
-        if ($snapshot->surface !== ProductSurface::Server) {
-            throw new \UnexpectedValueException('Server returned the wrong product surface.');
-        }
-
-        return $snapshot;
-    }
-
-    #[Command('product.check-in')]
-    public function productCheckIn(): array
-    {
-        $mutation = ProductMutation::checkIn('check-in:'.bin2hex(random_bytes(16)));
-        $outbox = $this->readProductOutbox();
-        if (count($outbox) >= 32) {
-            throw new \OverflowException('Desktop product outbox is full.');
-        }
-        $outbox[] = $mutation;
-        $this->writeProductOutbox($outbox);
-        $remaining = $this->replayProductOutbox();
-        $queued = array_any(
-            $remaining,
-            static fn (ProductMutation $item): bool => hash_equals($item->idempotencyKey, $mutation->idempotencyKey),
-        );
-
-        return [
-            'deliveryStateCode' => $queued ? MutationDeliveryState::Queued->value : MutationDeliveryState::Delivered->value,
-            'pendingCount' => count($remaining),
-        ];
-    }
-
-    #[Command('product.outbox.replay')]
-    public function replayProductOutboxCommand(): array
-    {
-        $remaining = $this->replayProductOutbox();
-        return [
-            'deliveryStateCode' => $remaining === []
-                ? MutationDeliveryState::Delivered->value
-                : MutationDeliveryState::Queued->value,
-            'pendingCount' => count($remaining),
-        ];
-    }
-
-    /** @return list<ProductMutation> */
-    private function replayProductOutbox(): array
-    {
-        $remaining = $this->readProductOutbox();
-        while (($mutation = $remaining[0] ?? null) instanceof ProductMutation) {
-            try {
-                $this->sendProductMutation($mutation);
-                array_shift($remaining);
-            } catch (\Throwable) {
-                break;
-            }
-        }
-        $this->writeProductOutbox($remaining);
-        return $remaining;
-    }
-
-    private function sendProductMutation(ProductMutation $mutation): void
-    {
-        $endpoint = self::productEndpoint('PAM_PRODUCT_MUTATION_URL', 'http://127.0.0.1:3000/api/check-ins');
-        $body = json_encode($mutation->toArray(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        $context = stream_context_create([
-            'http' => [
-                'method' => 'POST',
-                'header' => "Accept: application/json\r\nContent-Type: application/json\r\nIdempotency-Key: {$mutation->idempotencyKey}\r\n",
-                'content' => $body,
-                'timeout' => 5,
-                'follow_location' => 0,
-                'max_redirects' => 0,
-            ],
-            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
-        ]);
-        $response = @file_get_contents($endpoint, false, $context, 0, 65_537);
-        if (!is_string($response) || strlen($response) > 65_536) {
-            throw new \RuntimeException('Mutation endpoint is unavailable or returned too much data.');
-        }
-        $payload = json_decode($response, true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($payload)) {
-            throw new \UnexpectedValueException('Mutation endpoint returned an invalid document.');
-        }
-        $receipt = ProductMutationReceipt::fromArray($payload);
-        if (!hash_equals($mutation->idempotencyKey, $receipt->idempotencyKey)) {
-            throw new \UnexpectedValueException('Mutation receipt key does not match.');
-        }
-    }
-
-    /** @return list<ProductMutation> */
-    private function readProductOutbox(): array
-    {
-        $path = self::productOutboxPath();
-        if (!is_file($path)) {
-            return [];
-        }
-        if (is_link($path) || filesize($path) > 65_536) {
-            throw new \RuntimeException('Desktop product outbox is unsafe or too large.');
-        }
-        $contents = file_get_contents($path, false, null, 0, 65_537);
-        if (!is_string($contents) || strlen($contents) > 65_536) {
-            throw new \RuntimeException('Desktop product outbox could not be read safely.');
-        }
-        $payload = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($payload) || ($payload['versionCode'] ?? null) !== 1 || !is_array($payload['mutations'] ?? null)
-            || count($payload['mutations']) > 32) {
-            throw new \UnexpectedValueException('Desktop product outbox is incompatible.');
-        }
-        return array_map(
-            static function (mixed $item): ProductMutation {
-                if (!is_array($item)) {
-                    throw new \UnexpectedValueException('Desktop product outbox entry is invalid.');
-                }
-                return ProductMutation::fromArray($item);
-            },
-            array_values($payload['mutations']),
-        );
-    }
-
-    /** @param list<ProductMutation> $mutations */
-    private function writeProductOutbox(array $mutations): void
-    {
-        if (count($mutations) > 32) {
-            throw new \OverflowException('Desktop product outbox is full.');
-        }
-        $path = self::productOutboxPath();
-        if (is_link($path)) {
-            throw new \RuntimeException('Desktop product outbox cannot be a symbolic link.');
-        }
-        $encoded = json_encode([
-            'versionCode' => 1,
-            'mutations' => array_map(static fn (ProductMutation $item): array => $item->toArray(), $mutations),
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        if (strlen($encoded) > 65_536) {
-            throw new \OverflowException('Desktop product outbox exceeds 64 KiB.');
-        }
-
-        self::writeProductStorageDocument($path, $encoded, 'outbox');
-    }
-
-    /** @return list<array{observedAtUnixMs: int, latencyMs: int, stateCode: int}> */
-    private function readProductTelemetryHistory(): array
-    {
-        $path = self::productTelemetryPath();
-        if (!is_file($path)) {
-            return [];
-        }
-        if (is_link($path) || filesize($path) > 16_384) {
-            throw new \RuntimeException('Desktop product telemetry history is unsafe or too large.');
-        }
-        $contents = file_get_contents($path, false, null, 0, 16_385);
-        if (!is_string($contents) || strlen($contents) > 16_384) {
-            throw new \RuntimeException('Desktop product telemetry history could not be read safely.');
-        }
-        $payload = json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
-        if (!is_array($payload) || array_keys($payload) !== ['versionCode', 'samples']
-            || ($payload['versionCode'] ?? null) !== 1 || !is_array($payload['samples'] ?? null)
-            || count($payload['samples']) > 24) {
-            throw new \UnexpectedValueException('Desktop product telemetry history is incompatible.');
-        }
-        $previousTimestamp = 0;
-        foreach ($payload['samples'] as $sample) {
-            if (!is_array($sample) || array_keys($sample) !== ['observedAtUnixMs', 'latencyMs', 'stateCode']
-                || !is_int($sample['observedAtUnixMs']) || $sample['observedAtUnixMs'] < $previousTimestamp
-                || !is_int($sample['latencyMs']) || $sample['latencyMs'] < 0 || $sample['latencyMs'] > 30_000
-                || !is_int($sample['stateCode']) || ReadinessState::tryFrom($sample['stateCode']) === null) {
-                throw new \UnexpectedValueException('Desktop product telemetry sample is incompatible.');
-            }
-            $previousTimestamp = $sample['observedAtUnixMs'];
-        }
-        return array_values($payload['samples']);
-    }
-
-    private function appendProductTelemetrySample(int $stateCode, int $latencyMs): void
-    {
-        if (ReadinessState::tryFrom($stateCode) === null || $latencyMs < 0 || $latencyMs > 30_000) {
-            throw new \UnexpectedValueException('Desktop product telemetry sample is out of bounds.');
-        }
-        $samples = $this->readProductTelemetryHistory();
-        $samples[] = [
-            'observedAtUnixMs' => (int) floor(microtime(true) * 1_000),
-            'latencyMs' => $latencyMs,
-            'stateCode' => $stateCode,
-        ];
-        $samples = array_slice($samples, -24);
-        $encoded = json_encode([
-            'versionCode' => 1,
-            'samples' => $samples,
-        ], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        if (strlen($encoded) > 16_384) {
-            throw new \OverflowException('Desktop product telemetry history exceeds 16 KiB.');
-        }
-        self::writeProductStorageDocument(self::productTelemetryPath(), $encoded, 'telemetry history');
-    }
-
-    private function recordProductTelemetrySample(int $stateCode, int $latencyMs): void
-    {
-        try {
-            $this->appendProductTelemetrySample($stateCode, $latencyMs);
-        } catch (\Throwable $error) {
-            error_log('PAM Product telemetry sample was not persisted: '.$error->getMessage());
-        }
-    }
-
-    private static function elapsedProductMilliseconds(int $startedAt): int
-    {
-        return min(30_000, max(0, (int) floor((hrtime(true) - $startedAt) / 1_000_000)));
-    }
-
-    private static function writeProductStorageDocument(string $path, string $encoded, string $label): void
-    {
-        if (is_link($path)) {
-            throw new \RuntimeException("Desktop product {$label} cannot be a symbolic link.");
-        }
-        $temporary = $path.'.'.bin2hex(random_bytes(8)).'.tmp';
-        $handle = fopen($temporary, 'x+b');
-        if ($handle === false) {
-            throw new \RuntimeException("Desktop product {$label} temporary file could not be created.");
-        }
-        try {
-            $written = 0;
-            while ($written < strlen($encoded)) {
-                $bytes = fwrite($handle, substr($encoded, $written));
-                if (!is_int($bytes) || $bytes <= 0) {
-                    throw new \RuntimeException("Desktop product {$label} could not be persisted.");
-                }
-                $written += $bytes;
-            }
-            if (!fflush($handle)) {
-                throw new \RuntimeException("Desktop product {$label} could not be persisted.");
-            }
-            if (function_exists('fsync') && !fsync($handle)) {
-                throw new \RuntimeException("Desktop product {$label} could not be synchronized.");
-            }
-            @chmod($temporary, 0600);
-            fclose($handle);
-            $handle = null;
-            if (!rename($temporary, $path)) {
-                throw new \RuntimeException("Desktop product {$label} could not be committed atomically.");
-            }
-        } finally {
-            if (is_resource($handle)) {
-                fclose($handle);
-            }
-            if (is_file($temporary)) {
-                @unlink($temporary);
-            }
-        }
-    }
-
-    private static function productOutboxPath(): string
-    {
-        $directory = realpath(__DIR__.'/storage');
-        if (!is_string($directory) || is_link(__DIR__.'/storage')) {
-            throw new \RuntimeException('Desktop product storage is unavailable or unsafe.');
-        }
-        return $directory.DIRECTORY_SEPARATOR.'product-outbox-v1.json';
-    }
-
-    private static function productTelemetryPath(): string
-    {
-        $directory = realpath(__DIR__.'/storage');
-        if (!is_string($directory) || is_link(__DIR__.'/storage')) {
-            throw new \RuntimeException('Desktop product storage is unavailable or unsafe.');
-        }
-        return $directory.DIRECTORY_SEPARATOR.'product-telemetry-v1.json';
-    }
-
-    private static function productEndpoint(string $variable, string $fallback): string
-    {
-        $endpoint = getenv($variable) ?: $fallback;
-        $parts = parse_url($endpoint);
-        $scheme = is_array($parts) && is_string($parts['scheme'] ?? null)
-            ? strtolower($parts['scheme'])
-            : null;
-        $host = is_array($parts) ? ($parts['host'] ?? null) : null;
-        $loopback = is_string($host) && in_array(strtolower($host), ['127.0.0.1', 'localhost', '::1'], true);
-        if (!is_string($host) || ($scheme !== 'https' && !($scheme === 'http' && $loopback))) {
-            throw new \RuntimeException("{$variable} must use HTTPS or loopback HTTP.");
-        }
-        return $endpoint;
-    }
-}
-
-HelloApp::run();"#,
-        "desktop product command",
-    )?;
-    replace_generated_once(
-        &desktop.join("resources/index.html"),
-        "            <section class=\"runtime-strip\" aria-label=\"Componentes da aplicação\">",
-        r#"            <section class="product-console" aria-labelledby="product-console-title">
-                <header class="product-console__header">
-                    <div>
-                        <span class="eyebrow">PRODUCT CONTROL CENTER · LIVE CONTRACT</span>
-                        <h2 id="product-console-title">Um domínio.<br><strong>Três superfícies.</strong></h2>
-                        <p id="product-headline">Consultando o contrato PHP compartilhado…</p>
-                    </div>
-                    <div class="product-console__actions">
-                        <button id="product-refresh" type="button">Atualizar sinais</button>
-                        <span id="product-sample-time">Nenhuma amostra concluída</span>
-                    </div>
-                </header>
-
-                <div class="product-console__grid">
-                    <section class="product-panel product-panel--surfaces" aria-labelledby="product-surfaces-title">
-                        <div class="product-panel__heading">
-                            <div>
-                                <span>ECOSSISTEMA</span>
-                                <h3 id="product-surfaces-title">Superfícies</h3>
-                            </div>
-                            <span class="product-summary" id="product-summary">0 de 3 confirmadas</span>
-                        </div>
-                        <ul class="surface-list" aria-label="Disponibilidade por superfície">
-                            <li id="surface-server" data-state="checking">
-                                <span class="surface-state" aria-hidden="true"></span>
-                                <span><strong>Server</strong><small id="surface-server-detail">Verificando endpoint…</small></span>
-                                <span class="surface-code">01</span>
-                            </li>
-                            <li id="surface-native" data-state="unknown">
-                                <span class="surface-state" aria-hidden="true"></span>
-                                <span><strong>Native</strong><small>Não monitorado nesta sessão Desktop</small></span>
-                                <span class="surface-code">02</span>
-                            </li>
-                            <li id="surface-desktop" data-state="checking">
-                                <span class="surface-state" aria-hidden="true"></span>
-                                <span><strong>Desktop</strong><small id="surface-desktop-detail">Aguardando worker PHP…</small></span>
-                                <span class="surface-code">03</span>
-                            </li>
-                        </ul>
-                    </section>
-
-                    <section class="product-panel product-panel--contract" aria-labelledby="product-contract-title">
-                        <div class="product-panel__heading">
-                            <div><span>COMPATIBILIDADE</span><h3 id="product-contract-title">Contrato</h3></div>
-                            <span class="product-badge" id="product-contract-badge">verificando</span>
-                        </div>
-                        <dl class="product-metrics">
-                            <div><dt>Versão</dt><dd id="product-version-code">—</dd></div>
-                            <div><dt>Origem</dt><dd id="product-surface-code">—</dd></div>
-                            <div><dt>Estado</dt><dd id="product-state-code">—</dd></div>
-                            <div><dt>Latência</dt><dd><span id="product-latency">—</span><small> ms</small></dd></div>
-                        </dl>
-                        <p id="product-status" class="product-feedback" role="status" aria-live="polite">Aguardando o worker PHP.</p>
-                    </section>
-
-                    <section class="product-panel product-panel--outbox" aria-labelledby="product-outbox-title">
-                        <div class="product-panel__heading">
-                            <div><span>OFFLINE FIRST</span><h3 id="product-outbox-title">Outbox Desktop</h3></div>
-                            <strong><span id="product-outbox-count">—</span><small> / 32</small></strong>
-                        </div>
-                        <meter id="product-outbox-meter" min="0" max="32" value="0" aria-labelledby="product-outbox-title" aria-describedby="product-outbox-status">0 de 32 operações</meter>
-                        <p id="product-outbox-status" class="product-feedback" role="status" aria-live="polite">Carregando operações preservadas…</p>
-                        <button id="product-check-in" class="secondary-action" type="button">Criar check-in resiliente</button>
-                        <p class="product-privacy">Persistência privada e limitada; não armazene tokens, credenciais ou dados pessoais.</p>
-                    </section>
-
-                    <section class="product-panel product-panel--history" aria-labelledby="product-history-title">
-                        <div class="product-panel__heading">
-                            <div><span>ÚLTIMAS 24 AMOSTRAS</span><h3 id="product-history-title">Latência e disponibilidade</h3></div>
-                            <span class="product-badge">local</span>
-                        </div>
-                        <p id="product-history-summary" class="product-history-summary" role="status" aria-live="polite">
-                            Faça uma consulta para iniciar o histórico local.
-                        </p>
-                        <ol id="product-history-chart" class="product-history-chart" aria-label="Histórico cronológico de consultas ao Server">
-                            <li class="product-history-empty">Nenhuma amostra disponível.</li>
-                        </ol>
-                        <div class="product-history-legend" aria-label="Legenda dos estados">
-                            <span data-state="ready">Operacional</span>
-                            <span data-state="degraded">Degradado</span>
-                            <span data-state="offline">Offline</span>
-                        </div>
-                    </section>
-                </div>
-            </section>
-
-            <section class="runtime-strip" aria-label="Componentes da aplicação">"#,
-        "desktop product status surface",
-    )?;
-    let desktop_css = fs::read_to_string(desktop.join("resources/styles.css"))
-        .map_err(|error| format!("cannot read generated desktop styles: {error}"))?;
-    replace_generated(
-        &desktop.join("resources/styles.css"),
-        &(desktop_css
-            + r##"
-
-.product-console {
-    margin: 0 0 32px;
-    padding: clamp(20px, 3vw, 36px);
-    border: 1px solid var(--line);
-    border-radius: 24px;
-    background: linear-gradient(145deg, var(--surface-raised), var(--ink));
-    box-shadow: var(--shadow);
-}
-
-.product-console__header { display: flex; align-items: end; justify-content: space-between; gap: 32px; margin-bottom: 28px; }
-.product-console__header h2 { margin: 8px 0 12px; font-size: clamp(30px, 4vw, 54px); line-height: .98; letter-spacing: -.04em; }
-.product-console__header h2 strong { color: var(--cyan); font-family: Georgia, serif; font-weight: 500; }
-.product-console__header p { max-width: 60ch; margin: 0; color: var(--text-soft); line-height: 1.55; }
-.product-console__actions { display: grid; flex: 0 0 auto; gap: 10px; justify-items: end; }
-.product-console button { min-height: 48px; padding: 0 18px; color: var(--run-ink); background: var(--run); border: 1px solid transparent; border-radius: 10px; font-weight: 700; cursor: pointer; transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease; }
-.product-console button:hover { background: #91efbd; }
-.product-console button:active { background: #53ce8e; }
-.product-console button:disabled { cursor: wait; opacity: .55; }
-.product-console button:focus-visible { outline: 3px solid var(--cyan); outline-offset: 3px; }
-#product-sample-time { color: var(--text-faint); font: 500 11px/1.4 "JetBrains Mono", monospace; }
-.product-console__grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(260px, .75fr); gap: 16px; }
-.product-panel { min-width: 0; padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--ink-soft); }
-.product-panel--surfaces { grid-row: span 2; }
-.product-panel__heading { display: flex; align-items: start; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.product-panel__heading span, .product-panel__heading small { color: var(--text-faint); font: 600 10px/1.3 "JetBrains Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }
-.product-panel__heading h3 { margin: 4px 0 0; font-size: 20px; letter-spacing: -.02em; }
-.product-summary, .product-badge { padding: 7px 9px; border: 1px solid var(--line); border-radius: 999px; white-space: nowrap; }
-.product-badge[data-state="ready"] { color: var(--run); border-color: rgba(103, 232, 165, .35); }
-.product-badge[data-state="error"] { color: var(--coral); border-color: rgba(255, 146, 121, .4); }
-.surface-list { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
-.surface-list li { min-height: 72px; display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised); }
-.surface-list strong, .surface-list small { display: block; }
-.surface-list small { margin-top: 4px; color: var(--text-soft); line-height: 1.4; }
-.surface-state { width: 9px; height: 9px; border: 2px solid var(--text-faint); border-radius: 50%; }
-.surface-list li[data-state="ready"] .surface-state { border-color: var(--run); background: var(--run); box-shadow: 0 0 0 4px rgba(103, 232, 165, .1); }
-.surface-list li[data-state="degraded"] .surface-state { border-color: #f6b85f; background: #f6b85f; }
-.surface-list li[data-state="offline"] .surface-state { border-color: var(--coral); background: var(--coral); }
-.surface-code { color: var(--text-faint); font: 600 12px/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
-.product-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
-.product-metrics div { padding: 4px 12px; border-left: 1px solid var(--line); }
-.product-metrics div:first-child { padding-left: 0; border-left: 0; }
-.product-metrics dt { color: var(--text-faint); font-size: 11px; }
-.product-metrics dd { margin: 7px 0 0; font: 600 26px/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
-.product-metrics dd small { font-size: 10px; color: var(--text-faint); }
-.product-feedback { min-height: 38px; margin: 18px 0 0; color: var(--text-soft); font-size: 12px; line-height: 1.5; }
-.product-panel--outbox meter { width: 100%; height: 12px; accent-color: var(--run); }
-.product-panel--outbox .secondary-action { width: 100%; margin-top: 14px; color: var(--text); border-color: var(--line-strong); background: transparent; }
-.product-panel--outbox .secondary-action:hover { border-color: var(--cyan); background: rgba(104, 222, 210, .07); }
-.product-privacy { margin: 12px 0 0; color: var(--text-faint); font-size: 11px; line-height: 1.5; }
-.product-panel--history { grid-column: 1 / -1; }
-.product-history-summary { margin: -4px 0 18px; color: var(--text-soft); line-height: 1.5; }
-.product-history-chart { min-height: 180px; display: flex; align-items: end; gap: clamp(4px, .8vw, 10px); margin: 0; padding: 20px 4px 0; border-bottom: 1px solid var(--line-strong); list-style: none; }
-.product-history-chart li:not(.product-history-empty) { min-width: 0; flex: 1 1 0; display: grid; grid-template-rows: 120px auto auto; gap: 7px; align-items: end; justify-items: center; }
-.product-history-bar { width: min(100%, 20px); min-height: 4px; height: var(--sample-height); border: 1px solid currentColor; border-radius: 4px 4px 1px 1px; background: currentColor; opacity: .88; }
-.product-history-chart li[data-state="ready"] { color: var(--run); }
-.product-history-chart li[data-state="degraded"] { color: #f6b85f; }
-.product-history-chart li[data-state="offline"] { color: var(--coral); }
-.product-history-value { color: var(--text); font: 600 10px/1 "JetBrains Mono", monospace; font-variant-numeric: tabular-nums; }
-.product-history-chart time { color: var(--text-faint); font: 500 9px/1 "JetBrains Mono", monospace; }
-.product-history-empty { align-self: center; width: 100%; color: var(--text-faint); text-align: center; }
-.product-history-legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 14px; color: var(--text-soft); font-size: 11px; }
-.product-history-legend span::before { width: 8px; height: 8px; display: inline-block; margin-right: 7px; border-radius: 2px; background: var(--text-faint); content: ""; }
-.product-history-legend span[data-state="ready"]::before { background: var(--run); }
-.product-history-legend span[data-state="degraded"]::before { background: #f6b85f; }
-.product-history-legend span[data-state="offline"]::before { background: var(--coral); }
-.product-visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-
-@media (max-width: 880px) {
-    .product-console__header { align-items: stretch; flex-direction: column; }
-    .product-console__actions { justify-items: stretch; }
-    .product-console__grid { grid-template-columns: 1fr; }
-    .product-panel--surfaces { grid-row: auto; }
-}
-
-@media (max-width: 520px) {
-    .product-console { padding: 18px; border-radius: 18px; }
-    .product-panel { padding: 18px; }
-    .product-metrics { grid-template-columns: repeat(2, 1fr); gap: 16px 0; }
-    .product-metrics div:nth-child(3) { padding-left: 0; border-left: 0; }
-    .product-panel__heading { align-items: stretch; flex-direction: column; }
-    .product-summary, .product-badge { align-self: start; }
-    .product-history-chart { gap: 3px; }
-    .product-history-chart li:not(.product-history-empty) { grid-template-rows: 96px auto; }
-    .product-history-chart time { display: none; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .product-console button { transition: none; }
-}
-"##),
-    )?;
-    let desktop_javascript = fs::read_to_string(desktop.join("resources/app.js"))
-        .map_err(|error| format!("cannot read generated desktop JavaScript: {error}"))?;
-    replace_generated(
-        &desktop.join("resources/app.js"),
-        &(desktop_javascript
-            + r##"
-
-(() => {
-    "use strict";
-    const button = document.querySelector("#product-refresh");
-    const headline = document.querySelector("#product-headline");
-    const versionCode = document.querySelector("#product-version-code");
-    const surfaceCode = document.querySelector("#product-surface-code");
-    const stateCode = document.querySelector("#product-state-code");
-    const latency = document.querySelector("#product-latency");
-    const status = document.querySelector("#product-status");
-    const sampleTime = document.querySelector("#product-sample-time");
-    const contractBadge = document.querySelector("#product-contract-badge");
-    const summary = document.querySelector("#product-summary");
-    const serverSurface = document.querySelector("#surface-server");
-    const serverDetail = document.querySelector("#surface-server-detail");
-    const desktopSurface = document.querySelector("#surface-desktop");
-    const desktopDetail = document.querySelector("#surface-desktop-detail");
-    const checkInButton = document.querySelector("#product-check-in");
-    const outboxStatus = document.querySelector("#product-outbox-status");
-    const outboxCount = document.querySelector("#product-outbox-count");
-    const outboxMeter = document.querySelector("#product-outbox-meter");
-    const historySummary = document.querySelector("#product-history-summary");
-    const historyChart = document.querySelector("#product-history-chart");
-    if (!window.pam || !button || !headline || !versionCode || !surfaceCode || !stateCode || !latency
-        || !status || !sampleTime || !contractBadge || !summary || !serverSurface || !serverDetail
-        || !desktopSurface || !desktopDetail || !checkInButton || !outboxStatus || !outboxCount
-        || !outboxMeter || !historySummary || !historyChart) return;
-
-    const themeQuery = window.matchMedia("(prefers-color-scheme: dark)");
-    const themeRoles = ["background", "surface", "surfaceRaised", "foreground", "mutedForeground",
-        "border", "primary", "onPrimary", "success", "warning", "danger", "focus"];
-    const cssRoles = {
-        background: ["--ink", "--ink-soft"],
-        surface: ["--surface"],
-        surfaceRaised: ["--surface-raised"],
-        foreground: ["--text"],
-        mutedForeground: ["--text-soft", "--text-faint"],
-        border: ["--line", "--line-strong"],
-        primary: ["--run"],
-        onPrimary: ["--run-ink"],
-        success: ["--success"],
-        warning: ["--warning"],
-        danger: ["--coral"],
-        focus: ["--cyan"],
-    };
-    let themeRevision = 0;
-    const applyProductTheme = async () => {
-        const revision = ++themeRevision;
-        const modeCode = themeQuery.matches ? 2 : 1;
-        const theme = await window.pam.invoke("product.theme", { modeCode }, { timeout: 2_000 });
-        if (revision !== themeRevision) return;
-        if (!theme || typeof theme !== "object" || Array.isArray(theme)
-            || Object.keys(theme).join(",") !== "modeCode,name,colors"
-            || theme.modeCode !== modeCode || theme.name !== (modeCode === 1 ? "light" : "dark")
-            || !theme.colors || typeof theme.colors !== "object" || Array.isArray(theme.colors)
-            || Object.keys(theme.colors).join(",") !== themeRoles.join(",")) {
-            throw new Error("O contrato visual do Product é incompatível.");
-        }
-        for (const role of themeRoles) {
-            const value = theme.colors[role];
-            if (typeof value !== "string" || !/^#[0-9a-f]{6}$/.test(value)) {
-                throw new Error("O contrato visual contém uma cor inválida.");
-            }
-            for (const property of cssRoles[role]) {
-                document.documentElement.style.setProperty(property, value);
-            }
-        }
-        document.documentElement.style.colorScheme = theme.name;
-    };
-    themeQuery.addEventListener("change", () => {
-        void applyProductTheme().catch(() => {});
-    });
-    void applyProductTheme().catch(() => {});
-
-    const stateName = (code) => ({ 1: "operacional", 2: "degradado", 3: "offline" })[code];
-    const renderSummary = () => {
-        const confirmed = [serverSurface, desktopSurface]
-            .filter((surface) => surface.dataset.state === "ready").length;
-        summary.textContent = `${confirmed} de 3 confirmadas`;
-    };
-
-    const renderOutbox = (result) => {
-        if (!Number.isInteger(result.deliveryStateCode) || result.deliveryStateCode < 1 || result.deliveryStateCode > 2
-            || !Number.isInteger(result.pendingCount) || result.pendingCount < 0 || result.pendingCount > 32) {
-            throw new Error("O worker devolveu um estado de outbox incompatível.");
-        }
-        outboxCount.textContent = String(result.pendingCount);
-        outboxMeter.value = result.pendingCount;
-        outboxMeter.textContent = `${result.pendingCount} de 32 operações`;
-        outboxStatus.textContent = result.deliveryStateCode === 1
-            ? "Entregue · nenhuma operação pendente."
-            : `Offline · ${result.pendingCount} operação(ões) preservada(s).`;
-    };
-
-    const renderHistory = (result) => {
-        if (!result || typeof result !== "object" || Array.isArray(result)
-            || Object.keys(result).length !== 2 || result.versionCode !== 1
-            || !Array.isArray(result.samples) || result.samples.length > 24) {
-            throw new Error("O histórico local é incompatível.");
-        }
-        let previousTimestamp = 0;
-        for (const sample of result.samples) {
-            if (!sample || typeof sample !== "object" || Array.isArray(sample)
-                || Object.keys(sample).length !== 3
-                || !Number.isSafeInteger(sample.observedAtUnixMs) || sample.observedAtUnixMs < previousTimestamp
-                || !Number.isInteger(sample.latencyMs) || sample.latencyMs < 0 || sample.latencyMs > 30_000
-                || !Number.isInteger(sample.stateCode) || sample.stateCode < 1 || sample.stateCode > 3) {
-                throw new Error("Uma amostra do histórico local é incompatível.");
-            }
-            previousTimestamp = sample.observedAtUnixMs;
-        }
-
-        historyChart.replaceChildren();
-        if (result.samples.length === 0) {
-            const empty = document.createElement("li");
-            empty.className = "product-history-empty";
-            empty.textContent = "Nenhuma amostra disponível.";
-            historyChart.append(empty);
-            historySummary.textContent = "Faça uma consulta para iniciar o histórico local.";
-            latency.textContent = "—";
-            return;
-        }
-
-        const maximum = Math.max(1, ...result.samples.map((sample) => sample.latencyMs));
-        const operational = result.samples.filter((sample) => sample.stateCode === 1).length;
-        const orderedLatency = result.samples.map((sample) => sample.latencyMs).sort((left, right) => left - right);
-        const median = orderedLatency[Math.floor((orderedLatency.length - 1) / 2)];
-        const timeFormatter = new Intl.DateTimeFormat(undefined, {
-            hour: "2-digit", minute: "2-digit"
-        });
-        for (const sample of result.samples) {
-            const item = document.createElement("li");
-            item.dataset.state = sample.stateCode === 1 ? "ready" : sample.stateCode === 2 ? "degraded" : "offline";
-            const bar = document.createElement("span");
-            bar.className = "product-history-bar";
-            bar.setAttribute("aria-hidden", "true");
-            bar.style.setProperty("--sample-height", `${Math.max(4, Math.round(sample.latencyMs / maximum * 100))}%`);
-            const value = document.createElement("span");
-            value.className = "product-history-value";
-            value.textContent = `${sample.latencyMs} ms`;
-            const time = document.createElement("time");
-            const observedAt = new Date(sample.observedAtUnixMs);
-            time.dateTime = observedAt.toISOString();
-            time.textContent = timeFormatter.format(observedAt);
-            const state = document.createElement("span");
-            state.className = "product-visually-hidden";
-            state.textContent = `Estado ${stateName(sample.stateCode)}`;
-            item.append(bar, value, time, state);
-            historyChart.append(item);
-        }
-        const availability = Math.round(operational / result.samples.length * 100);
-        historySummary.textContent = `${availability}% operacional · mediana ${median} ms · ${result.samples.length} amostra(s)`;
-        latency.textContent = String(result.samples[result.samples.length - 1].latencyMs);
-    };
-
-    const loadHistory = async () => {
-        try {
-            renderHistory(await window.pam.invoke("product.telemetry-history", null, { timeout: 2_000 }));
-        } catch (error) {
-            historySummary.textContent = error instanceof Error
-                ? `Histórico indisponível: ${error.message}`
-                : "Histórico local indisponível.";
-        }
-    };
-
-    const refresh = async () => {
-        button.disabled = true;
-        button.setAttribute("aria-busy", "true");
-        contractBadge.dataset.state = "checking";
-        contractBadge.textContent = "verificando";
-        serverSurface.dataset.state = "checking";
-        desktopSurface.dataset.state = "checking";
-        status.textContent = "Verificando no worker PHP…";
-        try {
-            const snapshot = await window.pam.invoke("product.server-status", null, { timeout: 7_000 });
-            if (!Number.isInteger(snapshot.versionCode) || snapshot.versionCode !== 1
-                || !Number.isInteger(snapshot.surfaceCode) || snapshot.surfaceCode !== 1
-                || !Number.isInteger(snapshot.stateCode) || snapshot.stateCode < 1 || snapshot.stateCode > 3
-                || typeof snapshot.headline !== "string" || snapshot.headline.length > 120) {
-                throw new Error("O worker devolveu um contrato incompatível.");
-            }
-            headline.textContent = snapshot.headline;
-            versionCode.textContent = String(snapshot.versionCode);
-            surfaceCode.textContent = String(snapshot.surfaceCode);
-            stateCode.textContent = String(snapshot.stateCode);
-            sampleTime.textContent = `Amostra ${new Intl.DateTimeFormat(undefined, {
-                hour: "2-digit", minute: "2-digit", second: "2-digit"
-            }).format(new Date())}`;
-            contractBadge.dataset.state = "ready";
-            contractBadge.textContent = "compatível";
-            desktopSurface.dataset.state = "ready";
-            desktopDetail.textContent = "Worker PHP autenticado e responsivo";
-            serverSurface.dataset.state = snapshot.stateCode === 1
-                ? "ready" : snapshot.stateCode === 2 ? "degraded" : "offline";
-            serverDetail.textContent = `Contrato compatível · ${stateName(snapshot.stateCode)}`;
-            status.textContent = snapshot.stateCode === 1
-                ? "Contrato operacional e compatível."
-                : `Server ${stateName(snapshot.stateCode)}; consulte os diagnósticos do runtime.`;
-        } catch (error) {
-            latency.textContent = "—";
-            sampleTime.textContent = "Última tentativa falhou";
-            contractBadge.dataset.state = "error";
-            contractBadge.textContent = "indisponível";
-            desktopSurface.dataset.state = "ready";
-            desktopDetail.textContent = "Worker PHP respondeu com erro recuperável";
-            serverSurface.dataset.state = "offline";
-            serverDetail.textContent = "Sem amostra válida do endpoint";
-            status.textContent = error instanceof Error ? error.message : "Falha ao verificar o contrato.";
-        } finally {
-            await loadHistory();
-            renderSummary();
-            button.disabled = false;
-            button.removeAttribute("aria-busy");
-        }
-    };
-    button.addEventListener("click", () => void refresh());
-    checkInButton.addEventListener("click", async () => {
-        checkInButton.disabled = true;
-        checkInButton.setAttribute("aria-busy", "true");
-        outboxStatus.textContent = "Persistindo antes de transmitir…";
-        try {
-            renderOutbox(await window.pam.invoke("product.check-in", null, { timeout: 7_000 }));
-        } catch (error) {
-            outboxStatus.textContent = error instanceof Error ? error.message : "Falha no check-in.";
-        } finally {
-            checkInButton.disabled = false;
-            checkInButton.removeAttribute("aria-busy");
-        }
-    });
-    void refresh();
-    void window.pam.invoke("product.outbox.replay", null, { timeout: 7_000 })
-        .then(renderOutbox)
-        .catch(() => { outboxStatus.textContent = "Offline · o worker preservará operações pendentes."; });
-})();
-"##),
-    )?;
-
     write_new(
         &directory.join("README.md"),
         r#"# PAM product workspace
@@ -3013,19 +2231,12 @@ One typed PHP domain across Server, Native, and Desktop.
 - Native fetches `GET /api/status` through OkHttp/URLSession, caps the response
   at 64 KiB, then validates it through `ProductSnapshot::fromArray()` before
   updating native controls.
-- Desktop asks its authenticated PHP worker to fetch and validate the same
-  Server endpoint; the renderer never receives ambient network authority.
-- Desktop renders a responsive Product Control Center from verified data only:
-  Server readiness, local worker availability, contract version, request
-  latency, sample time, and bounded outbox occupancy. Native is explicitly
-  marked as unmonitored until a trustworthy telemetry channel is connected.
-- The PHP worker records at most 24 Server observations in a versioned 16 KiB
-  local history using atomic replacement writes. It stores only integer state,
-  latency, and observation time; the renderer receives the bounded history
-  through an authenticated command and provides exact text alongside its chart.
-- Desktop persists a 32-item, 64 KiB outbox with private temporary files and
-  replacement writes under its capability-scoped `storage` root. The worker
-  replays it on launch; the renderer receives only delivery codes and counts.
+- Desktop is a PAM Desktop 2 application (`pushinbr/pam-desktop` ^2.1). Its
+  home screen (`src/Screens/Home`) reads the same Server endpoint through
+  `App\Services\ProductServer` in PHP, caps the response at 64 KiB, rejects
+  redirects and cleartext remote origins, and validates it through
+  `ProductSnapshot::fromArray()`. Native is shown as unmonitored until a
+  trustworthy telemetry channel is connected.
 - Native check-ins use the SDK's bounded `OfflineMutationQueue`, persist before
   transport, deduplicate by idempotency key, retry with capped exponential
   backoff, cap the product outbox at 32 entries to remain below native Storage's
@@ -3129,2153 +2340,347 @@ fn replace_generated(path: &Path, contents: &str) -> Result<(), String> {
         .map_err(|error| format!("cannot replace generated file {}: {error}", path.display()))
 }
 
-fn replace_generated_once(
-    path: &Path,
-    needle: &str,
-    replacement: &str,
-    label: &str,
-) -> Result<(), String> {
-    let source = fs::read_to_string(path)
-        .map_err(|error| format!("cannot read generated {label} {}: {error}", path.display()))?;
-    if source.matches(needle).count() != 1 {
-        return Err(format!(
-            "generated {label} marker must occur exactly once in {}",
-            path.display()
-        ));
+/// The `product` workspace's Desktop surface: the same PAM Desktop 2
+/// application as `--template desktop`, with a home screen that reads the
+/// Server status through the shared contract.
+fn init_product_desktop(directory: &Path) -> Result<(), String> {
+    for folder in [
+        "src/Navigation",
+        "src/Services",
+        "src/Screens/Home",
+        "tests",
+    ] {
+        fs::create_dir_all(directory.join(folder))
+            .map_err(|error| format!("cannot create desktop {folder}: {error}"))?;
     }
-    replace_generated(path, &source.replacen(needle, replacement, 1))
-}
-
-fn write_desktop_inspector(directory: &Path) -> Result<(), String> {
+    init_desktop(directory)?;
     write_new(
-        &directory.join("resources/inspector.html"),
-        r##"<!doctype html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="dark">
-    <meta name="theme-color" content="#071018">
-    <title>Pam Desktop · Runtime Inspector</title>
-    <link rel="stylesheet" href="/inspector.css">
-    <script src="/_pam/bridge.js" defer></script>
-    <script src="/inspector.js" defer></script>
-</head>
-<body>
-    <main>
-        <header>
-            <div class="identity">
-                <svg viewBox="0 0 32 32" aria-hidden="true">
-                    <path d="M7 23V9h8.1c4.2 0 6.9 2.2 6.9 5.8 0 3.7-2.7 5.9-6.9 5.9h-3.4V23H7Z"/>
-                    <path class="spark" d="m23.8 7.4.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>
-                </svg>
-                <div>
-                    <span>janela secundária</span>
-                    <h1>Runtime Inspector</h1>
-                </div>
-            </div>
-            <button id="hide-button" type="button" aria-label="Ocultar Runtime Inspector">
-                <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="m7 7 10 10M17 7 7 17"/>
-                </svg>
-            </button>
-        </header>
+        &directory.join("index.php"),
+        r#"<?php
 
-        <section class="summary" aria-labelledby="summary-title">
-            <div>
-                <span class="eyebrow">PAM DESKTOP 0.5</span>
-                <h2 id="summary-title">Uma runtime.<br><strong>Múltiplas janelas.</strong></h2>
-            </div>
-            <span class="online"><i aria-hidden="true"></i> worker online</span>
-        </section>
+declare(strict_types=1);
 
-        <section class="metrics" aria-label="Estado da runtime">
-            <article>
-                <span>window id</span>
-                <strong id="window-id">—</strong>
-                <small>isolamento por contexto</small>
-            </article>
-            <article>
-                <span>protocol</span>
-                <strong>IPC v5</strong>
-                <small>contrato tipado</small>
-            </article>
-            <article>
-                <span>renderer</span>
-                <strong>Servo</strong>
-                <small>host Rust nativo</small>
-            </article>
-        </section>
+use App\Navigation\AppRouter;
+use Pam\Desktop\App;
 
-        <section class="event-log" aria-labelledby="events-title">
-            <div class="section-heading">
-                <div>
-                    <span>STREAM</span>
-                    <h2 id="events-title">Eventos da aplicação</h2>
-                </div>
-                <span class="live"><i aria-hidden="true"></i> live</span>
-            </div>
-            <ol id="event-list" aria-live="polite">
-                <li>
-                    <time>agora</time>
-                    <span>inspector.ready</span>
-                    <small>aguardando eventos do PHP</small>
-                </li>
-            </ol>
-        </section>
-    </main>
-</body>
-</html>
-"##,
+require __DIR__.'/vendor/autoload.php';
+
+App::components(__DIR__.'/src', __DIR__.'/.pam-desktop/components');
+App::run(AppRouter::make());
+"#,
     )?;
     write_new(
-        &directory.join("resources/inspector.css"),
-        r#":root {
-    --ink: #071018;
-    --surface: #0d1b27;
-    --surface-raised: #132737;
-    --text: #f3f7f8;
-    --text-soft: #9fb3be;
-    --text-faint: #718792;
-    --violet: #a69aff;
-    --cyan: #68ded2;
-    --coral: #ff9279;
-    --line: rgba(176, 209, 220, 0.14);
-    --line-strong: rgba(176, 209, 220, 0.26);
-    color: var(--text);
-    background: var(--ink);
-    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+        &directory.join("src/Navigation/AppRoute.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace App\Navigation;
+
+enum AppRoute: int
+{
+    case Home = 1;
 }
+"#,
+    )?;
+    write_new(
+        &directory.join("src/Navigation/AppRouter.php"),
+        r#"<?php
 
-* {
-    box-sizing: border-box;
-}
+declare(strict_types=1);
 
-html {
-    min-width: 320px;
-    min-height: 100%;
-    background: var(--ink);
-}
+namespace App\Navigation;
 
-body {
-    min-height: 100vh;
-    margin: 0;
-    background:
-        radial-gradient(circle at 78% 10%, rgba(166, 154, 255, 0.13), transparent 24rem),
-        linear-gradient(rgba(104, 222, 210, 0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(104, 222, 210, 0.025) 1px, transparent 1px),
-        var(--ink);
-    background-size: auto, 36px 36px, 36px 36px, auto;
-}
+use App\Screens\Home\HomeScreen;
+use Pam\Desktop\Navigation\Navigator;
+use Pam\Desktop\Routing\Route;
 
-button {
-    font: inherit;
-    -webkit-tap-highlight-color: transparent;
-}
-
-:focus-visible {
-    outline: 3px solid var(--cyan);
-    outline-offset: 4px;
-}
-
-main {
-    width: min(100%, 760px);
-    min-height: 100vh;
-    margin: 0 auto;
-    padding: 0 clamp(20px, 5vw, 48px) 40px;
-}
-
-header {
-    min-height: 82px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--line);
-}
-
-.identity {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.identity svg {
-    width: 32px;
-    fill: none;
-    stroke: var(--text);
-    stroke-width: 2;
-    stroke-linejoin: round;
-}
-
-.identity .spark {
-    stroke: var(--cyan);
-    stroke-width: 1.5;
-}
-
-.identity span,
-.eyebrow,
-.section-heading span,
-.metrics span {
-    color: var(--text-faint);
-    font: 600 10px/1.3 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
-.identity h1 {
-    margin: 3px 0 0;
-    font-size: 16px;
-    letter-spacing: -0.02em;
-}
-
-header button {
-    width: 44px;
-    height: 44px;
-    display: grid;
-    place-items: center;
-    color: var(--text-soft);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: rgba(13, 27, 39, 0.7);
-    cursor: pointer;
-    transition: color 180ms ease, border-color 180ms ease, background 180ms ease;
-}
-
-header button:hover {
-    color: var(--text);
-    border-color: var(--line-strong);
-    background: var(--surface-raised);
-}
-
-header button svg {
-    width: 19px;
-    fill: none;
-    stroke: currentColor;
-    stroke-linecap: round;
-    stroke-width: 1.8;
-}
-
-.summary {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: 24px;
-    padding: 42px 0 30px;
-}
-
-.summary h2 {
-    margin: 10px 0 0;
-    font-size: clamp(34px, 7vw, 54px);
-    font-weight: 650;
-    line-height: 0.98;
-    letter-spacing: -0.055em;
-}
-
-.summary h2 strong {
-    color: var(--violet);
-    font-weight: inherit;
-}
-
-.online,
-.live {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    white-space: nowrap;
-}
-
-.online {
-    min-height: 38px;
-    padding: 0 12px;
-    color: var(--cyan);
-    border: 1px solid rgba(104, 222, 210, 0.2);
-    border-radius: 999px;
-    background: rgba(104, 222, 210, 0.06);
-    font: 600 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-.online i,
-.live i {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--cyan);
-    box-shadow: 0 0 12px rgba(104, 222, 210, 0.8);
-}
-
-.metrics {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    overflow: hidden;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: rgba(13, 27, 39, 0.74);
-}
-
-.metrics article {
-    min-width: 0;
-    padding: 20px;
-}
-
-.metrics article + article {
-    border-left: 1px solid var(--line);
-}
-
-.metrics strong,
-.metrics small {
-    display: block;
-}
-
-.metrics strong {
-    margin-top: 11px;
-    overflow: hidden;
-    font-size: 18px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.metrics small {
-    margin-top: 5px;
-    color: var(--text-faint);
-    font-size: 11px;
-}
-
-.event-log {
-    margin-top: 20px;
-    padding: 22px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: rgba(13, 27, 39, 0.58);
-}
-
-.section-heading {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-}
-
-.section-heading h2 {
-    margin: 5px 0 0;
-    font-size: 17px;
-}
-
-.section-heading .live {
-    color: var(--cyan);
-}
-
-ol {
-    margin: 20px 0 0;
-    padding: 0;
-    list-style: none;
-}
-
-li {
-    display: grid;
-    grid-template-columns: 54px minmax(0, 1fr);
-    gap: 4px 12px;
-    padding: 13px 0;
-    border-top: 1px solid var(--line);
-}
-
-li time {
-    grid-row: span 2;
-    color: var(--text-faint);
-    font: 500 10px/1.5 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-li span {
-    color: var(--text);
-    font: 600 12px/1.3 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-li small {
-    overflow: hidden;
-    color: var(--text-faint);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-@media (max-width: 560px) {
-    .summary {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .metrics {
-        grid-template-columns: 1fr;
-    }
-
-    .metrics article + article {
-        border-top: 1px solid var(--line);
-        border-left: 0;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
+final class AppRouter
+{
+    public static function make(): Navigator
+    {
+        return Route::stack(
+            name: 'main',
+            initial: AppRoute::Home,
+            routes: static function (): void {
+                Route::screen(AppRoute::Home, HomeScreen::class);
+            },
+            restoreState: false,
+        );
     }
 }
 "#,
     )?;
     write_new(
-        &directory.join("resources/inspector.js"),
-        r##"(() => {
-    "use strict";
+        &directory.join("src/Services/ProductServer.php"),
+        r#"<?php
 
-    const list = document.querySelector("#event-list");
-    const hideButton = document.querySelector("#hide-button");
-    const windowId = document.querySelector("#window-id");
+declare(strict_types=1);
 
-    const appendEvent = (name, detail) => {
-        const item = document.createElement("li");
-        const time = document.createElement("time");
-        const title = document.createElement("span");
-        const description = document.createElement("small");
+namespace App\Services;
 
-        time.textContent = new Intl.DateTimeFormat("pt-BR", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-        }).format(new Date());
-        title.textContent = name;
-        description.textContent = detail;
-        item.append(time, title, description);
-        list.prepend(item);
+use Product\Contracts\ProductSnapshot;
+use Product\Contracts\ProductSurface;
 
-        while (list.children.length > 5) {
-            list.lastElementChild.remove();
+/** Reads the Server's `GET /api/status` and validates it through the shared contract. */
+final class ProductServer
+{
+    public const string DEFAULT_ENDPOINT = 'http://127.0.0.1:3000/api/status';
+
+    public static function endpoint(string|false $configured): string
+    {
+        $endpoint = is_string($configured) && $configured !== '' ? $configured : self::DEFAULT_ENDPOINT;
+        $parts = parse_url($endpoint);
+        $scheme = is_array($parts) && is_string($parts['scheme'] ?? null) ? strtolower($parts['scheme']) : null;
+        $host = is_array($parts) ? ($parts['host'] ?? null) : null;
+        $loopback = is_string($host) && in_array(strtolower(trim($host, '[]')), ['127.0.0.1', 'localhost', '::1'], true);
+        if (!is_string($host) || ($scheme !== 'https' && !($scheme === 'http' && $loopback))) {
+            throw new \RuntimeException('PAM_PRODUCT_SERVER_URL must use HTTPS or loopback HTTP.');
         }
-    };
 
-    if (!window.pam) {
-        appendEvent("bridge.error", "A bridge Pam não foi carregada.");
-        hideButton.disabled = true;
-        return;
+        return $endpoint;
     }
 
-    windowId.textContent = window.pam.windowId;
-    window.pam.on("runtime.ready", ({ protocol }) => {
-        appendEvent("runtime.ready", `IPC v${protocol} conectado`);
-    });
-    window.pam.on("pam.dev.reloaded", ({ kind }) => {
-        appendEvent("pam.dev.reloaded", kind === 1 ? "assets" : "worker PHP");
-    });
-    window.pam.on("pam.dev.error", ({ message }) => {
-        appendEvent("pam.dev.error", message);
-    });
-
-    hideButton.addEventListener("click", async () => {
-        hideButton.disabled = true;
-        try {
-            await window.pam.invoke("inspector.hide", null, { timeout: 3_000 });
-        } catch (error) {
-            appendEvent(
-                "inspector.hide.failed",
-                error instanceof Error ? error.message : "Falha desconhecida",
-            );
-            hideButton.disabled = false;
+    public function status(): ProductSnapshot
+    {
+        $endpoint = self::endpoint(getenv('PAM_PRODUCT_SERVER_URL'));
+        $context = stream_context_create([
+            'http' => [
+                'method' => 'GET',
+                'header' => "Accept: application/json\r\n",
+                'timeout' => 3,
+                'follow_location' => 0,
+                'max_redirects' => 0,
+            ],
+            'ssl' => ['verify_peer' => true, 'verify_peer_name' => true],
+        ]);
+        $body = @file_get_contents($endpoint, false, $context, 0, 65_537);
+        if (!is_string($body) || strlen($body) > 65_536) {
+            throw new \RuntimeException('Server is unavailable or returned too much data.');
         }
-    });
+        $payload = json_decode($body, true, flags: JSON_THROW_ON_ERROR);
+        if (!is_array($payload)) {
+            throw new \UnexpectedValueException('Server returned an invalid document.');
+        }
+        $snapshot = ProductSnapshot::fromArray($payload);
+        if ($snapshot->surface !== ProductSurface::Server) {
+            throw new \UnexpectedValueException('Server returned the wrong product surface.');
+        }
 
-    void window.pam.emit("client.ready", {
-        loadedAt: new Date().toISOString(),
-    }, { timeout: 2_000 }).catch((error) => {
-        appendEvent(
-            "client.ready.failed",
-            error instanceof Error ? error.message : "Falha desconhecida",
-        );
-    });
-})();
-"##,
+        return $snapshot;
+    }
+}
+"#,
     )?;
-    Ok(())
+    write_new(
+        &directory.join("src/Screens/Home/HomeScreen.pam.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace App\Screens\Home;
+
+use App\Services\ProductServer;
+use Pam\Desktop\Component;
+use Product\Contracts\ProductSurface;
+use Product\Contracts\ReadinessState;
+
+final class HomeScreen extends Component
+{
+    public string $headline = 'Checking the Server…';
+
+    public string $serverState = 'Checking';
+
+    public string $desktopState = 'Ready';
+
+    public int $stateCode = 0;
+
+    public function mount(): void
+    {
+        $this->refresh();
+    }
+
+    public function refresh(): void
+    {
+        try {
+            $snapshot = (new ProductServer())->status();
+            $this->stateCode = $snapshot->state->value;
+            $this->headline = $snapshot->headline;
+            $this->serverState = match ($snapshot->state) {
+                ReadinessState::Operational => 'Operational',
+                ReadinessState::Degraded => 'Degraded',
+                ReadinessState::Offline => 'Offline',
+            };
+        } catch (\Throwable $error) {
+            $this->stateCode = ReadinessState::Offline->value;
+            $this->headline = $error->getMessage();
+            $this->serverState = 'Offline';
+        }
+    }
+
+    public function surfaceCode(): int
+    {
+        return ProductSurface::Desktop->value;
+    }
+}
+?>
+
+<template>
+    <Column class="home">
+        <Column class="content">
+            <Text class="eyebrow">PRODUCT CONTROL CENTER</Text>
+            <Text class="title">One domain, three surfaces</Text>
+            <Text class="lead" testId="product-headline">{{ $headline }}</Text>
+            <Column class="surfaces">
+                <Row class="surface"><Text class="surface-name">Server</Text><Text class="surface-state" testId="product-server-state">{{ $serverState }}</Text></Row>
+                <Row class="surface"><Text class="surface-name">Desktop</Text><Text class="surface-state">{{ $desktopState }}</Text></Row>
+                <Row class="surface"><Text class="surface-name">Native</Text><Text class="surface-state">Not monitored from Desktop</Text></Row>
+            </Column>
+            <Row class="actions">
+                <Button label="Refresh" on:press="refresh" class="primary" testId="product-refresh" />
+            </Row>
+        </Column>
+    </Column>
+</template>
+
+<style scoped>
+    .home { flex: 1; justify-content: center; align-items: center; padding: 40px; background-color: var(--background); }
+    .content { width: 640px; max-width: 100%; gap: 14px; }
+    .eyebrow { color: var(--accent); font-size: 12px; font-weight: 700; letter-spacing: 1px; }
+    .title { color: var(--text); font-size: 34px; font-weight: 700; line-height: 42px; }
+    .lead { color: var(--muted); font-size: 16px; line-height: 25px; }
+    .surfaces { margin-top: 12px; padding: 20px; gap: 12px; border-radius: 10px; border-width: 1px; border-color: var(--border); background-color: var(--surface); }
+    .surface { gap: 12px; align-items: center; }
+    .surface-name { width: 110px; color: var(--text); font-size: 14px; font-weight: 700; }
+    .surface-state { flex: 1; color: var(--muted); font-size: 14px; }
+    .actions { gap: 18px; align-items: center; margin-top: 10px; }
+    .primary { background-color: var(--accent); color: #FFFFFF; border-radius: 8px; height: 40px; padding-left: 18px; padding-right: 18px; font-size: 14px; font-weight: 600; }
+    .primary:hover { background-color: var(--accent-strong); }
+</style>
+"#,
+    )?;
+    write_new(
+        &directory.join("src/app.css"),
+        r#"/* Shared design tokens and styles. Screen-specific rules belong to each .pam.php component. */
+:root {
+    --background: #F6F6F3;
+    --surface: #FFFFFF;
+    --border: #E2E3DD;
+    --text: #17201C;
+    --muted: #5B655F;
+    --accent: #2F6B55;
+    --accent-strong: #245744;
 }
 
+@media (prefers-color-scheme: dark) {
+    :root {
+        --background: #121514;
+        --surface: #1A1E1C;
+        --border: #2C322F;
+        --text: #EEF1EF;
+        --muted: #A3ADA7;
+        --accent: #5FB592;
+        --accent-strong: #4C9E7D;
+    }
+}
+
+Text { font-family: sans-serif; }
+"#,
+    )?;
+    write_new(
+        &directory.join("tests/HomeScreenTest.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+use App\Screens\Home\HomeScreen;
+use App\Services\ProductServer;
+use Pam\Desktop\App;
+
+use function Pam\Desktop\Testing\mount;
+
+require dirname(__DIR__).'/vendor/autoload.php';
+
+App::components(dirname(__DIR__).'/src', dirname(__DIR__).'/.pam-desktop/components');
+
+function check(bool $passed, string $what): void
+{
+    if (!$passed) {
+        fwrite(STDERR, "failed: {$what}\n");
+        exit(1);
+    }
+}
+
+check(ProductServer::endpoint(false) === ProductServer::DEFAULT_ENDPOINT, 'the Server defaults to loopback');
+try {
+    ProductServer::endpoint('http://example.com/api/status');
+    check(false, 'cleartext remote origins are rejected');
+} catch (RuntimeException) {
+}
+
+putenv('PAM_PRODUCT_SERVER_URL=http://127.0.0.1:9/api/status');
+$home = mount(HomeScreen::class);
+check(str_contains($home->text(), 'Offline'), 'an unreachable Server is shown as offline');
+$home->unmount();
+
+echo "ok\n";
+"#,
+    )
+}
+
+/// `--template desktop`: a PAM Desktop 2 application. Only the Composer
+/// manifest is written here; `pam desktop init` writes the rest after the
+/// install (`run_desktop_init`).
 fn init_desktop(directory: &Path) -> Result<(), String> {
-    let mut manifest = serde_json::json!({
-        "name": "app/pam-desktop-project",
-        "description": "A PHP-first desktop application powered by Pam, Rust, and Servo.",
+    let slug = directory
+        .file_name()
+        .and_then(OsStr::to_str)
+        .map(|name| {
+            name.chars()
+                .map(|character| {
+                    if character.is_ascii_alphanumeric() {
+                        character.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_owned()
+        })
+        .filter(|slug| !slug.is_empty())
+        .unwrap_or_else(|| "desktop-app".to_owned());
+    let manifest = serde_json::json!({
+        "name": format!("app/{slug}"),
+        "description": "A PAM Desktop application",
         "type": "project",
         "license": "proprietary",
         "require": {
             "php": "^8.5",
-            "pushinbr/pam-desktop": "^1.2"
+            "pushinbr/pam-desktop": "^2.1"
         },
         "autoload": {
             "psr-4": {
                 "App\\": "src/"
             }
         },
+        "scripts": {
+            "dev": ["Composer\\Config::disableProcessTimeout", "pam-desktop dev"],
+            "start": "pam-desktop run",
+            "build": "pam-desktop build",
+            "test": "php tests/HomeScreenTest.php"
+        },
         "config": {
-            "platform": {
-                "php": "8.5.0"
-            },
             "platform-check": true,
             "sort-packages": true
-        },
-        "scripts": {
-            "desktop:build": "pam desktop build .",
-            "desktop:dev": "pam desktop dev .",
-            "desktop:doctor": "pam desktop doctor ."
         }
     });
-    if let Some(repository) = local_desktop_repository() {
-        manifest["repositories"] = serde_json::json!([repository]);
-    }
     write_new(
         &directory.join("composer.json"),
         &(serde_json::to_string_pretty(&manifest)
             .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
             + "\n"),
-    )?;
-    write_new(
-        &directory.join("app.php"),
-        r#"<?php
-
-declare(strict_types=1);
-
-use Pam\Desktop\App;
-use Pam\Desktop\ApplicationCategory;
-use Pam\Desktop\Attributes\Command;
-use Pam\Desktop\Attributes\Desktop as DesktopApplication;
-use Pam\Desktop\Attributes\Listen;
-use Pam\Desktop\Attributes\Window as DesktopWindowDefinition;
-use Pam\Desktop\Desktop;
-use Pam\Desktop\DesktopWindow;
-use Pam\Desktop\Events;
-use Pam\Desktop\Permissions;
-use Pam\Desktop\WindowHandle;
-use Pam\Desktop\WindowTheme;
-
-require __DIR__.'/vendor/autoload.php';
-
-#[DesktopWindowDefinition(
-    name: 'inspector',
-    title: 'Pam Desktop · Runtime Inspector',
-    page: 'resources/inspector.html',
-    width: 680,
-    height: 520,
-    minimumWidth: 480,
-    minimumHeight: 360,
-    theme: WindowTheme::Dark,
-)]
-final readonly class InspectorWindow extends DesktopWindow
-{
-}
-
-#[DesktopApplication(
-    id: 'com.pushin.pam-hello',
-    name: 'Pam Hello',
-    version: '1.0.0',
-    description: 'Uma aplicação desktop elegante, gerenciada em PHP.',
-    publisher: 'Pushin',
-    category: ApplicationCategory::Development,
-    theme: WindowTheme::Dark,
-)]
-final class HelloApp extends App
-{
-    protected function configure(Desktop $desktop): void
-    {
-        $desktop
-            ->permissions(static fn (Permissions $permissions) => $permissions
-                ->filesystem('data', __DIR__.'/storage', read: true, write: true)
-                ->dialogs()
-                ->clipboard()
-                ->notifications()
-                ->dragAndDrop())
-            ->timeout(10_000);
-    }
-
-    protected function windows(): array
-    {
-        return [InspectorWindow::class];
-    }
-
-    #[Command]
-    public function greet(
-        WindowHandle $window,
-        Events $events,
-        string $name = 'mundo',
-    ): array {
-        $name = trim($name);
-        $name = $name !== '' ? mb_substr($name, 0, 40) : 'mundo';
-        $window->title("Pam Desktop · {$name}");
-        $events->emit('hello.completed', compact('name'));
-
-        return [
-            'message' => "Olá, {$name}.",
-            'detail' => 'Esta resposta saiu do PHP, atravessou o host Rust e chegou ao Servo.',
-        ];
-    }
-
-    #[Command('inspector.open')]
-    public function openInspector(
-        InspectorWindow $inspector,
-        WindowHandle $window,
-        Events $events,
-    ): array {
-        $inspector->show()->focus();
-        $events->emit('inspector.opened', ['sourceWindowId' => $window->id]);
-
-        return ['windowId' => $inspector->id()];
-    }
-
-    #[Command('inspector.hide')]
-    public function hideInspector(InspectorWindow $inspector): void
-    {
-        $inspector->hide();
-    }
-
-    #[Listen('client.ready')]
-    public function clientReady(WindowHandle $window, Events $events): void
-    {
-        $events->emit('runtime.ready', [
-            'windowId' => $window->id,
-            'protocol' => 6,
-        ]);
-    }
-}
-
-HelloApp::run();
-"#,
-    )?;
-    write_new(
-        &directory.join(".gitignore"),
-        "/vendor/\n/.pam/\n/target/\n/storage/*\n!/storage/.gitkeep\n",
-    )?;
-    fs::create_dir_all(directory.join("resources"))
-        .map_err(|error| format!("cannot create desktop resources: {error}"))?;
-    fs::create_dir_all(directory.join("storage"))
-        .map_err(|error| format!("cannot create desktop storage: {error}"))?;
-    write_new(&directory.join("storage/.gitkeep"), "")?;
-    write_new(
-        &directory.join("resources/icon.svg"),
-        r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-    <title>Pam Hello</title>
-    <defs>
-        <linearGradient id="background" x1="64" y1="40" x2="448" y2="472" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#16364a"/>
-            <stop offset="0.52" stop-color="#0b1d2a"/>
-            <stop offset="1" stop-color="#071018"/>
-        </linearGradient>
-        <linearGradient id="signal" x1="140" y1="118" x2="378" y2="394" gradientUnits="userSpaceOnUse">
-            <stop stop-color="#9ff5eb"/>
-            <stop offset="1" stop-color="#43b8c5"/>
-        </linearGradient>
-    </defs>
-    <rect x="20" y="20" width="472" height="472" rx="116" fill="url(#background)"/>
-    <rect x="42" y="42" width="428" height="428" rx="96" fill="none" stroke="#68ded2" stroke-opacity=".22" stroke-width="4"/>
-    <path d="M152 386V126h120c72 0 118 40 118 102 0 64-48 106-122 106h-48v52h-68Zm68-112h47c34 0 54-16 54-44 0-27-20-43-54-43h-47v87Z" fill="url(#signal)"/>
-    <circle cx="389" cy="128" r="18" fill="#f6b85f"/>
-    <path d="M389 160v50M357 128h-42M421 128h28" stroke="#f6b85f" stroke-linecap="round" stroke-width="10"/>
-</svg>
-"##,
-    )?;
-    write_new(
-        &directory.join("resources/index.html"),
-        r##"<!doctype html>
-<html lang="pt-BR">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="dark">
-    <meta name="theme-color" content="#071018">
-    <title>Pam Desktop · Hello</title>
-    <link rel="stylesheet" href="/styles.css">
-    <script src="/_pam/bridge.js" defer></script>
-    <script src="/app.js" defer></script>
-</head>
-<body>
-    <a class="skip-link" href="#main-content">Pular para o conteúdo</a>
-
-    <div class="app-shell">
-        <header class="topbar" aria-label="Barra da aplicação">
-            <a class="brand" href="/" aria-label="Pam Desktop, início">
-                <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
-                    <path d="M7 23V9h8.1c4.2 0 6.9 2.2 6.9 5.8 0 3.7-2.7 5.9-6.9 5.9h-3.4V23H7Z"/>
-                    <path class="brand-spark" d="m23.8 7.4.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8.8-2.2Z"/>
-                </svg>
-                <span>Pam <strong>Desktop</strong></span>
-            </a>
-
-            <div class="runtime-status" aria-label="Estado da runtime">
-                <span class="status-pulse" aria-hidden="true"></span>
-                <span id="runtime-status-text">runtime conectando</span>
-                <kbd>API 1</kbd>
-            </div>
-        </header>
-
-        <main id="main-content">
-            <section class="hero" aria-labelledby="hero-title">
-                <div class="hero-copy">
-                    <p class="eyebrow">
-                        <span>PHP</span>
-                        <svg viewBox="0 0 20 10" aria-hidden="true">
-                            <path d="M1 5h16M13 1l4 4-4 4"/>
-                        </svg>
-                        <span>Rust</span>
-                        <svg viewBox="0 0 20 10" aria-hidden="true">
-                            <path d="M1 5h16M13 1l4 4-4 4"/>
-                        </svg>
-                        <span>Servo</span>
-                    </p>
-
-                    <h1 id="hero-title">
-                        PHP na direção.<br>
-                        <span>Rust no ritmo.</span><br>
-                        Servo na tela.
-                    </h1>
-
-                    <p class="hero-description">
-                        Uma aplicação desktop de verdade, com sua lógica em PHP,
-                        isolamento por processo e uma engine web inteira escrita para o futuro.
-                    </p>
-
-                    <form class="hello-form" id="hello-form">
-                        <div class="field">
-                            <label for="name">Como devemos te chamar?</label>
-                            <div class="input-wrap">
-                                <svg viewBox="0 0 24 24" aria-hidden="true">
-                                    <circle cx="12" cy="8" r="4"/>
-                                    <path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6"/>
-                                </svg>
-                                <input
-                                    id="name"
-                                    name="name"
-                                    maxlength="40"
-                                    autocomplete="name"
-                                    aria-describedby="name-hint"
-                                    placeholder="Seu nome"
-                                    required
-                                >
-                            </div>
-                            <small id="name-hint" class="field-hint">Até 40 caracteres; enviado somente ao comando local.</small>
-                        </div>
-                        <button id="hello-button" type="submit">
-                            <span>Conversar com o PHP</span>
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <path d="M5 12h13M14 7l5 5-5 5"/>
-                            </svg>
-                        </button>
-                    </form>
-
-                    <div class="demo-actions">
-                        <button id="inspector-button" type="button">
-                            <svg viewBox="0 0 24 24" aria-hidden="true">
-                                <rect x="4" y="5" width="16" height="14" rx="2"/>
-                                <path d="M8 9h8M8 13h5"/>
-                            </svg>
-                            <span>Abrir Runtime Inspector</span>
-                        </button>
-                        <span id="event-status" role="status" aria-live="polite">
-                            eventos conectando…
-                        </span>
-                    </div>
-
-                    <section class="native-lab" aria-labelledby="native-lab-title">
-                        <div class="native-lab-heading">
-                            <div>
-                                <span>NATIVE AUTHORITY · API 1</span>
-                                <h2 id="native-lab-title">Native Lab</h2>
-                            </div>
-                            <span class="capability-lock">autorizado no PHP</span>
-                        </div>
-                        <div class="native-actions" aria-label="Demonstrações nativas">
-                            <button id="save-note-button" type="button">Salvar nota</button>
-                            <button id="open-file-button" type="button">Abrir texto</button>
-                            <button id="copy-button" type="button">Copiar olá</button>
-                            <button id="notify-button" type="button">Notificar</button>
-                        </div>
-                        <div id="drop-zone" class="drop-zone" aria-label="Área para soltar arquivos">
-                            <strong>Arraste um arquivo para a janela</strong>
-                            <span>O host entrega um grant temporário, nunca o caminho do sistema.</span>
-                        </div>
-                        <p id="native-status" role="status" aria-live="polite">
-                            Nenhuma capability usada ainda.
-                        </p>
-                    </section>
-
-                    <section class="update-console" aria-labelledby="update-title">
-                        <div>
-                            <span>SIGNED UPDATES · API 1</span>
-                            <h2 id="update-title">Atualizações com rollback</h2>
-                            <p id="update-status" role="status" aria-live="polite">
-                                Desativadas por padrão; a chave pública fica no manifesto PHP.
-                            </p>
-                        </div>
-                        <button id="update-button" type="button">Verificar estado</button>
-                    </section>
-
-                    <div class="response" id="response" role="status" aria-live="polite" aria-atomic="true" tabindex="-1">
-                        <span class="response-label">aguardando comando</span>
-                        <p id="response-message">
-                            A primeira resposta da sua aplicação vai aparecer aqui.
-                        </p>
-                        <small id="response-detail">
-                            Nenhuma ponte global para Node. Apenas comandos explícitos.
-                        </small>
-                    </div>
-                </div>
-
-                <div class="runtime-visual" aria-label="Fluxo entre Servo, Rust e PHP">
-                    <div class="orbit orbit-outer" aria-hidden="true"></div>
-                    <div class="orbit orbit-middle" aria-hidden="true"></div>
-                    <div class="orbit orbit-inner" aria-hidden="true"></div>
-
-                    <div class="core">
-                        <svg viewBox="0 0 32 32" aria-hidden="true">
-                            <path d="M8 24V8h8.6c4.8 0 7.7 2.5 7.7 6.6 0 4.2-2.9 6.7-7.7 6.7h-3.7V24H8Z"/>
-                        </svg>
-                        <span>PAM</span>
-                    </div>
-
-                    <div class="runtime-node node-servo">
-                        <span class="node-index">01</span>
-                        <strong>Servo</strong>
-                        <small>render</small>
-                    </div>
-                    <div class="runtime-node node-rust">
-                        <span class="node-index">02</span>
-                        <strong>Rust</strong>
-                        <small>host</small>
-                    </div>
-                    <div class="runtime-node node-php">
-                        <span class="node-index">03</span>
-                        <strong>PHP</strong>
-                        <small>logic</small>
-                    </div>
-
-                    <div class="signal signal-a" aria-hidden="true"></div>
-                    <div class="signal signal-b" aria-hidden="true"></div>
-
-                    <aside class="security-note">
-                        <svg viewBox="0 0 24 24" aria-hidden="true">
-                            <path d="M12 3 5 6v5c0 4.6 2.8 8.1 7 10 4.2-1.9 7-5.4 7-10V6l-7-3Z"/>
-                            <path d="m9 12 2 2 4-4"/>
-                        </svg>
-                        <div>
-                            <strong>Bridge protegido</strong>
-                            <span>origin + token efêmero</span>
-                        </div>
-                    </aside>
-                </div>
-            </section>
-
-            <section class="runtime-strip" aria-label="Componentes da aplicação">
-                <article>
-                    <span>renderer</span>
-                    <strong>Servo LTS</strong>
-                    <small>HTML, CSS e JavaScript</small>
-                </article>
-                <article>
-                    <span>orchestrator</span>
-                    <strong>Rust host</strong>
-                    <small>janela, IPC e segurança</small>
-                </article>
-                <article>
-                    <span>application</span>
-                    <strong>PHP 8.5</strong>
-                    <small>Composer e domínio</small>
-                </article>
-                <article>
-                    <span>contract</span>
-                    <strong>IPC v6</strong>
-                    <small>tipado e versionado</small>
-                </article>
-            </section>
-        </main>
-
-        <footer>
-            <span>Feito com Pam Desktop</span>
-            <span class="footer-command"><kbd>pam desktop dev .</kbd></span>
-        </footer>
-    </div>
-</body>
-</html>
-"##,
-    )?;
-    write_new(
-        &directory.join("resources/styles.css"),
-        r#":root {
-    --ink: #071018;
-    --ink-soft: #0a151f;
-    --surface: #0d1b27;
-    --surface-raised: #132737;
-    --text: #f3f7f8;
-    --text-soft: #9fb3be;
-    --text-faint: #718792;
-    --violet: #a69aff;
-    --cyan: #68ded2;
-    --run: #67e8a5;
-    --run-ink: #062315;
-    --coral: #ff9279;
-    --line: rgba(176, 209, 220, 0.14);
-    --line-strong: rgba(176, 209, 220, 0.26);
-    --shadow: 0 24px 70px rgba(0, 0, 0, 0.34);
-    color: var(--text);
-    background: var(--ink);
-    font-family: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
-    font-synthesis: none;
-}
-
-* {
-    box-sizing: border-box;
-}
-
-html {
-    min-width: 320px;
-    min-height: 100%;
-    background: var(--ink);
-}
-
-body {
-    min-height: 100vh;
-    min-height: 100dvh;
-    margin: 0;
-    overflow-x: hidden;
-    background:
-        radial-gradient(circle at 77% 39%, rgba(166, 154, 255, 0.11), transparent 28rem),
-        linear-gradient(rgba(104, 222, 210, 0.025) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(104, 222, 210, 0.025) 1px, transparent 1px),
-        var(--ink);
-    background-size: auto, 42px 42px, 42px 42px, auto;
-}
-
-button,
-input {
-    font: inherit;
-}
-
-button,
-a {
-    -webkit-tap-highlight-color: transparent;
-}
-
-.skip-link {
-    position: fixed;
-    z-index: 100;
-    top: 12px;
-    left: 12px;
-    padding: 10px 14px;
-    color: var(--ink);
-    background: var(--run);
-    border-radius: 8px;
-    transform: translateY(-160%);
-}
-
-.skip-link:focus {
-    transform: translateY(0);
-}
-
-:focus-visible {
-    outline: 3px solid var(--run);
-    outline-offset: 4px;
-}
-
-.app-shell {
-    width: min(100%, 1440px);
-    min-height: 100vh;
-    margin: 0 auto;
-    padding: 0 clamp(24px, 4vw, 64px);
-}
-
-.topbar {
-    height: 84px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    border-bottom: 1px solid var(--line);
-}
-
-.brand {
-    display: inline-flex;
-    align-items: center;
-    gap: 11px;
-    color: var(--text);
-    text-decoration: none;
-    letter-spacing: -0.02em;
-    font-size: 17px;
-}
-
-.brand strong {
-    font-weight: 650;
-}
-
-.brand-mark {
-    width: 30px;
-    height: 30px;
-    overflow: visible;
-    fill: none;
-    stroke: var(--text);
-    stroke-width: 2.1;
-    stroke-linejoin: round;
-}
-
-.brand-mark .brand-spark {
-    stroke: var(--cyan);
-    stroke-width: 1.45;
-}
-
-.runtime-status {
-    min-height: 38px;
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 0 8px 0 13px;
-    color: var(--text-soft);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    background: rgba(13, 27, 39, 0.72);
-    font: 500 11px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.04em;
-}
-
-.runtime-status kbd {
-    padding: 7px 9px;
-    color: var(--cyan);
-    border: 1px solid rgba(104, 222, 210, 0.19);
-    border-radius: 999px;
-    background: rgba(104, 222, 210, 0.07);
-    font: inherit;
-}
-
-.status-pulse {
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--cyan);
-    box-shadow: 0 0 0 4px rgba(104, 222, 210, 0.1), 0 0 18px rgba(104, 222, 210, 0.8);
-}
-
-.runtime-status[data-state="ready"] .status-pulse {
-    background: var(--run);
-    box-shadow: 0 0 0 4px rgba(103, 232, 165, 0.1), 0 0 18px rgba(103, 232, 165, 0.72);
-}
-
-.runtime-status[data-state="error"] .status-pulse {
-    background: var(--coral);
-    box-shadow: 0 0 0 4px rgba(255, 146, 121, 0.12);
-}
-
-.hero {
-    min-height: calc(100vh - 208px);
-    display: grid;
-    grid-template-columns: minmax(0, 1.08fr) minmax(420px, 0.92fr);
-    gap: clamp(48px, 7vw, 110px);
-    align-items: center;
-    padding: clamp(52px, 7vh, 94px) 0;
-}
-
-.hero-copy {
-    position: relative;
-    z-index: 3;
-}
-
-.eyebrow {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin: 0 0 24px;
-    color: var(--cyan);
-    font: 600 11px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-}
-
-.eyebrow svg {
-    width: 20px;
-    fill: none;
-    stroke: var(--text-faint);
-    stroke-width: 1.2;
-}
-
-h1 {
-    max-width: 720px;
-    margin: 0;
-    color: var(--text);
-    font-size: clamp(46px, 6.1vw, 84px);
-    font-weight: 630;
-    line-height: 0.94;
-    letter-spacing: -0.065em;
-}
-
-h1 span {
-    color: transparent;
-    background: linear-gradient(105deg, var(--run) 8%, #baf7d4 52%, var(--cyan));
-    background-clip: text;
-}
-
-.hero-description {
-    max-width: 620px;
-    margin: 30px 0 0;
-    color: var(--text-soft);
-    font-size: 17px;
-    line-height: 1.65;
-}
-
-.hello-form {
-    max-width: 620px;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 12px;
-    align-items: end;
-    margin-top: 34px;
-}
-
-.field label {
-    display: block;
-    margin: 0 0 9px 2px;
-    color: var(--text-soft);
-    font-size: 12px;
-    font-weight: 600;
-}
-
-.field-hint {
-    display: block;
-    margin: 8px 2px 0;
-    color: var(--text-faint);
-    font-size: 11px;
-    line-height: 1.45;
-}
-
-.input-wrap {
-    height: 54px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 0 16px;
-    border: 1px solid var(--line-strong);
-    border-radius: 12px;
-    background: rgba(13, 27, 39, 0.8);
-    transition: border-color 180ms ease, background 180ms ease, box-shadow 180ms ease;
-}
-
-.input-wrap:focus-within {
-    border-color: var(--violet);
-    background: var(--surface);
-    box-shadow: 0 0 0 4px rgba(166, 154, 255, 0.1);
-}
-
-.input-wrap svg {
-    width: 19px;
-    flex: 0 0 auto;
-    fill: none;
-    stroke: var(--text-faint);
-    stroke-width: 1.7;
-    stroke-linecap: round;
-}
-
-.input-wrap input {
-    min-width: 0;
-    width: 100%;
-    color: var(--text);
-    border: 0;
-    outline: 0;
-    background: transparent;
-    font-size: 15px;
-}
-
-.input-wrap input::placeholder {
-    color: var(--text-faint);
-}
-
-.hello-form button {
-    min-height: 54px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    padding: 0 20px;
-    color: var(--run-ink);
-    border: 0;
-    border-radius: 12px;
-    background: linear-gradient(120deg, var(--run), #8ef0c0);
-    box-shadow: 0 12px 28px rgba(45, 190, 116, 0.2);
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 700;
-    transition: filter 180ms ease, transform 180ms ease, box-shadow 180ms ease;
-}
-
-.hello-form button:hover {
-    filter: brightness(1.08);
-    box-shadow: 0 16px 34px rgba(45, 190, 116, 0.3);
-    transform: translateY(-1px);
-}
-
-.hello-form button:active {
-    transform: translateY(0);
-}
-
-.hello-form button:disabled {
-    cursor: wait;
-    filter: saturate(0.5);
-    opacity: 0.72;
-    transform: none;
-}
-
-.hello-form button svg {
-    width: 19px;
-    fill: none;
-    stroke: currentColor;
-    stroke-width: 1.8;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.demo-actions {
-    max-width: 620px;
-    min-height: 48px;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-top: 14px;
-}
-
-.demo-actions button {
-    min-height: 44px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 9px;
-    padding: 0 15px;
-    color: var(--text);
-    border: 1px solid var(--line-strong);
-    border-radius: 10px;
-    background: rgba(19, 39, 55, 0.72);
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 650;
-    transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
-}
-
-.demo-actions button:hover {
-    border-color: rgba(104, 222, 210, 0.56);
-    background: var(--surface-raised);
-    transform: translateY(-1px);
-}
-
-.demo-actions button:active {
-    transform: translateY(0);
-}
-
-.demo-actions button:disabled {
-    cursor: wait;
-    opacity: 0.6;
-    transform: none;
-}
-
-.demo-actions button svg {
-    width: 18px;
-    fill: none;
-    stroke: var(--cyan);
-    stroke-width: 1.7;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.demo-actions > span {
-    color: var(--text-faint);
-    font: 500 10px/1.4 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-.native-lab {
-    max-width: 620px;
-    margin-top: 18px;
-    padding: 18px;
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: rgba(13, 27, 39, 0.64);
-}
-
-.native-lab-heading {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-}
-
-.native-lab-heading span {
-    color: var(--cyan);
-    font: 600 9px/1.3 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
-.native-lab-heading h2 {
-    margin: 5px 0 0;
-    font-size: 18px;
-}
-
-.native-lab-heading .capability-lock {
-    min-height: 30px;
-    display: inline-flex;
-    align-items: center;
-    padding: 0 10px;
-    color: var(--text-soft);
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    letter-spacing: 0.04em;
-    text-transform: none;
-}
-
-.native-actions {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 8px;
-    margin-top: 16px;
-}
-
-.native-actions button {
-    min-height: 44px;
-    padding: 0 10px;
-    color: var(--text);
-    border: 1px solid var(--line-strong);
-    border-radius: 9px;
-    background: var(--surface-raised);
-    cursor: pointer;
-    font-size: 11px;
-    font-weight: 650;
-    transition: border-color 180ms ease, background 180ms ease, transform 180ms ease;
-}
-
-.native-actions button:hover {
-    border-color: var(--cyan);
-    background: rgba(104, 222, 210, 0.09);
-    transform: translateY(-1px);
-}
-
-.native-actions button:disabled {
-    cursor: wait;
-    opacity: 0.55;
-    transform: none;
-}
-
-.drop-zone {
-    min-height: 76px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-direction: column;
-    gap: 5px;
-    margin-top: 10px;
-    padding: 14px;
-    text-align: center;
-    border: 1px dashed var(--line-strong);
-    border-radius: 10px;
-    transition: border-color 180ms ease, background 180ms ease;
-}
-
-.drop-zone strong {
-    font-size: 12px;
-}
-
-.drop-zone span,
-#native-status {
-    color: var(--text-faint);
-    font-size: 10px;
-    line-height: 1.45;
-}
-
-.drop-zone[data-active="true"] {
-    border-color: var(--cyan);
-    background: rgba(104, 222, 210, 0.07);
-}
-
-#native-status {
-    min-height: 15px;
-    margin: 10px 2px 0;
-}
-
-.update-console {
-    max-width: 620px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 18px;
-    margin-top: 12px;
-    padding: 15px 16px;
-    border: 1px solid rgba(166, 154, 255, 0.24);
-    border-radius: 12px;
-    background: linear-gradient(115deg, rgba(166, 154, 255, 0.09), rgba(104, 222, 210, 0.04));
-}
-
-.update-console span {
-    color: var(--violet);
-    font: 650 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.12em;
-}
-
-.update-console h2 {
-    margin: 6px 0 3px;
-    font-size: 14px;
-}
-
-.update-console p {
-    margin: 0;
-    color: var(--text-faint);
-    font-size: 10px;
-    line-height: 1.45;
-}
-
-.update-console button {
-    min-width: 118px;
-    min-height: 40px;
-    color: var(--text);
-    border: 1px solid rgba(166, 154, 255, 0.34);
-    border-radius: 9px;
-    background: rgba(166, 154, 255, 0.1);
-    cursor: pointer;
-    font-size: 10px;
-    font-weight: 700;
-}
-
-.update-console button:disabled {
-    cursor: wait;
-    opacity: 0.55;
-}
-
-.response {
-    max-width: 620px;
-    min-height: 112px;
-    margin-top: 16px;
-    padding: 18px 20px;
-    border: 1px solid var(--line);
-    border-left: 2px solid var(--violet);
-    border-radius: 4px 12px 12px 4px;
-    background: rgba(13, 27, 39, 0.58);
-    box-shadow: inset 0 1px rgba(255, 255, 255, 0.02);
-}
-
-.response-label {
-    display: block;
-    margin-bottom: 8px;
-    color: var(--violet);
-    font: 600 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.13em;
-    text-transform: uppercase;
-}
-
-.response p {
-    margin: 0;
-    color: var(--text);
-    font-size: 15px;
-    font-weight: 600;
-    line-height: 1.5;
-}
-
-.response small {
-    display: block;
-    margin-top: 5px;
-    color: var(--text-faint);
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.response[data-state="success"] {
-    border-left-color: var(--cyan);
-}
-
-.response[data-state="success"] .response-label {
-    color: var(--cyan);
-}
-
-.response[data-state="error"] {
-    border-left-color: var(--coral);
-}
-
-.response[data-state="error"] .response-label {
-    color: var(--coral);
-}
-
-.runtime-visual {
-    position: relative;
-    width: min(100%, 520px);
-    aspect-ratio: 1;
-    justify-self: center;
-    isolation: isolate;
-}
-
-.runtime-visual::before {
-    content: "";
-    position: absolute;
-    inset: 15%;
-    z-index: -2;
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(166, 154, 255, 0.13), transparent 66%);
-    filter: blur(18px);
-}
-
-.orbit {
-    position: absolute;
-    inset: 50%;
-    border: 1px solid var(--line);
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-}
-
-.orbit::before {
-    content: "";
-    position: absolute;
-    width: 7px;
-    height: 7px;
-    top: -4px;
-    left: calc(50% - 4px);
-    border-radius: 50%;
-    background: var(--cyan);
-    box-shadow: 0 0 16px rgba(104, 222, 210, 0.9);
-}
-
-.orbit-outer {
-    width: 89%;
-    height: 89%;
-    border-style: dashed;
-    border-color: rgba(166, 154, 255, 0.22);
-    animation: orbit-spin 34s linear infinite;
-}
-
-.orbit-middle {
-    width: 66%;
-    height: 66%;
-    animation: orbit-spin 23s linear reverse infinite;
-}
-
-.orbit-inner {
-    width: 39%;
-    height: 39%;
-    border-color: rgba(104, 222, 210, 0.28);
-    animation: orbit-spin 14s linear infinite;
-}
-
-.core {
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 112px;
-    height: 112px;
-    display: grid;
-    place-items: center;
-    border: 1px solid rgba(166, 154, 255, 0.32);
-    border-radius: 31px;
-    background: linear-gradient(145deg, rgba(28, 45, 62, 0.98), rgba(10, 21, 31, 0.98));
-    box-shadow:
-        0 22px 50px rgba(0, 0, 0, 0.4),
-        inset 0 1px rgba(255, 255, 255, 0.08),
-        0 0 60px rgba(166, 154, 255, 0.1);
-    transform: translate(-50%, -50%) rotate(-7deg);
-}
-
-.core svg {
-    width: 38px;
-    margin-top: 8px;
-    fill: none;
-    stroke: var(--text);
-    stroke-width: 2;
-    stroke-linejoin: round;
-}
-
-.core span {
-    margin-top: -20px;
-    color: var(--violet);
-    font: 700 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.18em;
-}
-
-.runtime-node {
-    position: absolute;
-    z-index: 2;
-    min-width: 112px;
-    padding: 12px 14px;
-    border: 1px solid var(--line-strong);
-    border-radius: 12px;
-    background: rgba(13, 27, 39, 0.94);
-    box-shadow: var(--shadow);
-}
-
-.runtime-node strong,
-.runtime-node small {
-    display: block;
-}
-
-.runtime-node strong {
-    color: var(--text);
-    font-size: 14px;
-}
-
-.runtime-node small {
-    margin-top: 4px;
-    color: var(--text-faint);
-    font: 500 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-.node-index {
-    position: absolute;
-    top: 12px;
-    right: 12px;
-    color: var(--text-faint);
-    font: 500 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-.node-servo {
-    top: 7%;
-    left: 9%;
-    border-top-color: var(--violet);
-}
-
-.node-rust {
-    top: 25%;
-    right: 0;
-    border-top-color: var(--coral);
-}
-
-.node-php {
-    right: 9%;
-    bottom: 8%;
-    border-top-color: var(--cyan);
-}
-
-.signal {
-    position: absolute;
-    z-index: 1;
-    width: 9px;
-    height: 9px;
-    border: 2px solid var(--cyan);
-    border-radius: 50%;
-    box-shadow: 0 0 14px rgba(104, 222, 210, 0.75);
-}
-
-.signal-a {
-    top: 18%;
-    right: 22%;
-}
-
-.signal-b {
-    bottom: 22%;
-    left: 16%;
-    border-color: var(--violet);
-}
-
-.security-note {
-    position: absolute;
-    bottom: 4%;
-    left: 1%;
-    display: flex;
-    align-items: center;
-    gap: 11px;
-    padding: 11px 13px;
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: rgba(7, 16, 24, 0.88);
-    box-shadow: 0 16px 38px rgba(0, 0, 0, 0.3);
-}
-
-.security-note svg {
-    width: 23px;
-    fill: none;
-    stroke: var(--cyan);
-    stroke-width: 1.6;
-    stroke-linecap: round;
-    stroke-linejoin: round;
-}
-
-.security-note strong,
-.security-note span {
-    display: block;
-}
-
-.security-note strong {
-    font-size: 11px;
-}
-
-.security-note span {
-    margin-top: 3px;
-    color: var(--text-faint);
-    font: 500 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-.runtime-strip {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    background: rgba(10, 21, 31, 0.66);
-}
-
-.runtime-strip article {
-    min-width: 0;
-    padding: 18px 20px;
-}
-
-.runtime-strip article + article {
-    border-left: 1px solid var(--line);
-}
-
-.runtime-strip span,
-.runtime-strip strong,
-.runtime-strip small {
-    display: block;
-}
-
-.runtime-strip span {
-    color: var(--text-faint);
-    font: 600 9px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
-.runtime-strip strong {
-    margin-top: 9px;
-    color: var(--text);
-    font-size: 13px;
-}
-
-.runtime-strip small {
-    margin-top: 4px;
-    overflow: hidden;
-    color: var(--text-faint);
-    font-size: 11px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-footer {
-    min-height: 84px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    color: var(--text-faint);
-    font-size: 11px;
-}
-
-footer kbd {
-    padding: 7px 10px;
-    color: var(--text-soft);
-    border: 1px solid var(--line);
-    border-radius: 7px;
-    background: var(--ink-soft);
-    font: 500 10px/1 "JetBrains Mono", "SFMono-Regular", Consolas, monospace;
-}
-
-@keyframes orbit-spin {
-    to {
-        transform: translate(-50%, -50%) rotate(360deg);
-    }
-}
-
-@media (max-width: 980px) {
-    .hero {
-        grid-template-columns: 1fr;
-    }
-
-    .runtime-visual {
-        width: min(82vw, 520px);
-        grid-row: 1;
-    }
-
-    .runtime-strip {
-        grid-template-columns: repeat(2, 1fr);
-    }
-
-    .runtime-strip article:nth-child(3) {
-        border-top: 1px solid var(--line);
-        border-left: 0;
-    }
-
-    .runtime-strip article:nth-child(4) {
-        border-top: 1px solid var(--line);
-    }
-}
-
-@media (max-height: 800px) and (min-width: 981px) {
-    .topbar {
-        height: 68px;
-    }
-
-    .hero {
-        min-height: auto;
-        padding: 30px 0 26px;
-    }
-
-    .eyebrow {
-        margin-bottom: 16px;
-    }
-
-    h1 {
-        font-size: clamp(44px, 5.3vw, 68px);
-    }
-
-    .hero-description {
-        margin-top: 20px;
-        font-size: 15px;
-        line-height: 1.5;
-    }
-
-    .hello-form {
-        margin-top: 20px;
-    }
-
-    .response {
-        min-height: 96px;
-        padding: 14px 18px;
-    }
-
-    footer {
-        min-height: 64px;
-    }
-}
-
-@media (max-width: 620px) {
-    .app-shell {
-        padding: 0 18px;
-    }
-
-    .topbar {
-        height: 72px;
-    }
-
-    .runtime-status > span:not(.status-pulse) {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        overflow: hidden;
-        clip: rect(0 0 0 0);
-        clip-path: inset(50%);
-        white-space: nowrap;
-    }
-
-    .hero {
-        gap: 40px;
-        padding: 42px 0;
-    }
-
-    h1 {
-        font-size: clamp(42px, 14vw, 62px);
-    }
-
-    .hello-form {
-        grid-template-columns: 1fr;
-    }
-
-    .demo-actions {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .native-actions {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .native-lab-heading {
-        flex-direction: column;
-    }
-
-    .runtime-visual {
-        width: min(100%, 440px);
-    }
-
-    .runtime-node {
-        min-width: 96px;
-        padding: 10px 12px;
-    }
-
-    .security-note {
-        display: none;
-    }
-
-    .runtime-strip {
-        grid-template-columns: 1fr;
-    }
-
-    .runtime-strip article + article {
-        border-top: 1px solid var(--line);
-        border-left: 0;
-    }
-
-    footer {
-        align-items: flex-start;
-        flex-direction: column;
-        justify-content: center;
-        gap: 10px;
-    }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-        scroll-behavior: auto !important;
-        animation-duration: 0.01ms !important;
-        animation-iteration-count: 1 !important;
-        transition-duration: 0.01ms !important;
-    }
-}
-
-@media (prefers-contrast: more) {
-    :root {
-        --text-soft: #d4e0e5;
-        --text-faint: #b5c8d0;
-        --line: rgba(226, 241, 246, 0.34);
-        --line-strong: rgba(226, 241, 246, 0.58);
-    }
-}
-
-@media (forced-colors: active) {
-    :focus-visible {
-        outline-color: Highlight;
-    }
-
-    .status-pulse,
-    .runtime-status[data-state="ready"] .status-pulse,
-    .runtime-status[data-state="error"] .status-pulse {
-        background: CanvasText;
-        box-shadow: none;
-    }
-}
-"#,
-    )?;
-    write_new(
-        &directory.join("resources/app.js"),
-        r##"(() => {
-    "use strict";
-
-    const form = document.querySelector("#hello-form");
-    const name = document.querySelector("#name");
-    const button = document.querySelector("#hello-button");
-    const response = document.querySelector("#response");
-    const label = response.querySelector(".response-label");
-    const message = document.querySelector("#response-message");
-    const detail = document.querySelector("#response-detail");
-    const inspectorButton = document.querySelector("#inspector-button");
-    const runtimeStatus = document.querySelector(".runtime-status");
-    const runtimeStatusText = document.querySelector("#runtime-status-text");
-    const eventStatus = document.querySelector("#event-status");
-    const nativeStatus = document.querySelector("#native-status");
-    const dropZone = document.querySelector("#drop-zone");
-    const saveNoteButton = document.querySelector("#save-note-button");
-    const openFileButton = document.querySelector("#open-file-button");
-    const copyButton = document.querySelector("#copy-button");
-    const notifyButton = document.querySelector("#notify-button");
-    const updateButton = document.querySelector("#update-button");
-    const updateStatus = document.querySelector("#update-status");
-
-    const setState = (state, title, body, supportingText) => {
-        response.dataset.state = state;
-        response.setAttribute("aria-live", state === "error" ? "assertive" : "polite");
-        label.textContent = title;
-        message.textContent = body;
-        detail.textContent = supportingText;
-    };
-
-    const runNative = async (button, operation) => {
-        button.disabled = true;
-        try {
-            await operation();
-        } catch (error) {
-            nativeStatus.textContent = error instanceof Error
-                ? `Falhou · ${error.message}`
-                : "A operação nativa falhou.";
-        } finally {
-            button.disabled = false;
-        }
-    };
-
-    if (!window.pam) {
-        runtimeStatus.dataset.state = "error";
-        runtimeStatusText.textContent = "runtime indisponível";
-        setState(
-            "error",
-            "bridge indisponível",
-            "A bridge Pam não foi carregada.",
-            "Abra este projeto com `pam desktop dev .`.",
-        );
-        document.querySelectorAll("button, input").forEach((element) => {
-            element.disabled = true;
-        });
-        return;
-    }
-
-    window.pam.on("runtime.ready", ({ protocol }) => {
-        runtimeStatus.dataset.state = "ready";
-        runtimeStatusText.textContent = "runtime online";
-        eventStatus.textContent = `eventos online · IPC v${protocol}`;
-    });
-    window.pam.on("hello.completed", ({ name: completedName }) => {
-        eventStatus.textContent = `hello.completed · ${completedName}`;
-    });
-    window.pam.on("inspector.opened", () => {
-        eventStatus.textContent = "janela inspector aberta";
-    });
-    window.pam.on("pam.dev.reloaded", ({ kind }) => {
-        eventStatus.textContent = kind === 1
-            ? "assets recarregados"
-            : "worker PHP reiniciado";
-    });
-    window.pam.on("pam.dev.error", ({ message: reloadError }) => {
-        eventStatus.textContent = `hot reload falhou · ${reloadError}`;
-    });
-    window.pam.on("pam.drag.enter", ({ name }) => {
-        dropZone.dataset.active = "true";
-        nativeStatus.textContent = `Pronto para receber ${name}.`;
-    });
-    window.pam.on("pam.drag.leave", () => {
-        delete dropZone.dataset.active;
-        nativeStatus.textContent = "O arquivo saiu da janela.";
-    });
-    window.pam.on("pam.drag.drop", async ({ files }) => {
-        delete dropZone.dataset.active;
-        const [file] = files;
-        if (!file) return;
-        try {
-            if (file.kind === 1) {
-                const contents = await window.pam.fs.readText(file);
-                nativeStatus.textContent = `${file.name} · ${contents.slice(0, 90)}`;
-            } else {
-                const entries = await window.pam.fs.list(file);
-                nativeStatus.textContent = `${file.name} · ${entries.length} itens`;
-            }
-        } catch (error) {
-            nativeStatus.textContent = error instanceof Error
-                ? `Drop bloqueado · ${error.message}`
-                : "Não foi possível ler o item solto.";
-        }
-    });
-    window.pam.on("pam.drag.error", ({ message: dragError }) => {
-        delete dropZone.dataset.active;
-        nativeStatus.textContent = `Drop bloqueado · ${dragError}`;
-    });
-    window.pam.on("pam.update.changed", ({ state, availableVersion }) => {
-        updateStatus.textContent = state === 4
-            ? `Versão ${availableVersion} disponível e assinada.`
-            : `Estado do updater · ${state}`;
-    });
-    window.pam.on("pam.update.error", ({ message: updateError }) => {
-        updateStatus.textContent = `Updater · ${updateError}`;
-    });
-
-    void window.pam.emit("client.ready", {
-        loadedAt: new Date().toISOString(),
-    }, { timeout: 2_000 }).catch((error) => {
-        eventStatus.textContent = error instanceof Error
-            ? error.message
-            : "eventos indisponíveis";
-    });
-
-    inspectorButton.addEventListener("click", async () => {
-        inspectorButton.disabled = true;
-        try {
-            await window.pam.invoke("inspector.open", null, { timeout: 3_000 });
-        } catch (error) {
-            setState(
-                "error",
-                "janela não abriu",
-                error instanceof Error ? error.message : "Não foi possível abrir o inspector.",
-                "O worker continua ativo; tente novamente.",
-            );
-        } finally {
-            inspectorButton.disabled = false;
-        }
-    });
-
-    saveNoteButton.addEventListener("click", () => {
-        void runNative(saveNoteButton, async () => {
-            const target = { root: "data", path: "hello.txt" };
-            const text = `Olá de Pam Desktop em ${new Date().toLocaleString("pt-BR")}.`;
-            await window.pam.fs.writeText(target, text);
-            const persisted = await window.pam.fs.readText(target);
-            nativeStatus.textContent = `storage/hello.txt · ${persisted}`;
-        });
-    });
-
-    openFileButton.addEventListener("click", () => {
-        void runNative(openFileButton, async () => {
-            const file = await window.pam.dialog.openFile({
-                title: "Abrir um texto com Pam Desktop",
-                filters: [{ name: "Texto", extensions: ["txt", "md", "json"] }],
-            });
-            if (!file) {
-                nativeStatus.textContent = "Seleção cancelada.";
-                return;
-            }
-            const contents = await window.pam.fs.readText(file);
-            nativeStatus.textContent = `${file.name} · ${contents.slice(0, 90)}`;
-        });
-    });
-
-    copyButton.addEventListener("click", () => {
-        void runNative(copyButton, async () => {
-            const greeting = `Olá, ${name.value.trim() || "mundo"}!`;
-            await window.pam.clipboard.writeText(greeting);
-            nativeStatus.textContent = `Clipboard · ${greeting}`;
-        });
-    });
-
-    notifyButton.addEventListener("click", () => {
-        void runNative(notifyButton, async () => {
-            await window.pam.notification.show({
-                title: "Pam Desktop",
-                body: "PHP autorizou; Rust entregou.",
-                urgency: 2,
-            });
-            nativeStatus.textContent = "Notificação entregue ao sistema.";
-        });
-    });
-
-    updateButton.addEventListener("click", async () => {
-        updateButton.disabled = true;
-        try {
-            const update = await window.pam.updater.status();
-            updateStatus.textContent = update.state === 1
-                ? "Updater desativado. Configure Updates::from() no manifesto PHP."
-                : `Estado ${update.state} · versão atual ${update.currentVersion}`;
-        } catch (error) {
-            updateStatus.textContent = error instanceof Error
-                ? `Updater · ${error.message}`
-                : "Não foi possível consultar o updater.";
-        } finally {
-            updateButton.disabled = false;
-        }
-    });
-
-    form.addEventListener("submit", async (event) => {
-        event.preventDefault();
-        button.disabled = true;
-        button.setAttribute("aria-busy", "true");
-        setState(
-            "loading",
-            "executando no PHP",
-            "Enviando um comando tipado para o worker…",
-            "O host mantém a interface responsiva durante a operação.",
-        );
-
-        try {
-            const result = await window.pam.invoke("greet", {
-                name: name.value.trim(),
-            }, { timeout: 5_000 });
-            setState("success", "resposta recebida", result.message, result.detail);
-        } catch (error) {
-            setState(
-                "error",
-                "comando interrompido",
-                error instanceof Error ? error.message : "Não foi possível executar o comando.",
-                "Confira o worker PHP e tente novamente.",
-            );
-            response.focus();
-        } finally {
-            button.disabled = false;
-            button.removeAttribute("aria-busy");
-        }
-    });
-})();
-"##,
-    )?;
-    write_desktop_inspector(directory)?;
-    Ok(())
+    )
 }
 
 fn init_mobile(
@@ -5737,7 +3142,12 @@ Route::get('/ping', static fn (): array => ['message' => 'pong']);
     configure_laravel_manifest(directory)?;
 
     write_pam_manifest(directory, InitTemplate::Laravel, options)?;
-    print_init_success(directory, InitTemplate::Laravel, options.socket);
+    print_init_success(
+        directory,
+        InitTemplate::Laravel,
+        options.socket,
+        options.install,
+    );
     Ok(0)
 }
 
@@ -5807,33 +3217,6 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                         "pushinbr/pam-http-psr": "1.0.0",
                         "pushinbr/pam-socket": "1.1.0",
                         "pushinbr/pam-http-testing": "1.0.0"
-                    }
-                }
-            })
-        })
-}
-
-fn local_desktop_repository() -> Option<serde_json::Value> {
-    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let configured = std::env::var_os("PAM_DESKTOP_PACKAGE_PATH").map(PathBuf::from);
-    let candidates = [
-        configured,
-        Some(manifest_root.join("../pam-desktop/packages/desktop")),
-        Some(manifest_root.join("pam-desktop/packages/desktop")),
-    ];
-    candidates
-        .into_iter()
-        .flatten()
-        .find(|path| path.join("composer.json").is_file())
-        .map(|path| {
-            let path = fs::canonicalize(&path).unwrap_or(path);
-            serde_json::json!({
-                "type": "path",
-                "url": path.to_string_lossy(),
-                "options": {
-                    "symlink": false,
-                    "versions": {
-                        "pushinbr/pam-desktop": "1.2.0"
                     }
                 }
             })
@@ -5933,7 +3316,7 @@ fn run_composer_in(executable: &OsStr, directory: &Path, arguments: &[&str]) -> 
     Ok(())
 }
 
-fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
+fn print_init_success(directory: &Path, template: InitTemplate, socket: bool, installed: bool) {
     let preset = match (template, socket) {
         (InitTemplate::Raw, false) => "raw",
         (InitTemplate::Raw, true) => "raw + Socket",
@@ -5966,6 +3349,13 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
     );
     let next = if template == InitTemplate::Product {
         format!("cd {} && read README.md", directory.display())
+    } else if template == InitTemplate::Desktop && installed {
+        format!("cd {} && pam desktop dev", directory.display())
+    } else if template == InitTemplate::Desktop {
+        format!(
+            "cd {} && pam composer install && pam desktop init && pam desktop dev",
+            directory.display()
+        )
     } else if matches!(
         template,
         InitTemplate::Desktop | InitTemplate::Mobile | InitTemplate::MobileUi

@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.2.12 - 2026-11-09
+
+Fixes from a clean-room first run on Ubuntu 22.04 and 24.04.
+
+- Bundled libraries resolve through a `$ORIGIN` RUNPATH set with `patchelf`
+  instead of `LD_LIBRARY_PATH`. The variable no longer leaks into child
+  processes, so the system `curl` no longer loads PAM's libcurl and fails with
+  `undefined symbol curl_global_trace` during `pam init` and `pam self-update`,
+  and the bare `bin/pam` started by package commands finds libsodium. Packaging
+  fails closed when a bundled library does not resolve without the variable.
+- The Composer installer runs in a child `pam` process; starting PHP Embed twice
+  in one process segfaulted on Ubuntu 22.04 (`pam init`, first run).
+- `pam init --template desktop` creates a PAM Desktop 2 application
+  (`pushinbr/pam-desktop` `^2.1`): it writes the Composer manifest with the
+  `App\` autoload and scripts, installs it and runs `pam desktop init`.
+- `pam init --template product` generates its Desktop surface as a PAM Desktop 2
+  application too; the home screen reads the Server status through the shared
+  contract. The PAM Desktop 1.x (Servo web view) scaffold is gone.
+- A failed `pam init` removes the directory it created, so a retry does not
+  stop at "directory is not empty".
+- `date.timezone` defaults to the system zone (`TZ`, then the
+  `/etc/localtime` link) instead of PHP's UTC fallback; php.ini and `-d` still
+  override it.
+- Docs: PAM Desktop 2 is released; the first run goes through the PAM CLI
+  (`pam init --template desktop`, `pam desktop dev`), with notes for
+  `~/.local/bin` on `PATH`, no `php` on `PATH`, tzdata and the GTK packages.
+
 ## 2.2.11 - 2026-11-08
 
 - First published release of the 2.2.10 changes below; the `v2.2.10` tag was

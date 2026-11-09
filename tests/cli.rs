@@ -207,20 +207,6 @@ fn manager_dashboard_request(port: u16, path: &str, authorization: Option<&str>)
     response
 }
 
-fn css_hex(styles: &str, property: &str) -> [f64; 3] {
-    let prefix = format!("{property}: #");
-    let value = styles
-        .lines()
-        .map(str::trim)
-        .find_map(|line| line.strip_prefix(&prefix))
-        .and_then(|value| value.strip_suffix(';'))
-        .unwrap_or_else(|| panic!("missing CSS color token {property}"));
-    assert_eq!(value.len(), 6, "{property} must use six hexadecimal digits");
-    let channel =
-        |offset| u8::from_str_radix(&value[offset..offset + 2], 16).unwrap() as f64 / 255.0;
-    [channel(0), channel(2), channel(4)]
-}
-
 fn contrast_ratio(foreground: [f64; 3], background: [f64; 3]) -> f64 {
     let luminance = |color: [f64; 3]| {
         let linear = |channel: f64| {
@@ -2358,6 +2344,33 @@ fn accepts_php_cli_no_ini_option_for_isolated_workers() {
     );
     assert_eq!(String::from_utf8_lossy(&output.stdout), "none");
     fs::remove_file(ini).unwrap();
+}
+
+#[test]
+fn defaults_date_timezone_to_the_system_zone() {
+    let timezone = |zone: &str, extra: &[&str]| {
+        let mut arguments = vec!["-n"];
+        arguments.extend_from_slice(extra);
+        arguments.extend(["-r", "echo ini_get('date.timezone');"]);
+        let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+            .env("TZ", zone)
+            .args(&arguments)
+            .output()
+            .expect("pam should start");
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    };
+    assert_eq!(timezone("America/Sao_Paulo", &[]), "America/Sao_Paulo");
+    assert_eq!(timezone(":Europe/Lisbon", &[]), "Europe/Lisbon");
+    assert_eq!(
+        timezone("America/Sao_Paulo", &["-d", "date.timezone=UTC"]),
+        "UTC"
+    );
+    assert_ne!(timezone("../../etc/passwd", &[]), "../../etc/passwd");
 }
 
 #[test]
@@ -4636,94 +4649,37 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
     assert!(!native_component.contains("<PamUIProvider"));
     assert!(!native_component.contains("<Heading"));
     assert!(!native_component.contains("<ButtonText"));
-    assert!(
-        fs::read_to_string(directory.join("apps/desktop/app.php"))
-            .unwrap()
-            .contains("ProductSurface::Desktop")
-    );
-    let desktop_application = fs::read_to_string(directory.join("apps/desktop/app.php")).unwrap();
-    assert!(desktop_application.contains("#[Command('product.server-status')]"));
-    assert!(desktop_application.contains("#[Command('product.theme')]"));
-    assert!(desktop_application.contains("public function productTheme(int $modeCode): array"));
-    assert!(
-        desktop_application
-            .contains("dirname(__DIR__, 2).'/packages/contracts/design-tokens.json'")
-    );
-    assert!(desktop_application.contains("file_get_contents($path, false, null, 0, 32_769)"));
-    assert!(desktop_application.contains("$theme['modeCode'] !== $modeCode"));
-    assert!(desktop_application.contains("Product theme contains an invalid color."));
-    assert!(desktop_application.contains("#[Command('product.telemetry-history')]"));
-    assert!(desktop_application.contains("count($payload['samples']) > 24"));
-    assert!(desktop_application.contains("product-telemetry-v1.json"));
-    assert!(desktop_application.contains("array_slice($samples, -24)"));
-    assert!(desktop_application.contains("Desktop product telemetry history exceeds 16 KiB"));
-    assert!(desktop_application.contains("elapsedProductMilliseconds"));
-    assert!(desktop_application.contains("['127.0.0.1', 'localhost', '::1']"));
-    assert!(desktop_application.contains("$scheme !== 'https'"));
-    assert!(desktop_application.contains("strtolower($parts['scheme'])"));
-    assert!(desktop_application.contains("'follow_location' => 0"));
-    assert!(
-        desktop_application.contains("file_get_contents($endpoint, false, $context, 0, 65_537)")
-    );
-    assert!(desktop_application.contains("ProductSnapshot::fromArray($payload)"));
-    assert!(desktop_application.contains("#[Command('product.check-in')]"));
-    assert!(desktop_application.contains("#[Command('product.outbox.replay')]"));
-    assert!(desktop_application.contains("count($outbox) >= 32"));
-    assert!(desktop_application.contains("file_get_contents($path, false, null, 0, 65_537)"));
-    assert!(desktop_application.contains("fopen($temporary, 'x+b')"));
-    assert!(desktop_application.contains("fsync($handle)"));
-    assert!(desktop_application.contains("rename($temporary, $path)"));
-    let desktop_html =
-        fs::read_to_string(directory.join("apps/desktop/resources/index.html")).unwrap();
-    let desktop_styles =
-        fs::read_to_string(directory.join("apps/desktop/resources/styles.css")).unwrap();
-    let desktop_javascript =
-        fs::read_to_string(directory.join("apps/desktop/resources/app.js")).unwrap();
-    assert!(desktop_html.contains("id=\"product-refresh\""));
-    assert!(desktop_html.contains("id=\"product-version-code\""));
-    assert!(desktop_html.contains("id=\"product-check-in\""));
-    assert!(desktop_html.contains("id=\"product-outbox-status\""));
-    assert!(desktop_html.contains("aria-live=\"polite\""));
-    assert!(desktop_html.contains("role=\"status\" aria-live=\"polite\""));
-    assert!(desktop_styles.contains(".product-console button:focus-visible"));
-    assert!(desktop_styles.contains("min-height: 48px"));
-    assert!(desktop_styles.contains("@media (prefers-reduced-motion: reduce)"));
-    assert!(desktop_styles.contains("@media (max-width: 520px)"));
-    assert!(desktop_html.contains("class=\"product-console\""));
-    assert!(desktop_html.contains("id=\"product-surfaces-title\""));
-    assert!(desktop_html.contains("id=\"product-outbox-meter\""));
-    assert!(desktop_html.contains("id=\"product-history-chart\""));
-    assert!(desktop_html.contains("aria-label=\"Histórico cronológico de consultas ao Server\""));
-    assert!(desktop_html.contains("Não monitorado nesta sessão Desktop"));
-    assert!(desktop_javascript.contains("window.pam.invoke(\"product.server-status\""));
-    assert!(desktop_javascript.contains("window.pam.invoke(\"product.theme\", { modeCode }"));
-    assert!(desktop_javascript.contains("window.matchMedia(\"(prefers-color-scheme: dark)\")"));
-    assert!(desktop_javascript.contains("themeQuery.addEventListener(\"change\""));
-    assert!(
-        desktop_javascript.contains("document.documentElement.style.setProperty(property, value)")
-    );
-    assert!(
-        desktop_javascript
-            .contains("Object.keys(theme.colors).join(\",\") !== themeRoles.join(\",\")")
-    );
-    assert!(
-        desktop_styles
-            .contains("background: linear-gradient(145deg, var(--surface-raised), var(--ink))")
-    );
-    assert!(desktop_styles.contains("background: var(--surface-raised)"));
-    assert!(desktop_javascript.contains("snapshot.versionCode !== 1"));
-    assert!(desktop_javascript.contains("snapshot.surfaceCode !== 1"));
-    assert!(desktop_javascript.contains("Number.isInteger(snapshot.stateCode)"));
-    assert!(desktop_javascript.contains("window.pam.invoke(\"product.check-in\""));
-    assert!(desktop_javascript.contains("window.pam.invoke(\"product.outbox.replay\""));
-    assert!(desktop_javascript.contains("result.pendingCount > 32"));
-    assert!(desktop_javascript.contains("window.pam.invoke(\"product.telemetry-history\""));
-    assert!(desktop_javascript.contains("result.samples.length > 24"));
-    assert!(desktop_javascript.contains("Number.isSafeInteger(sample.observedAtUnixMs)"));
-    assert!(desktop_javascript.contains("historyChart.replaceChildren()"));
-    assert!(desktop_javascript.contains("availability}% operacional"));
-    assert!(desktop_javascript.contains("Intl.DateTimeFormat"));
-    assert!(desktop_javascript.contains("surface.dataset.state === \"ready\""));
+    let desktop_manifest: serde_json::Value =
+        serde_json::from_slice(&fs::read(directory.join("apps/desktop/composer.json")).unwrap())
+            .unwrap();
+    assert_eq!(desktop_manifest["require"]["pushinbr/pam-desktop"], "^2.1");
+    assert_eq!(desktop_manifest["autoload"]["psr-4"]["App\\"], "src/");
+    assert!(!directory.join("apps/desktop/app.php").exists());
+    let desktop_screen =
+        fs::read_to_string(directory.join("apps/desktop/src/Screens/Home/HomeScreen.pam.php"))
+            .unwrap();
+    assert!(desktop_screen.contains("extends Component"));
+    assert!(desktop_screen.contains("ProductSurface::Desktop"));
+    assert!(desktop_screen.contains("on:press=\"refresh\""));
+    let desktop_service =
+        fs::read_to_string(directory.join("apps/desktop/src/Services/ProductServer.php")).unwrap();
+    assert!(desktop_service.contains("ProductSnapshot::fromArray($payload)"));
+    assert!(desktop_service.contains("$snapshot->surface !== ProductSurface::Server"));
+    assert!(desktop_service.contains("'follow_location' => 0"));
+    assert!(desktop_service.contains("file_get_contents($endpoint, false, $context, 0, 65_537)"));
+    assert!(desktop_service.contains("['127.0.0.1', 'localhost', '::1']"));
+    for file in [
+        "index.php",
+        "src/Navigation/AppRouter.php",
+        "src/Navigation/AppRoute.php",
+        "src/app.css",
+        "tests/HomeScreenTest.php",
+    ] {
+        assert!(
+            directory.join("apps/desktop").join(file).is_file(),
+            "{file}"
+        );
+    }
 
     for (application, artifact, contents) in [
         ("server", "product-server.tar.gz", b"server".as_slice()),
@@ -4964,7 +4920,7 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
 }
 
 #[test]
-fn initializes_a_servo_desktop_project_with_php_commands() {
+fn initializes_a_native_desktop_project() {
     let directory = temporary_path("init-desktop");
     let output = run_pam(&[
         "init",
@@ -4980,83 +4936,21 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
-    let application = fs::read_to_string(directory.join("app.php")).unwrap();
-    let html = fs::read_to_string(directory.join("resources/index.html")).unwrap();
-    let styles = fs::read_to_string(directory.join("resources/styles.css")).unwrap();
-    let javascript = fs::read_to_string(directory.join("resources/app.js")).unwrap();
-    let inspector = fs::read_to_string(directory.join("resources/inspector.html")).unwrap();
-    let inspector_styles = fs::read_to_string(directory.join("resources/inspector.css")).unwrap();
-    let inspector_javascript =
-        fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
-
-    assert!(manifest.contains("\"pushinbr/pam-desktop\""));
-    assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.2\""));
-    assert!(manifest.contains("pam desktop build ."));
-    assert!(manifest.contains("pam desktop dev ."));
-    assert!(application.contains("final class HelloApp extends App"));
-    assert!(application.contains("#[DesktopApplication("));
-    assert!(application.contains("#[Command]"));
-    assert!(application.contains("#[Listen('client.ready')]"));
-    assert!(application.contains("ApplicationCategory::Development"));
-    assert!(application.contains("extends DesktopWindow"));
-    assert!(application.contains("Events $events"));
-    assert!(application.contains("->timeout(10_000)"));
-    assert!(application.contains("Permissions $permissions"));
-    assert!(application.contains("->filesystem('data'"));
-    assert!(application.contains("$window->title"));
-    assert!(html.contains("/_pam/bridge.js"));
-    assert!(html.contains("aria-live=\"polite\""));
-    assert!(html.contains("aria-atomic=\"true\""));
-    assert!(html.contains("runtime conectando"));
-    assert!(html.contains("NATIVE AUTHORITY · API 1"));
-    assert!(html.contains("SIGNED UPDATES · API 1"));
-    assert!(html.contains("<strong>Servo LTS</strong>"));
-    assert!(!html.contains("<strong>Servo 0."));
-    assert!(html.contains("aria-describedby=\"name-hint\""));
-    assert!(!html.contains("value=\"David\""));
-    assert!(!html.contains("CAPABILITIES 0.3"));
-    assert!(!html.contains("SIGNED UPDATES · 0.5"));
-    assert!(html.contains("IPC v6"));
-    assert!(html.contains("Native Lab"));
-    assert!(html.contains("Atualizações com rollback"));
-    assert!(styles.contains("prefers-reduced-motion"));
-    assert!(styles.contains("prefers-contrast: more"));
-    assert!(styles.contains("forced-colors: active"));
-    assert!(styles.contains(":focus-visible"));
-    assert!(styles.contains("width: min(100%, 440px)"));
-    assert!(!styles.contains("width: min(96vw, 440px)"));
-    for (foreground, background) in [
-        ("--text", "--ink"),
-        ("--text-soft", "--ink"),
-        ("--text-faint", "--ink"),
-        ("--run-ink", "--run"),
-    ] {
-        let ratio = contrast_ratio(css_hex(&styles, foreground), css_hex(&styles, background));
-        assert!(
-            ratio >= 4.5,
-            "{foreground} on {background} has insufficient contrast: {ratio:.2}:1"
-        );
-    }
-    assert!(javascript.contains("window.pam.invoke(\"greet\""));
-    assert!(javascript.contains("runtimeStatus.dataset.state = \"ready\""));
-    assert!(javascript.contains("state === \"error\" ? \"assertive\" : \"polite\""));
-    assert!(javascript.contains("document.querySelectorAll(\"button, input\")"));
-    assert!(javascript.contains("response.focus()"));
-    assert!(javascript.contains("window.pam.on(\"pam.dev.reloaded\""));
-    assert!(javascript.contains("{ timeout: 5_000 }"));
-    assert!(javascript.contains("window.pam.fs.writeText"));
-    assert!(javascript.contains("window.pam.dialog.openFile"));
-    assert!(javascript.contains("window.pam.clipboard.writeText"));
-    assert!(javascript.contains("window.pam.notification.show"));
-    assert!(javascript.contains("window.pam.on(\"pam.drag.drop\""));
-    assert!(javascript.contains("window.pam.updater.status"));
-    assert!(directory.join("storage/.gitkeep").is_file());
-    assert!(directory.join("resources/icon.svg").is_file());
-    assert!(inspector.contains("Runtime Inspector"));
-    assert!(inspector.contains("/_pam/bridge.js"));
-    assert!(inspector_styles.contains("prefers-reduced-motion"));
-    assert!(inspector_javascript.contains("window.pam.windowId"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["require"]["pushinbr/pam-desktop"], "^2.1");
+    assert_eq!(manifest["autoload"]["psr-4"]["App\\"], "src/");
+    assert_eq!(manifest["scripts"]["start"], "pam-desktop run");
+    // The application skeleton is written by `pam desktop init` after the
+    // install, so the 1.x web view files must be gone.
+    assert!(!directory.join("app.php").exists());
+    assert!(!directory.join("resources/index.html").exists());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("pam composer install && pam desktop init && pam desktop dev"),
+        "{stdout}"
+    );
 
     let invalid = run_pam(&[
         "init",

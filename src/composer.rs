@@ -179,14 +179,17 @@ fn install_composer(executable: &OsStr, target: &Path) -> Result<(), String> {
         signature.as_os_str().to_os_string(),
         installer.as_os_str().to_os_string(),
     ];
-    // SAFETY: Bootstrap owns the single-threaded Embed lifecycle.
-    unsafe { env::set_var("PAM_COMPOSER_MODE", "1") };
-    let result = (|| {
-        let mut runtime = PhpRuntime::initialize(executable, &bootstrap, &arguments)?;
-        runtime.execute_file(&bootstrap)
-    })();
-    // SAFETY: See the set_var safety note above.
-    unsafe { env::remove_var("PAM_COMPOSER_MODE") };
+    // The installer runs in a child PAM process: Composer itself runs in this
+    // process right after, and a second PHP Embed start-up in one process
+    // crashed intermittently (segmentation fault on a fresh Ubuntu 22.04).
+    let program = env::current_exe().unwrap_or_else(|_| PathBuf::from(executable));
+    let result = Command::new(program)
+        .arg(&bootstrap)
+        .args(&arguments)
+        .env("PAM_COMPOSER_MODE", "1")
+        .status()
+        .map_err(|error| format!("cannot run the Composer bootstrap: {error}"))
+        .map(|status| u8::try_from(status.code().unwrap_or(1)).unwrap_or(1));
     let _ = fs::remove_file(&bootstrap);
     let _ = fs::remove_file(&signature);
     let _ = fs::remove_file(&installer);
