@@ -44,6 +44,16 @@ final class PamServer
         $worker = new Worker(new ApplicationFactory($this->basePath), $this->client);
         $worker->boot();
 
+        $staticFiles = $options['serveStaticFiles'] ?? true;
+        unset($options['serveStaticFiles'], $options['staticFileHeaders']);
+        if ($staticFiles === true) {
+            $application = $worker->application();
+            $this->client->serveStaticFilesFrom(
+                $application->publicPath(),
+                self::staticFileHeaders($application->make('config')),
+            );
+        }
+
         try {
             // Registers the handler; PAM starts serving after this script
             // returns, so the worker must stay alive past this call.
@@ -64,6 +74,27 @@ final class PamServer
         register_shutdown_function(static function () use ($worker): void {
             $worker->terminate();
         });
+    }
+
+    /** @return array<string, array<string, string>> */
+    private static function staticFileHeaders(mixed $config): array
+    {
+        $configured = $config instanceof \Illuminate\Contracts\Config\Repository
+            ? $config->get('pam-octane.static_file_headers', [])
+            : [];
+        $headers = [];
+        foreach (is_array($configured) ? $configured : [] as $pattern => $values) {
+            if (!is_string($pattern) || !is_array($values)) {
+                continue;
+            }
+            foreach ($values as $name => $value) {
+                if (is_string($name) && is_string($value)) {
+                    $headers[$pattern][$name] = $value;
+                }
+            }
+        }
+
+        return $headers;
     }
 
     private function assertPamRuntime(): void

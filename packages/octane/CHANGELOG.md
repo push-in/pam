@@ -4,6 +4,12 @@ All notable changes to PAM Octane will be documented here.
 
 ## Unreleased
 
+- Fix: files in `public/` (Vite builds, `robots.txt`, the `storage:link`
+  symlink) returned Laravel's 404. PamClient now implements Octane's
+  `ServesStaticFiles` like the Swoole client, with MIME types, ETag/304,
+  Range requests and `static_file_headers`; PHP sources, dotfiles and paths
+  outside `public/` (other than the storage symlink) are never served.
+  Disable with `PAM_SERVE_STATIC_FILES=false` when a proxy serves them.
 - Fix: any streamed response (`response()->stream()`, SSE, `download()`,
   `streamDownload()`) poisoned the worker; every later request answered 500.
 - Fix: generator callbacks from `response()->stream()` (Laravel keeps them

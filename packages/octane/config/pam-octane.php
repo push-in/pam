@@ -6,7 +6,14 @@ return [
     'host' => env('PAM_HOST', '127.0.0.1'),
     'port' => (int) env('PAM_PORT', 8000),
 
+    // Headers added to static files served from public/, by path pattern.
+    'static_file_headers' => [
+        // 'build/*' => ['Cache-Control' => 'public, max-age=31536000, immutable'],
+    ],
+
     'server' => [
+        // Serve files from public/ (Vite builds, robots.txt, storage:link).
+        'serveStaticFiles' => (bool) env('PAM_SERVE_STATIC_FILES', true),
         'maxBodyBytes' => (int) env('PAM_MAX_BODY_BYTES', 2 * 1024 * 1024),
         'maxHeaderBytes' => (int) env('PAM_MAX_HEADER_BYTES', 32 * 1024),
         'maxHeaders' => (int) env('PAM_MAX_HEADERS', 100),
