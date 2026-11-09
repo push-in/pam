@@ -27,7 +27,7 @@ class CommunityExperienceGateTest(unittest.TestCase):
         self.assertIn('exec setsid "${pam_bin}" dev .', script)
         self.assertIn("stop_dev", script)
         self.assertIn("report_error", script)
-        self.assertIn("android-logcat.txt", script)
+        self.assertIn('local logcat_file=${gate_root}/$(basename "${directory}")-android-logcat.txt', script)
         self.assertIn("screenshot attempt", script)
         self.assertIn("Android launch proven", script)
         self.assertIn("parse-system-anr-wait.py", script)
@@ -62,6 +62,7 @@ class CommunityExperienceGateTest(unittest.TestCase):
 
         self.assertEqual(parse("Quickstep isn't responding"), "200 230")
         self.assertEqual(parse("Pixel Launcher isn't responding"), "200 230")
+        self.assertEqual(parse("System UI isn't responding"), "200 230")
         self.assertEqual(parse("PAM Native isn't responding"), "")
         self.assertEqual(parse("Quickstep isn't responding", "dev.pam.app"), "")
 

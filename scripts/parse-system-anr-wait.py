@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Return the center of a system launcher ANR's Wait button, if present."""
+"""Return the center of a system (launcher or System UI) ANR's Wait button, if present."""
 
 import re
 import sys
@@ -18,6 +18,7 @@ def wait_point(dump: str) -> tuple[int, int] | None:
     launcher_titles = {
         "Quickstep isn't responding",
         "Pixel Launcher isn't responding",
+        "System UI isn't responding",
     }
     if not any(
         node.get("package") == "android"
