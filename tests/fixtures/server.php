@@ -115,6 +115,37 @@ $app->post('/upload', static fn (Request $request, Response $response): Response
         ? file_get_contents($_FILES['document']['tmp_name'])
         : null,
 ]));
+$app->post('/upload-stream', static function (Request $request, Response $response): Response {
+    $file = $_FILES['document'] ?? [];
+    $temporary = is_string($file['tmp_name'] ?? null) ? $file['tmp_name'] : '';
+    $result = [
+        'size' => $file['size'] ?? null,
+        'error' => $file['error'] ?? null,
+        'tmp' => $temporary,
+        'uploaded' => $temporary !== '' && is_uploaded_file($temporary),
+        'input' => strlen((string) file_get_contents('php://input')),
+        'sha256' => $temporary !== '' ? hash_file('sha256', $temporary) : null,
+        'moved' => false,
+    ];
+    if (($_POST['move'] ?? '') === '1' && $result['uploaded']) {
+        $target = sys_get_temp_dir() . '/pam-moved-' . bin2hex(random_bytes(6));
+        $result['moved'] = move_uploaded_file($temporary, $target);
+        $result['sha256'] = hash_file('sha256', $target);
+        $result['uploadedAfterMove'] = is_uploaded_file($temporary);
+        unlink($target);
+    }
+    return $response->json($result);
+});
+$app->post('/upload-nested', static fn (Request $request, Response $response): Response => $response->json([
+    'post' => $_POST,
+    'names' => $_FILES['photos']['name'] ?? null,
+    'sizes' => $_FILES['photos']['size'] ?? null,
+    'contents' => array_map(
+        static fn (string $path): string => (string) file_get_contents($path),
+        $_FILES['photos']['tmp_name'] ?? [],
+    ),
+    'avatar' => $_FILES['profile']['name']['avatar'] ?? null,
+]));
 $app->get('/session', static function (Request $request, Response $response): Response {
     session_start();
     $_SESSION['visits'] = (int) ($_SESSION['visits'] ?? 0) + 1;
@@ -268,6 +299,15 @@ $app->get('/abandon-async', static function (Request $request, Response $respons
     \Pam\Async\FiberContext::set('request-object', new stdClass());
     return $response->send('scheduled');
 });
+$app->get('/engine-fatal', static function (Request $request, Response $response): Response {
+    // A real engine fatal (not an exception): PHP bails out of the request.
+    ini_set('memory_limit', '32M');
+    $blocks = [];
+    while (true) {
+        $blocks[] = str_repeat('x', 1024 * 1024);
+    }
+});
+
 $app->get('/runtime-state', static fn (Request $request, Response $response): Response => $response->json([
     'fibers' => \Pam\Async\Scheduler::pendingCount(),
     'context' => \Pam\Async\FiberContext::get('request-object'),

@@ -24,6 +24,11 @@ const SIGTERM: i32 = 15;
 const SIGKILL: i32 = 9;
 const DEFAULT_MAX_REQUESTS: u64 = 10_000_000;
 const MAX_RESTART_BACKOFF: Duration = Duration::from_secs(30);
+/// A worker answers a request stuck past its deadline with 504 by itself and
+/// asks to be recycled; the master only kills a worker that failed to do so
+/// within this allowance (plus `--watchdog-grace`), e.g. a fully hung process.
+const WORKER_SELF_TIMEOUT_ALLOWANCE_MILLIS: u64 = 1_000;
+static NEXT_INCARNATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
@@ -267,6 +272,26 @@ struct Worker {
     started: Instant,
     consecutive_failures: u32,
     pool: Option<RuntimePool>,
+    retry_replacement_after: Option<Instant>,
+}
+
+impl Drop for Worker {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.state_path);
+    }
+}
+
+/// A replacement booting next to a worker that asked to be recycled. The old
+/// worker keeps serving until the replacement reports ready (make-before-break).
+struct Replacement {
+    replaces: u32,
+    worker: Worker,
+}
+
+/// A worker that was replaced and is draining its in-flight requests.
+struct Retiring {
+    worker: Worker,
+    deadline: Instant,
 }
 
 #[derive(Clone, Debug)]
@@ -436,7 +461,9 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
         .as_deref()
         .map(|path| MasterStateFile::create(path, &options, control_plane.as_ref(), &workers))
         .transpose()?;
-    let mut checks = tokio::time::interval(Duration::from_millis(200));
+    let mut warming: Vec<Replacement> = Vec::new();
+    let mut retiring: Vec<Retiring> = Vec::new();
+    let mut checks = tokio::time::interval(Duration::from_millis(100));
     checks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     #[cfg(unix)]
@@ -472,6 +499,8 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                     Ok(()) => {
                         generation = next_generation;
                         set_cluster_health(&snapshot, true, true, generation, &replacements);
+                        workers.extend(warming.drain(..).map(|replacement| replacement.worker));
+                        workers.extend(retiring.drain(..).map(|retiring| retiring.worker));
                         terminate_workers(&mut workers, options.graceful_timeout).await;
                         workers = replacements;
                         eprintln!("Pam master activated worker generation {generation}");
@@ -503,28 +532,36 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                         .map_err(|error| format!("cannot inspect worker: {error}"))?;
                     if let Some(status) = status {
                         let failed = workers.remove(index);
+                        if warming
+                            .iter()
+                            .any(|replacement| replacement.replaces == failed.process.id())
+                        {
+                            // Its replacement is already booting and takes the
+                            // slot as soon as it is ready.
+                            eprintln!(
+                                "pam: worker {} generation {} exited with {} while its replacement boots",
+                                failed.id, failed.generation, status,
+                            );
+                            continue;
+                        }
                         eprintln!(
                             "pam: worker {} generation {} exited with {}; restarting",
                             failed.id, failed.generation, status,
                         );
-                        let failures = if failed.started.elapsed() >= Duration::from_secs(60) {
-                            1
-                        } else {
-                            failed.consecutive_failures.saturating_add(1)
-                        };
-                        let multiplier = 1_u32 << failures.saturating_sub(1).min(8);
-                        let backoff = options
-                            .restart_backoff
-                            .saturating_mul(multiplier)
-                            .min(MAX_RESTART_BACKOFF);
-                        tokio::time::sleep(backoff).await;
-                        #[cfg(target_os = "linux")]
-                        let zygote = failed
-                            .process
-                            .zygote()
-                            .filter(|zygote| zygote.borrow_mut().is_running());
-                        #[cfg(not(target_os = "linux"))]
-                        let zygote: Option<SharedZygote> = None;
+                        let failures = restart_failures(
+                            status.success(),
+                            failed.started.elapsed(),
+                            failed.consecutive_failures,
+                        );
+                        if failures > 0 {
+                            let multiplier = 1_u32 << failures.saturating_sub(1).min(8);
+                            let backoff = options
+                                .restart_backoff
+                                .saturating_mul(multiplier)
+                                .min(MAX_RESTART_BACKOFF);
+                            tokio::time::sleep(backoff).await;
+                        }
+                        let zygote = live_zygote(&failed);
                         workers.push(launch_worker(
                             executable,
                             &options,
@@ -535,14 +572,108 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             failed.pool.clone(),
                             zygote.as_ref(),
                         )?);
+                        continue;
+                    }
+                    // Make-before-break recycling: a worker that reached
+                    // --max-requests (or whose PHP engine is wedged) keeps
+                    // serving while its replacement boots.
+                    let pid = workers[index].process.id();
+                    let wants_recycle = worker_record(&workers[index])
+                        .is_some_and(|record| record.recycle_requested);
+                    if wants_recycle
+                        && !warming.iter().any(|replacement| replacement.replaces == pid)
+                        && workers[index]
+                            .retry_replacement_after
+                            .is_none_or(|after| Instant::now() >= after)
+                    {
+                        let zygote = live_zygote(&workers[index]);
+                        let replacement = launch_worker(
+                            executable,
+                            &options,
+                            workers[index].id,
+                            workers[index].generation,
+                            runtime_directory.path(),
+                            0,
+                            workers[index].pool.clone(),
+                            zygote.as_ref(),
+                        )?;
+                        warming.push(Replacement { replaces: pid, worker: replacement });
                     }
                 }
+
+                for index in (0..warming.len()).rev() {
+                    let exited = warming[index]
+                        .worker
+                        .process
+                        .try_wait()
+                        .map_err(|error| format!("cannot inspect worker: {error}"))?;
+                    let ready = exited.is_none()
+                        && worker_record(&warming[index].worker).is_some_and(|record| {
+                            matches!(
+                                record.lifecycle(),
+                                Ok(WorkerLifecycle::Ready | WorkerLifecycle::Busy)
+                            )
+                        });
+                    if ready {
+                        let Replacement { replaces, worker } = warming.remove(index);
+                        if let Some(position) =
+                            workers.iter().position(|old| old.process.id() == replaces)
+                        {
+                            let mut old = workers.remove(position);
+                            old.process.signal(SIGTERM);
+                            retiring.push(Retiring {
+                                worker: old,
+                                deadline: Instant::now() + options.graceful_timeout,
+                            });
+                        }
+                        workers.push(worker);
+                        continue;
+                    }
+                    let timed_out = warming[index].worker.started.elapsed() >= options.startup_timeout;
+                    if exited.is_some() || timed_out {
+                        let mut failed = warming.remove(index);
+                        eprintln!(
+                            "pam: replacement for worker {} generation {} failed to start ({}); the current worker keeps serving",
+                            failed.worker.id,
+                            failed.worker.generation,
+                            exited.map_or_else(|| "startup timeout".to_owned(), |status| status.to_string()),
+                        );
+                        if exited.is_none() {
+                            failed.worker.process.kill();
+                            let _ = failed.worker.process.wait();
+                        }
+                        let retry = Instant::now() + options.restart_backoff.max(Duration::from_secs(1));
+                        if let Some(old) = workers
+                            .iter_mut()
+                            .find(|old| old.process.id() == failed.replaces)
+                        {
+                            old.retry_replacement_after = Some(retry);
+                        } else {
+                            // The old worker is gone too: start a plain replacement.
+                            let zygote = live_zygote(&failed.worker);
+                            workers.push(launch_worker(
+                                executable,
+                                &options,
+                                failed.worker.id,
+                                generation,
+                                runtime_directory.path(),
+                                1,
+                                failed.worker.pool.clone(),
+                                zygote.as_ref(),
+                            )?);
+                        }
+                    }
+                }
+
+                reap_retiring(&mut retiring);
                 set_cluster_health(&snapshot, true, true, generation, &workers);
             }
         }
     }
 
     set_cluster_health(&snapshot, true, false, generation, &workers);
+    workers.extend(warming.drain(..).map(|replacement| replacement.worker));
+    workers.extend(retiring.drain(..).map(|retiring| retiring.worker));
     terminate_workers(&mut workers, options.graceful_timeout).await;
     if let Some(ingress) = ingress {
         ingress.stop().await;
@@ -758,7 +889,12 @@ fn worker_environment(
     runtime_directory: &Path,
     pool: Option<&RuntimePool>,
 ) -> Result<WorkerEnvironment, String> {
-    let state_path = runtime_directory.join(format!("worker-{id}-generation-{generation}.json"));
+    // A make-before-break replacement shares the id and generation of the
+    // worker it replaces while both run, so each incarnation has its own file.
+    let incarnation = NEXT_INCARNATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let state_path = runtime_directory.join(format!(
+        "worker-{id}-generation-{generation}-{incarnation}.json"
+    ));
     if let Err(error) = fs::remove_file(&state_path)
         && error.kind() != std::io::ErrorKind::NotFound
     {
@@ -862,6 +998,7 @@ fn launch_worker(
         started: Instant::now(),
         consecutive_failures,
         pool,
+        retry_replacement_after: None,
     })
 }
 
@@ -885,8 +1022,26 @@ fn prepare_pools(options: &StartOptions) -> Result<Vec<RuntimePool>, String> {
         .collect()
 }
 
+/// Consecutive-failure count used for restart backoff. A worker that exits
+/// successfully was recycled on purpose (`--max-requests` or a fatal-error
+/// recycle) and is replaced immediately: backing off there would take
+/// capacity away exactly when busy workers recycle, and the delay grows with
+/// traffic because busy workers recycle sooner.
+fn restart_failures(clean_exit: bool, uptime: Duration, previous_failures: u32) -> u32 {
+    if clean_exit {
+        0
+    } else if uptime >= Duration::from_secs(60) {
+        1
+    } else {
+        previous_failures.saturating_add(1)
+    }
+}
+
 fn staggered_max_requests(options: &StartOptions, worker_id: usize) -> u64 {
-    if options.workers <= 1 || options.max_requests < 1_000 {
+    // Always stagger: with small limits (Octane's default is 500) evenly
+    // balanced workers would otherwise reach the limit together and recycle at
+    // the same moment, leaving no listener and refusing connections.
+    if options.workers <= 1 {
         return options.max_requests;
     }
     let spread = options.max_requests / 4;
@@ -1060,13 +1215,52 @@ fn worker_record(worker: &Worker) -> Option<WorkerRuntimeRecord> {
         })
 }
 
+#[cfg(target_os = "linux")]
+fn live_zygote(worker: &Worker) -> Option<SharedZygote> {
+    worker
+        .process
+        .zygote()
+        .filter(|zygote| zygote.borrow_mut().is_running())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn live_zygote(_worker: &Worker) -> Option<SharedZygote> {
+    None
+}
+
+/// Forgets retired workers that exited and kills those that outlived the
+/// graceful timeout.
+fn reap_retiring(retiring: &mut Vec<Retiring>) {
+    retiring.retain_mut(|entry| {
+        if entry.worker.process.try_wait().ok().flatten().is_some() {
+            return false;
+        }
+        if Instant::now() >= entry.deadline {
+            eprintln!(
+                "pam: retired worker {} generation {} did not drain in time; killing it",
+                entry.worker.id, entry.worker.generation,
+            );
+            entry.worker.process.kill();
+            let _ = entry.worker.process.wait();
+            return false;
+        }
+        true
+    });
+}
+
 fn worker_timed_out(worker: &Worker, grace: Duration) -> bool {
     worker_record(worker).is_some_and(|record| {
         let now = epoch_millis();
-        record.lifecycle().ok() == Some(WorkerLifecycle::Busy)
-            && record
-                .deadline_at_millis
-                .is_some_and(|deadline| now >= deadline.saturating_add(grace.as_millis() as u64))
+        // A worker that asked to be recycled already answered its stuck
+        // request with 504 itself; it is replaced make-before-break and then
+        // killed if it does not drain in time.
+        !record.recycle_requested
+            && record.lifecycle().ok() == Some(WorkerLifecycle::Busy)
+            && record.deadline_at_millis.is_some_and(|deadline| {
+                now >= deadline
+                    .saturating_add(grace.as_millis() as u64)
+                    .saturating_add(WORKER_SELF_TIMEOUT_ALLOWANCE_MILLIS)
+            })
     })
 }
 
@@ -1306,6 +1500,29 @@ mod tests {
 
         assert_eq!(staggered_max_requests(&options, 1), 10_000_000);
         assert_eq!(staggered_max_requests(&options, 4), 12_500_000);
+    }
+
+    #[test]
+    fn planned_recycles_restart_without_backoff_and_crashes_back_off() {
+        assert_eq!(restart_failures(true, Duration::from_millis(500), 7), 0);
+        assert_eq!(restart_failures(false, Duration::from_millis(500), 0), 1);
+        assert_eq!(restart_failures(false, Duration::from_millis(500), 3), 4);
+        assert_eq!(restart_failures(false, Duration::from_secs(61), 3), 1);
+    }
+
+    #[test]
+    fn small_recycle_limits_are_staggered_so_workers_never_recycle_together() {
+        let mut options = StartOptions::parse(std::iter::empty()).unwrap();
+        options.workers = 4;
+        options.max_requests = 500;
+
+        let limits = (1..=4)
+            .map(|worker| staggered_max_requests(&options, worker))
+            .collect::<Vec<_>>();
+        assert_eq!(limits, vec![500, 541, 583, 625]);
+
+        options.workers = 1;
+        assert_eq!(staggered_max_requests(&options, 1), 500);
     }
 
     #[test]

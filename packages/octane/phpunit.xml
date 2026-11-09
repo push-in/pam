@@ -12,6 +12,11 @@
             <exclude>tests/Fixtures</exclude>
         </testsuite>
     </testsuites>
+    <php>
+        <!-- PAM runs PHPUnit through the Embed SAPI; Laravel only detects
+             the console automatically for the cli/phpdbg SAPIs. -->
+        <env name="APP_RUNNING_IN_CONSOLE" value="true"/>
+    </php>
     <source>
         <include>
             <directory>src</directory>

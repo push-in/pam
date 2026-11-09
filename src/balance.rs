@@ -138,8 +138,13 @@ impl Balancer {
     /// it stays here, or `None` after it was handed to a less loaded sibling.
     pub fn place(&self, stream: TcpStream) -> Option<(TcpStream, ConnectionGuard)> {
         let own = self.slots[self.slot].connections.load(Ordering::Relaxed);
+        // A draining worker (recycle or reload) still accepts from its
+        // SO_REUSEPORT queue during the quiesce window. Serving those here
+        // would cut them at the graceful shutdown that follows, so they go to
+        // a sibling that keeps serving.
+        let draining = self.slots[self.slot].accepting.load(Ordering::Acquire) == 0;
         if let Some((sibling, pid, load)) = self.least_loaded_sibling()
-            && own >= load.saturating_add(HANDOFF_THRESHOLD)
+            && (draining || own >= load.saturating_add(HANDOFF_THRESHOLD))
         {
             if process_alive(pid) {
                 // Count the connection before it is in flight so concurrent
@@ -472,89 +477,16 @@ fn socket_path(directory: &Path, generation: u64, slot: usize) -> PathBuf {
     directory.join(format!("balance-{generation}-{slot}.sock"))
 }
 
-/// `axum_server` acceptor that applies [`Balancer::place`] to new connections.
-#[derive(Clone)]
-pub struct BalancingAcceptor {
-    balancer: Option<Arc<Balancer>>,
-}
+pub use crate::http_serve::{ConnectionTracker as HandOffTracker, HttpSettings as HandOffHttp};
 
-impl BalancingAcceptor {
-    pub fn new(balancer: Option<Arc<Balancer>>) -> Self {
-        Self { balancer }
-    }
-}
-
-impl<S> axum_server::accept::Accept<TcpStream, S> for BalancingAcceptor {
-    type Stream = TrackedStream;
-    type Service = S;
-    type Future = std::future::Ready<io::Result<(TrackedStream, S)>>;
-
-    fn accept(&self, stream: TcpStream, service: S) -> Self::Future {
-        let placed = match &self.balancer {
-            Some(balancer) => balancer.place(stream),
-            None => Some((stream, ConnectionGuard::untracked())),
-        };
-        std::future::ready(match placed {
-            Some((stream, guard)) => Ok((TrackedStream::new(stream, guard), service)),
-            None => Err(io::Error::other("connection handed to a sibling worker")),
-        })
-    }
-}
-
-/// Counts handed-off connections still being served so shutdown can wait.
-#[derive(Clone, Default)]
-pub struct HandOffTracker {
-    inner: Arc<(std::sync::atomic::AtomicUsize, tokio::sync::Notify)>,
-}
-
-pub struct HandOffActive {
-    inner: Arc<(std::sync::atomic::AtomicUsize, tokio::sync::Notify)>,
-}
-
-impl HandOffTracker {
-    pub fn begin(&self) -> HandOffActive {
-        self.inner.0.fetch_add(1, Ordering::AcqRel);
-        HandOffActive {
-            inner: self.inner.clone(),
-        }
-    }
-
-    /// Waits until every handed-off connection finished or `timeout` elapses.
-    pub async fn wait_idle(&self, timeout: std::time::Duration) {
-        let _ = tokio::time::timeout(timeout, async {
-            loop {
-                let notified = self.inner.1.notified();
-                if self.inner.0.load(Ordering::Acquire) == 0 {
-                    return;
-                }
-                notified.await;
-            }
-        })
-        .await;
-    }
-}
-
-impl Drop for HandOffActive {
-    fn drop(&mut self) {
-        if self.inner.0.fetch_sub(1, Ordering::AcqRel) == 1 {
-            self.inner.1.notify_waiters();
-        }
-    }
-}
-
-/// HTTP settings shared with the connections `axum_server` accepts itself.
-#[derive(Clone, Copy)]
-pub struct HandOffHttp {
-    pub header_read_timeout: std::time::Duration,
-    pub graceful_timeout: std::time::Duration,
-}
-
-/// Receives sockets handed over by siblings and serves them with `app`.
+/// Receives sockets handed over by siblings and serves them with `app`. When
+/// the worker starts draining, the inbox is withdrawn so siblings stop
+/// choosing this worker; whatever was already queued is still served.
 pub fn spawn_receiver(
     socket: UnixDatagram,
     balancer: Arc<Balancer>,
     app: axum::Router,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    drain: Arc<crate::http_serve::Drain>,
     http: HandOffHttp,
     tracker: HandOffTracker,
 ) {
@@ -566,6 +498,7 @@ pub fn spawn_receiver(
         let Ok(socket) = tokio::net::UnixDatagram::from_std(socket) else {
             return;
         };
+        let mut draining = drain.subscribe();
         loop {
             let stopping = tokio::select! {
                 ready = socket.readable() => {
@@ -574,22 +507,20 @@ pub fn spawn_receiver(
                     }
                     false
                 }
-                _ = stopped(&mut shutdown) => true,
+                _ = crate::http_serve::raised(&mut draining) => true,
             };
             if stopping {
                 // Siblings stop choosing this worker and late sends fail on
                 // the sender, which then serves the connection itself.
                 balancer.close_inbox();
             }
-            drain_inbox(
-                &socket, &balancer, &app, &shutdown, http, &tracker, stopping,
-            );
+            drain_inbox(&socket, &balancer, &app, &drain, http, &tracker);
             if stopping {
                 // A sibling may have resolved the socket name just before it was
                 // removed; give such a send time to land, then drain once more
                 // so nothing queued is closed (and reset) with the socket.
                 tokio::time::sleep(LATE_SEND_GRACE).await;
-                drain_inbox(&socket, &balancer, &app, &shutdown, http, &tracker, true);
+                drain_inbox(&socket, &balancer, &app, &drain, http, &tracker);
                 return;
             }
         }
@@ -603,10 +534,9 @@ fn drain_inbox(
     socket: &tokio::net::UnixDatagram,
     balancer: &Arc<Balancer>,
     app: &axum::Router,
-    shutdown: &tokio::sync::watch::Receiver<bool>,
+    drain: &Arc<crate::http_serve::Drain>,
     http: HandOffHttp,
     tracker: &HandOffTracker,
-    late: bool,
 ) {
     loop {
         match socket.try_io(tokio::io::Interest::READABLE, || {
@@ -616,10 +546,9 @@ fn drain_inbox(
                 stream,
                 balancer.received(),
                 app.clone(),
-                shutdown.clone(),
+                drain.clone(),
                 http,
                 tracker.begin(),
-                late,
             ),
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
@@ -639,12 +568,10 @@ fn serve_handed_off(
     stream: std::net::TcpStream,
     guard: ConnectionGuard,
     app: axum::Router,
-    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    drain: Arc<crate::http_serve::Drain>,
     http: HandOffHttp,
-    active: HandOffActive,
-    late: bool,
+    active: crate::http_serve::ActiveConnection,
 ) {
-    use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
     tokio::spawn(async move {
         let _active = active;
         if stream.set_nonblocking(true).is_err() {
@@ -656,44 +583,15 @@ fn serve_handed_off(
         let Ok(remote) = stream.peer_addr() else {
             return;
         };
-        let service = hyper_util::service::TowerToHyperService::new(
-            app.layer(axum::Extension(axum::extract::ConnectInfo(remote))),
-        );
-        let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
-        builder
-            .http1()
-            .timer(TokioTimer::new())
-            .header_read_timeout(http.header_read_timeout)
-            // A connection received while draining serves one request and
-            // closes instead of being cut before its first response.
-            .keep_alive(!late);
-        builder
-            .http2()
-            .timer(TokioTimer::new())
-            .keep_alive_interval(Some(std::time::Duration::from_secs(15)))
-            .keep_alive_timeout(std::time::Duration::from_secs(10));
-        let connection = builder.serve_connection_with_upgrades(
-            TokioIo::new(TrackedStream::new(stream, guard)),
-            service,
-        );
-        tokio::pin!(connection);
-        if late {
-            let _ = tokio::time::timeout(http.graceful_timeout, connection.as_mut()).await;
-            return;
-        }
-        tokio::select! {
-            _ = connection.as_mut() => {}
-            _ = stopped(&mut shutdown) => {
-                connection.as_mut().graceful_shutdown();
-                let _ = tokio::time::timeout(http.graceful_timeout, connection).await;
-            }
-        }
+        crate::http_serve::serve_connection(
+            TrackedStream::new(stream, guard),
+            remote,
+            app,
+            drain,
+            http,
+        )
+        .await;
     });
-}
-
-/// Resolves once the worker starts draining, without holding the watch guard.
-async fn stopped(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
-    let _ = shutdown.wait_for(|stopping| *stopping).await;
 }
 
 #[cfg(test)]
@@ -804,14 +702,20 @@ mod tests {
         send_descriptor(balancer.sender.as_raw_fd(), &path, accepted.as_raw_fd()).unwrap();
         drop(accepted);
 
-        let (shutdown, receiver) = tokio::sync::watch::channel(true);
+        let drain = crate::http_serve::Drain::new();
+        drain.start();
         let tracker = HandOffTracker::default();
-        let app = axum::Router::new().route("/", axum::routing::get(|| async { "served" }));
+        let app = axum::Router::new()
+            .route("/", axum::routing::get(|| async { "served" }))
+            .layer(axum::middleware::from_fn_with_state(
+                drain.clone(),
+                crate::http_serve::close_when_draining,
+            ));
         spawn_receiver(
             inbox,
             balancer.clone(),
             app,
-            receiver,
+            drain,
             HandOffHttp {
                 header_read_timeout: std::time::Duration::from_secs(5),
                 graceful_timeout: std::time::Duration::from_secs(5),
@@ -833,7 +737,10 @@ mod tests {
         tracker.wait_idle(std::time::Duration::from_secs(5)).await;
         assert_eq!(slots[1].connections.load(Ordering::Relaxed), 0);
         assert!(!path.exists(), "the inbox name is removed while draining");
-        drop(shutdown);
+        assert!(
+            response.to_ascii_lowercase().contains("connection: close"),
+            "{response}"
+        );
         drop(balancer);
         std::fs::remove_dir_all(&directory).unwrap();
     }

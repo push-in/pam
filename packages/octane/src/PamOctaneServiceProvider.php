@@ -22,9 +22,13 @@ final class PamOctaneServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        if ($this->app->runningInConsole()) {
-            $this->commands([StartPamOctaneCommand::class]);
+        // Registered unconditionally: Laravel only detects the console for
+        // the cli/phpdbg SAPIs, while PAM runs Artisan through the Embed SAPI
+        // (for example under `pam dev artisan pam:octane`). Registration is
+        // lazy (Artisan::starting), so HTTP workers pay nothing for it.
+        $this->commands([StartPamOctaneCommand::class]);
 
+        if ($this->app->runningInConsole()) {
             $this->publishes([
                 __DIR__.'/../config/pam-octane.php' => config_path('pam-octane.php'),
             ], 'pam-octane-config');

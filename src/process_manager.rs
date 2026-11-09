@@ -3206,6 +3206,44 @@ fn ensure_daemon(executable: &OsStr) -> Result<(), String> {
     start_daemon(executable).map(|_| ())
 }
 
+/// Marks every descriptor above stderr close-on-exec. Async-signal-safe: it is
+/// called between fork and exec.
+fn mark_inherited_descriptors_cloexec() {
+    #[cfg(target_os = "linux")]
+    {
+        const CLOSE_RANGE_CLOEXEC: libc::c_uint = 1 << 2;
+        // SAFETY: close_range only changes descriptor flags of this process.
+        let marked = unsafe {
+            libc::syscall(
+                libc::SYS_close_range,
+                3 as libc::c_uint,
+                libc::c_uint::MAX,
+                CLOSE_RANGE_CLOEXEC,
+            )
+        };
+        if marked == 0 {
+            return;
+        }
+    }
+    // SAFETY: sysconf and fcntl are async-signal-safe.
+    let limit = unsafe { libc::sysconf(libc::_SC_OPEN_MAX) };
+    let limit = if limit <= 0 {
+        1024
+    } else {
+        limit.min(65_536) as libc::c_int
+    };
+    for descriptor in 3..limit {
+        // SAFETY: querying or updating flags of a possibly-closed descriptor
+        // is harmless; EBADF is ignored.
+        unsafe {
+            let flags = libc::fcntl(descriptor, libc::F_GETFD);
+            if flags >= 0 {
+                libc::fcntl(descriptor, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+            }
+        }
+    }
+}
+
 fn start_daemon(executable: &OsStr) -> Result<DaemonResponse, String> {
     let paths = ManagerPaths::load()?;
     let stderr = secure_append(&paths.logs.join("pamd.error.log"))?;
@@ -3220,10 +3258,14 @@ fn start_daemon(executable: &OsStr) -> Result<DaemonResponse, String> {
     unsafe {
         command.pre_exec(|| {
             if libc::setsid() < 0 {
-                Err(std::io::Error::last_os_error())
-            } else {
-                Ok(())
+                return Err(std::io::Error::last_os_error());
             }
+            // pamd outlives the command that started it. Descriptors the
+            // caller leaked without CLOEXEC (for example PHP's STDOUT/STDERR
+            // stream duplicates) would otherwise keep the caller's pipes open
+            // forever, hanging `pam octane:start | tee` and CI log capture.
+            mark_inherited_descriptors_cloexec();
+            Ok(())
         })
     };
     command
@@ -3604,6 +3646,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut name = None;
     let mut target = None;
     let mut workers = None;
+    let mut max_requests = None;
     let mut attach = false;
     let mut json = false;
     let mut log_max_bytes = DEFAULT_LOG_MAX_BYTES;
@@ -3632,6 +3675,9 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         match argument.to_string_lossy().as_ref() {
             "--name" => name = Some(required_utf8(arguments.next(), "--name")?),
             "--workers" => workers = Some(required_positive(arguments.next(), "--workers")?),
+            "--max-requests" => {
+                max_requests = Some(required_positive(arguments.next(), "--max-requests")?)
+            }
             "--attach" => attach = true,
             "--json" => json = true,
             "--no-autorestart" => auto_restart = false,
@@ -3809,6 +3855,12 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         launch_arguments.extend([
             OsString::from("--workers"),
             OsString::from(workers.to_string()),
+        ]);
+    }
+    if let Some(max_requests) = max_requests {
+        launch_arguments.extend([
+            OsString::from("--max-requests"),
+            OsString::from(max_requests.to_string()),
         ]);
     }
     if php_extension_isolation {

@@ -52,6 +52,8 @@ int pam_php_resume_http(
     size_t *output_length
 );
 int pam_php_cancel_http(const char *request_id, size_t request_id_length);
+int pam_php_register_upload(const char *path, size_t path_length);
+int pam_php_release_upload(const char *path, size_t path_length);
 int pam_php_dispatch_ws(
     int event_kind,
     const char *socket_id,

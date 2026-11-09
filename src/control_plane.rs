@@ -807,6 +807,7 @@ mod tests {
                 event_loop_lag_samples: samples,
                 ..WorkerMetricsSnapshot::default()
             },
+            recycle_requested: false,
         }
     }
 

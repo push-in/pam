@@ -91,6 +91,11 @@ pub struct WorkerRuntimeRecord {
     pub deadline_at_millis: Option<u64>,
     pub request_id: Option<String>,
     pub metrics: WorkerMetricsSnapshot,
+    /// The worker asks the master for a make-before-break replacement (it
+    /// reached `--max-requests` or its PHP engine is wedged). It keeps serving
+    /// until the replacement is ready and the master tells it to drain.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub recycle_requested: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
@@ -191,6 +196,7 @@ struct PendingRecord {
     request_id: Option<String>,
     metrics: WorkerMetricsSnapshot,
     startup_phases: Option<WorkerStartupPhases>,
+    recycle_requested: bool,
     revision: u64,
 }
 
@@ -269,6 +275,32 @@ impl WorkerStateReporter {
         self.publish_synchronously_if_needed(inner)
     }
 
+    /// Asks the master for a replacement. Sticky for the life of the worker
+    /// and published immediately. Returns false when no master supervises
+    /// this process, in which case the caller must stop by itself.
+    pub fn request_recycle(&self) -> bool {
+        let Some(inner) = &self.inner else {
+            return false;
+        };
+        {
+            let mut pending = inner
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if pending.recycle_requested {
+                return true;
+            }
+            pending.recycle_requested = true;
+            pending.lifecycle.get_or_insert(WorkerLifecycle::Ready);
+            pending.revision = pending.revision.wrapping_add(1);
+        }
+        inner.signal.notify(true);
+        if let Err(error) = self.publish_synchronously_if_needed(inner) {
+            eprintln!("pam: {error}");
+        }
+        true
+    }
+
     pub fn update_metrics(&self, metrics: WorkerMetricsSnapshot) -> Result<(), String> {
         let Some(inner) = &self.inner else {
             return Ok(());
@@ -318,6 +350,7 @@ impl ReporterInner {
             deadline_at_millis: pending.deadline_at_millis,
             request_id: pending.request_id.clone(),
             metrics: pending.metrics.clone(),
+            recycle_requested: pending.recycle_requested,
         })
     }
 

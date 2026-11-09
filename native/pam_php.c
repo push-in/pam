@@ -767,6 +767,40 @@ int pam_php_resume_http(
     return status;
 }
 
+static void pam_uploaded_file_dtor(zval *element)
+{
+    zend_string_release_ex(Z_STR_P(element), 0);
+}
+
+/* Registers a temporary file the transport streamed a multipart upload into,
+ * exactly as PHP's own rfc1867 handler does, so is_uploaded_file() and
+ * move_uploaded_file() accept it. */
+int pam_php_register_upload(const char *path, size_t path_length)
+{
+    zend_string *name;
+
+    if (SG(rfc1867_uploaded_files) == NULL) {
+        ALLOC_HASHTABLE(SG(rfc1867_uploaded_files));
+        zend_hash_init(SG(rfc1867_uploaded_files), 8, NULL, pam_uploaded_file_dtor, 0);
+    }
+    name = zend_string_init(path, path_length, 0);
+    if (zend_hash_add_ptr(SG(rfc1867_uploaded_files), name, name) == NULL) {
+        zend_string_release_ex(name, 0);
+        return FAILURE;
+    }
+    return SUCCESS;
+}
+
+/* Forgets an upload at the end of its request. Returns 1 when the file was
+ * still registered (the application did not move it) and must be deleted. */
+int pam_php_release_upload(const char *path, size_t path_length)
+{
+    if (SG(rfc1867_uploaded_files) == NULL) {
+        return 0;
+    }
+    return zend_hash_str_del(SG(rfc1867_uploaded_files), path, path_length) == SUCCESS ? 1 : 0;
+}
+
 int pam_php_cancel_http(const char *request_id, size_t request_id_length)
 {
     int status = FAILURE;

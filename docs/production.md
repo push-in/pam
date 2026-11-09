@@ -108,8 +108,8 @@ antes de liberar tráfego.
 O Laravel executa uma requisição/callback Socket por worker porque managers e
 facades possuem estado process-global. `Pam\Laravel` fixa
 `maxConcurrentRequests=1` e recusa override inseguro; aumente `--workers` para
-concorrência. Uma requisição excedente naquele worker recebe `503`, permitindo que
-o proxy faça retry apenas quando o método for idempotente.
+concorrência. Uma requisição que chega a um worker ocupado espera o slot (até
+`requestTimeoutMs`) em vez de receber `503`.
 
 ### Prefork e balanceamento de conexões (Linux)
 
@@ -169,6 +169,60 @@ Workers devem ser tratados como descartáveis. `--max-requests` limita o impacto
 fragmentação ou crescimento de caches de bibliotecas de terceiros. O padrão é 10
 milhões e o master escalona o limite em até 25% entre workers para evitar que eles
 reciclem juntos. Calibre o valor final a partir do RSS observado no soak test.
+
+### Reciclagem sem perda (make-before-break)
+
+`--max-requests` e `SIGHUP` nunca reduzem a capacidade nem derrubam requisições:
+
+1. Um worker que atinge `--max-requests` pede ao master um substituto e continua
+   atendendo. O master inicia e aquece o substituto (fork do mesmo zygote) e só
+   depois que ele está pronto manda `SIGTERM` ao antigo. No reload, a geração
+   nova inteira fica pronta antes da antiga começar a drenar.
+2. O worker que drena sai do balanceamento (irmãos param de repassar conexões a
+   ele) e toda resposta HTTP/1 passa a levar `Connection: close`: cada conexão
+   termina a requisição em andamento, ou a próxima que chegar, e fecha limpa; o
+   cliente reconecta e cai num worker ativo. Conexões que ficam ociosas por
+   `PAM_DRAIN_IDLE_MS` (padrão 1000) e conexões HTTP/2 recebem o shutdown
+   gracioso (`GOAWAY`). Uma conexão aceita um instante antes do drain, com a
+   primeira requisição ainda no buffer, é atendida em vez de fechada.
+3. O listener continua aceitando por `PAM_DRAIN_QUIESCE_MS` (padrão 100),
+   repassando conexões a irmãos ativos, esvazia a fila do kernel e só então fecha.
+   O accept roda nas threads de I/O, nunca atrás da thread do PHP.
+4. O master espera a drenagem até `--graceful-timeout` e então mata o processo.
+
+Recomendado em produção no Linux: `sysctl -w net.ipv4.tcp_migrate_req=1`
+(Linux 5.14+; em Docker, `--sysctl net.ipv4.tcp_migrate_req=1`). Com
+`SO_REUSEPORT`, o kernel reseta uma conexão que completa o handshake no listener
+no exato instante em que ele fecha; com `tcp_migrate_req=1` ela migra para o
+listener de outro worker. O Pam fecha a janela do lado do processo; esta opção
+fecha a do kernel.
+
+### Timeout de requisição
+
+`requestTimeoutMs` é um limite rígido. Uma requisição que o excede recebe
+`504 Gateway Timeout` com `Connection: close`, mesmo quando o handler bloqueia a
+thread do PHP (`sleep()`, loop, chamada bloqueante): o transporte responde por
+conta própria. O worker então é reciclado make-before-break; requisições que
+estavam na fila atrás dela no mesmo worker recebem `503` com `Retry-After: 1`, e o
+processo sai assim que as conexões drenam. O watchdog do master (`--watchdog-grace`
+mais 1 s) só mata um worker que não conseguiu responder sozinho, por exemplo um
+processo totalmente travado. Uma requisição suspensa numa Fiber recebe o `504` no
+próprio prazo.
+
+### Uploads
+
+Como os SAPIs do PHP, o Pam grava cada arquivo de um `multipart/form-data` em um
+arquivo temporário (`upload_tmp_dir`, ou o diretório temporário do sistema,
+modo 0600) enquanto lê o corpo; nada é mantido em memória além de um buffer de
+1 MiB por arquivo em escrita. Valem os limites do PHP: `upload_max_filesize`
+(`UPLOAD_ERR_INI_SIZE`), o campo `MAX_FILE_SIZE` (`UPLOAD_ERR_FORM_SIZE`),
+`max_file_uploads` e `post_max_size` (corpo acima dele chega com `$_POST` e
+`$_FILES` vazios, como no PHP-FPM; o Laravel responde `413`). `php://input` fica
+vazio para multipart. Os arquivos são registrados para `is_uploaded_file()` e
+`move_uploaded_file()` e apagados ao fim da requisição se a aplicação não os
+moveu. Um upload de 1 GB funciona com o `memory_limit` padrão de 128M.
+`maxBodyBytes` limita só corpos mantidos em memória (JSON, formulários
+urlencoded, corpos crus) e não se aplica a multipart.
 
 ## Proxy e TLS
 
