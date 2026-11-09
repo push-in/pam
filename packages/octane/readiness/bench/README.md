@@ -7,6 +7,10 @@ serving the **same** Laravel application through Laravel Octane.
 packages/octane/readiness/run-local.sh bench        # or: bash bench/run.sh
 ```
 
+To benchmark an unreleased PAM build, point `BENCH_PAM_RUNTIME` at an
+extracted PAM runtime directory (the one holding `bin/pam-run`); the PAM image
+is then built from it (`docker/pam-local.Dockerfile`) instead of the release.
+
 What it does, in order (one server at a time, never in parallel):
 
 1. Builds three images from `docker/` with the exact versions in

@@ -12,9 +12,19 @@ SERVERS="${BENCH_SERVERS:-pam frankenphp swoole roadrunner}"
 ENDPOINTS="${BENCH_ENDPOINTS:-hello json db view}"
 mkdir -p "$OUT"
 
+# BENCH_PAM_RUNTIME=/path/to/runtime benchmarks an unreleased PAM build.
+if [ -n "${BENCH_PAM_RUNTIME:-}" ]; then
+    PAM_VERSION="local-$("$BENCH_PAM_RUNTIME/bin/pam-run" --version | awk '{print $2}')"
+fi
+
 images() {
-    docker build -q -t "pam-octane-bench/pam:$PAM_VERSION" --build-arg PAM_VERSION="$PAM_VERSION" \
-        -f "$BENCH_DIR/docker/pam.Dockerfile" "$BENCH_DIR/docker" >/dev/null
+    if [ -n "${BENCH_PAM_RUNTIME:-}" ]; then
+        docker build -q -t "pam-octane-bench/pam:$PAM_VERSION" \
+            -f "$BENCH_DIR/docker/pam-local.Dockerfile" "$BENCH_PAM_RUNTIME" >/dev/null
+    else
+        docker build -q -t "pam-octane-bench/pam:$PAM_VERSION" --build-arg PAM_VERSION="$PAM_VERSION" \
+            -f "$BENCH_DIR/docker/pam.Dockerfile" "$BENCH_DIR/docker" >/dev/null
+    fi
     docker build -q -t "pam-octane-bench/frankenphp:$FRANKENPHP_VERSION" --build-arg FRANKENPHP_VERSION="$FRANKENPHP_VERSION" \
         -f "$BENCH_DIR/docker/frankenphp.Dockerfile" "$BENCH_DIR/docker" >/dev/null
     docker build -q -t "pam-octane-bench/php-octane:$SWOOLE_VERSION-$ROADRUNNER_VERSION" --build-arg PHP_IMAGE="$PHP_IMAGE" \
