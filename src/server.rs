@@ -187,7 +187,29 @@ impl ServerState {
         )
     }
 
+    /// Stop accepting requests once the PHP engine has failed (fatal error or
+    /// bailout). Supervised workers are then replaced by the cluster, matching
+    /// how PHP-FPM children and FrankenPHP worker scripts recover.
+    fn recycle_if_engine_failed(&self) -> bool {
+        if !php::engine_failed() {
+            return false;
+        }
+        if !*self.shutdown.borrow() {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "level": "error",
+                    "event": "php_engine_failed",
+                    "message": "a PHP fatal error left the engine unusable; recycling this worker",
+                })
+            );
+            let _ = self.shutdown.send(true);
+        }
+        true
+    }
+
     fn record_request(&self) {
+        self.recycle_if_engine_failed();
         let requests = self.request_count.fetch_add(1, Ordering::Relaxed) + 1;
         if requests >= self.max_requests {
             let _ = self.shutdown.send(true);
@@ -1250,6 +1272,7 @@ impl fmt::Display for ServerError {
 }
 
 pub fn run(config: ServerConfig) -> Result<(), ServerError> {
+    release_php_termination_signals();
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .thread_name("pam-io")
@@ -1258,6 +1281,24 @@ pub fn run(config: ServerConfig) -> Result<(), ServerError> {
         .map_err(ServerError::Runtime)?;
     let local = LocalSet::new();
     runtime.block_on(local.run_until(run_async(config)))
+}
+
+/// PHP's Zend signal layer installs SIGTERM/SIGINT handlers that, for a
+/// default disposition, restore SIG_DFL and re-raise the signal. Tokio's
+/// signal registry chains to the previously installed handler, so without
+/// this reset every SIGTERM (reload, stop, recycle) killed the worker
+/// immediately: in-flight requests were cut, the listener never quiesced and
+/// PHP shutdown functions (Octane's WorkerStopping) never ran. The server
+/// owns process termination from here on.
+fn release_php_termination_signals() {
+    #[cfg(unix)]
+    for signal in [libc::SIGTERM, libc::SIGINT] {
+        // SAFETY: called before the Tokio runtime and its signal handlers
+        // exist; resetting a disposition to SIG_DFL is always valid.
+        unsafe {
+            libc::signal(signal, libc::SIG_DFL);
+        }
+    }
 }
 
 fn start_php_executor(state: ServerState, mut receiver: mpsc::Receiver<PhpJob>) {
@@ -1283,7 +1324,9 @@ fn start_php_executor(state: ServerState, mut receiver: mpsc::Receiver<PhpJob>) 
                             request_state.refresh_worker_metrics();
                             return;
                         };
-                        request_state.refresh_php_metrics_on_owner_thread(false);
+                        if !request_state.recycle_if_engine_failed() {
+                            request_state.refresh_php_metrics_on_owner_thread(false);
+                        }
                         let _ = response.send(result);
                     });
                 }
@@ -1885,14 +1928,17 @@ async fn shutdown_signal(
         tokio::select! {
             _ = tokio::signal::ctrl_c() => true,
             _ = terminate.recv() => true,
-            _ = recycle.changed() => false,
+            // A max-requests recycle closes this worker's SO_REUSEPORT
+            // listener too, so it must quiesce the same way. A failed engine
+            // cannot serve the quiesce window and closes immediately.
+            _ = recycle.changed() => !php::engine_failed(),
         }
     };
 
     #[cfg(not(unix))]
     let quiesce_listener = tokio::select! {
         _ = tokio::signal::ctrl_c() => true,
-        _ = recycle.changed() => false,
+        _ = recycle.changed() => !php::engine_failed(),
     };
 
     state.report_worker_state(WorkerLifecycle::Draining, None, None);

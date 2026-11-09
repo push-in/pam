@@ -32,6 +32,22 @@ const EX_SOFTWARE: c_int = 70;
 pub const NATIVE_ABI_VERSION: u32 = 1;
 
 static ACTIVE: AtomicBool = AtomicBool::new(false);
+/// Set once an HTTP dispatch fails inside the engine (a PHP fatal error or
+/// bailout). The Zend engine state is no longer trustworthy afterwards, so the
+/// HTTP server recycles the worker instead of serving further requests.
+static ENGINE_FAILED: AtomicBool = AtomicBool::new(false);
+
+/// Whether a previous HTTP dispatch left the PHP engine in a failed state.
+pub fn engine_failed() -> bool {
+    ENGINE_FAILED.load(Ordering::Acquire)
+}
+
+fn track_engine_failure<T>(result: Result<T, String>) -> Result<T, String> {
+    if result.is_err() {
+        ENGINE_FAILED.store(true, Ordering::Release);
+    }
+    result
+}
 static OWNER: OnceLock<ThreadId> = OnceLock::new();
 static PROCESS_STARTED_AT_MILLIS: OnceLock<u64> = OnceLock::new();
 static STARTUP_MILESTONES: OnceLock<StartupMilestones> = OnceLock::new();
@@ -605,7 +621,7 @@ pub fn dispatch_http(
     request_id: &str,
 ) -> Result<Vec<u8>, String> {
     ensure_owner()?;
-    call_for_bytes(|output, length| {
+    track_engine_failure(call_for_bytes(|output, length| {
         // SAFETY: All slices remain valid for the synchronous call; PHP runs only on
         // the owner thread and allocates the returned buffer for call_for_string.
         unsafe {
@@ -626,7 +642,7 @@ pub fn dispatch_http(
                 length,
             )
         }
-    })
+    }))
 }
 
 pub fn resume_http(
@@ -635,7 +651,7 @@ pub fn resume_http(
     operation_result: &str,
 ) -> Result<Vec<u8>, String> {
     ensure_owner()?;
-    call_for_bytes(|output, length| {
+    track_engine_failure(call_for_bytes(|output, length| {
         // SAFETY: Buffers remain valid for this synchronous owner-thread call.
         unsafe {
             pam_php_resume_http(
@@ -649,7 +665,7 @@ pub fn resume_http(
                 length,
             )
         }
-    })
+    }))
 }
 
 pub fn cancel_http(request_id: &str) -> Result<(), String> {

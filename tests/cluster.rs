@@ -544,16 +544,48 @@ fn recycles_workers_after_the_request_limit() {
     let mut cluster = ClusterProcess::start(3);
     let mut workers = HashSet::new();
     let mut processes = HashSet::new();
-    for _ in 0..24 {
+    // A recycling worker quiesces its SO_REUSEPORT listener briefly (and keeps
+    // serving when no sibling can take its connections), so recycling is
+    // observed over time rather than at an exact request count.
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while processes.len() < 3 && Instant::now() < deadline {
         let (worker, process) = request_identity(&cluster.request_with_retry());
         workers.insert(worker);
         processes.insert(process);
+        thread::sleep(Duration::from_millis(20));
     }
     assert_eq!(workers, HashSet::from(["1".to_owned(), "2".to_owned()]));
     assert!(
         processes.len() >= 3,
         "workers were not recycled: {processes:?}"
     );
+    cluster.stop();
+}
+
+#[test]
+fn recycles_a_worker_whose_engine_hit_a_fatal_error() {
+    let mut cluster = ClusterProcess::start(1_000);
+    let before = cluster.children();
+    assert_eq!(before.len(), 2);
+    // The fatal request itself fails, but the poisoned worker must be
+    // replaced instead of answering every later request with a 500.
+    let _ = cluster.request_path("/engine-fatal");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while Instant::now() < deadline {
+        let children = cluster.children();
+        if children.len() == 2 && children != before {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let after = cluster.children();
+    assert_eq!(after.len(), 2);
+    assert_ne!(after, before, "the failed worker was not recycled");
+    for _ in 0..20 {
+        let response = cluster.request_with_retry();
+        assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    }
     cluster.stop();
 }
 

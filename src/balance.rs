@@ -138,8 +138,13 @@ impl Balancer {
     /// it stays here, or `None` after it was handed to a less loaded sibling.
     pub fn place(&self, stream: TcpStream) -> Option<(TcpStream, ConnectionGuard)> {
         let own = self.slots[self.slot].connections.load(Ordering::Relaxed);
+        // A draining worker (recycle or reload) still accepts from its
+        // SO_REUSEPORT queue during the quiesce window. Serving those here
+        // would cut them at the graceful shutdown that follows, so they go to
+        // a sibling that keeps serving.
+        let draining = self.slots[self.slot].accepting.load(Ordering::Acquire) == 0;
         if let Some((sibling, pid, load)) = self.least_loaded_sibling()
-            && own >= load.saturating_add(HANDOFF_THRESHOLD)
+            && (draining || own >= load.saturating_add(HANDOFF_THRESHOLD))
         {
             if process_alive(pid) {
                 // Count the connection before it is in flight so concurrent

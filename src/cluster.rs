@@ -507,17 +507,19 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             "pam: worker {} generation {} exited with {}; restarting",
                             failed.id, failed.generation, status,
                         );
-                        let failures = if failed.started.elapsed() >= Duration::from_secs(60) {
-                            1
-                        } else {
-                            failed.consecutive_failures.saturating_add(1)
-                        };
-                        let multiplier = 1_u32 << failures.saturating_sub(1).min(8);
-                        let backoff = options
-                            .restart_backoff
-                            .saturating_mul(multiplier)
-                            .min(MAX_RESTART_BACKOFF);
-                        tokio::time::sleep(backoff).await;
+                        let failures = restart_failures(
+                            status.success(),
+                            failed.started.elapsed(),
+                            failed.consecutive_failures,
+                        );
+                        if failures > 0 {
+                            let multiplier = 1_u32 << failures.saturating_sub(1).min(8);
+                            let backoff = options
+                                .restart_backoff
+                                .saturating_mul(multiplier)
+                                .min(MAX_RESTART_BACKOFF);
+                            tokio::time::sleep(backoff).await;
+                        }
                         #[cfg(target_os = "linux")]
                         let zygote = failed
                             .process
@@ -885,8 +887,26 @@ fn prepare_pools(options: &StartOptions) -> Result<Vec<RuntimePool>, String> {
         .collect()
 }
 
+/// Consecutive-failure count used for restart backoff. A worker that exits
+/// successfully was recycled on purpose (`--max-requests` or a fatal-error
+/// recycle) and is replaced immediately: backing off there would take
+/// capacity away exactly when busy workers recycle, and the delay grows with
+/// traffic because busy workers recycle sooner.
+fn restart_failures(clean_exit: bool, uptime: Duration, previous_failures: u32) -> u32 {
+    if clean_exit {
+        0
+    } else if uptime >= Duration::from_secs(60) {
+        1
+    } else {
+        previous_failures.saturating_add(1)
+    }
+}
+
 fn staggered_max_requests(options: &StartOptions, worker_id: usize) -> u64 {
-    if options.workers <= 1 || options.max_requests < 1_000 {
+    // Always stagger: with small limits (Octane's default is 500) evenly
+    // balanced workers would otherwise reach the limit together and recycle at
+    // the same moment, leaving no listener and refusing connections.
+    if options.workers <= 1 {
         return options.max_requests;
     }
     let spread = options.max_requests / 4;
@@ -1306,6 +1326,29 @@ mod tests {
 
         assert_eq!(staggered_max_requests(&options, 1), 10_000_000);
         assert_eq!(staggered_max_requests(&options, 4), 12_500_000);
+    }
+
+    #[test]
+    fn planned_recycles_restart_without_backoff_and_crashes_back_off() {
+        assert_eq!(restart_failures(true, Duration::from_millis(500), 7), 0);
+        assert_eq!(restart_failures(false, Duration::from_millis(500), 0), 1);
+        assert_eq!(restart_failures(false, Duration::from_millis(500), 3), 4);
+        assert_eq!(restart_failures(false, Duration::from_secs(61), 3), 1);
+    }
+
+    #[test]
+    fn small_recycle_limits_are_staggered_so_workers_never_recycle_together() {
+        let mut options = StartOptions::parse(std::iter::empty()).unwrap();
+        options.workers = 4;
+        options.max_requests = 500;
+
+        let limits = (1..=4)
+            .map(|worker| staggered_max_requests(&options, worker))
+            .collect::<Vec<_>>();
+        assert_eq!(limits, vec![500, 541, 583, 625]);
+
+        options.workers = 1;
+        assert_eq!(staggered_max_requests(&options, 1), 500);
     }
 
     #[test]
