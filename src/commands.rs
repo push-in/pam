@@ -411,20 +411,43 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     {
         return Err(format!("{} is not empty", directory.display()));
     }
+    let created = !directory.exists();
     fs::create_dir_all(directory)
         .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let result = init_project(executable, directory, template, socket, &options);
+    if let Err(error) = result {
+        // A half-written project would make the retry fail with "not empty".
+        if created && fs::remove_dir_all(directory).is_ok() {
+            return Err(format!(
+                "{error}; the partial project {} was removed, so the same command can be run again",
+                directory.display()
+            ));
+        }
+        return Err(error);
+    }
+    print_init_success(directory, template, socket, options.install);
+    Ok(0)
+}
+
+fn init_project(
+    executable: &OsStr,
+    directory: &Path,
+    template: InitTemplate,
+    socket: bool,
+    options: &InitOptions,
+) -> Result<(), String> {
     if template == InitTemplate::Raw {
         init_raw(directory, socket)?;
     } else if template == InitTemplate::Desktop {
         init_desktop(directory)?;
     } else if template == InitTemplate::Product {
-        init_product(directory, &options)?;
+        init_product(directory, options)?;
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
-        init_mobile(directory, template == InitTemplate::MobileUi, &options)?;
+        init_mobile(directory, template == InitTemplate::MobileUi, options)?;
     } else {
         init_api(directory, socket)?;
     }
-    write_pam_manifest(directory, template, &options)?;
+    write_pam_manifest(directory, template, options)?;
 
     if options.install {
         if template == InitTemplate::Product {
@@ -438,9 +461,28 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
         } else if directory.join("composer.json").is_file() {
             run_composer_in(executable, directory, &["install", "--no-interaction"])?;
         }
+        if template == InitTemplate::Desktop {
+            run_desktop_init(executable, directory)?;
+        }
     }
-    print_init_success(directory, template, socket);
-    Ok(0)
+    Ok(())
+}
+
+/// PAM Desktop 2 owns its application skeleton: once the package is
+/// installed, `pam desktop init` (the package's own command) writes it, so a
+/// new project always matches the installed release.
+fn run_desktop_init(executable: &OsStr, directory: &Path) -> Result<(), String> {
+    let status = std::process::Command::new(executable)
+        .args(["desktop", "init"])
+        .current_dir(directory)
+        .status()
+        .map_err(|error| format!("cannot run `pam desktop init`: {error}"))?;
+    if !status.success() {
+        return Err(format!(
+            "`pam desktop init` failed with {status}; on Linux the PAM Desktop host needs GTK 4 (Debian and Ubuntu: `sudo apt install libgtk-4-1`)"
+        ));
+    }
+    Ok(())
 }
 
 fn configure_mobile_options(options: &mut InitOptions) -> Result<(), String> {
@@ -1689,7 +1731,7 @@ echo "Cross-surface product contract verified.\n";
     fs::create_dir_all(&desktop).map_err(|error| format!("cannot create desktop app: {error}"))?;
     init_api(&server, false)?;
     init_mobile(&native, true, options)?;
-    init_desktop(&desktop)?;
+    init_desktop_legacy(&desktop)?;
     add_product_contract(&server.join("composer.json"))?;
     add_product_contract(&native.join("composer.json"))?;
     add_product_contract(&desktop.join("composer.json"))?;
@@ -3597,7 +3639,64 @@ li small {
     Ok(())
 }
 
+/// `--template desktop`: a PAM Desktop 2 application. Only the Composer
+/// manifest is written here; `pam desktop init` writes the rest after the
+/// install (`run_desktop_init`).
 fn init_desktop(directory: &Path) -> Result<(), String> {
+    let slug = directory
+        .file_name()
+        .and_then(OsStr::to_str)
+        .map(|name| {
+            name.chars()
+                .map(|character| {
+                    if character.is_ascii_alphanumeric() {
+                        character.to_ascii_lowercase()
+                    } else {
+                        '-'
+                    }
+                })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_owned()
+        })
+        .filter(|slug| !slug.is_empty())
+        .unwrap_or_else(|| "desktop-app".to_owned());
+    let manifest = serde_json::json!({
+        "name": format!("app/{slug}"),
+        "description": "A PAM Desktop application",
+        "type": "project",
+        "license": "proprietary",
+        "require": {
+            "php": "^8.5",
+            "pushinbr/pam-desktop": "^2.1"
+        },
+        "autoload": {
+            "psr-4": {
+                "App\\": "src/"
+            }
+        },
+        "scripts": {
+            "dev": ["Composer\\Config::disableProcessTimeout", "pam-desktop dev"],
+            "start": "pam-desktop run",
+            "build": "pam-desktop build",
+            "test": "php tests/HomeScreenTest.php"
+        },
+        "config": {
+            "platform-check": true,
+            "sort-packages": true
+        }
+    });
+    write_new(
+        &directory.join("composer.json"),
+        &(serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
+            + "\n"),
+    )
+}
+
+/// The PAM Desktop 1.x (Servo web view) scaffold, still used by the
+/// `product` workspace.
+fn init_desktop_legacy(directory: &Path) -> Result<(), String> {
     let mut manifest = serde_json::json!({
         "name": "app/pam-desktop-project",
         "description": "A PHP-first desktop application powered by Pam, Rust, and Servo.",
@@ -5737,7 +5836,12 @@ Route::get('/ping', static fn (): array => ['message' => 'pong']);
     configure_laravel_manifest(directory)?;
 
     write_pam_manifest(directory, InitTemplate::Laravel, options)?;
-    print_init_success(directory, InitTemplate::Laravel, options.socket);
+    print_init_success(
+        directory,
+        InitTemplate::Laravel,
+        options.socket,
+        options.install,
+    );
     Ok(0)
 }
 
@@ -5933,7 +6037,7 @@ fn run_composer_in(executable: &OsStr, directory: &Path, arguments: &[&str]) -> 
     Ok(())
 }
 
-fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
+fn print_init_success(directory: &Path, template: InitTemplate, socket: bool, installed: bool) {
     let preset = match (template, socket) {
         (InitTemplate::Raw, false) => "raw",
         (InitTemplate::Raw, true) => "raw + Socket",
@@ -5966,6 +6070,13 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool) {
     );
     let next = if template == InitTemplate::Product {
         format!("cd {} && read README.md", directory.display())
+    } else if template == InitTemplate::Desktop && installed {
+        format!("cd {} && pam desktop dev", directory.display())
+    } else if template == InitTemplate::Desktop {
+        format!(
+            "cd {} && pam composer install && pam desktop init && pam desktop dev",
+            directory.display()
+        )
     } else if matches!(
         template,
         InitTemplate::Desktop | InitTemplate::Mobile | InitTemplate::MobileUi

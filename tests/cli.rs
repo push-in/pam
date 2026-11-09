@@ -207,20 +207,6 @@ fn manager_dashboard_request(port: u16, path: &str, authorization: Option<&str>)
     response
 }
 
-fn css_hex(styles: &str, property: &str) -> [f64; 3] {
-    let prefix = format!("{property}: #");
-    let value = styles
-        .lines()
-        .map(str::trim)
-        .find_map(|line| line.strip_prefix(&prefix))
-        .and_then(|value| value.strip_suffix(';'))
-        .unwrap_or_else(|| panic!("missing CSS color token {property}"));
-    assert_eq!(value.len(), 6, "{property} must use six hexadecimal digits");
-    let channel =
-        |offset| u8::from_str_radix(&value[offset..offset + 2], 16).unwrap() as f64 / 255.0;
-    [channel(0), channel(2), channel(4)]
-}
-
 fn contrast_ratio(foreground: [f64; 3], background: [f64; 3]) -> f64 {
     let luminance = |color: [f64; 3]| {
         let linear = |channel: f64| {
@@ -4964,7 +4950,7 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
 }
 
 #[test]
-fn initializes_a_servo_desktop_project_with_php_commands() {
+fn initializes_a_native_desktop_project() {
     let directory = temporary_path("init-desktop");
     let output = run_pam(&[
         "init",
@@ -4980,83 +4966,21 @@ fn initializes_a_servo_desktop_project_with_php_commands() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let manifest = fs::read_to_string(directory.join("composer.json")).unwrap();
-    let application = fs::read_to_string(directory.join("app.php")).unwrap();
-    let html = fs::read_to_string(directory.join("resources/index.html")).unwrap();
-    let styles = fs::read_to_string(directory.join("resources/styles.css")).unwrap();
-    let javascript = fs::read_to_string(directory.join("resources/app.js")).unwrap();
-    let inspector = fs::read_to_string(directory.join("resources/inspector.html")).unwrap();
-    let inspector_styles = fs::read_to_string(directory.join("resources/inspector.css")).unwrap();
-    let inspector_javascript =
-        fs::read_to_string(directory.join("resources/inspector.js")).unwrap();
-
-    assert!(manifest.contains("\"pushinbr/pam-desktop\""));
-    assert!(manifest.contains("\"pushinbr/pam-desktop\": \"^1.2\""));
-    assert!(manifest.contains("pam desktop build ."));
-    assert!(manifest.contains("pam desktop dev ."));
-    assert!(application.contains("final class HelloApp extends App"));
-    assert!(application.contains("#[DesktopApplication("));
-    assert!(application.contains("#[Command]"));
-    assert!(application.contains("#[Listen('client.ready')]"));
-    assert!(application.contains("ApplicationCategory::Development"));
-    assert!(application.contains("extends DesktopWindow"));
-    assert!(application.contains("Events $events"));
-    assert!(application.contains("->timeout(10_000)"));
-    assert!(application.contains("Permissions $permissions"));
-    assert!(application.contains("->filesystem('data'"));
-    assert!(application.contains("$window->title"));
-    assert!(html.contains("/_pam/bridge.js"));
-    assert!(html.contains("aria-live=\"polite\""));
-    assert!(html.contains("aria-atomic=\"true\""));
-    assert!(html.contains("runtime conectando"));
-    assert!(html.contains("NATIVE AUTHORITY · API 1"));
-    assert!(html.contains("SIGNED UPDATES · API 1"));
-    assert!(html.contains("<strong>Servo LTS</strong>"));
-    assert!(!html.contains("<strong>Servo 0."));
-    assert!(html.contains("aria-describedby=\"name-hint\""));
-    assert!(!html.contains("value=\"David\""));
-    assert!(!html.contains("CAPABILITIES 0.3"));
-    assert!(!html.contains("SIGNED UPDATES · 0.5"));
-    assert!(html.contains("IPC v6"));
-    assert!(html.contains("Native Lab"));
-    assert!(html.contains("Atualizações com rollback"));
-    assert!(styles.contains("prefers-reduced-motion"));
-    assert!(styles.contains("prefers-contrast: more"));
-    assert!(styles.contains("forced-colors: active"));
-    assert!(styles.contains(":focus-visible"));
-    assert!(styles.contains("width: min(100%, 440px)"));
-    assert!(!styles.contains("width: min(96vw, 440px)"));
-    for (foreground, background) in [
-        ("--text", "--ink"),
-        ("--text-soft", "--ink"),
-        ("--text-faint", "--ink"),
-        ("--run-ink", "--run"),
-    ] {
-        let ratio = contrast_ratio(css_hex(&styles, foreground), css_hex(&styles, background));
-        assert!(
-            ratio >= 4.5,
-            "{foreground} on {background} has insufficient contrast: {ratio:.2}:1"
-        );
-    }
-    assert!(javascript.contains("window.pam.invoke(\"greet\""));
-    assert!(javascript.contains("runtimeStatus.dataset.state = \"ready\""));
-    assert!(javascript.contains("state === \"error\" ? \"assertive\" : \"polite\""));
-    assert!(javascript.contains("document.querySelectorAll(\"button, input\")"));
-    assert!(javascript.contains("response.focus()"));
-    assert!(javascript.contains("window.pam.on(\"pam.dev.reloaded\""));
-    assert!(javascript.contains("{ timeout: 5_000 }"));
-    assert!(javascript.contains("window.pam.fs.writeText"));
-    assert!(javascript.contains("window.pam.dialog.openFile"));
-    assert!(javascript.contains("window.pam.clipboard.writeText"));
-    assert!(javascript.contains("window.pam.notification.show"));
-    assert!(javascript.contains("window.pam.on(\"pam.drag.drop\""));
-    assert!(javascript.contains("window.pam.updater.status"));
-    assert!(directory.join("storage/.gitkeep").is_file());
-    assert!(directory.join("resources/icon.svg").is_file());
-    assert!(inspector.contains("Runtime Inspector"));
-    assert!(inspector.contains("/_pam/bridge.js"));
-    assert!(inspector_styles.contains("prefers-reduced-motion"));
-    assert!(inspector_javascript.contains("window.pam.windowId"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["require"]["pushinbr/pam-desktop"], "^2.1");
+    assert_eq!(manifest["autoload"]["psr-4"]["App\\"], "src/");
+    assert_eq!(manifest["scripts"]["start"], "pam-desktop run");
+    // The application skeleton is written by `pam desktop init` after the
+    // install, so the 1.x web view files must be gone.
+    assert!(!directory.join("app.php").exists());
+    assert!(!directory.join("resources/index.html").exists());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("pam composer install && pam desktop init && pam desktop dev"),
+        "{stdout}"
+    );
 
     let invalid = run_pam(&[
         "init",
