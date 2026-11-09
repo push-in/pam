@@ -97,7 +97,7 @@ impl Drain {
         self.wedged.subscribe()
     }
 
-    fn idle_grace(&self) -> Duration {
+    pub fn idle_grace(&self) -> Duration {
         if self.is_wedged() {
             // A wedged worker cannot serve another request.
             Duration::ZERO

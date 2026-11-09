@@ -1602,6 +1602,7 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
     let accepting_stopped = stop_accepting_receiver.clone();
     {
         let state = state.clone();
+        let tracker = tracker.clone();
         tokio::spawn(async move {
             let quiesce = shutdown_signal(recycle).await;
             state.report_worker_state(WorkerLifecycle::Draining, None, None);
@@ -1619,6 +1620,11 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
                     .unwrap_or(100)
                     .min(5_000);
                 tokio::time::sleep(Duration::from_millis(quiesce)).await;
+                // Keep the listener open while this worker's own connections
+                // finish (bounded by the idle grace): their clients reconnect
+                // right now, and a listener that closes during that burst is
+                // where the kernel resets handshakes (without tcp_migrate_req).
+                tracker.wait_idle(state.drain.idle_grace()).await;
             }
             let _ = stop_accepting.send(true);
             // WebSocket sessions and HTTP/3 close now, as before.
