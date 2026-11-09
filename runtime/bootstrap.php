@@ -1580,6 +1580,7 @@ namespace Pam\Internal {
 
         /**
          * @param array<string, list<string>> $headers
+         * @param array<array-key, mixed>|null $multipart
          * @return array{
          *   array<string, string>,
          *   array<array-key, mixed>|null,
@@ -1624,8 +1625,8 @@ namespace Pam\Internal {
 
         /** @return array{
          *   array<array-key, mixed>,
-         *   array<string, mixed>,
-         *   array<string, mixed>,
+         *   array<string, array<string, int|string>>,
+         *   array<string, \Psr\Http\Message\UploadedFileInterface>,
          *   list<string>
          * }
          */
@@ -1746,6 +1747,8 @@ namespace Pam\Internal {
                 parse_str(implode('&', $fieldPairs), $fields);
             }
 
+            /** @var array<string, array<string, int|string>> $files */
+            /** @var array<string, \Psr\Http\Message\UploadedFileInterface> $uploads */
             return [$fields, $files, $uploads, $temporaryUploads];
         }
 
@@ -1753,11 +1756,11 @@ namespace Pam\Internal {
          * Builds $_POST and $_FILES from a body the transport streamed to
          * temporary files, the same way PHP's rfc1867 handler does.
          *
-         * @param array<string, mixed> $multipart
+         * @param array<array-key, mixed> $multipart
          * @return array{
          *   array<array-key, mixed>,
-         *   array<string, mixed>,
-         *   array<string, mixed>,
+         *   array<string, array<string, int|string>>,
+         *   array<string, \Psr\Http\Message\UploadedFileInterface>,
          *   list<string>
          * }
          */
@@ -1771,10 +1774,13 @@ namespace Pam\Internal {
             if (is_string($encoded) && $encoded !== '') {
                 parse_str($encoded, $fields);
             }
+            /** @var array<array-key, mixed> $files */
             $files = [];
+            /** @var array<array-key, mixed> $uploads */
             $uploads = [];
             $temporaryUploads = [];
-            foreach (is_array($multipart['files'] ?? null) ? $multipart['files'] : [] as $upload) {
+            $manifest = $multipart['files'] ?? null;
+            foreach (is_array($manifest) ? $manifest : [] as $upload) {
                 if (!is_array($upload) || !is_string($upload['field'] ?? null)) {
                     continue;
                 }
@@ -1813,6 +1819,8 @@ namespace Pam\Internal {
                 }
             }
 
+            /** @var array<string, array<string, int|string>> $files */
+            /** @var array<string, \Psr\Http\Message\UploadedFileInterface> $uploads */
             return [$fields, $files, $uploads, $temporaryUploads];
         }
 
@@ -1852,7 +1860,12 @@ namespace Pam\Internal {
             } elseif (!isset($target[$key]) || !is_array($target[$key])) {
                 $target[$key] = [];
             }
-            self::assignPath($target[$key], $path, $value);
+            $child = $target[$key];
+            if (!is_array($child)) {
+                $child = [];
+            }
+            self::assignPath($child, $path, $value);
+            $target[$key] = $child;
         }
 
         /**
