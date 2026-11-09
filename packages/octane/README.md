@@ -40,11 +40,16 @@ version for production; pre-release tags are intended for staging and feedback.
 
 Open <http://127.0.0.1:8000>. That is the complete development setup.
 
-Use another address or port when needed:
+Laravel Octane's options work as usual:
 
 ```bash
-pam octane:start -- --host=0.0.0.0 --port=8080
+pam octane:start --host=0.0.0.0 --port=8080 --workers=8 --max-requests=10000
+pam octane:start --watch          # foreground, restarts on file changes
+pam octane:status | pam octane:reload | pam octane:stop
 ```
+
+Each project gets its own managed application name, so several Laravel
+projects can run side by side; pass `--name=` to choose one.
 
 For public, anonymous read endpoints, PAM can serve an explicitly opted-in
 response from Rust without re-entering PHP. The cache is disabled until paths
@@ -103,6 +108,21 @@ PAM_REQUEST_TIMEOUT_MS=30000
 PAM_MAX_BODY_BYTES=2097152
 PAM_MAX_RESPONSE_BYTES=268435456
 ```
+
+HTTPS is terminated by PAM when `PAM_TLS_CERT` and `PAM_TLS_KEY` point to PEM
+files (HTTP/2 and HTTP/3 are negotiated automatically).
+
+Large uploads are limited twice: by PAM (`PAM_MAX_BODY_BYTES`, 2 MiB by
+default) and by PHP (`upload_max_filesize`, `post_max_size`). The request body
+is held in memory, so also allow `memory_limit` of roughly the body size plus
+64 MiB. PHP settings can be provided with a php.ini referenced by `PHPRC` in
+the file passed to `--env-file`.
+
+For zero dropped connections during `octane:reload` and `--max-requests`
+recycling on Linux, enable `net.ipv4.tcp_migrate_req=1` (Linux 5.14+, or
+`--sysctl net.ipv4.tcp_migrate_req=1` in Docker). Workers use
+`SO_REUSEPORT`, and without it the kernel resets connections still queued on
+a listener that closes.
 
 `maxConcurrentRequests` is intentionally fixed to `1` for Laravel. Framework
 managers and facades contain process-global mutable state. Scale safely with

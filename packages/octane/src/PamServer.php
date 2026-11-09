@@ -45,14 +45,25 @@ final class PamServer
         $worker->boot();
 
         try {
+            // Registers the handler; PAM starts serving after this script
+            // returns, so the worker must stay alive past this call.
             Server::createNative(function (PamResponse $response) use ($worker): PamResponse {
                 $worker->handle(...$this->client->marshalNativeRequest($response));
 
                 return $response;
             })->listen($port, $host, $options);
-        } finally {
+        } catch (\Throwable $error) {
             $worker->terminate();
+
+            throw $error;
         }
+
+        // Octane's WorkerStopping listeners (closing Monolog handlers,
+        // flushing telemetry) must run when the worker really stops, which is
+        // when PAM shuts the PHP engine down after serving.
+        register_shutdown_function(static function () use ($worker): void {
+            $worker->terminate();
+        });
     }
 
     private function assertPamRuntime(): void

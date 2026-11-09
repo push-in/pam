@@ -10,8 +10,118 @@ if (!is_string($pam) || $pam === '') {
     exit(64);
 }
 
+/**
+ * The managed application name is unique per project directory so several
+ * Laravel projects (and stop -> start cycles) never collide on one machine.
+ */
+function pam_octane_name(?string $explicit): string
+{
+    if ($explicit !== null && $explicit !== '') {
+        return $explicit;
+    }
+    $environment = getenv('PAM_OCTANE_NAME');
+    if (is_string($environment) && $environment !== '') {
+        return $environment;
+    }
+    $directory = realpath(getcwd() ?: '.') ?: (getcwd() ?: '.');
+    $base = strtolower((string) preg_replace('/[^A-Za-z0-9_.-]+/', '-', basename($directory)));
+    $base = trim(substr($base, 0, 40), '-.') ?: 'app';
+
+    return 'octane-'.$base.'-'.substr(hash('sha256', $directory), 0, 8);
+}
+
+/** @param list<string> $command */
+function pam_octane_run(array $command, bool $quiet = false): int
+{
+    $null = PHP_OS_FAMILY === 'Windows' ? 'NUL' : '/dev/null';
+    $process = proc_open(
+        $command,
+        $quiet ? [0 => STDIN, 1 => ['file', $null, 'w'], 2 => ['file', $null, 'w']] : [0 => STDIN, 1 => STDOUT, 2 => STDERR],
+        $pipes,
+        getcwd() ?: null,
+        null,
+        ['bypass_shell' => true],
+    );
+    if (!is_resource($process)) {
+        fwrite(STDERR, "pam-octane: cannot start PAM\n");
+        exit(70);
+    }
+
+    return proc_close($process);
+}
+
+/**
+ * Accepts both PAM (`--workers 4`) and Laravel Octane (`--workers=4`) option
+ * spellings so `pam octane:start` takes the flags `php artisan octane:start`
+ * users already know.
+ *
+ * @param list<string> $arguments
+ * @return array{name: ?string, supervisor: list<string>, server: list<string>, watch: bool}
+ */
+function pam_octane_parse(array $arguments): array
+{
+    $name = null;
+    $watch = false;
+    $supervisor = [];
+    $server = [];
+    $serverOptions = ['host', 'port'];
+    $supervisorValues = ['workers', 'max-requests'];
+    $ignored = ['poll', 'log-level', 'server', 'task-workers', 'rpc-host', 'rpc-port', 'rr-config', 'caddyfile', 'admin-port'];
+
+    for ($index = 0; $index < count($arguments); $index++) {
+        $argument = $arguments[$index];
+        if ($argument === '--') {
+            $server = array_merge($server, array_slice($arguments, $index + 1));
+            break;
+        }
+        if (!str_starts_with($argument, '--')) {
+            $supervisor[] = $argument;
+            continue;
+        }
+        [$option, $value] = str_contains($argument, '=')
+            ? explode('=', substr($argument, 2), 2)
+            : [substr($argument, 2), null];
+        $takeValue = static function () use (&$index, $arguments, $value, $option): string {
+            if ($value !== null) {
+                return $value;
+            }
+            if (!isset($arguments[$index + 1])) {
+                fwrite(STDERR, "pam-octane: --{$option} requires a value\n");
+                exit(64);
+            }
+
+            return $arguments[++$index];
+        };
+
+        if ($option === 'name') {
+            $name = $takeValue();
+        } elseif ($option === 'watch') {
+            $watch = true;
+        } elseif (in_array($option, $serverOptions, true)) {
+            $server[] = "--{$option}=".$takeValue();
+        } elseif (in_array($option, $supervisorValues, true)) {
+            $supervisor[] = "--{$option}";
+            $supervisor[] = $takeValue();
+        } elseif ($option === 'https') {
+            fwrite(STDERR, "pam-octane: --https is FrankenPHP-specific; set PAM_TLS_CERT and PAM_TLS_KEY instead\n");
+            exit(64);
+        } elseif (in_array($option, $ignored, true)) {
+            if ($value === null && in_array($option, ['log-level', 'server', 'task-workers', 'rpc-host', 'rpc-port', 'rr-config', 'caddyfile', 'admin-port'], true)) {
+                $index++;
+            }
+        } else {
+            // A native PAM supervisor option (for example --attach,
+            // --env-file or --memory-max-bytes); forwarded unchanged.
+            $supervisor[] = $argument;
+        }
+    }
+
+    return ['name' => $name, 'supervisor' => $supervisor, 'server' => $server, 'watch' => $watch];
+}
+
 $mode = $argv[1] ?? null;
-$arguments = array_slice($argv, 2);
+$parsed = pam_octane_parse(array_slice($argv, 2));
+$name = pam_octane_name($parsed['name']);
 
 switch ($mode) {
     case 'start':
@@ -20,26 +130,34 @@ switch ($mode) {
             exit(66);
         }
 
-        $separator = array_search('--', $arguments, true);
-        if ($separator === false) {
-            $supervisor = $arguments;
-            $server = [];
-        } else {
-            $supervisor = array_slice($arguments, 0, $separator);
-            $server = array_slice($arguments, $separator + 1);
+        if ($parsed['watch']) {
+            // Octane's --watch runs in the foreground and restarts on change;
+            // `pam dev` provides exactly that for the artisan entrypoint.
+            exit(pam_octane_run(array_merge([$pam, 'dev', 'artisan', 'pam:octane'], $parsed['server'])));
         }
+
+        // A stopped record from a previous run is replaced; an online one is
+        // reported by `pam up` as already running.
+        pam_octane_run([$pam, 'delete', $name], quiet: true);
         $command = array_merge(
-            [$pam, 'up', 'artisan', '--name', 'pam-octane'],
-            $supervisor,
+            [$pam, 'up', 'artisan', '--name', $name],
+            $parsed['supervisor'],
             ['--', 'pam:octane'],
-            $server,
+            $parsed['server'],
         );
         break;
 
     case 'status':
     case 'reload':
     case 'stop':
-        $command = array_merge([$pam, $mode, 'pam-octane'], $arguments);
+        if ($parsed['name'] === null
+            && getenv('PAM_OCTANE_NAME') === false
+            && pam_octane_run([$pam, 'status', $name], quiet: true) !== 0
+            && pam_octane_run([$pam, 'status', 'pam-octane'], quiet: true) === 0) {
+            // Applications started by pam-octane <= 1.1 used a fixed name.
+            $name = 'pam-octane';
+        }
+        $command = array_merge([$pam, $mode, $name], $parsed['supervisor']);
         break;
 
     default:
@@ -47,18 +165,4 @@ switch ($mode) {
         exit(64);
 }
 
-$process = proc_open(
-    $command,
-    [0 => STDIN, 1 => STDOUT, 2 => STDERR],
-    $pipes,
-    getcwd(),
-    null,
-    ['bypass_shell' => true],
-);
-
-if (!is_resource($process)) {
-    fwrite(STDERR, "pam-octane: cannot start PAM\n");
-    exit(70);
-}
-
-exit(proc_close($process));
+exit(pam_octane_run($command));

@@ -55,6 +55,38 @@ final class PamResponseEmitterTest extends TestCase
         self::assertSame('firstsecond', implode('', $export['chunks']));
     }
 
+    public function testItIteratesGeneratorCallbacksLikeOctaneClients(): void
+    {
+        // Laravel returns generator callbacks untouched when LARAVEL_OCTANE is
+        // set; the Octane client must iterate them.
+        $request = Request::create('/generator');
+        $source = new StreamedResponse(static function (): \Generator {
+            yield 'alpha';
+            yield '';
+            yield 'beta';
+        });
+        $target = new PamResponse();
+
+        (new PamResponseEmitter())->emit($request, $target, new OctaneResponse($source));
+
+        self::assertSame('alphabeta', implode('', $target->export()['chunks']));
+    }
+
+    public function testStreamingLeavesTheOutputBufferStackBalanced(): void
+    {
+        $level = ob_get_level();
+        $source = new StreamedResponse(static function (): void {
+            ob_start();
+            echo 'nested';
+        });
+        $target = new PamResponse();
+
+        (new PamResponseEmitter())->emit(Request::create('/'), $target, new OctaneResponse($source));
+
+        self::assertSame($level, ob_get_level());
+        self::assertSame('nested', implode('', $target->export()['chunks']));
+    }
+
     public function testAHeadResponseNeverEmitsABody(): void
     {
         $request = Request::create('/download', 'HEAD');

@@ -14,6 +14,8 @@ return [
         'maxResponseChunkBytes' => (int) env('PAM_MAX_RESPONSE_CHUNK_BYTES', 1024 * 1024),
         'responseStreamQueueCapacity' => (int) env('PAM_STREAM_QUEUE_CAPACITY', 16),
         'requestTimeoutMs' => (int) env('PAM_REQUEST_TIMEOUT_MS', 30_000),
+        'tlsCert' => env('PAM_TLS_CERT') ?: null,
+        'tlsKey' => env('PAM_TLS_KEY') ?: null,
         'maxConcurrentRequests' => 1,
         'phpExecutorQueueCapacity' => (int) env('PAM_PHP_QUEUE_CAPACITY', 1_024),
         'gcCollectCyclesEvery' => (int) env('PAM_GC_COLLECT_CYCLES_EVERY', 256),
