@@ -44,6 +44,13 @@ final class PamServer
         $worker = new Worker(new ApplicationFactory($this->basePath), $this->client);
         $worker->boot();
 
+        // Octane's request timeout: `octane.max_execution_time` seconds, 0
+        // disables it. A request past it is answered 504 and its worker is
+        // replaced. PAM_REQUEST_TIMEOUT_MS (pam-octane.server) overrides it.
+        $options['requestTimeoutMs'] ??= self::requestTimeoutMs(
+            $worker->application()->make('config'),
+        );
+
         $staticFiles = $options['serveStaticFiles'] ?? true;
         unset($options['serveStaticFiles'], $options['staticFileHeaders']);
         if ($staticFiles === true) {
@@ -74,6 +81,23 @@ final class PamServer
         register_shutdown_function(static function () use ($worker): void {
             $worker->terminate();
         });
+    }
+
+    private const UNLIMITED_REQUEST_TIMEOUT_MS = 365 * 24 * 3600 * 1000;
+
+    private static function requestTimeoutMs(mixed $config): int
+    {
+        $seconds = $config instanceof \Illuminate\Contracts\Config\Repository
+            ? $config->get('octane.max_execution_time', 30)
+            : 30;
+        if (is_string($seconds) && is_numeric($seconds)) {
+            $seconds = (int) $seconds;
+        }
+        if (!is_int($seconds) || $seconds < 0) {
+            $seconds = 30;
+        }
+
+        return $seconds === 0 ? self::UNLIMITED_REQUEST_TIMEOUT_MS : $seconds * 1000;
     }
 
     /** @return array<string, array<string, string>> */

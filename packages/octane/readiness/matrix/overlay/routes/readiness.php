@@ -137,13 +137,33 @@ Route::prefix('_r')->group(function (): void {
             ], 422);
         }
 
+        $path = $file->getRealPath();
+        $size = $file->getSize();
+        $moved = null;
+        if ($file->isValid() && $request->boolean('move')) {
+            // Symfony's move() goes through is_uploaded_file()/move_uploaded_file().
+            $target = $file->move(storage_path('app/readiness-uploads'), 'moved.bin');
+            $moved = hash_file('sha256', $target->getPathname());
+            @unlink($target->getPathname());
+        }
+
         return response()->json([
             'ok' => $file->isValid(),
-            'size' => $file->getSize(),
-            'sha256' => hash_file('sha256', $file->getRealPath()),
+            'size' => $size,
+            'sha256' => $moved ?? hash_file('sha256', $path),
             'error' => $file->getError(),
+            'tmp' => $path,
+            'moved' => $moved !== null,
+            'memory_limit' => ini_get('memory_limit'),
+            'peak_memory' => memory_get_peak_usage(true),
+            'pid' => getmypid(),
         ]);
     })->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
+
+    Route::post('/upload-errors', fn (Request $request) => response()->json([
+        'files' => array_map(fn ($file) => $file->getError(), $request->allFiles()),
+        'fields' => $request->except([]),
+    ]))->withoutMiddleware(\Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class);
 
     Route::post('/echo', fn (Request $request) => response()->json([
         'length' => strlen($request->getContent()),

@@ -13,6 +13,7 @@ import http.client
 import json
 import os
 import re
+import shutil
 import socket
 import ssl
 import subprocess
@@ -49,18 +50,29 @@ class App:
             raise RuntimeError(f"pam {' '.join(argv)} failed: {proc.stdout}{proc.stderr}")
         return proc
 
-    def start(self, *extra, server_env=None):
+    def start(self, *extra, server_env=None, ini=None):
         self.stop(quiet=True)
         argv = ["octane:start", f"--port={self.port}", "--env-file", self.env_file, *extra]
-        self.write_env(server_env or {})
+        self.write_env(server_env or {}, ini or {})
         self.pam_cmd(*argv, check=True)
         self.wait()
 
-    def write_env(self, values):
+    @property
+    def upload_dir(self):
+        return os.path.join(self.dir, "readiness-upload-tmp")
+
+    def write_env(self, values, ini_overrides=None):
         ini = os.path.join(self.dir, "readiness-php.ini")
+        os.makedirs(self.upload_dir, exist_ok=True)
+        # memory_limit stays at PHP's default (128M): uploads are streamed to
+        # disk, so their size is bounded by upload_max_filesize/post_max_size.
+        settings = {"upload_max_filesize": "2G", "post_max_size": "2G", "upload_tmp_dir": self.upload_dir}
+        settings.update(ini_overrides or {})
         with open(ini, "w") as handle:
-            handle.write("memory_limit=512M\nupload_max_filesize=256M\npost_max_size=256M\n")
-        lines = [f"PHPRC={ini}", "PAM_MAX_BODY_BYTES=268435456"]
+            handle.write("".join(f"{key}={value}\n" for key, value in settings.items()))
+        # PAM_MAX_BODY_BYTES bounds in-memory bodies (the 5 MB JSON check);
+        # multipart uploads do not depend on it.
+        lines = [f"PHPRC={ini}", "PAM_MAX_BODY_BYTES=16777216"]
         lines += [f"{key}={value}" for key, value in values.items()]
         fd = os.open(self.env_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as handle:
@@ -206,18 +218,17 @@ def memory(app):
 
 @check("--max-requests worker recycling")
 def max_requests(app):
-    app.start("--workers=4", "--max-requests=2000")
-    pids = set()
-    for _ in range(40):
-        pids.add(app.json("/_r/pid")[1]["pid"])
-    before = len(pids)
-    result = app.hammer("/_r/hello", "-c", "8", "-s", "12")
-    for _ in range(40):
-        pids.add(app.json("/_r/pid")[1]["pid"])
-    recycled = len(pids) > before
-    ok = recycled and result["failed"] == 0
-    record("--max-requests recycling under load (4 workers, limit 2000)", "PASS" if ok else "FAIL",
-           f"{len(pids)} distinct worker pids, {result['ok']} ok/{result['failed']} failed {result['breakdown']}")
+    app.start("--workers=4", "--max-requests=500")
+    for keepalive in (False, True):
+        pids = {app.json("/_r/pid")[1]["pid"] for _ in range(40)}
+        before = len(pids)
+        extra = ["--keepalive"] if keepalive else []
+        result = app.hammer("/_r/hello", "-c", "16", "-s", "12", *extra)
+        pids |= {app.json("/_r/pid")[1]["pid"] for _ in range(40)}
+        ok = len(pids) > before and result["failed"] == 0
+        record(f"--max-requests recycling under load (4 workers, limit 500, "
+               f"{'keep-alive' if keepalive else 'new connection per request'})", "PASS" if ok else "FAIL",
+               f"{len(pids)} distinct worker pids, {result['ok']} ok/{result['failed']} failed {result['breakdown']}")
 
 
 @check("octane:reload under load")
@@ -226,19 +237,19 @@ def reload(app):
     results = {}
 
     def load():
-        results["r"] = app.hammer("/_r/hello", "-c", "8", "-s", "14")
+        results["r"] = app.hammer("/_r/hello", "-c", "16", "-s", "14", "--keepalive")
 
     thread = threading.Thread(target=load)
     thread.start()
     pids_before = {app.json("/_r/pid")[1]["pid"] for _ in range(20)}
-    for _ in range(3):
-        time.sleep(3)
+    for _ in range(4):
+        time.sleep(2.5)
         app.pam_cmd("octane:reload", check=True)
     thread.join()
     pids_after = {app.json("/_r/pid")[1]["pid"] for _ in range(20)}
     r = results["r"]
     ok = r["failed"] == 0 and pids_before.isdisjoint(pids_after)
-    record("octane:reload (3 reloads) with zero dropped requests", "PASS" if ok else "FAIL",
+    record("octane:reload (4 reloads, keep-alive) with zero dropped requests", "PASS" if ok else "FAIL",
            f"{r['ok']} ok/{r['failed']} failed {r['breakdown']}, workers replaced={pids_before.isdisjoint(pids_after)}")
 
 
@@ -314,27 +325,87 @@ def swoole_only(app):
     record("Task workers (--task-workers)", "N/A", "Swoole-only in Octane itself", "swoole-only")
 
 
-@check("Large uploads (100 MB)")
-def uploads(app):
-    payload = os.urandom(1024 * 1024) * 100
-    digest = hashlib.sha256(payload).hexdigest()
+def stream_upload(app, path, size, field="file", filename="big.bin", extra_parts=b"", timeout=600):
+    """POSTs a `size`-byte file as multipart without holding it in memory."""
     boundary = "readiness" + os.urandom(8).hex()
-    body = (f"--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"big.bin\"\r\n"
-            f"Content-Type: application/octet-stream\r\n\r\n").encode() + payload + f"\r\n--{boundary}--\r\n".encode()
-    started = time.time()
-    status, _, data = app.get("/_r/upload", method="POST", body=body,
-                              headers={"Content-Type": f"multipart/form-data; boundary={boundary}"}, timeout=120)
-    elapsed = time.time() - started
-    result = json.loads(data) if data[:1] == b"{" else {}
-    ok = status == 200 and result.get("sha256") == digest and result.get("size") == len(payload)
-    record("100 MB multipart upload", "PASS" if ok else "FAIL",
-           f"HTTP {status}, sha256 match={result.get('sha256') == digest}, {elapsed:.2f}s "
-           "(needs PAM_MAX_BODY_BYTES and PHP upload/post/memory limits raised)")
+    head = (extra_parts.replace(b"BOUNDARY", boundary.encode())
+            + f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; filename=\"{filename}\"\r\n"
+              f"Content-Type: application/octet-stream\r\n\r\n".encode())
+    tail = f"\r\n--{boundary}--\r\n".encode()
+    block = os.urandom(1024 * 1024)
+    digest = hashlib.sha256()
+
+    def body():
+        yield head
+        remaining = size
+        while remaining > 0:
+            chunk = block[:min(len(block), remaining)]
+            digest.update(chunk)
+            remaining -= len(chunk)
+            yield chunk
+        yield tail
+
+    conn = http.client.HTTPConnection("127.0.0.1", app.port, timeout=timeout)
+    conn.request("POST", path, body=body(), headers={
+        "Content-Type": f"multipart/form-data; boundary={boundary}",
+        "Content-Length": str(len(head) + size + len(tail)),
+        "Accept": "application/json",
+    })
+    response = conn.getresponse()
+    data = response.read()
+    conn.close()
+    return response.status, (json.loads(data) if data[:1] == b"{" else {}), digest.hexdigest()
+
+
+def worker_peak_rss_kb(pid):
+    try:
+        with open(f"/proc/{pid}/status") as handle:
+            for line in handle:
+                if line.startswith("VmHWM:"):
+                    return int(line.split()[1])
+    except OSError:
+        pass
+    return 0
+
+
+@check("Large uploads streamed to disk (100 MB, 1 GB)")
+def uploads(app):
+    # Default memory_limit (128M); only upload_max_filesize/post_max_size raised.
+    app.start("--workers=2")
+    for label, size in (("100 MB", 100 * 1024 * 1024), ("1 GB", 1024 * 1024 * 1024)):
+        for move in (False, True):
+            started = time.time()
+            status, result, digest = stream_upload(app, "/_r/upload" + ("?move=1" if move else ""), size)
+            elapsed = time.time() - started
+            leftovers = os.listdir(app.upload_dir)
+            peak_kb = worker_peak_rss_kb(result.get("pid", 0))
+            ok = (status == 200 and result.get("sha256") == digest and result.get("size") == size
+                  and result.get("ok") is True and result.get("moved") is move and not leftovers
+                  and result.get("memory_limit") == "128M" and peak_kb < 400 * 1024)
+            record(f"{label} multipart upload{' + move()' if move else ''}, memory_limit=128M",
+                   "PASS" if ok else "FAIL",
+                   f"HTTP {status}, sha256 match={result.get('sha256') == digest}, {elapsed:.2f}s, "
+                   f"isValid={result.get('ok')}, PHP peak {result.get('peak_memory', 0)//1048576} MiB, "
+                   f"worker peak RSS {peak_kb//1024} MiB, temp files left={len(leftovers)}")
+
     big_json = json.dumps({"blob": "x" * (5 * 1024 * 1024)}).encode()
     status, _, data = app.get("/_r/echo", method="POST", body=big_json, headers={"Content-Type": "application/json"})
     echo = json.loads(data) if data[:1] == b"{" else {}
-    record("5 MB raw JSON body", "PASS" if status == 200 and echo.get("length") == len(big_json) else "FAIL",
-           f"HTTP {status}, length={echo.get('length')}")
+    ok = status == 200 and echo.get("sha256") == hashlib.sha256(big_json).hexdigest()
+    record("5 MB raw JSON body", "PASS" if ok else "FAIL", f"HTTP {status}")
+
+    # PHP's limits are enforced while streaming.
+    app.start("--workers=2", ini={"upload_max_filesize": "1M", "post_max_size": "8M", "max_file_uploads": "2"})
+    field = b"--BOUNDARY\r\nContent-Disposition: form-data; name=\"note\"\r\n\r\nhello\r\n"
+    status, result, _ = stream_upload(app, "/_r/upload-errors", 2 * 1024 * 1024, extra_parts=field)
+    too_big_file = status == 200 and result.get("files", {}).get("file") == 1 and result.get("fields", {}).get("note") == "hello"
+    status_post, _, _ = stream_upload(app, "/_r/upload-errors", 9 * 1024 * 1024)
+    leftovers = os.listdir(app.upload_dir)
+    ok = too_big_file and status_post == 413 and not leftovers
+    record("upload_max_filesize / post_max_size enforced while streaming", "PASS" if ok else "FAIL",
+           f"2 MB file over 1M limit -> error={result.get('files', {}).get('file')} (want 1, fields kept), "
+           f"9 MB body over 8M post_max_size -> HTTP {status_post} (want 413), temp files left={len(leftovers)}")
+    app.start("--workers=2")
 
 
 def progressive(app, path):
@@ -491,16 +562,21 @@ def https(app):
 @check("Request timeout")
 def timeout(app):
     app.start("--workers=2", server_env={"PAM_REQUEST_TIMEOUT_MS": "2000"})
+    pids_before = {app.json("/_r/pid")[1]["pid"] for _ in range(20)}
     started = time.time()
     try:
-        status, _, _ = app.get("/_r/sleep/6000", timeout=15)
-    except Exception as error:  # connection dropped by the watchdog
-        status = type(error).__name__
+        status, headers, _ = app.get("/_r/sleep/6000", timeout=15)
+    except Exception as error:  # a dropped connection is a failure
+        status, headers = type(error).__name__, {}
     elapsed = time.time() - started
-    recovered = all(app.get("/_r/hello")[0] == 200 for _ in range(10))
-    ok = elapsed < 5 and recovered
-    record("Request timeout (2 s limit, blocking 6 s handler)", "PASS" if ok else "FAIL",
-           f"result={status} after {elapsed:.1f}s, recovered={recovered}")
+    recovered = all(app.get("/_r/hello")[0] == 200 for _ in range(20))
+    time.sleep(1.5)
+    pids_after = {app.json("/_r/pid")[1]["pid"] for _ in range(20)}
+    replaced = len(pids_before - pids_after) == 1
+    ok = status == 504 and 1.9 < elapsed < 3.5 and recovered and replaced
+    record("Request timeout answers 504 (2 s limit, blocking 6 s handler)", "PASS" if ok else "FAIL",
+           f"HTTP {status} after {elapsed:.1f}s, connection={headers.get('connection')}, "
+           f"20/20 healthy afterwards={recovered}, stuck worker replaced={replaced}")
     app.start("--workers=2")
 
 
@@ -548,8 +624,53 @@ def worker_stopping(app):
     app.start("--workers=2")
 
 
+def wrk(app, seconds, connections=64, path="/_r/hello"):
+    proc = subprocess.run(["wrk", "-t4", f"-c{connections}", f"-d{seconds}s", "--latency", app.base + path],
+                          capture_output=True, text=True, timeout=seconds + 60)
+    out = proc.stdout
+    requests = int(re.search(r"(\d+) requests in", out).group(1))
+    errors = re.search(r"Socket errors: connect (\d+), read (\d+), write (\d+), timeout (\d+)", out)
+    socket_errors = sum(int(value) for value in errors.groups()) if errors else 0
+    non2xx = re.search(r"Non-2xx or 3xx responses: (\d+)", out)
+    return {"requests": requests, "socket_errors": socket_errors,
+            "non_2xx": int(non2xx.group(1)) if non2xx else 0,
+            "rps": float(re.search(r"Requests/sec:\s+([\d.]+)", out).group(1)), "raw": out}
+
+
+@check("Zero-loss recycling and reload under wrk")
+def zero_loss(app):
+    if not shutil.which("wrk"):
+        record("Zero-loss recycling and reload (wrk)", "N/A", "wrk is not installed")
+        return
+    seconds = int(os.environ.get("READINESS_ZERO_LOSS_SECONDS", "40"))
+    app.start("--workers=4", "--max-requests=2000")
+    pids = {app.json("/_r/pid")[1]["pid"] for _ in range(20)}
+    stop = threading.Event()
+    reloads = [0]
+
+    def reloader():
+        while not stop.wait(4):
+            app.pam_cmd("octane:reload", check=True)
+            reloads[0] += 1
+
+    thread = threading.Thread(target=reloader)
+    thread.start()
+    try:
+        result = wrk(app, seconds)
+    finally:
+        stop.set()
+        thread.join()
+    pids |= {app.json("/_r/pid")[1]["pid"] for _ in range(20)}
+    lost = result["socket_errors"] + result["non_2xx"]
+    ok = lost == 0 and result["requests"] >= 100_000 and reloads[0] >= 5
+    record("Zero-loss: wrk -c64 keep-alive, --max-requests=2000 and a reload every 4 s", "PASS" if ok else "FAIL",
+           f"{result['requests']} requests in {seconds}s ({result['rps']:.0f} rps), {reloads[0]} reloads, "
+           f"{len(pids)}+ worker pids seen, socket errors={result['socket_errors']}, non-2xx={result['non_2xx']}")
+    app.start("--workers=2")
+
+
 CHECKS = [basics, isolation, concurrently, swoole_only, streaming, static_files, keepalive, proxies, uploads,
-          memory, max_requests, reload, lifecycle, timeout, crashes, worker_stopping, https, watch]
+          memory, max_requests, reload, zero_loss, lifecycle, timeout, crashes, worker_stopping, https, watch]
 
 
 def main():

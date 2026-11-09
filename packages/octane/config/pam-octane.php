@@ -14,13 +14,18 @@ return [
     'server' => [
         // Serve files from public/ (Vite builds, robots.txt, storage:link).
         'serveStaticFiles' => (bool) env('PAM_SERVE_STATIC_FILES', true),
+        // Bodies held in memory (JSON, forms). Multipart uploads are streamed
+        // to temporary files and bounded by PHP's upload_max_filesize and
+        // post_max_size instead, like PHP-FPM.
         'maxBodyBytes' => (int) env('PAM_MAX_BODY_BYTES', 2 * 1024 * 1024),
         'maxHeaderBytes' => (int) env('PAM_MAX_HEADER_BYTES', 32 * 1024),
         'maxHeaders' => (int) env('PAM_MAX_HEADERS', 100),
         'maxResponseBytes' => (int) env('PAM_MAX_RESPONSE_BYTES', 256 * 1024 * 1024),
         'maxResponseChunkBytes' => (int) env('PAM_MAX_RESPONSE_CHUNK_BYTES', 1024 * 1024),
         'responseStreamQueueCapacity' => (int) env('PAM_STREAM_QUEUE_CAPACITY', 16),
-        'requestTimeoutMs' => (int) env('PAM_REQUEST_TIMEOUT_MS', 30_000),
+        // Defaults to Octane's `octane.max_execution_time` (0 disables it).
+        // A request past it is answered 504 and its worker is replaced.
+        'requestTimeoutMs' => env('PAM_REQUEST_TIMEOUT_MS') !== null ? (int) env('PAM_REQUEST_TIMEOUT_MS') : null,
         'tlsCert' => env('PAM_TLS_CERT') ?: null,
         'tlsKey' => env('PAM_TLS_KEY') ?: null,
         'maxConcurrentRequests' => 1,

@@ -104,7 +104,7 @@ Environment variables include:
 ```dotenv
 PAM_HOST=127.0.0.1
 PAM_PORT=8000
-PAM_REQUEST_TIMEOUT_MS=30000
+PAM_REQUEST_TIMEOUT_MS=30000      # default: octane.max_execution_time
 PAM_MAX_BODY_BYTES=2097152
 PAM_MAX_RESPONSE_BYTES=268435456
 ```
@@ -112,17 +112,26 @@ PAM_MAX_RESPONSE_BYTES=268435456
 HTTPS is terminated by PAM when `PAM_TLS_CERT` and `PAM_TLS_KEY` point to PEM
 files (HTTP/2 and HTTP/3 are negotiated automatically).
 
-Large uploads are limited twice: by PAM (`PAM_MAX_BODY_BYTES`, 2 MiB by
-default) and by PHP (`upload_max_filesize`, `post_max_size`). The request body
-is held in memory, so also allow `memory_limit` of roughly the body size plus
-64 MiB. PHP settings can be provided with a php.ini referenced by `PHPRC` in
-the file passed to `--env-file`.
+Uploads are streamed to temporary files, like PHP-FPM does: a 1 GB upload
+works with the default `memory_limit`. PHP's `upload_max_filesize`,
+`post_max_size`, `max_file_uploads` and `upload_tmp_dir` apply, uploaded files
+work with `is_uploaded_file()`/`move()`, and they are deleted when the request
+ends. `PAM_MAX_BODY_BYTES` only bounds bodies held in memory (JSON, raw and
+urlencoded bodies). PHP settings can be provided with a php.ini referenced by
+`PHPRC` in the file passed to `--env-file`.
 
-For zero dropped connections during `octane:reload` and `--max-requests`
-recycling on Linux, enable `net.ipv4.tcp_migrate_req=1` (Linux 5.14+, or
-`--sysctl net.ipv4.tcp_migrate_req=1` in Docker). Workers use
-`SO_REUSEPORT`, and without it the kernel resets connections still queued on
-a listener that closes.
+The request timeout follows Octane's `octane.max_execution_time` (seconds, `0`
+disables it); `PAM_REQUEST_TIMEOUT_MS` overrides it. A request past the timeout
+is answered `504 Gateway Timeout`, even when the handler blocks, and its worker
+is replaced.
+
+`octane:reload` and `--max-requests` recycling are make-before-break: the
+replacement worker boots and warms up before the old one drains, and draining
+finishes in-flight and just-accepted requests (`Connection: close`) instead of
+closing connections. On Linux, also enable `net.ipv4.tcp_migrate_req=1`
+(Linux 5.14+, or `--sysctl net.ipv4.tcp_migrate_req=1` in Docker): workers use
+`SO_REUSEPORT`, and without it the kernel resets a connection that completes its
+handshake on a listener in the instant that listener closes.
 
 `maxConcurrentRequests` is intentionally fixed to `1` for Laravel. Framework
 managers and facades contain process-global mutable state. Scale safely with
