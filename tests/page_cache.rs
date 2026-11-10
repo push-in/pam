@@ -635,3 +635,55 @@ fn memory_stays_bounded_under_a_cache_busting_load() {
     assert!(bytes <= max_bytes, "{bytes} > {max_bytes}");
     assert!(metric(server.port, "pam_http_response_cache_evictions_total") > 2_500);
 }
+
+#[test]
+fn purges_reach_every_worker_of_a_cluster() {
+    let port = free_port();
+    let child = Command::new(env!("CARGO_BIN_EXE_pam"))
+        .args(["start"])
+        .arg(fixture())
+        .args(["--workers", "3", "--startup-timeout", "10000"])
+        .env("PAM_TEST_PORT", port.to_string())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut server = Server { child, port };
+    wait_for_port(port, &mut server.child);
+    let target = format!("/shared?{PUBLIC}&tags=catalog");
+
+    // Warm every worker: new connections spread over the workers.
+    let mut warmed = std::collections::HashMap::new();
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while warmed.len() < 3 {
+        assert!(
+            Instant::now() < deadline,
+            "only {} workers answered",
+            warmed.len()
+        );
+        let response = server.get(&target, &[]);
+        let body = response.json();
+        warmed.insert(
+            body["worker"].as_u64().unwrap(),
+            body["calls"].as_u64().unwrap(),
+        );
+    }
+    let before: std::collections::HashSet<(u64, u64)> = warmed.into_iter().collect();
+
+    let purged = server.get("/purge?tag=catalog", &[]).json();
+    assert_eq!(purged["purged"], 1, "the purging worker dropped its copy");
+    thread::sleep(Duration::from_millis(250));
+    for _ in 0..60 {
+        let body = server.get(&target, &[]).json();
+        let served = (
+            body["worker"].as_u64().unwrap(),
+            body["calls"].as_u64().unwrap(),
+        );
+        assert!(
+            !before.contains(&served),
+            "worker {} served a purged page",
+            served.0
+        );
+    }
+}

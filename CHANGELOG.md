@@ -21,6 +21,17 @@
   worker. `\Pam\Fork::beforeFork()`/`afterFork()` (`pam_before_fork()`,
   `pam_on_fork()`) let frameworks reset more. A zygote that cannot fork its
   booted state safely falls back to pre-boot forking with one log line.
+- Edge page cache: opt-in (`responseCache: true`) full-page cache inside the
+  Rust HTTP layer. Responses that opt in with `Cache-Control: public,
+  s-maxage=N` are served without entering PHP. Requests with `Cookie` or
+  `Authorization` and responses with `Set-Cookie`, `private`, `no-store`,
+  `no-cache` or `Vary: *` are never cached; forwarded headers and every `Vary`
+  header are part of the key. Byte-bounded LRU, precompressed brotli/gzip
+  copies, ETag/304, single-flight misses, background stale-while-revalidate,
+  and purge by tag, URL or all from PHP (`pam_cache_purge()`), the purge
+  endpoint and `pam cache:purge`, propagated to every worker. HTTP/3 requests
+  now use the response cache too, and stale-while-revalidate no longer makes
+  the first request after expiry wait for PHP.
 
 ## 2.2.14 - 2026-11-10
 

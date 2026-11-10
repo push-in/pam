@@ -179,8 +179,11 @@ impl ServerState {
         true
     }
 
+    /// Counts a request that runs PHP toward `--max-requests`. Requests the
+    /// transport answers alone (edge cache hits, metrics, limits) do not age
+    /// the PHP worker, so they never trigger a recycle that would also drop
+    /// this worker's page cache.
     fn record_request(&self) {
-        self.recycle_if_engine_failed();
         let requests = self.request_count.fetch_add(1, Ordering::Relaxed) + 1;
         if requests >= self.max_requests {
             self.request_recycle();
@@ -1697,7 +1700,7 @@ async fn handle_http3_request(
     remote: SocketAddr,
     state: ServerState,
 ) -> Result<(), String> {
-    state.record_request();
+    state.recycle_if_engine_failed();
     let (parts, ()) = request.into_parts();
     let method = parts.method;
     let uri = parts.uri;
@@ -1907,7 +1910,7 @@ async fn http_dispatch(
     headers: HeaderMap,
     body: Body,
 ) -> Response {
-    state.record_request();
+    state.recycle_if_engine_failed();
     let request_id = request_identifier(&headers).unwrap_or_else(|| state.allocate_request_id());
     let traceparent = request_traceparent(&headers, &state);
     let parent_span_id = state
@@ -2652,6 +2655,7 @@ async fn invoke_php_http(
     request_id: &str,
     traceparent: &str,
 ) -> (Response, usize) {
+    state.record_request();
     state
         .php
         .http(OwnedHttpRequest {

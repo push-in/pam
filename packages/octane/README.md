@@ -158,6 +158,80 @@ for the boot and, with a single worker, refuse connections.
 managers and facades contain process-global mutable state. Scale safely with
 multiple supervised PAM workers instead of overriding that boundary.
 
+## Edge page cache
+
+PAM can serve whole pages from Rust without entering PHP, like a Varnish in
+front of Laravel, with no extra process. It is opt-in: enable it, then mark the
+routes that are the same for every visitor.
+
+```dotenv
+PAM_RESPONSE_CACHE=true
+```
+
+```php
+use Pam\Octane\Http\Middleware\CacheResponse;
+
+Route::get('/products/{product}', ShowProduct::class)
+    ->middleware(CacheResponse::for(ttl: 600, staleWhileRevalidate: 60, tags: ['products', 'product:{product}']))
+    ->withoutMiddleware(CacheResponse::STATEFUL);
+
+// or the alias: ->middleware('pam.cache:600,60,products,product:{product}')
+```
+
+The middleware sets `Cache-Control: public, max-age=0, s-maxage=600,
+stale-while-revalidate=60` and `Pam-Cache-Tags`; `{product}` becomes the route
+parameter (a model's key). It leaves alone responses that set cookies, are
+streamed or downloads, have a non-cacheable status, or that the application
+marked `private`, `no-store` or `no-cache`.
+
+PAM never stores a response that sets a cookie and, by default, never uses the
+cache for requests that carry `Cookie` or `Authorization`, so a page rendered
+for one user can never be served to another. Browsers send the session cookie
+everywhere, so for public pages:
+
+1. remove the session/cookie/CSRF middleware from the cached routes
+   (`->withoutMiddleware(CacheResponse::STATEFUL)`), and
+2. set `PAM_RESPONSE_CACHE_ALLOW_COOKIES=true` so those requests may be served
+   from the cache.
+
+Only do 2. when every cached route renders the same page for everyone (no
+`@auth`, no CSRF tokens, no flashed messages).
+
+Purge when data changes:
+
+```php
+use Pam\Octane\Facades\Pam;
+
+Pam::purge('products', 'product:42');   // by tag
+Pam::purgeUrl('/products/*');            // by URL or path prefix
+Pam::purgeAll();
+```
+
+or let models purge their own tags (`products`, `products:42`) after the
+transaction commits:
+
+```php
+use Pam\Octane\Cache\PurgesPageCache;
+
+class Product extends Model
+{
+    use PurgesPageCache;   // override pageCacheTags() to choose the tags
+}
+```
+
+Inside a PAM worker the purge is immediate and reaches the other workers in
+about 100 ms. Queue workers, Artisan, the scheduler and `pam cache:purge
+--tag=products` write to `storage/framework/cache/pam-page-cache.log`
+(`PAM_RESPONSE_CACHE_INVALIDATION_LOG`), which every worker tails.
+
+Other settings: `PAM_RESPONSE_CACHE_MAX_BYTES` (64 MiB per worker, LRU),
+`PAM_RESPONSE_CACHE_MAX_ENTRIES`, `PAM_RESPONSE_CACHE_IGNORED_QUERY_PARAMS`
+(`utm_*,gclid,fbclid`), `PAM_RESPONSE_CACHE_COMPRESS` (precompressed brotli
+and gzip copies) and `PAM_RESPONSE_CACHE_STATUS_HEADER` (`X-Pam-Cache:
+HIT|STALE|MISS|BYPASS`). Hits, misses, stale serves, bytes and evictions are in
+PAM's Prometheus metrics (`pam_http_response_cache_*`). The full rules are in
+PAM's [production guide](https://github.com/push-in/pam/blob/main/docs/production.md).
+
 ## Production
 
 The package owns the Octane bridge; the PAM binary owns process supervision.

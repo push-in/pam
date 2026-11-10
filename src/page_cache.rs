@@ -75,7 +75,9 @@ pub struct Entry {
     status: StatusCode,
     headers: HeaderMap,
     body: Bytes,
-    etag: String,
+    /// Validators of the identity, brotli and gzip representations.
+    etags: [String; 3],
+    etag_headers: [HeaderValue; 3],
     encoded: OnceLock<Encoded>,
     stored_at: Instant,
     fresh_until: Instant,
@@ -95,11 +97,9 @@ struct Encoded {
 
 impl Entry {
     fn matches(&self, request: &HeaderMap) -> bool {
-        let names: Vec<HeaderName> = self.vary.iter().map(|(name, _)| name.clone()).collect();
-        policy::vary_values(request, &names)
-            .into_iter()
-            .zip(&self.vary)
-            .all(|(value, (_, stored))| value == *stored)
+        self.vary
+            .iter()
+            .all(|(name, stored)| policy::vary_value_matches(request, name, stored.as_deref()))
     }
 }
 
@@ -475,6 +475,16 @@ impl PageCache {
         if size > self.config.max_bytes {
             return None;
         }
+        let etags = [
+            etag.clone(),
+            policy::encoded_etag(&etag, "br"),
+            policy::encoded_etag(&etag, "gzip"),
+        ];
+        let etag_headers = [
+            HeaderValue::from_str(&etags[0]).ok()?,
+            HeaderValue::from_str(&etags[1]).ok()?,
+            HeaderValue::from_str(&etags[2]).ok()?,
+        ];
         let now = Instant::now();
         let compress =
             self.config.compress && negotiates && policy::compressible(&headers, body.len());
@@ -488,7 +498,8 @@ impl PageCache {
             status,
             headers,
             body,
-            etag,
+            etags,
+            etag_headers,
             encoded: OnceLock::new(),
             stored_at: now,
             fresh_until: now + store_policy.ttl,
@@ -633,19 +644,17 @@ impl PageCache {
                 Some(Encoded {
                     brotli: Some(body), ..
                 }),
-            ) => (body.clone(), policy::encoded_etag(&entry.etag, "br")),
+            ) => (body.clone(), &entry.etag_headers[1]),
             (
                 Encoding::Gzip,
                 Some(Encoded {
                     gzip: Some(body), ..
                 }),
-            ) => (body.clone(), policy::encoded_etag(&entry.etag, "gzip")),
-            _ => (entry.body.clone(), entry.etag.clone()),
+            ) => (body.clone(), &entry.etag_headers[2]),
+            _ => (entry.body.clone(), &entry.etag_headers[0]),
         };
         let mut headers = entry.headers.clone();
-        if let Ok(value) = HeaderValue::from_str(&etag) {
-            headers.insert(http::header::ETAG, value);
-        }
+        headers.insert(http::header::ETAG, etag.clone());
         if encoding != Encoding::Identity {
             headers.insert(
                 http::header::CONTENT_ENCODING,
@@ -667,11 +676,10 @@ impl PageCache {
             );
         }
         let validators = [
-            entry.etag.clone(),
-            policy::encoded_etag(&entry.etag, "br"),
-            policy::encoded_etag(&entry.etag, "gzip"),
+            entry.etags[0].as_str(),
+            entry.etags[1].as_str(),
+            entry.etags[2].as_str(),
         ];
-        let validators: Vec<&str> = validators.iter().map(String::as_str).collect();
         let success = entry.status.is_success();
         if success
             && (policy::if_none_match_matches(request, &validators)

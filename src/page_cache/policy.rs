@@ -157,8 +157,8 @@ pub fn request_key(
 
 /// Length-prefixed fields keep the key unambiguous whatever bytes they hold.
 fn push_field(key: &mut String, field: &str) {
-    key.push_str(&field.len().to_string());
-    key.push(':');
+    use std::fmt::Write as _;
+    let _ = write!(key, "{}:", field.len());
     key.push_str(field);
 }
 
@@ -276,25 +276,27 @@ pub fn store_policy(
     if headers.contains_key(http::header::SET_COOKIE) {
         return Err(NotStored::SetCookie);
     }
-    if headers
-        .get_all(http::header::VARY)
-        .iter()
-        .filter_map(|value| {
-            value
-                .to_str()
-                .ok()
-                .map(str::to_owned)
-                .or_else(|| Some("*".to_owned()))
-        })
-        .flat_map(|value| {
-            value
-                .split(',')
-                .map(|name| name.trim().to_owned())
-                .collect::<Vec<_>>()
-        })
-        .any(|name| name == "*")
-    {
-        return Err(NotStored::VaryStar);
+    // Safety-relevant headers that cannot be parsed (obs-text, invalid
+    // tokens) cannot be proven safe, so they make the response uncacheable.
+    for (name, refusal) in [
+        (http::header::CACHE_CONTROL, NotStored::Private),
+        (http::header::PRAGMA, NotStored::NoCache),
+        (http::header::VARY, NotStored::VaryStar),
+    ] {
+        if headers
+            .get_all(name)
+            .iter()
+            .any(|value| value.to_str().is_err())
+        {
+            return Err(refusal);
+        }
+    }
+    match vary_names(headers, false) {
+        None => return Err(NotStored::VaryStar),
+        Some(names) if names.iter().any(|name| name.as_str() == "*") => {
+            return Err(NotStored::VaryStar);
+        }
+        Some(_) => {}
     }
     let mut public = false;
     let mut shared_max_age = None;
@@ -312,15 +314,6 @@ pub fn store_policy(
             "stale-while-revalidate" => stale = value.and_then(parse_seconds),
             _ => {}
         }
-    }
-    // A header that is present but not valid UTF-8 cannot be parsed, so it
-    // cannot be proven safe.
-    if headers
-        .get_all(http::header::CACHE_CONTROL)
-        .iter()
-        .any(|value| value.to_str().is_err())
-    {
-        return Err(NotStored::Private);
     }
     if header_directives(headers, http::header::PRAGMA)
         .any(|(name, _)| name.eq_ignore_ascii_case("no-cache"))
@@ -393,6 +386,30 @@ pub fn vary_values(headers: &HeaderMap, names: &[HeaderName]) -> Vec<Option<Vec<
             Some(joined)
         })
         .collect()
+}
+
+/// Whether the request's value for `name` (every field line, joined by `\n`)
+/// equals `stored`, without allocating.
+pub fn vary_value_matches(headers: &HeaderMap, name: &HeaderName, stored: Option<&[u8]>) -> bool {
+    let mut values = headers.get_all(name).iter().peekable();
+    let Some(mut rest) = stored else {
+        return values.peek().is_none();
+    };
+    let mut first = true;
+    for value in values {
+        if !first {
+            match rest.strip_prefix(b"\n") {
+                Some(remaining) => rest = remaining,
+                None => return false,
+            }
+        }
+        first = false;
+        match rest.strip_prefix(value.as_bytes()) {
+            Some(remaining) => rest = remaining,
+            None => return false,
+        }
+    }
+    !first && rest.is_empty()
 }
 
 /// Cache tags from the response's tag headers (comma or space separated).
@@ -1005,6 +1022,29 @@ mod tests {
             store_policy(&rules, false, StatusCode::OK, &invalid),
             Err(NotStored::Private)
         );
+        // Found by fuzzing: unparsable Pragma/Vary values were skipped.
+        for (name, value, refusal) in [
+            ("pragma", &b"x\xe3, no-cache"[..], NotStored::NoCache),
+            ("vary", &b"\xe9ccept"[..], NotStored::VaryStar),
+        ] {
+            let mut invalid = headers(&[("cache-control", "s-maxage=60")]);
+            invalid.append(
+                HeaderName::from_static(name),
+                HeaderValue::from_bytes(value).unwrap(),
+            );
+            assert_eq!(
+                store_policy(&rules, false, StatusCode::OK, &invalid),
+                Err(refusal),
+                "{name}"
+            );
+        }
+        for vary in ["*=60", "a b", "Accept, *"] {
+            assert_eq!(
+                ok(&[("cache-control", "s-maxage=60"), ("vary", vary)]),
+                Err(NotStored::VaryStar),
+                "{vary}"
+            );
+        }
     }
 
     #[test]
@@ -1089,6 +1129,25 @@ mod tests {
         let request = headers(&[("x-tenant", "a"), ("x-tenant", "b")]);
         let values = vary_values(&request, &names);
         assert_eq!(values, vec![None, Some(b"a\nb".to_vec())]);
+        for (name, value) in names.iter().zip(&values) {
+            assert!(vary_value_matches(&request, name, value.as_deref()));
+        }
+        let tenant = HeaderName::from_static("x-tenant");
+        assert!(!vary_value_matches(&request, &tenant, Some(b"a")));
+        assert!(!vary_value_matches(&request, &tenant, Some(b"a\nb\n")));
+        assert!(!vary_value_matches(&request, &tenant, Some(b"ab")));
+        assert!(!vary_value_matches(&request, &tenant, None));
+        assert!(!vary_value_matches(
+            &headers(&[("x-tenant", "")]),
+            &tenant,
+            None
+        ));
+        assert!(vary_value_matches(
+            &headers(&[("x-tenant", "")]),
+            &tenant,
+            Some(b"")
+        ));
+        assert!(!vary_value_matches(&HeaderMap::new(), &tenant, Some(b"")));
     }
 
     #[test]

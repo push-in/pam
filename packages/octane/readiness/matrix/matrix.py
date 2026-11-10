@@ -53,7 +53,10 @@ class App:
     def start(self, *extra, server_env=None, ini=None):
         self.stop(quiet=True)
         argv = ["octane:start", f"--port={self.port}", "--env-file", self.env_file, *extra]
-        self.write_env(server_env or {}, ini or {})
+        # READINESS_RESPONSE_CACHE=1 runs every check with the edge page cache on.
+        values = {"PAM_RESPONSE_CACHE": os.environ.get("READINESS_RESPONSE_CACHE", "0")}
+        values.update(server_env or {})
+        self.write_env(values, ini or {})
         self.pam_cmd(*argv, check=True)
         self.wait()
 
@@ -688,8 +691,66 @@ def zero_loss(app):
     app.start("--workers=2")
 
 
+@check("Edge page cache")
+def edge_cache(app):
+    """PAM's edge page cache with a real Laravel app: hits never reach PHP, a
+    session response is never shared, and model changes purge every worker,
+    from inside a worker and from another process (Artisan)."""
+    app.start("--workers=3", server_env={"PAM_RESPONSE_CACHE": "1", "PAM_RESPONSE_CACHE_ALLOW_COOKIES": "1"})
+    problems = []
+    try:
+        if app.get("/_r/cache/purge-all")[0] != 200:
+            problems.append("purge-all route")
+        labels = [app.get("/_r/view-cached")[1].get("x-pam-cache") for _ in range(30)]
+        if labels.count("HIT") < 20:
+            problems.append(f"view-cached labels {labels}")
+        status, headers, body = app.get("/_r/view-cached", headers={"Cookie": "laravel_session=abc"})
+        if status != 200 or headers.get("x-pam-cache") != "HIT" or "set-cookie" in headers or b"item-20" not in body:
+            problems.append(f"view-cached with a session cookie: {status} {headers.get('x-pam-cache')}")
+        if any(app.get("/_r/view")[1].get("x-pam-cache") == "HIT" for _ in range(10)):
+            problems.append("an unmarked route was cached")
+
+        sessions = set()
+        for _ in range(15):
+            status, headers, body = app.get("/_r/cache/web")
+            session = json.loads(body).get("session")
+            if headers.get("x-pam-cache") == "HIT" or "set-cookie" not in headers or session in sessions:
+                problems.append(f"session page shared: {headers.get('x-pam-cache')} {session}")
+                break
+            sessions.add(session)
+
+        def names(count=30):
+            return {json.loads(app.get("/_r/cache/user/1")[2])["name"] for _ in range(count)}
+
+        app.pam_cmd("artisan", "tinker", "--execute=DB::table('users')->where('id', 1)->update(['name' => 'before'])",
+                    check=True)
+        app.get("/_r/cache/rename/1?name=before")
+        time.sleep(0.3)
+        if names() != {"before"}:
+            problems.append(f"warm names {names()}")
+        # In-worker change: the trait purges this worker at once, siblings via the log.
+        app.get("/_r/cache/rename/1?name=inside")
+        time.sleep(0.3)
+        seen = names(60)
+        if seen != {"inside"}:
+            problems.append(f"after in-worker purge: {seen}")
+        # Out-of-worker change (Artisan): only the invalidation log reaches workers.
+        app.pam_cmd("artisan", "tinker",
+                    "--execute=ReadinessCachedUser::query()->findOrFail(1)->update(['name' => 'artisan'])", check=True)
+        time.sleep(0.3)
+        seen = names(60)
+        if seen != {"artisan"}:
+            problems.append(f"after Artisan purge: {seen}")
+        app.pam_cmd("cache:purge", "--tag=users:1", check=True)
+    finally:
+        app.start("--workers=2")
+    record("Edge page cache (hits, sessions never shared, model purges across workers and from Artisan)",
+           "PASS" if not problems else "FAIL", "; ".join(problems) or "all correct")
+
+
 CHECKS = [basics, isolation, concurrently, swoole_only, streaming, static_files, keepalive, proxies, uploads,
-          memory, max_requests, reload, zero_loss, lifecycle, timeout, crashes, worker_stopping, https, watch]
+          memory, max_requests, reload, zero_loss, lifecycle, timeout, crashes, worker_stopping, https, watch,
+          edge_cache]
 
 
 def main():

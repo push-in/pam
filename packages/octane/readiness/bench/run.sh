@@ -9,7 +9,7 @@ APP="$WORK_DIR/bench-app"
 OUT="$RESULTS_DIR/bench"
 PORT="${BENCH_PORT:-8400}"
 SERVERS="${BENCH_SERVERS:-pam frankenphp swoole roadrunner}"
-ENDPOINTS="${BENCH_ENDPOINTS:-hello json db view}"
+ENDPOINTS="${BENCH_ENDPOINTS:-hello json db view view-cached}"
 mkdir -p "$OUT"
 
 # BENCH_PAM_RUNTIME=/path/to/runtime benchmarks an unreleased PAM build.
@@ -41,6 +41,9 @@ app() {
         fi
         touch .rr.yaml
         sed -i 's/^APP_ENV=.*/APP_ENV=production/; s/^APP_DEBUG=.*/APP_DEBUG=false/; s/^LOG_LEVEL=.*/LOG_LEVEL=error/' .env
+        # BENCH_PAM_RESPONSE_CACHE=1 turns PAM's edge page cache on (view-cached).
+        sed -i '/^PAM_RESPONSE_CACHE=/d' .env
+        echo "PAM_RESPONSE_CACHE=${BENCH_PAM_RESPONSE_CACHE:-0}" >> .env
         "$PAM" artisan optimize >/dev/null
     )
 }

@@ -37,6 +37,11 @@ Route::prefix('_r')->group(function (): void {
         DB::table('users')->where('id', random_int(1, 100))->first(),
     ));
     Route::get('/view', fn () => view('readiness', ['items' => range(1, 20)]));
+    // Same page, marked for PAM's edge page cache (headers only elsewhere).
+    $cached = Route::get('/view-cached', fn () => view('readiness', ['items' => range(1, 20)]));
+    if (class_exists(\Pam\Octane\Http\Middleware\CacheResponse::class)) {
+        $cached->middleware(\Pam\Octane\Http\Middleware\CacheResponse::for(ttl: 60, staleWhileRevalidate: 30, tags: ['readiness']));
+    }
 
     Route::get('/pid', fn () => response()->json([
         'pid' => getmypid(),
@@ -277,4 +282,38 @@ Route::prefix('_r')->group(function (): void {
     Route::get('/redirect', fn () => redirect('/_r/hello'));
     Route::get('/empty', fn () => response()->noContent());
     Route::get('/abort', fn () => abort(418));
+
+    // --- edge page cache ----------------------------------------------------
+    if (class_exists(\Pam\Octane\Http\Middleware\CacheResponse::class)) {
+        $cache = \Pam\Octane\Http\Middleware\CacheResponse::class;
+        // Session-backed: StartSession sets a cookie, so PAM must never cache it.
+        Route::get('/cache/web', fn () => response()->json([
+            'session' => session()->getId(),
+            'pid' => getmypid(),
+        ]))->middleware(['web', $cache.':60']);
+        Route::get('/cache/user/{id}', fn (string $id) => response()->json([
+            'name' => DB::table('users')->where('id', (int) $id)->value('name'),
+            'pid' => getmypid(),
+            'rendered' => microtime(true),
+        ]))->middleware($cache::for(ttl: 300, tags: ['users:{id}']));
+        Route::get('/cache/rename/{id}', function (string $id) {
+            ReadinessCachedUser::query()->findOrFail((int) $id)->update(['name' => request()->query('name')]);
+
+            return response()->json(['ok' => true, 'pid' => getmypid()]);
+        });
+        Route::get('/cache/purge-all', fn () => response()->json([
+            'purged' => \Pam\Octane\Facades\Pam::purgeAll(),
+        ]));
+    }
 });
+
+if (trait_exists(\Pam\Octane\Cache\PurgesPageCache::class) && !class_exists('ReadinessCachedUser', false)) {
+    final class ReadinessCachedUser extends \Illuminate\Database\Eloquent\Model
+    {
+        use \Pam\Octane\Cache\PurgesPageCache;
+
+        protected $table = 'users';
+
+        protected $guarded = [];
+    }
+}
