@@ -142,3 +142,48 @@ logged, and the kernel OOM counters of this user's slice show the cause
 by every job on the workstation). The master replaced the worker from the
 zygote and the run continued; the same OOM events also killed this test
 session's shell twice.
+
+## 7. Chaos (kill -9, OOM, memory_limit fatals, cut clients, reloads)
+
+`soak.py --minutes 10 --workers 4 --max-requests 2000 --kill-every 15 --hog-every 60 --scope-memory 1500M --disconnect-every 3 --reload-every 45 --sessions-every 20 --wrk-connections 32`,
+the cluster inside a `systemd-run --user --scope -p MemoryMax=1500M` so the
+hog request (`/z/hog`, unbounded PHP memory) is OOM-killed by the kernel;
+each hog is followed by a PHP `memory_limit` fatal (`/z/oom`); every 3 s a
+client cuts a request mid-flight, one sends headers byte by byte and one sends
+half a body then disconnects.
+
+### Bug found and fixed: the OOM killer chose the zygote
+
+First run (`chaos-app`): 546k requests with **184,786 `wrk` write errors**,
+against 5 in pre-boot mode (`chaos-engine`, same command). A watcher sampling
+the zygote PIDs and the listening sockets every 200 ms (`watch.sh`) showed
+the cause: a zygote died outside any reload, its workers died with it
+(`PR_SET_PDEATHSIG`), the port had 0-1 listeners for about 0.8 s and `wrk`
+spun on refused connections until exec'd workers booted. The post-boot
+zygote holds the booted application, so it is the largest idle process of
+the scope and the OOM killer picked it (kernel `oom_kill` counter moved with
+it). Fix (9a844a22): every forked worker raises its own `oom_score_adj` by 300
+(no privilege needed), so the kernel kills the worker that is growing; the
+master replaces it from the zygote in milliseconds. Covered by a unit test
+and by the post-boot integration test (worker adj = zygote adj + 300).
+
+### After the fix (`chaos-app2`, same command)
+
+| | post-boot (after fix) | pre-boot |
+|---|---:|---:|
+| requests | 927,575 | 720,139 |
+| rps | 1,546 | 1,200 |
+| zygote deaths (watcher) | 0 | - |
+| `wrk` write / read errors | 13 / 444 | 5 / 455 |
+| non-2xx | 117 | 111 |
+| kills / OOM kills / fatals / cut clients | 39 / 9 / 9 / 538 | 39 / 9 / 9 / 537 |
+| reloads (p50 / max) | 13 (444 / 649 ms) | 13 (789 / 1,247 ms) |
+| final | healthy, 4 ready | healthy, 4 ready |
+| session isolation checks | 28, no leak | 26, no leak |
+
+Every remaining error is a request that was inside a worker when it was
+killed (`read` errors, the byte-by-byte probe connection) or queued behind a
+`memory_limit` fatal (`non-2xx`: requests already accepted by that worker are
+answered 500 while it is recycled), in the same proportion in both modes;
+none is caused by forking from a booted application. Master fds stayed at
+12 and master RSS at 16.3 MB.
