@@ -122,3 +122,10 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
     branch: a keep-alive connection closed by a draining worker in the same
     instant the client reuses it. Not a regression; tracked separately.
     Throughput in the same runs overlaps (other jobs on the machine).
+
+11. Ecosystem app (Laravel 12 + Livewire 3, Inertia 2/Vue, Filament 4,
+    Sanctum, Horizon 5 + Redis, Reverb 1, scheduler, mail, storage; headless
+    Chrome on the GPU), release build:
+    ECO_SERVERS=pam ecosystem/run.sh                       -> 17/17 PASS (off)
+    ECO_SERVERS=pam ECO_PAM_FLAGS=--task-workers=2 ...     -> 17/17 PASS (on)
+    Laravel log: no errors. (ecosystem/off.md, ecosystem/on.md)
