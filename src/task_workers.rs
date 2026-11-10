@@ -61,6 +61,32 @@ impl Endpoint {
     }
 }
 
+/// How long a connection refused or reset during the handshake is retried.
+/// While the pool reloads or recycles, a task worker that is closing its
+/// listener resets the handshakes still in its queue (unless the kernel has
+/// `net.ipv4.tcp_migrate_req=1`); nothing was sent yet, so retrying is safe
+/// and a sibling or the replacement worker takes the task.
+const CONNECT_RETRY: Duration = Duration::from_secs(1);
+
+async fn connect(address: SocketAddr) -> std::io::Result<tokio::net::TcpStream> {
+    let deadline = tokio::time::Instant::now() + CONNECT_RETRY;
+    let mut pause = Duration::from_millis(5);
+    loop {
+        match tokio::net::TcpStream::connect(address).await {
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset | std::io::ErrorKind::ConnectionRefused
+                ) && tokio::time::Instant::now() + pause < deadline =>
+            {
+                tokio::time::sleep(pause).await;
+                pause = (pause * 2).min(Duration::from_millis(200));
+            }
+            result => return result,
+        }
+    }
+}
+
 /// Sends one task request and returns the response body.
 pub async fn post(endpoint: &Endpoint, kind: Kind, body: Bytes) -> Result<Bytes, String> {
     post_notifying(endpoint, kind, body, None).await
@@ -74,7 +100,7 @@ async fn post_notifying(
     body: Bytes,
     connected: Option<Connected>,
 ) -> Result<Bytes, String> {
-    let stream = match tokio::net::TcpStream::connect(endpoint.address).await {
+    let stream = match connect(endpoint.address).await {
         Ok(stream) => stream,
         Err(error) => {
             let error = format!("cannot reach the task workers: {error}");
@@ -364,6 +390,27 @@ mod tests {
         .unwrap();
         assert!(matches!(outcomes[0], Outcome::Pending));
         assert_eq!(flush(Duration::from_secs(2)), 0);
+    }
+
+    #[test]
+    fn connects_refused_while_the_pool_restarts_are_retried() {
+        let address = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let accepted = runtime.block_on(async move {
+            let listen = tokio::spawn(async move {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+                let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+                listener.accept().await.is_ok()
+            });
+            let started = tokio::time::Instant::now();
+            assert!(connect(address).await.is_ok());
+            assert!(started.elapsed() >= Duration::from_millis(100));
+            listen.await.unwrap()
+        });
+        assert!(accepted);
     }
 
     #[test]

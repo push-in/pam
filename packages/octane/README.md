@@ -283,7 +283,10 @@ Octane::tick('heartbeat', fn () => Cache::store('octane')->increment('beats'))->
   returns `false` for a task still running after `$waitMs` and throws
   `TaskTimeoutException` when none finished; exceptions in tasks are rethrown
   as `TaskException`, as on Swoole. Without task workers, `concurrently()`
-  keeps running tasks sequentially.
+  keeps running tasks sequentially. Each task counts towards `--max-requests`:
+  PHP keeps a few hundred bytes for every serialized closure it unserializes
+  (the same with `php-cli` and on Swoole), so a task worker that never
+  recycles grows slowly; with the default limit its memory stays flat.
 - **Ticks** honour `octane.tick` (default `true`) and need task workers.
 - A worker killed in the middle of a table write (`SIGKILL`, out of memory)
   never leaves a torn row: the next worker that needs that part of the table
