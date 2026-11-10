@@ -35,3 +35,12 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
    closure code; not PAM. Bounded by --max-requests, which task workers honour
    (soak #1: all workers flat with --max-requests 2000). Documented in README.
    (soak-leak-15min-no-recycling.json)
+
+5. laravel/octane suite (release build, ran alongside soak #2):
+   READINESS_WORK_DIR=... PAM=pam-run bash octane-suite/run.sh
+   - Upstream v2.24.0 (feature off: no PAM tables in Octane): 260 tests,
+     217 pass, 0 fail, 43 skipped (Swoole-only); through PamClient the same;
+     112 exchanges cross-checked, 0 mismatches.
+   - OCTANE_REPO=octane-fork OCTANE_REF=2.x-pam-swoole-parity (feature on):
+     273 tests, 265 pass, 0 fail, 8 skipped; of the 43 Swoole-only tests 35
+     now run and pass on PAM; same through PamClient; 112 exchanges, 0 mismatches.
