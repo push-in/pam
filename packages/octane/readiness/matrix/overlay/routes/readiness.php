@@ -434,6 +434,21 @@ Route::prefix('_r/parity')->group(function (): void {
     Route::get('/task-memory', fn () => response()->json(Octane::concurrently([
         fn () => ['pid' => getmypid(), 'memory' => memory_get_usage(), 'peak' => memory_get_peak_usage()],
     ])[0]));
+    Route::get('/task-oom', function () {
+        try {
+            Octane::concurrently([function () {
+                ini_set('memory_limit', '64M');
+                $data = [];
+                while (true) {
+                    $data[] = str_repeat('x', 1024 * 1024);
+                }
+            }], 10000);
+        } catch (Throwable $error) {
+            return response()->json(['failed' => get_class($error)]);
+        }
+
+        return response()->json(['failed' => null]);
+    });
     Route::get('/concurrently/error', function () {
         try {
             Octane::concurrently([fn () => throw new RuntimeException('task failed on purpose')]);
