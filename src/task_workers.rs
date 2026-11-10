@@ -177,7 +177,8 @@ pub fn resolve(
         let endpoint = endpoint.clone();
         let sender = sender.clone();
         runtime.spawn(async move {
-            let _in_flight = InFlight::start();
+            // Not counted as in flight: a result nobody waits for any more
+            // does not delay the worker's shutdown.
             let result = post(&endpoint, Kind::Run, payload).await;
             let _ = sender.send((index, result));
         });

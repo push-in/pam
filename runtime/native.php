@@ -14,6 +14,8 @@ namespace Pam\Native {
         case HttpStreaming = 7;
         case WebSocket = 8;
         case Http3 = 9;
+        case SharedTables = 10;
+        case TaskWorkers = 11;
     }
 
     final class Api

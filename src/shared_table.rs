@@ -1064,7 +1064,7 @@ pub fn open(name: &str, layout: Layout) -> Result<Table, String> {
         return Table::attach(mapping.clone(), layout);
     }
     let mapping = Arc::new(match std::env::var_os(SOCKET_ENV) {
-        #[cfg(target_os = "linux")]
+        #[cfg(all(target_os = "linux", not(fuzzing)))]
         Some(socket) => segment_client::request(std::path::Path::new(&socket), &key.0, key.1)?,
         _ => Mapping::anonymous(layout.segment_bytes)?,
     });
@@ -1087,7 +1087,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 #[cfg(all(test, target_os = "linux"))]
 pub(crate) use segment_client::request as segment_client_request;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(fuzzing)))]
 mod segment_client {
     use super::Mapping;
     use std::io::Write;

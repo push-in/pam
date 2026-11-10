@@ -168,10 +168,17 @@ static PHP_FUNCTION(pam_native_table_open)
         pam_table_column *column = &handle->columns[handle->column_count];
         zend_long type, size;
 
+        ZVAL_DEREF(definition);
         if (Z_TYPE_P(definition) != IS_ARRAY
             || (column_name = zend_hash_index_find(Z_ARRVAL_P(definition), 0)) == NULL
-            || (column_type = zend_hash_index_find(Z_ARRVAL_P(definition), 1)) == NULL
-            || Z_TYPE_P(column_name) != IS_STRING
+            || (column_type = zend_hash_index_find(Z_ARRVAL_P(definition), 1)) == NULL) {
+            pam_table_free(handle);
+            zend_argument_value_error(3, "must be a list of [name, type, size] columns");
+            RETURN_THROWS();
+        }
+        ZVAL_DEREF(column_name);
+        ZVAL_DEREF(column_type);
+        if (Z_TYPE_P(column_name) != IS_STRING
             || Z_STRLEN_P(column_name) == 0
             || Z_STRLEN_P(column_name) > 255
             || Z_TYPE_P(column_type) != IS_LONG) {
@@ -180,6 +187,9 @@ static PHP_FUNCTION(pam_native_table_open)
             RETURN_THROWS();
         }
         column_size = zend_hash_index_find(Z_ARRVAL_P(definition), 2);
+        if (column_size != NULL) {
+            ZVAL_DEREF(column_size);
+        }
         type = Z_LVAL_P(column_type);
         size = column_size != NULL && Z_TYPE_P(column_size) == IS_LONG ? Z_LVAL_P(column_size) : 0;
         if (pam_table_column_named(handle, Z_STRVAL_P(column_name), Z_STRLEN_P(column_name)) != NULL) {
@@ -659,6 +669,7 @@ static bool pam_task_payloads(HashTable *input, pam_shared_bytes **payloads, siz
     *count = zend_hash_num_elements(input);
     *payloads = safe_emalloc(*count + 1, sizeof(pam_shared_bytes), 0);
     ZEND_HASH_FOREACH_VAL(input, payload) {
+        ZVAL_DEREF(payload);
         if (Z_TYPE_P(payload) != IS_STRING) {
             efree(*payloads);
             zend_argument_type_error(1, "must be a list of strings");
