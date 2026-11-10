@@ -304,6 +304,28 @@ Route::prefix('_r')->group(function (): void {
         Route::get('/cache/purge-all', fn () => response()->json([
             'purged' => \Pam\Octane\Facades\Pam::purgeAll(),
         ]));
+
+        // Cross-user isolation battery: each route echoes who is asking.
+        $who = static fn (array $extra = []) => response()->json([
+            'cookie' => request()->cookie('uid'),
+            'bearer' => request()->bearerToken(),
+            'q' => request()->query('u'),
+            'pad' => str_repeat('x', 2048),
+        ] + $extra);
+        Route::get('/cache/me-cookie', fn () => $who())->middleware($cache.':60');
+        Route::get('/cache/me-bearer', fn () => $who())->middleware($cache.':60');
+        Route::get('/cache/me-query', fn () => $who())->middleware($cache.':60');
+        Route::get('/cache/me-vary', fn () => $who()->header('Vary', 'Cookie, Authorization'))
+            ->middleware($cache::for(ttl: 60, staleWhileRevalidate: 30));
+        Route::get('/cache/me-swr', fn () => $who()->header('Vary', 'Cookie, Authorization'))
+            ->middleware($cache::for(ttl: 1, staleWhileRevalidate: 30));
+        Route::get('/cache/login', function () {
+            session()->put('uid', request()->query('u'));
+
+            return response()->json(['ok' => true]);
+        })->middleware('web');
+        Route::get('/cache/me-session', fn () => response()->json(['session' => session('uid')]))
+            ->middleware(['web', $cache.':60']);
     }
 });
 
