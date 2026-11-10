@@ -258,9 +258,12 @@ task workers, kernel default `tcp_migrate_req=0` unless noted.
 | Run | Result |
 |---|---|
 | 30 min, `octane:reload` every 60 s, `--max-requests=2000`, `SIGKILL` of a random HTTP or task worker every ~15 s (70 + 46 kills) | 4.95M requests; increments exact; 0 table repairs; memory flat; the 1,008 failures (0.02 %) are all requests in flight on, or queued to, a killed worker |
+| 30 min, reload every 60 s and `--max-requests=2000`, no kills | 7.66M requests, 448k `concurrently()` calls, 1 failure: a keep-alive connection closed by a draining worker as the client reused it, a rare race that `origin/main` shows too (A/B in the evidence) |
 | 15 min leak run without recycling | 4.38M requests, 0 failed; HTTP workers flat; task workers grow about 0.27 KB per task because PHP keeps the code of every unserialized closure (same in plain `php-cli`); bounded by `--max-requests`, which task workers honour |
 | Stress, 15 rounds: 256 parallel writers on one row, 2,048 concurrent cache misses, 400 clients hanging up during `concurrently()`, 200 slowloris clients, `memory_limit` fatal in an HTTP and a task worker | All exact, 0 failed requests |
 | `cargo fuzz` on the table (model-checked against a `HashMap`) | 5.9M runs in 20 min, 0 crashes |
+| Benchmark A/B against `origin/main`, same build setup | Feature off: within noise (-0.8 % to +1.3 %); with 2 task workers on the same 8 CPUs: -0.5 % to -5.4 % |
+| Ecosystem app, task workers off and on | 17/17 and 17/17 |
 | Octane fork suite with PAM table support | 273 tests, 265 pass, 0 fail; 35 of the 43 Swoole-only tests now run and pass on PAM |
 
 ## Remaining gaps

@@ -129,3 +129,18 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
     ECO_SERVERS=pam ecosystem/run.sh                       -> 17/17 PASS (off)
     ECO_SERVERS=pam ECO_PAM_FLAGS=--task-workers=2 ...     -> 17/17 PASS (on)
     Laravel log: no errors. (ecosystem/off.md, ecosystem/on.md)
+
+12. Benchmark A/B (no regression check), readiness Laravel 12 app, 8 workers
+    pinned to CPUs 0-7, wrk -t4 -c64 20 s (+5 s warm-up) from CPUs 8-11,
+    2 alternating rounds (other jobs were running on the machine):
+    ROUNDS=2 bench/ab-local.sh l12 main=<origin/main build> \
+      branch-off=<branch> "branch-on=<branch>:--task-workers=2"
+    mean req/s       main     branch-off        branch-on (2 task workers)
+    hello           11512     11424 (-0.8 %)    11133 (-3.3 %)
+    json            11528     11639 (+1.0 %)    10904 (-5.4 %)
+    db               9482      9600 (+1.3 %)     9438 (-0.5 %)
+    view             9985      9911 (-0.7 %)     9789 (-2.0 %)
+    0 errors in every run. With the feature off the branch is within noise
+    of main (round-to-round spread 5-10 %). With task workers on, two more
+    PHP processes and the 1 s tick share the same 8 pinned CPUs.
+    (bench-ab-local.tsv)
