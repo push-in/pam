@@ -54,7 +54,8 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
    200 slowloris clients for 20 s while 17-21k requests ran, 0 failed;
    memory_limit fatal in an HTTP worker (500) and in a task worker
    (TaskException), 20/20 concurrently() right after; health check ok.
-   Laravel log: only the 20 intended memory_limit fatals.
+   Laravel log: only the 20 intended memory_limit fatals. A second run of
+   10 rounds (stress-l13-10-rounds.json): all ok, master never restarted.
    Findings on the way, root-caused:
    - First design (500 drops of 2 x 300 ms tasks) timed out a probe: 300
      task-seconds of abandoned work on 2 task workers. Requests whose client
