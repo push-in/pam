@@ -405,4 +405,49 @@ if (is_string($tlsCertificate) && $tlsCertificate !== '' && is_string($tlsKey) &
     $options['tlsCert'] = $tlsCertificate;
     $options['tlsKey'] = $tlsKey;
 }
+if (getenv('PAM_TEST_FORK') === '1') {
+    // Post-boot zygote isolation probes: state created while booting must not
+    // be shared by the workers forked from it.
+    $forkLog = (string) getenv('PAM_TEST_FORK_LOG');
+    mt_rand();
+    lcg_value();
+    $bootPid = getmypid();
+    $bootSocket = null;
+    $bootSocketPort = getenv('PAM_TEST_BOOT_SOCKET_PORT');
+    if (is_string($bootSocketPort) && $bootSocketPort !== '') {
+        $bootSocket = stream_socket_client("tcp://127.0.0.1:{$bootSocketPort}", $errorCode, $errorMessage, 2.0);
+    }
+    $bootFile = fopen(__FILE__, 'rb');
+    // Unbuffered: every fread() uses the kernel file offset.
+    stream_set_read_buffer($bootFile, 0);
+    \Pam\Fork::beforeFork(static function () use ($forkLog): void {
+        file_put_contents($forkLog, 'before:' . getmypid() . "\n", FILE_APPEND | LOCK_EX);
+    });
+    pam_on_fork(static function () use ($forkLog): void {
+        file_put_contents($forkLog, 'after:' . getmypid() . ':' . getenv('PAM_WORKER_ID') . "\n", FILE_APPEND | LOCK_EX);
+    });
+    if (getenv('PAM_TEST_FORK_FAIL_IN_ZYGOTE') === '1' && getenv('PAM_WORKER_ID') === false) {
+        throw new RuntimeException('Intentional boot failure in the zygote only');
+    }
+    $app->get('/fork', static function (Request $request, Response $response) use ($bootPid, $bootSocket, $bootFile): Response {
+        $offset = ftell($bootFile);
+        $chunk = fread($bootFile, 5);
+        $written = $bootSocket === null ? null : @fwrite($bootSocket, "ping\n");
+        return $response->json([
+            'pid' => getmypid(),
+            'bootPid' => $bootPid,
+            'worker' => getenv('PAM_WORKER_ID') ?: null,
+            'forked' => \Pam\Fork::isForkedWorker(),
+            'mt' => mt_rand(),
+            'rand' => rand(),
+            'lcg' => lcg_value(),
+            'uniqid' => uniqid('', true),
+            'shuffle' => str_shuffle('abcdefghijklmnopqrstuvwxyz'),
+            'offset' => $offset,
+            'chunk' => $chunk,
+            'expected' => file_get_contents(__FILE__, false, null, (int) $offset, 5),
+            'socket' => $written === null ? 'none' : ($written === false || $written === 0 ? 'failed' : 'written'),
+        ]);
+    });
+}
 $app->listen((int) getenv('PAM_TEST_PORT'), options: $options);

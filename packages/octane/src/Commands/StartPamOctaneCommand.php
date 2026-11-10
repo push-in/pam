@@ -51,6 +51,10 @@ final class StartPamOctaneCommand extends Command
             'Rust + Tokio transport active',
         ]);
 
+        // This console application booted too (its providers may have opened
+        // connections) and stays in memory beside Octane's worker application.
+        PamServer::registerForkHooks($this->laravel);
+
         $server->listen($host, $port, $serverOptions);
 
         return self::SUCCESS;

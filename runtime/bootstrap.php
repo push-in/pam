@@ -1416,7 +1416,11 @@ namespace Pam\Internal {
         private static function temporaryUploadPrefix(): string
         {
             static $prefix = null;
-            if ($prefix === null) {
+            static $pid = null;
+            // A worker forked from a booted zygote must not reuse the
+            // zygote's PID in its prefix.
+            if ($prefix === null || $pid !== getmypid()) {
+                $pid = getmypid();
                 $namespace = @readlink('/proc/self/ns/pid');
                 $namespace = is_string($namespace) ? preg_replace('/\D+/', '', $namespace) : '';
                 $prefix = 'php-pam-' . ($namespace === '' || $namespace === null ? '0' : $namespace)
@@ -2067,10 +2071,27 @@ namespace Pam\Internal {
         public static function registerSocketAdapter(Adapter $adapter): void
         {
             self::$socketAdapter = $adapter;
+            self::$nodeId = self::socketNodeId();
+        }
+
+        private static function socketNodeId(): string
+        {
             $configuredNode = getenv('PAM_NODE_ID');
-            self::$nodeId = is_string($configuredNode) && $configuredNode !== ''
+
+            return is_string($configuredNode) && $configuredNode !== ''
                 ? $configuredNode
                 : sprintf('%s:%s:%d', gethostname() ?: 'localhost', getenv('PAM_WORKER_ID') ?: 'standalone', getmypid());
+        }
+
+        /**
+         * @internal Process-bound runtime state of a worker forked from a
+         * booted zygote: its node identity carries its own worker id and PID.
+         */
+        public static function resetAfterFork(): void
+        {
+            if (self::$socketAdapter !== null) {
+                self::$nodeId = self::socketNodeId();
+            }
         }
 
         public static function onSocketEvent(string $socketId, string $event, callable $handler): void
@@ -2380,6 +2401,73 @@ namespace Pam\Internal {
 }
 
 namespace Pam {
+    /**
+     * Fork lifecycle of a post-boot zygote (`PAM_PREFORK_BOOT=app`, the
+     * default for Laravel Octane): the application boots once in the zygote
+     * and every worker is forked from that booted state.
+     *
+     * PAM already resets what it can generically: PRNG seeds (mt_rand, rand,
+     * shuffle, lcg_value, uniqid), timers, inherited file offsets, and any
+     * socket still open at fork time is disconnected so no two processes ever
+     * share a connection. Frameworks register callbacks for the rest:
+     *
+     *  - beforeFork(): runs once in the zygote before the first fork. Close
+     *    connections cleanly here (database, Redis, brokers) so workers
+     *    reconnect lazily.
+     *  - afterFork(): runs in every worker right after its fork, with its
+     *    PAM_WORKER_ID and other per-worker environment already set.
+     *
+     * Both are harmless when the application is not forked: the callbacks
+     * simply never run.
+     */
+    final class Fork
+    {
+        /** @var list<callable> */
+        private static array $before = [];
+
+        /** @var list<callable> */
+        private static array $after = [];
+
+        private static bool $forked = false;
+
+        public static function beforeFork(callable $callback): void
+        {
+            self::$before[] = $callback;
+        }
+
+        public static function afterFork(callable $callback): void
+        {
+            self::$after[] = $callback;
+        }
+
+        /** Whether this worker was forked from a booted application. */
+        public static function isForkedWorker(): bool
+        {
+            return self::$forked;
+        }
+
+        /** @internal Called by PAM in the zygote, once, before the first fork. */
+        public static function prepare(): void
+        {
+            foreach (self::$before as $callback) {
+                $callback();
+            }
+            // Objects released by the hooks (PDO, sockets) close now, in the
+            // zygote, instead of being shared with every worker.
+            gc_collect_cycles();
+        }
+
+        /** @internal Called by PAM in every worker right after its fork. */
+        public static function forked(): void
+        {
+            self::$forked = true;
+            \Pam\Internal\Runtime::resetAfterFork();
+            foreach (self::$after as $callback) {
+                $callback();
+            }
+        }
+    }
+
     $arguments = $GLOBALS['argv'] ?? [];
     $script = is_array($arguments) && isset($arguments[0]) && is_string($arguments[0])
         ? $arguments[0]
@@ -2388,4 +2476,22 @@ namespace Pam {
     $_SERVER['SCRIPT_NAME'] = $_SERVER['PHP_SELF'];
     $_SERVER['SCRIPT_FILENAME'] = $_SERVER['PHP_SELF'];
     unset($arguments, $script);
+}
+
+namespace {
+    if (!function_exists('pam_on_fork')) {
+        /** Runs `$callback` in every worker forked from a booted zygote. */
+        function pam_on_fork(callable $callback): void
+        {
+            \Pam\Fork::afterFork($callback);
+        }
+    }
+
+    if (!function_exists('pam_before_fork')) {
+        /** Runs `$callback` once in a booted zygote before workers are forked. */
+        function pam_before_fork(callable $callback): void
+        {
+            \Pam\Fork::beforeFork($callback);
+        }
+    }
 }

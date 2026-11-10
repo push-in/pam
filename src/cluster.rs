@@ -811,7 +811,7 @@ fn spawn_generation(
     generation: u64,
     runtime_directory: &Path,
 ) -> Result<Vec<Worker>, String> {
-    let zygote = start_zygote(executable, options)?;
+    let zygote = start_zygote(executable, options, generation)?;
     let zygote = zygote.as_ref();
     if pools.is_empty() {
         return (1..=options.workers)
@@ -855,6 +855,7 @@ fn spawn_generation(
 fn start_zygote(
     executable: &OsStr,
     options: &StartOptions,
+    generation: u64,
 ) -> Result<Option<SharedZygote>, String> {
     if options.workers < 2 || std::env::var_os("PAM_PREFORK").is_some_and(|value| value == "0") {
         return Ok(None);
@@ -868,14 +869,68 @@ fn start_zygote(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
     configure_runtime_command(&mut command, options);
-    let zygote = crate::prefork::Zygote::start(command)?;
+    let mode = prefork_boot_mode(options);
+    command.env(crate::prefork::BOOT_MODE_ENV, mode.as_str());
+    if mode == crate::prefork::BootMode::Application {
+        // The application boots once per generation, in the zygote, and may
+        // read its generation while booting like an exec'd worker does.
+        command.env("PAM_WORKER_GENERATION", generation.to_string());
+    }
+    let zygote = crate::prefork::Zygote::start(command, options.startup_timeout)?;
     Ok(Some(std::rc::Rc::new(std::cell::RefCell::new(zygote))))
+}
+
+/// `PAM_PREFORK_BOOT=app` forks workers from a booted application,
+/// `engine` from a bare engine. Laravel Octane on PAM (`artisan pam:octane`)
+/// boots in the zygote by default. Pools boot a different runtime per worker,
+/// so they always fork from the engine.
+#[cfg(target_os = "linux")]
+fn prefork_boot_mode(options: &StartOptions) -> crate::prefork::BootMode {
+    use crate::prefork::BootMode;
+    let requested = std::env::var(crate::prefork::BOOT_MODE_ENV).ok();
+    let mode = match requested.as_deref().map(BootMode::parse) {
+        Some(Some(mode)) => mode,
+        Some(None) => {
+            eprintln!(
+                "pam: ignoring {}={:?}; expected app or engine",
+                crate::prefork::BOOT_MODE_ENV,
+                requested.unwrap_or_default()
+            );
+            default_prefork_boot_mode(options)
+        }
+        None => default_prefork_boot_mode(options),
+    };
+    if mode == BootMode::Application && !options.pools.is_empty() {
+        eprintln!(
+            "pam: post-boot zygote disabled (runtime pools boot per pool); falling back to pre-boot forking"
+        );
+        return BootMode::Engine;
+    }
+    mode
+}
+
+#[cfg(target_os = "linux")]
+fn default_prefork_boot_mode(options: &StartOptions) -> crate::prefork::BootMode {
+    if is_octane_entrypoint(&options.script, &options.script_args) {
+        crate::prefork::BootMode::Application
+    } else {
+        crate::prefork::BootMode::Engine
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn is_octane_entrypoint(script: &Path, arguments: &[OsString]) -> bool {
+    script.file_name().is_some_and(|name| name == "artisan")
+        && arguments
+            .first()
+            .is_some_and(|argument| argument == "pam:octane")
 }
 
 #[cfg(not(target_os = "linux"))]
 fn start_zygote(
     _executable: &OsStr,
     _options: &StartOptions,
+    _generation: u64,
 ) -> Result<Option<SharedZygote>, String> {
     Ok(None)
 }
@@ -1433,6 +1488,25 @@ fn parse_pool(value: Option<OsString>) -> Result<PoolSpec, String> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn boots_octane_in_the_zygote_by_default() {
+        let artisan = Path::new("/srv/app/artisan");
+        assert!(is_octane_entrypoint(
+            artisan,
+            &[OsString::from("pam:octane")]
+        ));
+        assert!(!is_octane_entrypoint(
+            artisan,
+            &[OsString::from("queue:work")]
+        ));
+        assert!(!is_octane_entrypoint(
+            Path::new("/srv/app/server.php"),
+            &[OsString::from("pam:octane")]
+        ));
+        assert!(!is_octane_entrypoint(artisan, &[]));
+    }
+
     use super::*;
 
     #[test]

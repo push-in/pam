@@ -132,6 +132,7 @@ jobs:
         run: |
           cargo build --locked
           cargo test --locked --test cluster --test server -- --test-threads=1
+          PAM_PREFORK_BOOT=app cargo test --locked --test cluster -- --test-threads=1
       - name: Serve Laravel through PAM Octane
         working-directory: packages/octane/tests/Fixtures/laravel
         run: |
