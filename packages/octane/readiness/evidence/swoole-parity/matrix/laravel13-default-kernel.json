@@ -1,0 +1,236 @@
+[
+  {
+    "feature": "Basic responses",
+    "status": "PASS",
+    "detail": "all correct",
+    "category": "pam"
+  },
+  {
+    "feature": "Request isolation (container instances, config, locale, auth, session, request)",
+    "status": "PASS",
+    "detail": "no state leaked across 12 requests",
+    "category": "pam"
+  },
+  {
+    "feature": "Octane::concurrently()",
+    "status": "PASS",
+    "detail": "results=[2, 101, 'PAM'] via SequentialTaskDispatcher (sequential outside Swoole, same as RoadRunner/FrankenPHP)",
+    "category": "pam"
+  },
+  {
+    "feature": "Octane cache store (`octane` driver)",
+    "status": "PASS",
+    "detail": "Laravel\\Octane\\Cache\\OctaneArrayStore without --task-workers (per worker, as before)",
+    "category": "pam"
+  },
+  {
+    "feature": "Octane::table()",
+    "status": "PASS",
+    "detail": "same row in 4 workers; 400 concurrent incr -> 400 (400 distinct values)",
+    "category": "swoole-parity"
+  },
+  {
+    "feature": "Octane cache store (`octane` driver, shared)",
+    "status": "PASS",
+    "detail": "value seen by 4 workers; increments 1..20",
+    "category": "swoole-parity"
+  },
+  {
+    "feature": "Octane::concurrently() on task workers",
+    "status": "PASS",
+    "detail": "2x300 ms in 305 ms on 2 task workers, 4x300 ms in 605 ms; exceptions -> TaskException",
+    "category": "swoole-parity"
+  },
+  {
+    "feature": "Task dispatch (--task-workers)",
+    "status": "PASS",
+    "detail": "5 dispatched tasks ran (0 -> 5)",
+    "category": "swoole-parity"
+  },
+  {
+    "feature": "Octane::tick()",
+    "status": "PASS",
+    "detail": "3 ticks in 3.5 s (one per second, task workers)",
+    "category": "swoole-parity"
+  },
+  {
+    "feature": "Octane cache intervals",
+    "status": "PASS",
+    "detail": "Edgd9sUzO504Y5WF -> r8kWAiqr8Kynk912 after 2.2 s",
+    "category": "swoole-parity"
+  },
+  {
+    "feature": "Tables and cache survive reload and a killed worker",
+    "status": "PASS",
+    "detail": "after reload {'name': 'pam', 'votes': 400}, cache 'shared', after SIGKILL of 3023537: {'name': 'pam', 'votes': 400}",
+    "category": "swoole-parity"
+  },
+  {
+    "feature": "Progressive /_r/stream",
+    "status": "PASS",
+    "detail": "HTTP 200, first byte 7 ms, complete 1009 ms, chunked",
+    "category": "pam"
+  },
+  {
+    "feature": "Progressive /_r/stream-generator",
+    "status": "PASS",
+    "detail": "HTTP 200, first byte 7 ms, complete 1009 ms, chunked",
+    "category": "pam"
+  },
+  {
+    "feature": "Progressive /_r/sse",
+    "status": "PASS",
+    "detail": "HTTP 200, first byte 4 ms, complete 1007 ms, chunked",
+    "category": "pam"
+  },
+  {
+    "feature": "50 MB BinaryFileResponse download",
+    "status": "PASS",
+    "detail": "HTTP 200, 52428800 bytes",
+    "category": "pam"
+  },
+  {
+    "feature": "Chunked streamDownload (16 MB)",
+    "status": "PASS",
+    "detail": "HTTP 200, 16777216 bytes, chunked",
+    "category": "pam"
+  },
+  {
+    "feature": "Worker healthy after streaming",
+    "status": "PASS",
+    "detail": "",
+    "category": "pam"
+  },
+  {
+    "feature": "Requests arriving while every worker streams are queued (no 503)",
+    "status": "PASS",
+    "detail": "20/20 ok, others=[]",
+    "category": "pam"
+  },
+  {
+    "feature": "Static files (Vite build, robots.txt, storage:link, 304, Range)",
+    "status": "PASS",
+    "detail": "served with MIME, ETag/304 and Range; no PHP source or files outside public/",
+    "category": "pam"
+  },
+  {
+    "feature": "HTTP/1.1 keep-alive (50 requests, 1 connection)",
+    "status": "PASS",
+    "detail": "1 connection(s)",
+    "category": "pam"
+  },
+  {
+    "feature": "Trusted proxies (X-Forwarded-*)",
+    "status": "PASS",
+    "detail": "{\"secure\": true, \"scheme\": \"https\", \"host\": \"shop.example\", \"ip\": \"203.0.113.9\", \"url\": \"https://shop.example/x\"}",
+    "category": "pam"
+  },
+  {
+    "feature": "100 MB multipart upload, memory_limit=128M",
+    "status": "PASS",
+    "detail": "HTTP 200, sha256 match=True, 0.15s, isValid=True, PHP peak 14 MiB, worker peak RSS 74 MiB, temp files left=0",
+    "category": "pam"
+  },
+  {
+    "feature": "100 MB multipart upload + move(), memory_limit=128M",
+    "status": "PASS",
+    "detail": "HTTP 200, sha256 match=True, 0.15s, isValid=True, PHP peak 14 MiB, worker peak RSS 77 MiB, temp files left=0",
+    "category": "pam"
+  },
+  {
+    "feature": "1 GB multipart upload, memory_limit=128M",
+    "status": "PASS",
+    "detail": "HTTP 200, sha256 match=True, 1.38s, isValid=True, PHP peak 18 MiB, worker peak RSS 79 MiB, temp files left=0",
+    "category": "pam"
+  },
+  {
+    "feature": "1 GB multipart upload + move(), memory_limit=128M",
+    "status": "PASS",
+    "detail": "HTTP 200, sha256 match=True, 2.23s, isValid=True, PHP peak 18 MiB, worker peak RSS 83 MiB, temp files left=0",
+    "category": "pam"
+  },
+  {
+    "feature": "5 MB raw JSON body",
+    "status": "PASS",
+    "detail": "HTTP 200",
+    "category": "pam"
+  },
+  {
+    "feature": "upload_max_filesize / post_max_size enforced while streaming",
+    "status": "PASS",
+    "detail": "2 MB file over 1M limit -> error=1 (want 1, fields kept), 9 MB body over 8M post_max_size -> HTTP 413 (want 413), temp files left=0",
+    "category": "pam"
+  },
+  {
+    "feature": "Memory stability over 50k requests (1 worker)",
+    "status": "PASS",
+    "detail": "50000 ok/0 failed, PHP heap 15664->15664 KiB, RSS 100->100 MiB, same worker=True, 1555.2 rps",
+    "category": "pam"
+  },
+  {
+    "feature": "--max-requests recycling under load (4 workers, limit 500, new connection per request)",
+    "status": "FAIL",
+    "detail": "8 distinct worker pids, 36088 ok/1 failed {'2xx': 36088, 'error:ConnectionResetError': 1}",
+    "category": "pam"
+  },
+  {
+    "feature": "--max-requests recycling under load (4 workers, limit 500, keep-alive)",
+    "status": "PASS",
+    "detail": "8 distinct worker pids, 62606 ok/0 failed {'2xx': 62606}",
+    "category": "pam"
+  },
+  {
+    "feature": "octane:reload (4 reloads, keep-alive) with zero dropped requests",
+    "status": "PASS",
+    "detail": "70342 ok/0 failed {'2xx': 70342}, workers replaced=True",
+    "category": "pam"
+  },
+  {
+    "feature": "Zero-loss: wrk -c64 keep-alive, --max-requests=2000 and a reload every 4 s",
+    "status": "PASS",
+    "detail": "212926 requests in 40s (5319 rps), 9 reloads, 8+ worker pids seen, socket errors=0, non-2xx=0",
+    "category": "pam"
+  },
+  {
+    "feature": "octane:status / octane:stop / start again",
+    "status": "PASS",
+    "detail": "status online=True, stop closed port=True, restart=True",
+    "category": "pam"
+  },
+  {
+    "feature": "Request timeout answers 504 (2 s limit, blocking 6 s handler)",
+    "status": "PASS",
+    "detail": "HTTP 504 after 2.1s, connection=close, 20/20 healthy afterwards=True, stuck worker replaced=True",
+    "category": "pam"
+  },
+  {
+    "feature": "Request timeout during a 100 MB upload leaves no temporary file",
+    "status": "PASS",
+    "detail": "HTTP 504 after 2.4s, temp files left=0",
+    "category": "pam"
+  },
+  {
+    "feature": "Worker crash recovery (SIGKILL, memory_limit fatal, exit(), exception)",
+    "status": "PASS",
+    "detail": "/_r/crash->RemoteDisconnected, then 20/20 ok; /_r/oom->500, then 20/20 ok; /_r/exit->500, then 20/20 ok; /_r/fatal->500, then 20/20 ok",
+    "category": "pam"
+  },
+  {
+    "feature": "WorkerStopping fires on shutdown (not at boot)",
+    "status": "PASS",
+    "detail": "fired at boot=False, fired at stop=True",
+    "category": "pam"
+  },
+  {
+    "feature": "HTTPS (PAM_TLS_CERT/PAM_TLS_KEY)",
+    "status": "PASS",
+    "detail": "HTTP 200, request()->secure()=True, negotiated HTTP/2",
+    "category": "pam"
+  },
+  {
+    "feature": "--watch reloads on file change",
+    "status": "PASS",
+    "detail": "b'watch-v1' -> b'watch-v2'",
+    "category": "pam"
+  }
+]

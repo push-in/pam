@@ -15,8 +15,10 @@ an official server next to Swoole, RoadRunner and FrankenPHP.
 
 ## Verdict
 
-Ready on the server side. Every Octane feature that is not Swoole-only works
-on Laravel 12 and 13, Octane's own suite passes through the PAM client, the
+Ready on the server side. Every Octane feature works on Laravel 12 and 13,
+including the ones that used to be Swoole-only (`Octane::table()`, the shared
+`octane` cache, `Octane::concurrently()` on task workers, task dispatch,
+`Octane::tick()` and cache intervals, opt-in with `--task-workers`), Octane's own suite passes through the PAM client, the
 real ecosystem app passes the same 17 steps as FrankenPHP, and PAM is the
 fastest of the four servers in the benchmark.
 
@@ -84,18 +86,22 @@ requests and on manual dispatch, and uploads `results/`.
 
 ## 2. Feature matrix (Laravel 12 and 13)
 
-34 checks per Laravel version; 28 PASS, 6 N/A (Swoole-only) on both, except
-the recycling check marked below, which depends on the kernel setting.
+39 checks per Laravel version, all PASS on both, except the recycling check
+marked below, which depends on the kernel setting. The Swoole-parity rows were
+re-run on 2026-11-10 with the release build of this branch.
 
 | Feature | Laravel 12 | Laravel 13 | Notes |
 |---|---|---|---|
 | Basic responses (JSON, Blade, DB, redirect, 204, HEAD, multiple cookies, repeated headers) | PASS | PASS | |
 | Request isolation: container instances, config, locale, auth, session, request attributes | PASS | PASS | No leaks across 12 requests and every worker |
 | `Octane::concurrently()` | PASS | PASS | Sequential dispatcher, the same as RoadRunner and FrankenPHP |
-| Octane cache store (`octane` driver) | PASS | PASS | Per-worker array store. It is shared through a table only on Swoole. |
-| `Octane::table()` | N/A | N/A | **Swoole-only in Octane itself** |
-| `Octane::tick()` / intervals | N/A | N/A | **Swoole-only in Octane itself** |
-| Task workers (`--task-workers`) | N/A | N/A | **Swoole-only in Octane itself** |
+| Octane cache store (`octane` driver), no task workers | PASS | PASS | Per-worker array store, as before |
+| Octane cache store, shared (task workers or `pam-octane.shared_cache`) | PASS | PASS | Value seen by 4 workers; increments 1..20 |
+| `Octane::table()` / `PamOctane::table()` | PASS | PASS | Same row in 4 workers; 400 concurrent `incr` -> 400 distinct values |
+| `Octane::concurrently()` on task workers | PASS | PASS | 2 x 300 ms in 305 ms on 2 task workers, 4 x 300 ms in 605 ms; exceptions -> `TaskException` |
+| Task dispatch (`--task-workers`) | PASS | PASS | 5 of 5 dispatched tasks ran |
+| `Octane::tick()` / cache intervals | PASS | PASS | One tick per second on a task worker; interval value refreshed after 2.2 s |
+| Tables and shared cache survive `octane:reload` and a `SIGKILL`ed worker | PASS | PASS | Row and cache intact after both |
 | Streamed responses (`response()->stream()`, generators, `eventStream` SSE) | PASS | PASS | First byte in 3 to 5 ms, last byte at 1 s, chunked |
 | 50 MB `download()` and 16 MB `streamDownload()` | PASS | PASS | |
 | Requests reaching a busy, streaming worker are queued instead of rejected | PASS | PASS | 20/20 |
@@ -243,6 +249,20 @@ to 13, 16 to 18) and pam-octane 1.2.0 (package: bugs 1, 2, 7, 9, 10, 14, 15,
 19). Each fix has a regression test in `tests/` (Rust), `packages/octane/tests`
 (PHPUnit) or this readiness suite.
 
+## Swoole parity: soak, chaos, stress, fuzzing
+
+Evidence and commands: `readiness/evidence/swoole-parity/RUNS.txt`, with the
+JSON of every run. Release build, Laravel 12/13 readiness apps, 4 HTTP and 2
+task workers, kernel default `tcp_migrate_req=0` unless noted.
+
+| Run | Result |
+|---|---|
+| 30 min, `octane:reload` every 60 s, `--max-requests=2000`, `SIGKILL` of a random HTTP or task worker every ~15 s (70 + 46 kills) | 4.95M requests; increments exact; 0 table repairs; memory flat; the 1,008 failures (0.02 %) are all requests in flight on, or queued to, a killed worker |
+| 15 min leak run without recycling | 4.38M requests, 0 failed; HTTP workers flat; task workers grow about 0.27 KB per task because PHP keeps the code of every unserialized closure (same in plain `php-cli`); bounded by `--max-requests`, which task workers honour |
+| Stress, 15 rounds: 256 parallel writers on one row, 2,048 concurrent cache misses, 400 clients hanging up during `concurrently()`, 200 slowloris clients, `memory_limit` fatal in an HTTP and a task worker | All exact, 0 failed requests |
+| `cargo fuzz` on the table (model-checked against a `HashMap`) | 5.9M runs in 20 min, 0 crashes |
+| Octane fork suite with PAM table support | 273 tests, 265 pass, 0 fail; 35 of the 43 Swoole-only tests now run and pass on PAM |
+
 ## Remaining gaps
 
 Gaps 1 to 3 of the previous report (lossless hand-over, hard timeouts, upload
@@ -251,8 +271,13 @@ memory) are closed in PAM 2.2.13, see above. Still open:
 1. **Static files go through the PHP worker.** This matches Swoole, but it
    uses the single request slot. Serving `public/` from Rust would be faster
    and would leave PHP free.
-2. **`Octane::concurrently()` is sequential**, as on RoadRunner and FrankenPHP.
-   PAM has Fibers and process pools and could offer a real `DispatchesTasks`.
+2. **Task workers are opt-in.** Without `--task-workers`,
+   `Octane::concurrently()` stays sequential as on RoadRunner and FrankenPHP.
+   With them it runs on a private task pool (see the Swoole-parity section).
+   Tasks are not interrupted when the HTTP client that started them leaves,
+   as on Swoole. Released Octane declares `Octane::table()` with a
+   `Swoole\Table` return type, so apps use `PamOctane::table()` until Octane
+   accepts the PAM server.
 3. **No automatic certificates.** FrankenPHP's `--https` uses ACME through
    Caddy; PAM needs certificate files. `--admin-port`, `--log-level` and
    `--poll` are accepted and ignored.
