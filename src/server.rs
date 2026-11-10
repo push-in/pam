@@ -2320,13 +2320,10 @@ async fn serve_through_page_cache(
         }
     }
     let epoch = cache.epoch();
-    let php_headers;
-    let php_headers = if key.head {
-        headers
-    } else {
-        php_headers = without_conditional_headers(headers);
-        &php_headers
-    };
+    // Conditional headers reach PHP unchanged: an application that answers
+    // 304 itself (static files, ETag middleware) keeps doing so; a 304 is
+    // simply not stored and the next unconditional request fills the cache.
+    let php_headers = headers;
     let (response, bytes) = with_hard_deadline(
         state,
         request_id,
@@ -2383,8 +2380,10 @@ async fn fill_page_cache(
         Ok(policy) => policy,
         Err(_) => {
             // A failed background revalidation (5xx, timeout) keeps serving
-            // the stale copy; anything else that is not cacheable evicts it.
-            if !(background && response.status().is_server_error()) {
+            // the stale copy, and a 304 says nothing about cacheability;
+            // anything else that is not cacheable evicts it.
+            let status = response.status();
+            if status != StatusCode::NOT_MODIFIED && !(background && status.is_server_error()) {
                 cache.reject(key, request_headers);
             }
             return Filled::NotStored(response, response_bytes);

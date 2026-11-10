@@ -25,9 +25,33 @@ impl Drop for Server {
     }
 }
 
+/// A free port outside the kernel's ephemeral range, never handed out twice
+/// by this binary. PAM listens with `SO_REUSEPORT`, so a port probed with
+/// `bind(0)` could also be picked by another process on the machine and the
+/// two servers would silently share it; `wait_until_ours` double-checks.
 fn free_port() -> u16 {
-    let probe = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-    probe.local_addr().unwrap().port()
+    static HANDED_OUT: std::sync::Mutex<Vec<u16>> = std::sync::Mutex::new(Vec::new());
+    let mut seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .subsec_nanos() as u64
+        ^ u64::from(std::process::id()) << 16;
+    loop {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        let port = 20_000 + (seed >> 33) as u16 % 12_000;
+        let mut handed_out = HANDED_OUT.lock().unwrap();
+        if handed_out.contains(&port) || TcpListener::bind(("127.0.0.1", port)).is_err() {
+            continue;
+        }
+        handed_out.push(port);
+        return port;
+    }
+}
+
+fn token(port: u16) -> String {
+    format!("{}-{port}-{:?}", std::process::id(), Instant::now())
 }
 
 fn fixture() -> PathBuf {
@@ -47,11 +71,13 @@ impl Server {
         for (name, value) in environment {
             command.env(name, value);
         }
+        let token = token(port);
+        command.env("PAM_PC_TOKEN", &token);
         let mut server = Self {
             child: command.spawn().expect("PAM page cache server should start"),
             port,
         };
-        wait_for_port(port, &mut server.child);
+        wait_for_port(port, &mut server.child, &token);
         server
     }
 
@@ -60,11 +86,19 @@ impl Server {
     }
 }
 
-fn wait_for_port(port: u16, child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+/// Waits until this test's own server answers on `port`.
+fn wait_for_port(port: u16, child: &mut Child, token: &str) {
+    let deadline = Instant::now() + Duration::from_secs(15);
     while Instant::now() < deadline {
-        if TcpStream::connect(("127.0.0.1", port)).is_ok() {
-            return;
+        if let Ok(mut stream) = TcpStream::connect(("127.0.0.1", port)) {
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(5)));
+            let _ = stream
+                .write_all(b"GET /__ready HTTP/1.1\r\nHost: ready\r\nConnection: close\r\n\r\n");
+            let mut response = Vec::new();
+            let _ = stream.read_to_end(&mut response);
+            if String::from_utf8_lossy(&response).contains(&format!("\"token\":\"{token}\"")) {
+                return;
+            }
         }
         if let Some(status) = child.try_wait().unwrap() {
             panic!("PAM stopped before accepting connections: {status}");
@@ -121,7 +155,9 @@ fn request(port: u16, method: &str, target: &str, headers: &[(&str, &str)]) -> H
     raw.push_str("Connection: close\r\n\r\n");
     stream.write_all(raw.as_bytes()).unwrap();
     let mut response = Vec::new();
-    stream.read_to_end(&mut response).unwrap();
+    if let Err(error) = stream.read_to_end(&mut response) {
+        panic!("{method} {target}: {error} after {} bytes", response.len());
+    }
     let _ = stream.shutdown(Shutdown::Both);
     parse_response(&response, method == "HEAD")
 }
@@ -218,14 +254,28 @@ fn serves_public_responses_without_php_and_answers_conditionals() {
     assert!(not_modified.body.is_empty());
     assert_eq!(not_modified.header("etag"), Some(etag.as_str()));
 
-    // A conditional miss is answered by the cache after the fill: PHP never
-    // sees the validator, so the stored copy is always complete.
+    // A non-matching conditional miss fills the cache.
     let fresh_target = format!("/fresh?{PUBLIC}");
     let conditional_miss = server.get(&fresh_target, &[("If-None-Match", "\"nope\"")]);
     assert_eq!(conditional_miss.status, 200);
     let full = server.get(&fresh_target, &[]);
     assert_eq!(full.cache(), "HIT");
     assert!(!full.body.is_empty());
+
+    // An application that answers 304 itself still does on a miss; the 304
+    // is not stored and the next full response is.
+    let app_etag = format!("/app-etag?{PUBLIC}&etag=v1");
+    let revalidated = server.get(&app_etag, &[("If-None-Match", "\"v1\"")]);
+    assert_eq!(revalidated.status, 304);
+    assert_eq!(revalidated.cache(), "MISS");
+    assert_eq!(server.get(&app_etag, &[]).cache(), "MISS");
+    let stored = server.get(&app_etag, &[]);
+    assert_eq!(stored.cache(), "HIT");
+    assert_eq!(stored.header("etag"), Some("\"v1\""));
+    assert_eq!(
+        server.get(&app_etag, &[("If-None-Match", "\"v1\"")]).status,
+        304
+    );
 
     let head = request(server.port, "HEAD", &target, &[]);
     assert_eq!(head.status, 200);
@@ -239,7 +289,7 @@ fn serves_public_responses_without_php_and_answers_conditionals() {
     assert!(metric(server.port, "pam_http_response_cache_hits_total") >= 3);
     assert_eq!(
         metric(server.port, "pam_http_response_cache_not_modified_total"),
-        1
+        2
     );
     assert!(metric(server.port, "pam_http_response_cache_entries") >= 2);
 }
@@ -639,18 +689,20 @@ fn memory_stays_bounded_under_a_cache_busting_load() {
 #[test]
 fn purges_reach_every_worker_of_a_cluster() {
     let port = free_port();
+    let cluster_token = token(port);
     let child = Command::new(env!("CARGO_BIN_EXE_pam"))
         .args(["start"])
         .arg(fixture())
         .args(["--workers", "3", "--startup-timeout", "10000"])
         .env("PAM_TEST_PORT", port.to_string())
+        .env("PAM_PC_TOKEN", &cluster_token)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
     let mut server = Server { child, port };
-    wait_for_port(port, &mut server.child);
+    wait_for_port(port, &mut server.child, &cluster_token);
     let target = format!("/shared?{PUBLIC}&tags=catalog");
 
     // Warm every worker: new connections spread over the workers.

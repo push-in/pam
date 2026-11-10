@@ -480,8 +480,9 @@ Comportamento:
   servida sem compressão em vez de acumular CPU).
 - **ETag/304**: a entrada guarda o `ETag` da aplicação ou gera um forte;
   `If-None-Match` e `If-Modified-Since` recebem 304 direto do cache. Em um
-  miss, os headers condicionais não chegam ao PHP, para que a cópia guardada
-  seja sempre completa.
+  miss, os headers condicionais chegam ao PHP normalmente; um 304 da aplicação
+  não é armazenado nem remove a cópia, e a próxima resposta completa preenche
+  o cache.
 - **Single flight**: misses concorrentes da mesma URL executam o PHP uma vez;
   os demais esperam e recebem a cópia. URLs que responderam não cacheável não
   colapsam por 10 s (hit-for-miss).

@@ -17,8 +17,12 @@ use Pam\Http\Server;
 $calls = 0;
 
 Server::createNative(static function (Response $response) use (&$calls): Response {
-    $call = ++$calls;
     $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+    // Readiness probe: not counted, so `calls` only counts test requests.
+    if ($path === '/__ready') {
+        return $response->json(['token' => getenv('PAM_PC_TOKEN') ?: null]);
+    }
+    $call = ++$calls;
     $query = $_GET;
 
     if ($path === '/purge') {
@@ -57,6 +61,10 @@ Server::createNative(static function (Response $response) use (&$calls): Respons
     }
     if (isset($query['etag'])) {
         $response->header('ETag', '"' . $query['etag'] . '"');
+        // Like Laravel's static files and ETag middleware: PHP answers 304.
+        if (($_SERVER['HTTP_IF_NONE_MATCH'] ?? null) === '"' . $query['etag'] . '"') {
+            return $response->status(304)->send('');
+        }
     }
     if (isset($query['setcookie'])) {
         $response->cookie('session', 'fresh-' . $call);
