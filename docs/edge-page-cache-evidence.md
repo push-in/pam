@@ -64,3 +64,46 @@ standalone run): 0 leaks in ~86 k checked responses.
 Negative control (proves the battery detects leaks): a route that marks
 per-cookie content `public` without `Vary`, with cookies allowed (the
 misconfiguration the docs warn against): 546 leaks detected in 640 requests.
+
+## Soak with chaos (cache ON)
+
+`soak.sh`, Laravel 12, 4 workers, `--max-requests=20000`, 8 MiB cache,
+15 minutes of four concurrent wrk streams: cached Blade view (32 conns),
+uncached view (8), cache-busting random query strings on the cached route (8,
+forces constant eviction), session pages with a new cookie per request (4).
+An `octane:reload` every 60 s (14 total) and a `kill -9` of a random worker
+every 90 s (9 total).
+
+| Stream | Requests | Req/s | p99 | Non-2xx |
+| --- | --- | --- | --- | --- |
+| Cached view (HIT) | 118 904 012 | 132 106 | 2.34 ms | 0 |
+| Uncached view | 746 114 | 829 | 944 ms | 0 |
+| Cache-busting (MISS + eviction) | 652 951 | 725 | 976 ms | 0 |
+| Session pages (BYPASS) | 154 672 | 172 | 1.00 s | 0 |
+
+- 41 socket read errors and 5 timeouts over ~120.5 M requests, all
+  coinciding with the 9 `kill -9`s (connections in flight on the killed
+  worker); no non-2xx response.
+- Per-worker cache stayed at its bound throughout: ~2.0 MB / 1 024 entries
+  with continuous LRU eviction under the cache-busting stream, back to empty
+  after each reload or kill and refilled within one sample.
+- Process RSS/PSS flat across the 15 minutes (no growth trend). Absolute
+  values are not reported because other agents' PAM processes on the same
+  host matched the sampler.
+
+## Benchmark (cache OFF vs ON)
+
+`wrk -t4 -c64 -d10s`, Laravel 12, 4 workers, server on CPUs 0-7, wrk on CPUs
+16-19, best of 3 per run, median of 3 runs. The host was shared with other
+agents' load tests (load average 15-37), so uncached numbers carry about
++-30 % noise.
+
+| Route | Cache OFF req/s | Cache ON req/s | Cache ON p99 |
+| --- | --- | --- | --- |
+| `/_r/hello` (not cacheable) | 4 964 | 5 890 | 16.7 ms |
+| `/_r/json` (not cacheable) | 4 999 | 6 203 | 16.1 ms |
+| `/_r/view` (not cacheable Blade) | 4 961 | 5 277 | 18.8 ms |
+| `/_r/view-cached` (Blade, `CacheResponse`) | 5 000 | 309 017 (HIT) | 2.9 ms |
+
+No measurable overhead on routes that are not cached; a cached Blade page is
+served from Rust at ~60x the PHP throughput (402 k req/s best run).
