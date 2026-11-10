@@ -175,6 +175,10 @@ O Pam trata de forma genérica o que não pode atravessar o `fork`:
   rearmado; a identidade de nó dos sockets do Pam usa o PID do worker.
 - **OPcache/JIT:** continuam no segmento compartilhado da geração, como no modo
   pré-boot e no PHP-FPM.
+- **OOM killer:** cada worker forkado soma 300 ao próprio `oom_score_adj`, então
+  sob falta de memória o kernel mata o worker que está crescendo, e não o
+  zygote (o maior processo ocioso no modo pós-boot), cuja morte derrubaria
+  todos os workers da geração de uma vez.
 
 Hooks para o framework resetar o resto:
 

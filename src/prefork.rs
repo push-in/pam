@@ -452,6 +452,7 @@ mod linux {
                     drop(signals);
                     drop(commands);
                     drop(events);
+                    prefer_worker_for_oom_kill();
                     for (name, value) in env {
                         // SAFETY: the forked worker is single-threaded until PHP
                         // finishes booting and the HTTP server starts.
@@ -706,6 +707,34 @@ mod linux {
             unsafe { libc::close(reopened) };
             if result < 0 { Err(error) } else { Ok(true) }
         }
+    }
+
+    /// How much more an OOM kill should prefer a forked worker over its
+    /// zygote, in `oom_score_adj` units (thousandths of the memory limit).
+    const WORKER_OOM_SCORE_BONUS: i32 = 300;
+
+    /// The zygote is the parent of every worker of its generation: when the
+    /// OOM killer picks it (a post-boot zygote holds the booted application,
+    /// so it is the largest idle process), every worker dies with it and the
+    /// port has no listener until replacements boot. Raising the worker's own
+    /// `oom_score_adj` needs no privilege and makes the kernel kill the worker
+    /// that is actually growing instead; the master replaces it from the
+    /// zygote in milliseconds.
+    fn prefer_worker_for_oom_kill() {
+        let path = "/proc/self/oom_score_adj";
+        let Some(current) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|value| value.trim().parse::<i32>().ok())
+        else {
+            return;
+        };
+        let _ = std::fs::write(path, worker_oom_score_adj(current).to_string());
+    }
+
+    pub(super) fn worker_oom_score_adj(zygote: i32) -> i32 {
+        zygote
+            .saturating_add(WORKER_OOM_SCORE_BONUS)
+            .clamp(-1000, 1000)
     }
 
     fn inherited_fd(name: &str) -> Result<RawFd, String> {
@@ -1007,6 +1036,14 @@ mod tests {
         assert!(error.contains("must be single-threaded"), "{error}");
         drop(sender);
         let _ = helper.join();
+    }
+
+    #[test]
+    fn forked_workers_are_preferred_over_the_zygote_by_the_oom_killer() {
+        use super::linux::worker_oom_score_adj;
+        assert_eq!(worker_oom_score_adj(0), 300);
+        assert_eq!(worker_oom_score_adj(-500), -200);
+        assert_eq!(worker_oom_score_adj(900), 1000);
     }
 
     #[test]

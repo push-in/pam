@@ -1126,6 +1126,17 @@ fn post_boot_zygote_forks_isolated_workers_from_the_booted_application() {
             "workers drew the same {key}: {values:?}"
         );
     }
+    // The OOM killer prefers a worker over the zygote all workers depend on.
+    let adj = |pid: u64| {
+        fs::read_to_string(format!("/proc/{pid}/oom_score_adj"))
+            .unwrap()
+            .trim()
+            .parse::<i32>()
+            .unwrap()
+    };
+    for pid in first_by_pid.keys() {
+        assert_eq!(adj(*pid), (adj(boot_pid) + 300).min(1000), "worker {pid}");
+    }
     let workers_seen = first_by_pid
         .values()
         .map(|probe| probe["worker"].as_str().unwrap().to_owned())
