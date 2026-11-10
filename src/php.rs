@@ -762,6 +762,12 @@ pub fn resume_http(
 
 pub fn cancel_http(request_id: &str) -> Result<(), String> {
     ensure_owner()?;
+    if engine_failed() {
+        // A fatal error bailed out of the dispatch: there is nothing left to
+        // unwind, and calling into the engine again raises a second fatal
+        // ("Couldn't execute method"). The worker is being recycled.
+        return Ok(());
+    }
     // SAFETY: The request ID remains valid for this synchronous owner-thread call.
     let status =
         unsafe { pam_php_cancel_http(request_id.as_ptr().cast::<c_char>(), request_id.len()) };

@@ -46,7 +46,7 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
      now run and pass on PAM; same through PamClient; 112 exchanges, 0 mismatches.
 
 6. Concurrency and chaos stress (Laravel 13 app, 4 workers, 2 task workers):
-   parity_stress.py --port 8180 --rounds 3          (stress-l13.json, all ok)
+   parity_stress.py --port 8180 --rounds 5          (stress-l13.json, all ok)
    Per round: 256 clients x 20 increments on one table row -> exactly 5120,
    every result distinct; 1024 concurrent cache misses on fresh keys and 1024
    on one key, 0 failed; 400 clients hanging up while Octane::concurrently()
@@ -54,7 +54,20 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
    200 slowloris clients for 20 s while 17-21k requests ran, 0 failed;
    memory_limit fatal in an HTTP worker (500) and in a task worker
    (TaskException), 20/20 concurrently() right after; health check ok.
-   First attempt (500 drops of 2 x 300 ms tasks) timed out a probe after
-   30 s: 300 task-seconds of abandoned work on 2 task workers. Requests whose
-   client left keep running, as on Swoole and PHP-FPM; the scenario now
-   measures the drain instead of overloading the pool.
+   Laravel log: only the 20 intended memory_limit fatals.
+   Findings on the way, root-caused:
+   - First design (500 drops of 2 x 300 ms tasks) timed out a probe: 300
+     task-seconds of abandoned work on 2 task workers. Requests whose client
+     left keep running, as on Swoole and PHP-FPM; the scenario now measures
+     the drain.
+   - After a memory_limit fatal PAM called cancelHttpDispatch into the
+     bailed-out engine: a second fatal "Couldn't execute method
+     Pam\Internal\Runtime::cancelHttpDispatch" in the logs (4 per round).
+     Fixed: no cancellation into a failed engine (the worker is recycled).
+   - One run (before the fix, stress-l13-before-cancel-fix.json) had 29
+     client-side failures among 2048 cache misses right after the previous
+     round's OOM recycling; not reproduced in 5 rounds on the fixed build.
+     With APP_DEBUG=true, Whoops still prints "http_response_code() after
+     header()" when the recycled worker exits after a fatal: Laravel's
+     shutdown handler re-renders the (already answered and logged) fatal;
+     not emitted with APP_DEBUG=false.

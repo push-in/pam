@@ -63,6 +63,20 @@ async def gather_limited(coros, limit):
     return await asyncio.gather(*(run(c) for c in coros))
 
 
+def failures(results):
+    """Count and a few samples of failed results, by kind."""
+    kinds = {}
+    for result in results:
+        if isinstance(result, Exception):
+            kind = f"{type(result).__name__}: {result}"[:120]
+        elif result[0] != 200:
+            kind = f"HTTP {result[0]}"
+        else:
+            continue
+        kinds[kind] = kinds.get(kind, 0) + 1
+    return kinds
+
+
 async def writers(port, concurrency, per_client):
     key = f"stress-{random.getrandbits(32)}"
     total = concurrency * per_client
@@ -71,7 +85,7 @@ async def writers(port, concurrency, per_client):
     _, row = await json_get(port, f"/_r/parity/table/get?key={key}")
     votes = (row["row"] or {}).get("votes", 0)
     seen = sorted(r[1]["votes"] for r in results if not isinstance(r, Exception) and r[0] == 200)
-    return {"sent": total, "failed": len(failed), "final": votes,
+    return {"sent": total, "failed": len(failed), "errors": failures(results), "final": votes,
             "distinct_results": len(set(seen)) == len(seen), "ok": not failed and votes == total and seen == list(range(1, total + 1))}
 
 
@@ -81,7 +95,7 @@ async def misses(port, concurrency):
     same = await gather_limited([json_get(port, f"/_r/parity/cache/remember?key={same_key}&bytes=4096") for _ in range(concurrency * 4)], concurrency)
     bad = [r for r in fresh + same if isinstance(r, Exception) or r[0] != 200]
     ok = not bad and {r[1]["length"] for r in fresh} == {2048} and {r[1]["length"] for r in same} == {4096}
-    return {"fresh": len(fresh), "same_key": len(same), "failed": len(bad), "ok": ok}
+    return {"fresh": len(fresh), "same_key": len(same), "failed": len(bad), "errors": failures(fresh + same), "ok": ok}
 
 
 async def disconnects(port, count, task_ms=50):
