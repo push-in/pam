@@ -26,6 +26,7 @@ const WS_BOOTSTRAP: &str = include_str!("../runtime/ws.php");
 const OBSERVABILITY_BOOTSTRAP: &str = include_str!("../runtime/observability.php");
 const SCOPE_BOOTSTRAP: &str = include_str!("../runtime/scope.php");
 const NATIVE_BOOTSTRAP: &str = include_str!("../runtime/native.php");
+const SHARED_BOOTSTRAP: &str = include_str!("../runtime/shared.php");
 const DIAGNOSTICS_BOOTSTRAP: &str = include_str!("../runtime/diagnostics.php");
 const LARAVEL_BOOTSTRAP: &str = include_str!("../runtime/laravel.php");
 const EX_SOFTWARE: c_int = 70;
@@ -570,6 +571,7 @@ impl PhpEngine {
 
         // SAFETY: Argument buffers are writable and NUL-terminated, and remain owned
         // by PhpRuntime until shutdown.
+        crate::native_shared::register();
         let status = unsafe { pam_php_init(argc, pointers.as_mut_ptr()) };
 
         if status != 0 {
@@ -646,6 +648,9 @@ impl PhpEngine {
             })
             .and_then(|()| evaluate_runtime_source(NATIVE_BOOTSTRAP, b"Pam Native API bootstrap\0"))
             .and_then(|()| {
+                evaluate_runtime_source(SHARED_BOOTSTRAP, b"Pam shared tables bootstrap\0")
+            })
+            .and_then(|()| {
                 evaluate_runtime_source(DIAGNOSTICS_BOOTSTRAP, b"Pam diagnostics bootstrap\0")
             })
             .and_then(|()| evaluate_runtime_source(BOOTSTRAP, b"Pam runtime bootstrap\0"))
@@ -692,6 +697,9 @@ impl Drop for PhpRuntime {
             // SAFETY: PhpRuntime uniquely owns the active PHP lifecycle.
             unsafe { pam_php_shutdown() };
         }
+        // Tasks dispatched to task workers (also from shutdown functions)
+        // are delivered before the worker exits; instant when there are none.
+        crate::task_workers::flush(std::time::Duration::from_secs(5));
         ACTIVE.store(false, Ordering::SeqCst);
     }
 }

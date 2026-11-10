@@ -244,11 +244,25 @@ static PHP_FUNCTION(pam_cache_purge)
     RETURN_LONG((zend_long) result);
 }
 
+#include "pam_shared_php.inc"
+
 static const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_cache_purge, arginfo_pam_cache_purge)
     PHP_FE(pam_native_abi_version, arginfo_pam_native_abi_version)
     PHP_FE(pam_native_stream_fd, arginfo_pam_native_stream_fd)
     PHP_FE(pam_native_reset_response, arginfo_pam_native_reset_response)
+    PHP_FE_END
+};
+
+/*
+ * Shared tables and task workers stay registered until the engine itself
+ * shuts down: objects destructed and shutdown functions run during
+ * php_request_shutdown() (an Octane WorkerStopping listener, a table's
+ * destructor) may still call them, and their call sites cache the function.
+ * zend_shutdown() releases them with the rest of the function table.
+ */
+static const zend_function_entry pam_shared_functions[] = {
+    PAM_SHARED_FUNCTION_ENTRIES
     PHP_FE_END
 };
 
@@ -593,6 +607,12 @@ int pam_php_init(int argc, char **argv)
         return PAM_INITIALIZATION_FAILURE;
     }
     pam_native_functions_registered = true;
+    if (zend_register_functions(NULL, pam_shared_functions, NULL, MODULE_PERSISTENT) == FAILURE) {
+        pam_unregister_native_functions();
+        php_embed_shutdown();
+        pam_initialized = false;
+        return PAM_INITIALIZATION_FAILURE;
+    }
     if (pam_register_file_handles() == FAILURE) {
         pam_unregister_native_functions();
         php_embed_shutdown();

@@ -3647,6 +3647,7 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
     let mut target = None;
     let mut workers = None;
     let mut max_requests = None;
+    let mut task_workers: Option<String> = None;
     let mut attach = false;
     let mut json = false;
     let mut log_max_bytes = DEFAULT_LOG_MAX_BYTES;
@@ -3677,6 +3678,13 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
             "--workers" => workers = Some(required_positive(arguments.next(), "--workers")?),
             "--max-requests" => {
                 max_requests = Some(required_positive(arguments.next(), "--max-requests")?)
+            }
+            "--task-workers" => {
+                let value = required_utf8(arguments.next(), "--task-workers")?;
+                if value != "auto" && value.parse::<u16>().is_err() {
+                    return Err("--task-workers requires a number or auto".to_owned());
+                }
+                task_workers = Some(value);
             }
             "--attach" => attach = true,
             "--json" => json = true,
@@ -3861,6 +3869,12 @@ fn up(executable: &OsStr, arguments: Vec<OsString>) -> Result<u8, String> {
         launch_arguments.extend([
             OsString::from("--max-requests"),
             OsString::from(max_requests.to_string()),
+        ]);
+    }
+    if let Some(task_workers) = task_workers {
+        launch_arguments.extend([
+            OsString::from("--task-workers"),
+            OsString::from(task_workers),
         ]);
     }
     if php_extension_isolation {

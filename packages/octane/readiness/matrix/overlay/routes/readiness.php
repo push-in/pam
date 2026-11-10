@@ -339,3 +339,105 @@ if (trait_exists(\Pam\Octane\Cache\PurgesPageCache::class) && !class_exists('Rea
         protected $guarded = [];
     }
 }
+
+// --- Swoole-parity features on PAM (shared tables, shared cache, task
+// workers, ticks). `Octane::table()` needs an Octane version that knows PAM
+// tables; PamOctane::table() works with every Octane release.
+if (!function_exists('readiness_table')) {
+    function readiness_table(string $name): object
+    {
+        try {
+            return Octane::table($name);
+        } catch (Throwable $error) {
+            if (class_exists(\Pam\Octane\PamOctane::class)) {
+                return \Pam\Octane\PamOctane::table($name);
+            }
+            throw $error;
+        }
+    }
+}
+
+// Registered in every worker; only task workers receive ticks.
+Octane::tick('readiness', fn () => Cache::store('octane')->increment('readiness-ticks'))->seconds(1);
+try {
+    Cache::store('octane')->interval('readiness-interval', fn () => \Illuminate\Support\Str::random(16), 1);
+} catch (Throwable) {
+}
+
+Route::prefix('_r/parity')->group(function (): void {
+    Route::get('/table/set', function (Request $request) {
+        $ok = readiness_table('example')->set((string) $request->query('key'), [
+            'name' => (string) $request->query('name', ''),
+            'votes' => (int) $request->query('votes', 0),
+        ]);
+
+        return response()->json(['ok' => $ok, 'pid' => getmypid()]);
+    });
+    Route::get('/table/get', fn (Request $request) => response()->json([
+        'row' => readiness_table('example')->get((string) $request->query('key')),
+        'pid' => getmypid(),
+    ]));
+    Route::get('/table/incr', fn (Request $request) => response()->json([
+        'votes' => readiness_table('example')->incr((string) $request->query('key'), 'votes'),
+        'pid' => getmypid(),
+    ]));
+    Route::get('/table/count', fn () => response()->json([
+        'count' => readiness_table('example')->count(),
+        'class' => get_class(readiness_table('example')),
+    ]));
+    Route::get('/cache/put', function (Request $request) {
+        Cache::store('octane')->put((string) $request->query('key'), (string) $request->query('value'), 60);
+
+        return response()->json(['pid' => getmypid(), 'driver' => get_class(Cache::store('octane')->getStore())]);
+    });
+    Route::get('/cache/get', fn (Request $request) => response()->json([
+        'value' => Cache::store('octane')->get((string) $request->query('key')),
+        'pid' => getmypid(),
+    ]));
+    Route::get('/cache/incr', fn (Request $request) => response()->json([
+        'value' => Cache::store('octane')->increment((string) $request->query('key')),
+        'pid' => getmypid(),
+    ]));
+    Route::get('/interval', fn () => response()->json([
+        'value' => Cache::store('octane')->get('readiness-interval'),
+    ]));
+    Route::get('/ticks', fn () => response()->json([
+        'ticks' => Cache::store('octane')->get('readiness-ticks'),
+    ]));
+    Route::get('/concurrently', function (Request $request) {
+        $sleep = (int) $request->query('sleep', 200);
+        $count = (int) $request->query('count', 4);
+        $started = microtime(true);
+        // One closure per line: serializable closures are located by line.
+        $task = function () use ($sleep) {
+            usleep($sleep * 1000);
+
+            return getmypid();
+        };
+        $results = Octane::concurrently(array_fill(0, $count, $task), (int) $request->query('wait', 5000));
+
+        return response()->json([
+            'pids' => array_values($results),
+            'ms' => (int) ((microtime(true) - $started) * 1000),
+            'worker' => getmypid(),
+            'dispatcher' => get_class(Octane::tasks()),
+        ]);
+    });
+    Route::get('/concurrently/error', function () {
+        try {
+            Octane::concurrently([fn () => throw new RuntimeException('task failed on purpose')]);
+        } catch (Throwable $error) {
+            return response()->json(['class' => get_class($error), 'message' => $error->getMessage()]);
+        }
+
+        return response()->json(['class' => null]);
+    });
+    Route::get('/dispatch', function (Request $request) {
+        Octane::tasks()->dispatch([fn () => Cache::store('octane')->increment('readiness-dispatched')]);
+
+        return response()->json(['ok' => true]);
+    });
+    Route::get('/dispatched', fn () => response()->json([
+        'value' => Cache::store('octane')->get('readiness-dispatched'),
+    ]));
+});
