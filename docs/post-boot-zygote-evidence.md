@@ -187,3 +187,25 @@ killed (`read` errors, the byte-by-byte probe connection) or queued behind a
 answered 500 while it is recycled), in the same proportion in both modes;
 none is caused by forking from a booted application. Master fds stayed at
 12 and master RSS at 16.3 MB.
+
+## 8. `--max-requests` recycling cost
+
+`soak.py --minutes 1 --workers 8 --path /up --wrk-connections 64 --max-requests {1000000000,200}`
+(single 60 s runs, `wrk -t4 -c64`, Laravel's `/up`):
+
+| | no recycling | recycling every 200 requests |
+|---|---|---|
+| post-boot | 11,897 rps, p50 5.03 ms, p99 7.85 ms | 14,249 rps, p50 4.26 ms, p99 11.2 ms |
+| pre-boot | 11,508 rps, p50 5.14 ms, p99 8.40 ms | 10,749 rps, p50 5.75 ms, p99 10.0 ms |
+
+With post-boot, recycling a worker every 200 requests costs no throughput
+(a replacement is ready in 1-6 ms); pre-boot loses 7 %. 2 (post-boot) and 6
+(pre-boot) `wrk` socket errors with recycling are the pre-existing
+reconnect race of section 3.
+
+## 9. Final binary
+
+The final release build (with the OOM fix) passes `zygote_e2e.py` with 0
+failures: 8 workers 152.5 MB PSS (14.9 MB per worker), spawn-to-ready p50
+3 ms (max 6); 16 workers 193.0 MB PSS (10.2 MB per worker), p50 2 ms (max
+4); reloads 362-584 ms.
