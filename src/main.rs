@@ -37,6 +37,8 @@ mod editor;
 mod extension_profile;
 mod http_serve;
 mod ingress;
+#[cfg(target_os = "linux")]
+mod listener_registry;
 mod manager_dashboard;
 mod otlp;
 mod php;

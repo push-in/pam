@@ -1762,6 +1762,33 @@ fn schedule_worker_ready(state: ServerState) {
 }
 
 fn bind_listener(address: &str) -> std::io::Result<std::net::TcpListener> {
+    // A cluster worker adopts the listener a previous incarnation of the same
+    // worker id bound (see `listener_registry`), and hands a new one to the
+    // master so it outlives this process.
+    #[cfg(target_os = "linux")]
+    if let Some(registry) = crate::listener_registry::Client::from_environment() {
+        match registry.claim(address) {
+            Ok(Some(listener)) => {
+                listener.set_nonblocking(true)?;
+                crate::http_serve::mark_listener_shared();
+                return Ok(listener);
+            }
+            Ok(None) => {}
+            Err(error) => eprintln!("pam: cannot adopt a listener for {address}: {error}"),
+        }
+        let listener = bind_new_listener(address)?;
+        match registry.register(address, &listener) {
+            Ok(()) => crate::http_serve::mark_listener_shared(),
+            Err(error) => {
+                eprintln!("pam: the master does not keep the listener for {address}: {error}")
+            }
+        }
+        return Ok(listener);
+    }
+    bind_new_listener(address)
+}
+
+fn bind_new_listener(address: &str) -> std::io::Result<std::net::TcpListener> {
     let socket_address = address
         .to_socket_addrs()?
         .next()

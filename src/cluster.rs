@@ -424,6 +424,18 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
     } else {
         None
     };
+    // Listeners outlive the worker incarnations that bound them, so a recycle
+    // or a reload never closes a socket with connections queued on it.
+    #[cfg(target_os = "linux")]
+    let listeners = match crate::listener_registry::Registry::start(runtime_directory.path()) {
+        Ok(registry) => Some(registry),
+        Err(error) => {
+            eprintln!(
+                "pam: workers bind their own listeners (listener registry unavailable: {error})"
+            );
+            None
+        }
+    };
     let mut generation = 1;
     let snapshot: SharedClusterSnapshot = Arc::new(RwLock::new(ClusterSnapshot {
         live: true,
@@ -452,6 +464,10 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
     )?;
     if let Err(error) = wait_generation_ready(&mut workers, options.startup_timeout).await {
         terminate_workers(&mut workers, options.graceful_timeout).await;
+        #[cfg(target_os = "linux")]
+        if let Some(listeners) = &listeners {
+            listeners.clear();
+        }
         set_cluster_health(&snapshot, false, false, generation, &workers);
         return Err(error);
     }
@@ -503,6 +519,10 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                         workers.extend(retiring.drain(..).map(|retiring| retiring.worker));
                         terminate_workers(&mut workers, options.graceful_timeout).await;
                         workers = replacements;
+                        #[cfg(target_os = "linux")]
+                        if let Some(listeners) = &listeners {
+                            listeners.activate(generation);
+                        }
                         eprintln!("Pam master activated worker generation {generation}");
                     }
                     Err(error) => {
@@ -510,6 +530,10 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             "pam: generation {next_generation} failed readiness; keeping generation {generation}: {error}"
                         );
                         terminate_workers(&mut replacements, options.graceful_timeout).await;
+                        #[cfg(target_os = "linux")]
+                        if let Some(listeners) = &listeners {
+                            listeners.discard(next_generation);
+                        }
                         set_cluster_health(&snapshot, true, true, generation, &workers);
                     }
                 }
@@ -555,6 +579,13 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                             failed.consecutive_failures,
                         );
                         if failures > 0 {
+                            // Nobody accepts on this worker's listener during
+                            // the backoff; close it so the kernel routes new
+                            // connections to the live siblings meanwhile.
+                            #[cfg(target_os = "linux")]
+                            if let Some(listeners) = &listeners {
+                                listeners.release(failed.id);
+                            }
                             let multiplier = 1_u32 << failures.saturating_sub(1).min(8);
                             let backoff = options
                                 .restart_backoff
@@ -676,6 +707,10 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
     workers.extend(warming.drain(..).map(|replacement| replacement.worker));
     workers.extend(retiring.drain(..).map(|retiring| retiring.worker));
     terminate_workers(&mut workers, options.graceful_timeout).await;
+    #[cfg(target_os = "linux")]
+    if let Some(listeners) = &listeners {
+        listeners.clear();
+    }
     if let Some(ingress) = ingress {
         ingress.stop().await;
     }
@@ -927,6 +962,16 @@ fn worker_environment(
         ),
         (WORKER_STATE_PATH_ENV.to_owned(), path_text(&state_path)?),
     ];
+    #[cfg(target_os = "linux")]
+    {
+        let registry = runtime_directory.join("listeners.sock");
+        if registry.exists() {
+            environment.push((
+                crate::listener_registry::REGISTRY_ENV.to_owned(),
+                path_text(&registry)?,
+            ));
+        }
+    }
     if let Some(pool) = pool {
         environment.push(("PAM_WORKER_POOL".to_owned(), pool.name.clone()));
         environment.push((

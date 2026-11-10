@@ -192,16 +192,21 @@ final a partir do RSS observado no soak test.
    gracioso (`GOAWAY`). Uma conexão aceita um instante antes do drain, com a
    primeira requisição ainda no buffer, é atendida em vez de fechada.
 3. O listener continua aceitando por `PAM_DRAIN_QUIESCE_MS` (padrão 100),
-   repassando conexões a irmãos ativos, esvazia a fila do kernel e só então fecha.
+   repassando conexões a irmãos ativos, e então o worker solta a sua cópia; o
+   socket segue aberto no master e no substituto (sem master, o worker esvazia
+   a fila do kernel antes de fechar).
    O accept roda nas threads de I/O, nunca atrás da thread do PHP.
 4. O master espera a drenagem até `--graceful-timeout` e então mata o processo.
 
-Recomendado em produção no Linux: `sysctl -w net.ipv4.tcp_migrate_req=1`
-(Linux 5.14+; em Docker, `--sysctl net.ipv4.tcp_migrate_req=1`). Com
-`SO_REUSEPORT`, o kernel reseta uma conexão que completa o handshake no listener
-no exato instante em que ele fecha; com `tcp_migrate_req=1` ela migra para o
-listener de outro worker. O Pam fecha a janela do lado do processo; esta opção
-fecha a do kernel.
+Os listeners pertencem ao master. Cada worker de um cluster registra o seu
+listener `SO_REUSEPORT` no master (um socket no diretório de runtime privado), e a
+próxima encarnação do mesmo worker (substituto por `--max-requests`, reinício
+após crash ou o mesmo id na próxima geração) adota esse socket em vez de abrir
+outro. Um listener com conexões na fila nunca é fechado durante um recycle ou
+reload: o worker antigo para de aceitar e o novo aceita da mesma fila. Por isso
+não há reset de handshake, com ou sem `net.ipv4.tcp_migrate_req`. O master só
+fecha um listener quando nenhuma geração usa mais aquele endereço, quando o
+worker cai e vai esperar backoff antes de reiniciar, e no shutdown.
 
 ### Timeout de requisição
 

@@ -128,10 +128,10 @@ is replaced.
 `octane:reload` and `--max-requests` recycling are make-before-break: the
 replacement worker boots and warms up before the old one drains, and draining
 finishes in-flight and just-accepted requests (`Connection: close`) instead of
-closing connections. On Linux, also enable `net.ipv4.tcp_migrate_req=1`
-(Linux 5.14+, or `--sysctl net.ipv4.tcp_migrate_req=1` in Docker): workers use
-`SO_REUSEPORT`, and without it the kernel resets a connection that completes its
-handshake on a listener in the instant that listener closes.
+closing connections. Listening sockets belong to the PAM master: a replacement
+adopts the socket its predecessor listened on, so no listener with queued
+connections is ever closed by a recycle or a reload, with or without
+`net.ipv4.tcp_migrate_req`.
 
 `--max-requests` is a ceiling on when a worker asks to be replaced, not on how
 many requests it serves. With several workers each one gets a limit between

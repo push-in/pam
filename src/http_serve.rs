@@ -19,11 +19,11 @@
 //!    HTTP/2 connections, receive hyper's graceful shutdown (HTTP/2 `GOAWAY`).
 //!
 //! The accept loop keeps accepting while the drain starts (the master already
-//! routes new work to the replacement), then sweeps every connection the kernel
-//! queued on this worker's `SO_REUSEPORT` listener before closing it. Linux
-//! resets connections that complete the handshake on a listener in the instant
-//! it closes; `net.ipv4.tcp_migrate_req=1` moves them to a sibling listener
-//! instead and is the recommended production setting.
+//! routes new work to the replacement). In a cluster the listener is also held
+//! by the master and adopted by the replacement (see `listener_registry`), so
+//! the worker only drops its copy and the queue stays with the replacement.
+//! Without a master, it sweeps every connection the kernel queued on the
+//! listener before closing it.
 
 use std::future::Future;
 use std::io;
@@ -42,6 +42,13 @@ use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Notify, watch};
+
+/// Set when this worker's listener is also held by the cluster master.
+static LISTENER_SHARED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn mark_listener_shared() {
+    LISTENER_SHARED.store(true, Ordering::Release);
+}
 
 /// How long a draining connection may stay idle before it is closed. Long
 /// enough for a client that holds a keep-alive connection, or that just
@@ -273,6 +280,16 @@ pub async fn accept_loop<P, S, H, F, T>(
                 }
             },
         }
+    }
+    // A listener the master keeps open (see `listener_registry`) is not
+    // closed by this worker: its queue stays with the next incarnation, which
+    // is already accepting from it.
+    if LISTENER_SHARED.load(Ordering::Acquire) {
+        drop(listener);
+        tracker
+            .wait_idle(http.graceful_timeout.saturating_add(drain.idle_grace))
+            .await;
+        return;
     }
     // Take everything the kernel already queued before the listener closes.
     // `accept()` on the Tokio listener only tries the syscall when the
