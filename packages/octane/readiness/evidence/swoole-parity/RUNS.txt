@@ -71,3 +71,17 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
      header()" when the recycled worker exits after a fatal: Laravel's
      shutdown handler re-renders the (already answered and logged) fatal;
      not emitted with APP_DEBUG=false.
+
+7. Chaos soak #2 (after the connect-retry and tool fixes), 30 min, release build:
+   parity_soak.py --app l12 --port 8160 --seconds 1800 --reload-every 60 \
+     --chaos --kill-every 15 --max-requests 2000        (soak-chaos-30min.json)
+   4,945,448 requests; 29 reloads; SIGKILL of 70 HTTP and 46 task workers;
+   increments exact (1,553,486 answered, 1,553,506 applied: the difference is
+   requests in flight at the deadline or cut by a kill; 20,000/20,000 in the
+   exact run afterwards); 0 table repairs needed; PSS flat (HTTP workers
+   88-93 MB total, task workers 25-44 MB, master 4-5 MB from minute 5 to 30).
+   Failures: 1,008 (0.02 %), all caused by the SIGKILLs: 944 socket errors
+   on connections of killed HTTP workers (in-flight plus their accept queue
+   with tcp_migrate_req=0), 64 concurrently() calls whose task worker was
+   killed mid-task (Laravel log: 64 "task request failed", 0 "cannot reach").
+   No other error in the Laravel or server logs.
