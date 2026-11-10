@@ -144,3 +144,16 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
     of main (round-to-round spread 5-10 %). With task workers on, two more
     PHP processes and the 1 s tick share the same 8 pinned CPUs.
     (bench-ab-local.tsv)
+
+13. Final checks on the PR head (release profile):
+    cargo fmt --check: clean; cargo clippy --release --all-targets -D warnings:
+    clean; cargo test --release --bins: 137 passed, 2 failed (the two
+    editor::tests that need the pam-native/editors checkout CI provides).
+    pam-octane: phpunit 34/34 under PAM, 34 (5 skipped) under php-cli;
+    phpstan: no errors.
+
+Open observation: in the first stress run (old build) the Laravel 13 server's
+master disappeared once without any log line and pamd restarted it within
+1 s. No crash, OOM-kill or signal could be attributed; it did not recur in
+15 later stress rounds with a liveness watcher on the master, nor in the
+soaks. Reported for follow-up rather than explained away.
