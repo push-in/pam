@@ -759,7 +759,9 @@ def wrk(app, seconds, connections=64, path="/_r/hello"):
     errors = re.search(r"Socket errors: connect (\d+), read (\d+), write (\d+), timeout (\d+)", out)
     socket_errors = sum(int(value) for value in errors.groups()) if errors else 0
     non2xx = re.search(r"Non-2xx or 3xx responses: (\d+)", out)
-    return {"requests": requests, "socket_errors": socket_errors,
+    kinds = {name: int(value) for name, value in zip(("connect", "read", "write", "timeout"), errors.groups())
+             if int(value)} if errors else {}
+    return {"requests": requests, "socket_errors": socket_errors, "socket_error_kinds": kinds,
             "non_2xx": int(non2xx.group(1)) if non2xx else 0,
             "rps": float(re.search(r"Requests/sec:\s+([\d.]+)", out).group(1)), "raw": out}
 
@@ -792,7 +794,8 @@ def zero_loss(app):
     ok = lost == 0 and result["requests"] >= 100_000 and reloads[0] >= 5
     record("Zero-loss: wrk -c64 keep-alive, --max-requests=2000 and a reload every 4 s", "PASS" if ok else "FAIL",
            f"{result['requests']} requests in {seconds}s ({result['rps']:.0f} rps), {reloads[0]} reloads, "
-           f"{len(pids)}+ worker pids seen, socket errors={result['socket_errors']}, non-2xx={result['non_2xx']}")
+           f"{len(pids)}+ worker pids seen, socket errors={result['socket_errors']} {result['socket_error_kinds'] or ''}, "
+           f"non-2xx={result['non_2xx']}")
     app.start("--workers=2")
 
 

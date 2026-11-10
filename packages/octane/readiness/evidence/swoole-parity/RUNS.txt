@@ -101,3 +101,24 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
    - A first Laravel 12 run is discarded: it shared the app name with the soak
      running on the same directory, so the soak's reloads hit the matrix
      server (and vice versa). The soak was restarted on a copy (soak12).
+
+9. Reload and recycling soak (no kills), 30 min, release build with all fixes:
+   parity_soak.py --app soak12 --port 8160 --seconds 1800 --reload-every 60 \
+     --max-requests 2000                            (soak-reload-recycle-30min.json)
+   7,655,704 requests; 29 reloads plus --max-requests recycling of every
+   HTTP and task worker; 448,320 concurrently() calls on task workers with 0
+   failures (the connect retry covers the pool reloads); increments exact;
+   memory flat. 1 failure: a wrk write error on a keep-alive connection
+   (cache-miss endpoint) -- an idle keep-alive connection closed by a draining
+   worker at the instant the client reused it. Same class as the single
+   socket error in the matrix zero-loss run (8).
+
+10. Keep-alive socket error during reloads: main vs this branch.
+    origin/main (83dfb5fb) built with the same builder into the same runtime
+    layout; matrix.py --only zero_loss (wrk -c64 keep-alive 40 s,
+    --max-requests=2000, reload every 4 s), alternating, 5 runs each:
+    main: 1 run with 1 socket error (write); branch: 0 errors in 5 runs
+    (zero-loss-ab-main-vs-branch.txt). The rare write error predates this
+    branch: a keep-alive connection closed by a draining worker in the same
+    instant the client reuses it. Not a regression; tracked separately.
+    Throughput in the same runs overlaps (other jobs on the machine).
