@@ -826,3 +826,94 @@ fn failed_reload_keeps_the_healthy_generation() {
     assert!(ready.contains(r#""generation":1"#), "{ready}");
     cluster.stop();
 }
+
+#[test]
+fn a_raw_status_line_fails_neither_the_request_nor_the_next_one() {
+    // Symfony's Response::send() sends `HTTP/1.1 200 OK` with header(); the
+    // end-of-request reset must not warn about it (PHP 8.5 does for
+    // http_response_code()), or an error handler turns it into a 500.
+    let mut cluster =
+        ClusterProcess::start_with_env(1_000, 1, None, None, &[("PAM_TEST_STRICT_ERRORS", "1")]);
+    let original = cluster.children();
+    for _ in 0..3 {
+        let sent = cluster.raw_request(
+            "GET /status-line HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+        assert!(sent.starts_with("HTTP/1.1 200"), "{sent}");
+        assert!(sent.ends_with("status-line"), "{sent}");
+        let created = cluster.raw_request(
+            "GET /response-code HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        );
+        assert!(created.starts_with("HTTP/1.1 201"), "{created}");
+        assert!(created.ends_with("created"), "{created}");
+    }
+    assert_eq!(cluster.children(), original, "the worker was recycled");
+    cluster.stop();
+}
+
+fn upload_request(path: &str, bytes: usize) -> String {
+    let mut body = String::from(
+        "--pam\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.bin\"\r\n\
+         Content-Type: application/octet-stream\r\n\r\n",
+    );
+    body.push_str(&"a".repeat(bytes));
+    body.push_str("\r\n--pam--\r\n");
+    format!(
+        "POST {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\
+         Content-Type: multipart/form-data; boundary=pam\r\nContent-Length: {}\r\n\r\n{body}",
+        body.len()
+    )
+}
+
+fn wait_for_files(directory: &std::path::Path, expected: usize, what: &str) {
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let files: Vec<_> = fs::read_dir(directory)
+            .unwrap()
+            .flatten()
+            .map(|entry| entry.file_name())
+            .collect();
+        if files.len() == expected {
+            return;
+        }
+        assert!(Instant::now() < deadline, "{what}: {files:?}");
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+#[test]
+fn deletes_the_uploads_of_requests_cut_by_a_deadline_or_a_killed_worker() {
+    let uploads = std::env::temp_dir().join(format!("pam-upload-test-{}", std::process::id()));
+    fs::create_dir_all(&uploads).unwrap();
+    let ini = format!("upload_tmp_dir={}\n", uploads.display());
+
+    // The PHP thread is blocked past the deadline: 504, then the worker exits
+    // without the request ever ending.
+    let mut cluster =
+        ClusterProcess::start_with_env(1_000, 1, Some(300), None, &[("PAM_INI_ENTRIES", &ini)]);
+    let timed_out = cluster.raw_request(&upload_request("/upload-block", 512 * 1024));
+    assert!(timed_out.starts_with("HTTP/1.1 504"), "{timed_out}");
+    wait_for_files(&uploads, 0, "a timed-out request left its upload");
+    cluster.stop();
+
+    // The worker is killed while PHP holds the upload.
+    let mut cluster =
+        ClusterProcess::start_with_env(1_000, 1, None, None, &[("PAM_INI_ENTRIES", &ini)]);
+    let worker = *cluster.children().iter().next().unwrap();
+    let port = cluster.port;
+    let client = thread::spawn(move || {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        let _ = stream.write_all(upload_request("/upload-block", 512 * 1024).as_bytes());
+        let mut response = Vec::new();
+        let _ = stream.read_to_end(&mut response);
+    });
+    wait_for_files(&uploads, 1, "the upload was not streamed to disk");
+    // SAFETY: signals a worker process of this test's cluster.
+    unsafe {
+        kill(worker as i32, SIGKILL);
+    }
+    wait_for_files(&uploads, 0, "a killed worker left its upload");
+    client.join().unwrap();
+    cluster.stop();
+    fs::remove_dir(&uploads).unwrap();
+}

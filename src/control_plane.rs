@@ -808,6 +808,7 @@ mod tests {
                 ..WorkerMetricsSnapshot::default()
             },
             recycle_requested: false,
+            upload_directory: None,
         }
     }
 

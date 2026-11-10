@@ -4,6 +4,20 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
+/// `eprintln!` with a single write(2) per line. Worker processes share the
+/// master's console; std's `eprintln!` writes each formatted piece
+/// separately, so lines of workers starting together interleaved.
+macro_rules! eprintln {
+    () => {{
+        let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), b"\n");
+    }};
+    ($($arg:tt)*) => {{
+        let mut line = format!($($arg)*);
+        line.push('\n');
+        let _ = std::io::Write::write_all(&mut std::io::stderr().lock(), line.as_bytes());
+    }};
+}
+
 mod admin_auth;
 mod api_generator;
 #[cfg(target_os = "linux")]

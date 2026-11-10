@@ -167,8 +167,14 @@ kill -TERM <pid-do-master>
 
 Workers devem ser tratados como descartáveis. `--max-requests` limita o impacto de
 fragmentação ou crescimento de caches de bibliotecas de terceiros. O padrão é 10
-milhões e o master escalona o limite em até 25% entre workers para evitar que eles
-reciclem juntos. Calibre o valor final a partir do RSS observado no soak test.
+milhões e o master escalona o limite para baixo em até 25% entre workers (cada um
+recebe entre 75% e 100% do valor) para evitar que eles reciclem juntos. O limite
+marca quando o worker pede o substituto, não quantas requisições ele atende: ele
+continua atendendo enquanto o substituto inicializa (no máximo
+`--startup-timeout`) e então drena, então as requisições além do limite são as
+que chegam durante essa inicialização. Um corte estrito deixaria o slot vazio
+nesse intervalo e, com um único worker, recusaria conexões. Calibre o valor
+final a partir do RSS observado no soak test.
 
 ### Reciclagem sem perda (make-before-break)
 

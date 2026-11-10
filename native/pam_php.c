@@ -99,9 +99,54 @@ static PHP_FUNCTION(pam_native_stream_fd)
     RETURN_LONG((zend_long) file_descriptor);
 }
 
+/*
+ * Resets the SAPI response state between logical requests without PHP's
+ * userland warnings: header_remove() keeps a raw `HTTP/` status line (set by
+ * header('HTTP/1.1 200 OK'), as Symfony's Response::send() does), and PHP 8.5
+ * warns when http_response_code() runs after one.
+ */
+static void pam_reset_sapi_response(int status_code)
+{
+    sapi_header_op(SAPI_HEADER_DELETE_ALL, NULL);
+    if (SG(sapi_headers).http_status_line != NULL) {
+        efree(SG(sapi_headers).http_status_line);
+        SG(sapi_headers).http_status_line = NULL;
+    }
+    SG(headers_sent) = 0;
+    SG(sapi_headers).http_response_code = status_code;
+    SG(sapi_headers).send_default_content_type = 0;
+}
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(
+    arginfo_pam_native_reset_response,
+    0,
+    0,
+    IS_VOID,
+    0
+)
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, status_code, IS_LONG, 0, "200")
+ZEND_END_ARG_INFO()
+
+static PHP_FUNCTION(pam_native_reset_response)
+{
+    zend_long status_code = 200;
+
+    ZEND_PARSE_PARAMETERS_START(0, 1)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_LONG(status_code)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (status_code < 100 || status_code > 999) {
+        zend_argument_value_error(1, "must be a valid HTTP status code");
+        RETURN_THROWS();
+    }
+    pam_reset_sapi_response((int) status_code);
+}
+
 static const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_native_abi_version, arginfo_pam_native_abi_version)
     PHP_FE(pam_native_stream_fd, arginfo_pam_native_stream_fd)
+    PHP_FE(pam_native_reset_response, arginfo_pam_native_reset_response)
     PHP_FE_END
 };
 
@@ -503,10 +548,7 @@ int pam_php_execute_file(const char *filename)
         zend_file_handle script;
         zend_stream_init_filename(&script, filename);
         CG(skip_shebang) = 1;
-        sapi_header_op(SAPI_HEADER_DELETE_ALL, NULL);
-        SG(headers_sent) = 0;
-        SG(sapi_headers).http_response_code = 200;
-        SG(sapi_headers).send_default_content_type = 0;
+        pam_reset_sapi_response(200);
 
         /*
          * php_execute_script() also returns false for a deliberate exit(0).
@@ -660,10 +702,7 @@ int pam_php_dispatch_http(
     /* php_embed considers headers sent after the bootstrap script finishes.
      * Pam dispatches many logical HTTP requests inside that single PHP
      * lifecycle, so each dispatch needs a fresh SAPI header bag. */
-    sapi_header_op(SAPI_HEADER_DELETE_ALL, NULL);
-    SG(headers_sent) = 0;
-    SG(sapi_headers).http_response_code = 200;
-    SG(sapi_headers).send_default_content_type = 0;
+    pam_reset_sapi_response(200);
 
     previous_request_body = SG(request_info).request_body;
     SG(request_info).request_body = body_length == 0
@@ -725,10 +764,7 @@ int pam_php_resume_http(
     ZVAL_STRINGL(&parameters[0], request_id, request_id_length);
     ZVAL_STRINGL(&parameters[1], operation_result, operation_result_length);
 
-    sapi_header_op(SAPI_HEADER_DELETE_ALL, NULL);
-    SG(headers_sent) = 0;
-    SG(sapi_headers).http_response_code = 200;
-    SG(sapi_headers).send_default_content_type = 0;
+    pam_reset_sapi_response(200);
 
     previous_request_body = SG(request_info).request_body;
     SG(request_info).request_body = body_length == 0

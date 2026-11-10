@@ -1,5 +1,28 @@
 # Changelog
 
+## 2.2.14 - 2026-11-10
+
+Fixes found while preparing the Laravel Octane integration.
+
+- A response sent with a raw `HTTP/` status line (Symfony's
+  `Response::send()`, `header('HTTP/1.1 200 OK')`) no longer fails on PHP 8.5.
+  PAM's end-of-request reset called `http_response_code()`, which PHP 8.5 warns
+  about after a status line; Laravel's error handler turned the warning into a
+  500 and a fatal that recycled the worker. The reset now clears the SAPI
+  header bag, the status line and the response code natively, without warnings.
+- Temporary upload files are deleted on every way a request can end. A worker
+  that exits with a request stuck past its deadline (504) deletes its own
+  uploads, a starting worker deletes the uploads of dead workers, and the
+  master deletes the uploads of a worker it reaped after a crash or a kill.
+  Files are named `php-pam-<pid namespace>-<pid>-<random>`; a client that
+  disconnects mid-upload or during the request already cleaned up.
+- Worker log lines are written with one `write(2)` each, so the startup lines
+  of workers booting together no longer interleave on the console.
+- `--max-requests` is a ceiling: the per-worker stagger now lowers limits (75%
+  to 100% of the value) instead of raising them by up to 25%. A worker that
+  reaches its limit still serves while its replacement boots, then drains;
+  documented in `docs/production.md` and the pam-octane README.
+
 ## 2.2.13 - 2026-11-09
 
 Laravel Octane readiness: every fix found by the PAM Octane readiness suite

@@ -9,10 +9,17 @@
 //! form fields and a manifest of the files, registers the files with
 //! `is_uploaded_file()`, and the files are deleted when the request ends
 //! unless the application moved them.
+//!
+//! Temporary files are named `php-pam-<pid namespace>-<pid>-<random>` so a
+//! request that never reached its normal end (a worker that exited past a
+//! hard deadline, crashed or was killed) cannot leave them behind: a worker
+//! deletes its own files when it exits, every worker deletes files of dead
+//! workers of its PID namespace when it starts, and the cluster master
+//! deletes a worker's files once it has reaped it.
 
 use std::fs::OpenOptions;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -68,7 +75,8 @@ impl Default for UploadLimits {
 }
 
 impl UploadLimits {
-    fn directory(&self) -> PathBuf {
+    /// The directory temporary upload files are created in.
+    pub fn directory(&self) -> PathBuf {
         self.temporary_directory
             .as_deref()
             .filter(|directory| !directory.is_empty())
@@ -640,7 +648,7 @@ async fn create_temporary(directory: &std::path::Path) -> io::Result<(String, to
                 ALPHABET[usize::from(*byte) % ALPHABET.len()] as char
             })
             .collect();
-        let path = directory.join(format!("php{suffix}"));
+        let path = directory.join(format!("{}{suffix}", own_prefix()));
         let Some(text) = path.to_str().map(str::to_owned) else {
             return Err(io::Error::other("the upload directory is not UTF-8"));
         };
@@ -658,6 +666,116 @@ async fn create_temporary(directory: &std::path::Path) -> io::Result<(String, to
         }
     }
     Err(io::Error::other("cannot pick a unique temporary file name"))
+}
+
+/// Every temporary upload file name starts with this prefix.
+pub const TEMPORARY_PREFIX: &str = "php-pam-";
+
+/// The PID namespace of this process (its inode on Linux), so workers of
+/// different containers sharing an upload directory never judge each other's
+/// PIDs.
+fn pid_namespace() -> &'static str {
+    static NAMESPACE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    NAMESPACE.get_or_init(|| {
+        std::fs::read_link("/proc/self/ns/pid")
+            .ok()
+            .and_then(|link| {
+                link.to_str().map(|text| {
+                    text.chars()
+                        .filter(char::is_ascii_digit)
+                        .collect::<String>()
+                })
+            })
+            .filter(|digits| !digits.is_empty())
+            .unwrap_or_else(|| "0".to_owned())
+    })
+}
+
+/// `php-pam-<namespace>-<pid>-` for this process.
+fn own_prefix() -> String {
+    format!(
+        "{TEMPORARY_PREFIX}{}-{}-",
+        pid_namespace(),
+        std::process::id()
+    )
+}
+
+/// The process that owns a temporary upload file of this PID namespace.
+fn owner_pid(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(TEMPORARY_PREFIX)?;
+    let rest = rest.strip_prefix(pid_namespace())?.strip_prefix('-')?;
+    let (pid, _) = rest.split_once('-')?;
+    pid.parse().ok()
+}
+
+#[cfg(unix)]
+fn process_alive(pid: u32) -> bool {
+    let Ok(pid) = i32::try_from(pid) else {
+        return true;
+    };
+    // SAFETY: signal 0 only checks that the process exists.
+    if unsafe { libc::kill(pid, 0) } == 0 {
+        return true;
+    }
+    io::Error::last_os_error().raw_os_error() != Some(libc::ESRCH)
+}
+
+#[cfg(not(unix))]
+fn process_alive(_pid: u32) -> bool {
+    true
+}
+
+/// The directories temporary uploads can be in: `upload_tmp_dir` and the
+/// system temporary directory (PHP's own multipart parser uses it).
+fn upload_directories(directory: &Path) -> Vec<PathBuf> {
+    let mut directories = vec![directory.to_path_buf()];
+    let system = std::env::temp_dir();
+    if !directories.contains(&system) {
+        directories.push(system);
+    }
+    directories
+}
+
+/// Deletes the temporary upload files that `remove` selects by owner PID and
+/// returns how many were deleted.
+fn sweep(directories: &[PathBuf], remove: impl Fn(u32) -> bool) -> usize {
+    let mut removed = 0;
+    for directory in directories {
+        let Ok(entries) = std::fs::read_dir(directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(pid) = name.to_str().and_then(owner_pid) else {
+                continue;
+            };
+            if remove(pid) && std::fs::remove_file(entry.path()).is_ok() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
+/// Deletes the temporary uploads left by processes of this PID namespace that
+/// no longer exist (a crashed or killed worker). Called when a worker starts.
+pub fn sweep_orphans(limits: &UploadLimits) -> usize {
+    let own = std::process::id();
+    sweep(&upload_directories(&limits.directory()), |pid| {
+        pid != own && !process_alive(pid)
+    })
+}
+
+/// Deletes this process's temporary uploads. Called when a worker exits, also
+/// when it exits with a request still running on a wedged PHP thread.
+pub fn sweep_own(limits: &UploadLimits) -> usize {
+    let own = std::process::id();
+    sweep(&upload_directories(&limits.directory()), |pid| pid == own)
+}
+
+/// Deletes the temporary uploads of a reaped worker process.
+pub fn sweep_process(directory: &Path, pid: u32) -> usize {
+    sweep(&upload_directories(directory), |owner| owner == pid)
 }
 
 fn getrandom(buffer: &mut [u8]) -> io::Result<()> {

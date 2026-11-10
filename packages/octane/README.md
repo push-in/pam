@@ -133,6 +133,14 @@ closing connections. On Linux, also enable `net.ipv4.tcp_migrate_req=1`
 `SO_REUSEPORT`, and without it the kernel resets a connection that completes its
 handshake on a listener in the instant that listener closes.
 
+`--max-requests` is a ceiling on when a worker asks to be replaced, not on how
+many requests it serves. With several workers each one gets a limit between
+75% and 100% of the value, so they never recycle together. A worker that
+reaches its limit keeps serving while its replacement boots (bounded by
+`--startup-timeout`), then drains; the requests it serves past the limit are
+the ones that arrive during that boot. A strict cut would leave the slot empty
+for the boot and, with a single worker, refuse connections.
+
 `maxConcurrentRequests` is intentionally fixed to `1` for Laravel. Framework
 managers and facades contain process-global mutable state. Scale safely with
 multiple supervised PAM workers instead of overriding that boundary.

@@ -96,6 +96,10 @@ pub struct WorkerRuntimeRecord {
     /// until the replacement is ready and the master tells it to drain.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub recycle_requested: bool,
+    /// Where the worker creates temporary upload files, so the master can
+    /// delete what a killed or crashed worker left behind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_directory: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
@@ -351,6 +355,7 @@ impl ReporterInner {
             request_id: pending.request_id.clone(),
             metrics: pending.metrics.clone(),
             recycle_requested: pending.recycle_requested,
+            upload_directory: UPLOAD_DIRECTORY.get().cloned(),
         })
     }
 
@@ -443,6 +448,15 @@ fn publish_pending_records(inner: Weak<ReporterInner>, signal: Arc<PublishSignal
         }
         drop(inner);
         last_publish = Some(Instant::now());
+    }
+}
+
+static UPLOAD_DIRECTORY: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+/// Records this worker's temporary upload directory in its state reports.
+pub fn set_upload_directory(directory: &Path) {
+    if let Some(directory) = directory.to_str() {
+        let _ = UPLOAD_DIRECTORY.set(directory.to_owned());
     }
 }
 

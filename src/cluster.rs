@@ -532,6 +532,7 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                         .map_err(|error| format!("cannot inspect worker: {error}"))?;
                     if let Some(status) = status {
                         let failed = workers.remove(index);
+                        sweep_worker_uploads(&failed);
                         if warming
                             .iter()
                             .any(|replacement| replacement.replaces == failed.process.id())
@@ -1040,14 +1041,15 @@ fn restart_failures(clean_exit: bool, uptime: Duration, previous_failures: u32) 
 fn staggered_max_requests(options: &StartOptions, worker_id: usize) -> u64 {
     // Always stagger: with small limits (Octane's default is 500) evenly
     // balanced workers would otherwise reach the limit together and recycle at
-    // the same moment, leaving no listener and refusing connections.
+    // the same moment, leaving no listener and refusing connections. The
+    // stagger only lowers limits (by up to 25%): --max-requests is a ceiling.
     if options.workers <= 1 {
         return options.max_requests;
     }
     let spread = options.max_requests / 4;
     let offset = spread.saturating_mul(worker_id.saturating_sub(1) as u64)
         / options.workers.saturating_sub(1) as u64;
-    options.max_requests.saturating_add(offset)
+    options.max_requests.saturating_sub(offset).max(1)
 }
 
 async fn wait_generation_ready(workers: &mut [Worker], timeout: Duration) -> Result<(), String> {
@@ -1233,6 +1235,7 @@ fn live_zygote(_worker: &Worker) -> Option<SharedZygote> {
 fn reap_retiring(retiring: &mut Vec<Retiring>) {
     retiring.retain_mut(|entry| {
         if entry.worker.process.try_wait().ok().flatten().is_some() {
+            sweep_worker_uploads(&entry.worker);
             return false;
         }
         if Instant::now() >= entry.deadline {
@@ -1242,10 +1245,26 @@ fn reap_retiring(retiring: &mut Vec<Retiring>) {
             );
             entry.worker.process.kill();
             let _ = entry.worker.process.wait();
+            sweep_worker_uploads(&entry.worker);
             return false;
         }
         true
     });
+}
+
+/// Deletes the temporary uploads a reaped worker left behind (it was killed
+/// or crashed with a request in flight).
+fn sweep_worker_uploads(worker: &Worker) {
+    let Some(directory) = worker_record(worker).and_then(|record| record.upload_directory) else {
+        return;
+    };
+    let removed = crate::upload::sweep_process(Path::new(&directory), worker.process.id());
+    if removed > 0 {
+        eprintln!(
+            "pam: removed {removed} temporary upload file(s) left by worker {} generation {}",
+            worker.id, worker.generation,
+        );
+    }
 }
 
 fn worker_timed_out(worker: &Worker, grace: Duration) -> bool {
@@ -1499,7 +1518,7 @@ mod tests {
         options.workers = 4;
 
         assert_eq!(staggered_max_requests(&options, 1), 10_000_000);
-        assert_eq!(staggered_max_requests(&options, 4), 12_500_000);
+        assert_eq!(staggered_max_requests(&options, 4), 7_500_000);
     }
 
     #[test]
@@ -1519,7 +1538,8 @@ mod tests {
         let limits = (1..=4)
             .map(|worker| staggered_max_requests(&options, worker))
             .collect::<Vec<_>>();
-        assert_eq!(limits, vec![500, 541, 583, 625]);
+        assert_eq!(limits, vec![500, 459, 417, 375]);
+        assert!(limits.iter().all(|limit| *limit <= options.max_requests));
 
         options.workers = 1;
         assert_eq!(staggered_max_requests(&options, 1), 500);

@@ -15,6 +15,9 @@ use Illuminate\Support\Facades\Storage;
 
 Route::get('/ping', static fn (): array => ['message' => 'pong']);
 
+// Symfony's Response::send() sends a raw `HTTP/1.1 200 OK` status line.
+Route::get('/send', static fn () => response('sent')->send());
+
 Route::get('/packages', static fn (): array => [
     'horizon' => class_exists(\Laravel\Horizon\HorizonServiceProvider::class),
     'inertia' => class_exists(\Inertia\ServiceProvider::class),
