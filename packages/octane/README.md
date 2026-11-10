@@ -232,6 +232,65 @@ HIT|STALE|MISS|BYPASS`). Hits, misses, stale serves, bytes and evictions are in
 PAM's Prometheus metrics (`pam_http_response_cache_*`). The full rules are in
 PAM's [production guide](https://github.com/push-in/pam/blob/main/docs/production.md).
 
+## Tables, cache, tasks and ticks
+
+The Octane features that only work on Swoole in Octane itself also work on PAM
+(runtime 2.2.15 or newer):
+
+| Feature | On PAM |
+| --- | --- |
+| Octane tables (`octane.tables`) | Shared memory, one copy for every worker; `Swoole\Table` API (`set`, `get`, `incr`, `decr`, `del`, `exists`, `count`, iteration) and Octane's column size checks |
+| `octane` cache store | A shared table sized by `octane.cache` (`rows`, `bytes`), with increments and `interval()` |
+| `Octane::concurrently()` and task dispatch | Task workers started with `--task-workers` |
+| `Octane::tick()` | One tick per second, delivered to a task worker |
+
+```bash
+pam octane:start --workers=8 --task-workers=2
+```
+
+```php
+use Pam\Octane\PamOctane;
+
+PamOctane::table('example')->incr('taylor', 'votes');
+
+[$users, $orders] = Octane::concurrently([
+    fn () => User::count(),
+    fn () => Order::count(),
+]);
+
+Octane::tick('heartbeat', fn () => Cache::store('octane')->increment('beats'))->seconds(10);
+```
+
+- **Tables.** Released Octane versions declare `Octane::table()` with a
+  `Swoole\Table` return type, so use `PamOctane::table($name)`. Octane versions
+  with PAM table support (`octane:start --server=pam`) also accept
+  `Octane::table($name)`. As on Swoole, the number of rows is fixed (rounded up
+  to a power of two); `set()` returns `false` when the table is full. Keys
+  longer than 64 bytes are stored under a digest instead of being truncated.
+  A table's memory is reserved the first time a worker uses it and is only
+  committed as rows are written; configured but unused tables cost nothing. The master
+  owns the memory: rows survive `--max-requests` recycling, `octane:reload`
+  and crashed workers, and are released when the server stops.
+- **Cache.** With task workers the `octane` store is shared by every worker
+  (ticks and intervals need one clock). Without them it stays the per-worker
+  array store of earlier releases unless `PAM_OCTANE_SHARED_CACHE=true`
+  (`pam-octane.shared_cache`); `false` keeps it per worker.
+- **Task workers** are opt-in: `--task-workers=N` (or `auto`, one per CPU, or
+  `PAM_OCTANE_TASK_WORKERS`). They boot the application like HTTP workers,
+  listen only on a private loopback address with a per-server random token,
+  are recycled, reloaded and restarted like HTTP workers, and a new task goes
+  to an idle task worker first. `Octane::concurrently($tasks, $waitMs)`
+  returns `false` for a task still running after `$waitMs` and throws
+  `TaskTimeoutException` when none finished; exceptions in tasks are rethrown
+  as `TaskException`, as on Swoole. Without task workers, `concurrently()`
+  keeps running tasks sequentially.
+- **Ticks** honour `octane.tick` (default `true`) and need task workers.
+- A worker killed in the middle of a table write (`SIGKILL`, out of memory)
+  never leaves a torn row: the next worker that needs that part of the table
+  repairs it, and the interrupted write is dropped like an evicted entry.
+- `PAM_SHARED_MEMORY_MAX_BYTES` caps the shared memory a server can reserve
+  (default: half of the machine's memory).
+
 ## Production
 
 The package owns the Octane bridge; the PAM binary owns process supervision.

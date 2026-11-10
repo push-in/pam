@@ -142,6 +142,10 @@ pam octane:start
 ```
 
 PAM owns the native HTTP transport, Tokio I/O, streaming and process supervision;
+Octane tables, the shared `octane` cache store, `Octane::concurrently()` on task
+workers (`--task-workers=N`) and `Octane::tick()` work as on Swoole; see
+[Tables, cache, tasks and ticks](../packages/octane/README.md#tables-cache-tasks-and-ticks).
+
 Octane owns Laravel's worker lifecycle. The maintained package matrix is PHP 8.4,
 Laravel 12 or 13, and Laravel Octane 2.19 or newer. Use `pam octane:status`,
 `pam octane:reload` and `pam octane:stop` for the supervised lifecycle.

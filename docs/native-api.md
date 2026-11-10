@@ -23,6 +23,42 @@ Capabilities são enums inteiros estáveis: timer, readiness de stream, DNS,
 filesystem, processo, sinal, streaming HTTP, WebSocket e HTTP/3. Adições futuras
 recebem novos valores; significados existentes não são reutilizados.
 
+## Tabelas compartilhadas e task workers
+
+`Capability::SharedTables` e `Capability::TaskWorkers` (runtime 2.2.15+)
+anunciam duas APIs PHP sobre funções nativas `pam_native_table_*` e
+`pam_native_task_*`:
+
+```php
+use Pam\Shared\Table;
+use Pam\Shared\Tasks;
+
+$table = new Table(1024, name: 'app.sessions');      // sem nome: só processos filhos (fork)
+$table->column('user', Table::TYPE_INT);
+$table->column('token', Table::TYPE_STRING, 64);
+$table->create();
+$table->set('abc', ['user' => 7, 'token' => 'x']);
+$table->incr('abc', 'user');                         // atômico entre workers
+
+if (Tasks::available()) {                            // cluster com --task-workers
+    $results = Tasks::resolve([$payloadA, $payloadB], 3000); // null = ainda rodando
+}
+```
+
+A semântica é a de `Swoole\Table`: número fixo de linhas (arredondado para
+potência de 2), colunas `int`, `float` e `string` de tamanho fixo, `set()`
+devolve `false` com a tabela cheia; uma string maior que a coluna lança
+`ValueError` em vez de ser truncada. Tabelas com o mesmo nome e as mesmas
+colunas são a mesma memória em todos os workers do cluster.
+
+A fronteira C/Rust é uma tabela de ponteiros de função
+(`native/pam_shared.h`) que o Rust entrega ao shim antes de iniciar o PHP. O
+Rust trata linhas como bytes opacos; o shim converte valores PHP antes de o
+Rust pegar um lock e depois de soltá-lo, então um erro do PHP (memory_limit,
+exceção) nunca deixa um lock compartilhado preso. Buffers devolvidos pelo Rust
+(resultados de task, varreduras) são liberados com `free_buffer` e mensagens de
+erro com `free_string`.
+
 ## Regras de evolução
 
 - incrementar a ABI ao mudar assinatura, ownership ou representação de dados;

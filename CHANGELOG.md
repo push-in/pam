@@ -32,6 +32,19 @@
   endpoint and `pam cache:purge`, propagated to every worker. HTTP/3 requests
   now use the response cache too, and stale-while-revalidate no longer makes
   the first request after expiry wait for PHP.
+- Shared-memory tables (`Pam\Shared\Table`, `Swoole\Table` semantics): every
+  worker of a cluster sees the same rows. The master hands out `memfd`
+  segments, so rows survive `--max-requests` recycling, reloads and crashed
+  workers and are freed when the master exits; memory is only committed as
+  rows are written. Writes hold one of up to 256 lock stripes; a worker killed
+  while holding one is detected and its interrupted write dropped, never seen
+  torn. `PAM_SHARED_MEMORY_MAX_BYTES` caps the total.
+- `--task-workers N|auto` (`pam start`, `pam up`, `octane:start`): workers that
+  run tasks (`Pam\Shared\Tasks`, Octane's `concurrently()` and task dispatch)
+  on a private, token-authenticated loopback pool, plus one tick per second.
+  Off by default; a new task goes to an idle task worker first.
+- Connection balancing between zygote siblings no longer moves a connection to
+  a worker of another pool.
 
 ## 2.2.14 - 2026-11-10
 
