@@ -122,3 +122,23 @@ new zygote): no zygote, worker or descriptor is leaked per reload. Reload p50
 594 ms. p50 latency 10.9 ms; p99 2.1 s is the cost of reloading without pause
 (requests wait while generations swap back to back). One reload took 12.1 s
 during the same workstation memory-pressure event seen in section 4.
+
+## 6. Memory over 1.4M requests (leak check)
+
+`soak.py --mode app --minutes 10 --workers 8 --max-requests 1000000000 --path /z/info --sample-every 20`
+(no recycling, no reloads; every request queries MySQL and Redis).
+
+Result: 1,435,474 requests, 0 non-2xx, 2,392 rps, p50 26 ms, p99 62 ms.
+Per-worker memory from t = 60 s to the end (seven workers that lived the
+whole run): RSS +72 to +248 KB per worker (511 -> 512 MB in total), PSS +0.5
+to +0.7 MB per worker (93 -> 97 MB in total; PSS rises slightly as pages
+written by a worker stop being shared with the zygote). Flat: no leak.
+
+The eighth worker was killed with `SIGKILL` at t = 340 s, which cut 8 `wrk`
+connections (8 read errors). It was not PAM: no watchdog or limit line was
+logged, and the kernel OOM counters of this user's slice show the cause
+(`/sys/fs/cgroup/user.slice/user-1000.slice/memory.events`: `high 74376`,
+`oom_kill 9`; the slice has `memory.high` 24 GiB / `memory.max` 28 GiB shared
+by every job on the workstation). The master replaced the worker from the
+zygote and the run continued; the same OOM events also killed this test
+session's shell twice.
