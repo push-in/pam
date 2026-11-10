@@ -1054,6 +1054,18 @@ void pam_php_shutdown(void)
         return;
     }
 
+    /*
+     * The last request may have been cut short by a fatal error (memory_limit)
+     * before PAM reset its response state, leaving a raw `HTTP/` status line.
+     * Shutdown functions (Laravel's, then Whoops' through Collision) handle
+     * that fatal again and call http_response_code(), which PHP 8.5 turns into
+     * a warning, and Whoops into a second, uncaught fatal. The response was
+     * already answered by the server; start shutdown from a clean slate.
+     */
+    if (SG(sapi_started)) {
+        pam_reset_sapi_response(200);
+    }
+
     pam_unregister_native_functions();
     php_embed_shutdown();
     php_embed_module.ini_entries = NULL;
