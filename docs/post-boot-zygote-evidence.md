@@ -106,3 +106,19 @@ An earlier attempt of this soak was invalid and is not counted: the probe's
 `lcg_value()` deprecation warnings filled the disk with `laravel.log`, Redis
 refused writes (`MISCONF`) and the session check got 500s. The probe no
 longer calls `lcg_value()` and the deprecation channel is off.
+
+## 5. Repeated reload (1,647 consecutive reloads under load)
+
+`soak.py --mode app --minutes 18 --workers 4 --max-requests 100000 --reload-every 0.05 --sessions-every 30 --wrk-connections 16`
+(a new `SIGHUP` 50 ms after each generation became ready, i.e. continuous
+reloading, with traffic and isolation checks running).
+
+Result: **1,647 reloads, 1,290,046 requests, 0 non-2xx, 0 socket errors**;
+35 isolation checks (sessions, auth, per-worker MySQL/Redis connections,
+PRNG), 0 failures; final state healthy at generation 1,648. Master fds
+constant at 14, master RSS flat (14.6 MB, later reclaimed to 5 MB by the
+kernel), master children constant at 2 at every sample (the retiring and the
+new zygote): no zygote, worker or descriptor is leaked per reload. Reload p50
+594 ms. p50 latency 10.9 ms; p99 2.1 s is the cost of reloading without pause
+(requests wait while generations swap back to back). One reload took 12.1 s
+during the same workstation memory-pressure event seen in section 4.
