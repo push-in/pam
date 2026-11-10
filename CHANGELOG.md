@@ -45,6 +45,13 @@
   Off by default; a new task goes to an idle task worker first.
 - Connection balancing between zygote siblings no longer moves a connection to
   a worker of another pool.
+- Task requests whose connection is refused or reset during the handshake (a
+  task worker closing its listener on reload or recycling, with
+  `net.ipv4.tcp_migrate_req=0`) are retried for up to 1 s; nothing was sent,
+  so a sibling or the replacement worker takes the task.
+- After a fatal error (such as `memory_limit`) bails out of a request, PAM no
+  longer calls back into the failed engine to cancel the dispatch, which
+  logged a second fatal ("Couldn't execute method ...cancelHttpDispatch").
 
 ## 2.2.14 - 2026-11-10
 
