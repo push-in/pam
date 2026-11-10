@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Stage 3: run the ecosystem smoke flow under PAM Octane and under FrankenPHP.
+#   ECO_SERVERS="pam frankenphp"  servers to run
+#   ECO_PAM_FLAGS                 extra `pam octane:start` flags, e.g. --task-workers=2
 source "$(dirname "$0")/../lib.sh"
 APP="${ECO_APP:-$WORK_DIR/eco}"
 PORT="${ECO_PORT:-8300}"
@@ -30,7 +32,10 @@ run_flow() {
     "${php[@]}" artisan horizon > "$OUT/$server-horizon.log" 2>&1 & pids+=($!)
     "${php[@]}" artisan reverb:start --port=8390 > "$OUT/$server-reverb.log" 2>&1 & pids+=($!)
     if [ "$server" = pam ]; then
-        (cd "$APP" && "$PAM" octane:start --port="$PORT" --workers=4) > "$OUT/$server-server.log" 2>&1
+        # ECO_PAM_FLAGS, e.g. "--task-workers=2", runs the flow with optional
+        # PAM features on.
+        # shellcheck disable=SC2086
+        (cd "$APP" && "$PAM" octane:start --port="$PORT" --workers=4 ${ECO_PAM_FLAGS:-}) > "$OUT/$server-server.log" 2>&1
     else
         (cd "$APP" && "$PAM" artisan octane:start --server=frankenphp --port="$PORT" --workers=4 --max-requests=100000) \
             > "$OUT/$server-server.log" 2>&1 & pids+=($!)

@@ -381,6 +381,14 @@ Route::prefix('_r/parity')->group(function (): void {
         'votes' => readiness_table('example')->incr((string) $request->query('key'), 'votes'),
         'pid' => getmypid(),
     ]));
+    Route::get('/table/stats', fn () => response()->json(readiness_table('example')->stats()));
+    Route::get('/cache/remember', fn (Request $request) => response()->json([
+        'length' => strlen(Cache::store('octane')->remember(
+            'remember-'.$request->query('key'),
+            60,
+            fn () => str_repeat('x', (int) $request->query('bytes', 512)),
+        )),
+    ]));
     Route::get('/table/count', fn () => response()->json([
         'count' => readiness_table('example')->count(),
         'class' => get_class(readiness_table('example')),

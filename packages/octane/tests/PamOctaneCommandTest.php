@@ -98,7 +98,10 @@ final class PamOctaneCommandTest extends TestCase
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $this->project,
-            ['PAM_BINARY' => $fake, 'PATH' => (string) getenv('PATH')] + $environment,
+            // The inherited environment keeps PHPRC, PAM_HOME and the
+            // extension directory that PAM's launcher sets when the suite
+            // itself runs inside PAM.
+            ['PAM_BINARY' => $fake] + $environment + getenv(),
         );
         self::assertIsResource($process);
         fclose($pipes[0]);
