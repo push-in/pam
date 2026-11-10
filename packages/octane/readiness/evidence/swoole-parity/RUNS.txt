@@ -44,3 +44,17 @@ App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
    - OCTANE_REPO=octane-fork OCTANE_REF=2.x-pam-swoole-parity (feature on):
      273 tests, 265 pass, 0 fail, 8 skipped; of the 43 Swoole-only tests 35
      now run and pass on PAM; same through PamClient; 112 exchanges, 0 mismatches.
+
+6. Concurrency and chaos stress (Laravel 13 app, 4 workers, 2 task workers):
+   parity_stress.py --port 8180 --rounds 3          (stress-l13.json, all ok)
+   Per round: 256 clients x 20 increments on one table row -> exactly 5120,
+   every result distinct; 1024 concurrent cache misses on fresh keys and 1024
+   on one key, 0 failed; 400 clients hanging up while Octane::concurrently()
+   waits -> backlog drained in 10-11 s, 0 failed hello during it;
+   200 slowloris clients for 20 s while 17-21k requests ran, 0 failed;
+   memory_limit fatal in an HTTP worker (500) and in a task worker
+   (TaskException), 20/20 concurrently() right after; health check ok.
+   First attempt (500 drops of 2 x 300 ms tasks) timed out a probe after
+   30 s: 300 task-seconds of abandoned work on 2 task workers. Requests whose
+   client left keep running, as on Swoole and PHP-FPM; the scenario now
+   measures the drain instead of overloading the pool.

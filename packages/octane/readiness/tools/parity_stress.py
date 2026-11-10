@@ -84,23 +84,34 @@ async def misses(port, concurrency):
     return {"fresh": len(fresh), "same_key": len(same), "failed": len(bad), "ok": ok}
 
 
-async def disconnects(port, count):
+async def disconnects(port, count, task_ms=50):
+    """Clients that hang up while their request waits on task workers.
+
+    As on Swoole and PHP-FPM, work that already started is not interrupted
+    when its client leaves: the dropped requests still run their tasks. The
+    pool must drain that backlog in about count * 2 * task_ms / task workers
+    and then serve normally, with nothing lost or wedged.
+    """
     async def drop():
         reader, writer = await asyncio.open_connection("127.0.0.1", port)
-        writer.write(b"GET /_r/parity/concurrently?sleep=300&count=2&wait=5000 HTTP/1.1\r\nHost: localhost\r\n\r\n")
+        writer.write(f"GET /_r/parity/concurrently?sleep={task_ms}&count=2&wait=5000 HTTP/1.1\r\nHost: localhost\r\n\r\n".encode())
         await writer.drain()
-        await asyncio.sleep(random.uniform(0.0, 0.25))
+        await asyncio.sleep(random.uniform(0.0, task_ms / 1000))
         writer.transport.abort()
 
     started = time.time()
     await gather_limited([drop() for _ in range(count)], 64)
-    # Abandoned tasks finish on their own; the pool must then be free again.
-    await asyncio.sleep(2)
-    status, body = await json_get(port, "/_r/parity/concurrently?sleep=200&count=2&wait=5000")
-    healthy = await gather_limited([request(port, "/_r/hello") for _ in range(100)], 16)
-    bad = [r for r in healthy if isinstance(r, Exception) or r[0] != 200]
-    ok = status == 200 and len(body["pids"]) == 2 and all(isinstance(p, int) for p in body["pids"]) and not bad
-    return {"dropped": count, "seconds": round(time.time() - started, 1), "concurrently_after": body, "hello_failed": len(bad), "ok": ok}
+    hello = await gather_limited([request(port, "/_r/hello") for _ in range(100)], 16)
+    bad = [r for r in hello if isinstance(r, Exception) or r[0] != 200]
+    # Drained once a fresh concurrently() answers promptly again.
+    while True:
+        probe = time.time()
+        status, body = await json_get(port, f"/_r/parity/concurrently?sleep={task_ms}&count=2&wait=5000", 120)
+        if status != 200 or time.time() - probe < 1 or time.time() - started > 120:
+            break
+    drained = round(time.time() - started, 1)
+    ok = status == 200 and len(body["pids"]) == 2 and all(isinstance(p, int) for p in body["pids"]) and not bad and drained < 120
+    return {"dropped": count, "drained_seconds": drained, "concurrently_after": body, "hello_failed": len(bad), "ok": ok}
 
 
 async def slow(port, slow_clients, seconds):
@@ -160,7 +171,7 @@ async def main():
         report["rounds"].append({
             "writers": await writers(args.port, args.concurrency, 20),
             "misses": await misses(args.port, args.concurrency),
-            "disconnects": await disconnects(args.port, 500),
+            "disconnects": await disconnects(args.port, 400),
             "slow": await slow(args.port, 200, 20),
             "oom": await oom(args.port),
             "health": await health(args.port),
