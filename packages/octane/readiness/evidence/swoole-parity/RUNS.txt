@@ -1,0 +1,37 @@
+Swoole-parity battery (shared tables, task workers, ticks). Release build
+(cargo build --release, Ubuntu 22.04 builder, PHP 8.5.12), Intel Core Ultra 9
+185H, 30 GiB, Linux 7.0.11, net.ipv4.tcp_migrate_req=0 unless noted.
+App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
+
+1. Unit tests: cargo test --release --bins
+   136 passed; 2 failed (editor::tests, need the pam-native/editors checkout
+   checkout that CI provides and this worktree lacks; unrelated).
+   cargo fmt --check: clean. cargo clippy --release --all-targets -D warnings: clean.
+   pam-octane: phpunit 34/34 under PAM (143 assertions), 34 (5 skipped) under
+   php-cli; phpstan: no errors.
+
+2. Fuzz: cargo +nightly fuzz run shared_table <corpus> -- -max_total_time=1200
+   5,884,593 runs in 1201 s, 0 crashes, RSS flat at 580 MB (fuzz-shared-table.txt).
+
+3. Chaos soak #1 (before fixes), 30 min:
+   parity_soak.py --seconds 1800 --reload-every 60 --chaos --kill-every 15 --max-requests 2000
+   5,067,909 requests, 29 reloads, 4 failed, increments exact, 0 table repairs.
+   Root causes:
+   - 2 x "cannot reach the task workers: Connection reset by peer": a task
+     worker closing its listener on reload resets queued handshakes
+     (tcp_migrate_req=0). Fixed in a9a050d4 (connect retry, nothing was sent).
+   - 2 wrk socket errors on HTTP connections during reloads: the documented
+     kernel behaviour with tcp_migrate_req=0 (READINESS.md, recycling section).
+   - Chaos killed nothing: the tool classified workers by command line, which
+     they inherit from the zygote. Fixed in 39362075.
+   (soak-chaos-30min-before-fixes.json)
+
+4. Leak run, 15 min, no recycling (--max-requests 100000000):
+   4,377,589 requests, 0 failed, increments exact.
+   HTTP workers flat (RSS 84-90 MB from minute 2 to 15).
+   Task workers grow ~0.27 KB per task (75 -> 166 MB over ~168k tasks each):
+   reproduced in plain php-cli 8.5 with laravel/serializable-closure alone
+   (unserialize + call, 60k iterations: +16 MB), i.e. PHP keeps compiled
+   closure code; not PAM. Bounded by --max-requests, which task workers honour
+   (soak #1: all workers flat with --max-requests 2000). Documented in README.
+   (soak-leak-15min-no-recycling.json)

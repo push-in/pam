@@ -1,0 +1,2 @@
+#5884593	DONE   cov: 411 ft: 2520 corp: 442/90Kb lim: 4096 exec/s: 4899 rss: 580Mb
+Done 5884593 runs in 1201 second(s)
