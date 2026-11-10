@@ -209,6 +209,9 @@ mod linux {
     pub struct Channel {
         commands: File,
         events: File,
+        /// The environment the master started this zygote with, before the
+        /// application could add to it (Laravel puts `.env` with `putenv`).
+        environment: Vec<(std::ffi::OsString, std::ffi::OsString)>,
     }
 
     impl Channel {
@@ -230,7 +233,11 @@ mod linux {
             for fd in [command_fd, event_fd] {
                 set_cloexec(fd, true)?;
             }
-            Ok(Self { commands, events })
+            Ok(Self {
+                commands,
+                events,
+                environment: std::env::vars_os().collect(),
+            })
         }
 
         pub fn descriptors(&self) -> [RawFd; 2] {
@@ -264,6 +271,8 @@ mod linux {
             }
             let error = Command::new(executable)
                 .args(std::env::args_os().skip(1))
+                .env_clear()
+                .envs(self.environment)
                 .env(COMMAND_FD_ENV, keep[0].to_string())
                 .env(EVENT_FD_ENV, keep[1].to_string())
                 .env(BOOT_MODE_ENV, super::BootMode::Engine.as_str())
@@ -312,6 +321,7 @@ mod linux {
         let Channel {
             mut commands,
             mut events,
+            ..
         } = channel;
 
         if let Err(error) = crate::balance::install_shared_table() {
