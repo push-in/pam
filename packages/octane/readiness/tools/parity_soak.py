@@ -137,6 +137,7 @@ def parse_wrk(text):
     match = re.search(r"Socket errors: connect (\d+), read (\d+), write (\d+), timeout (\d+)", text)
     if match:
         result["socket_errors"] = sum(int(value) for value in match.groups())
+        result["socket_error_kinds"] = dict(zip(("connect", "read", "write", "timeout"), map(int, match.groups())))
     match = re.search(r"Requests/sec:\s+([\d.]+)", text)
     if match:
         result["rps"] = float(match.group(1))
@@ -208,6 +209,7 @@ def main():
                 try:
                     os.kill(pid, 9)
                     events["kills"].append(role)
+                    events.setdefault("kill_log", []).append({"t": round(now - started, 1), "role": role, "pid": pid})
                 except ProcessLookupError:
                     pass
             next_kill = now + args.kill_every * random.uniform(0.5, 1.5)
@@ -262,12 +264,13 @@ def main():
         "table_recoveries": stats.get("recoveries"),
         "memory_first": samples[0], "memory_last": samples[-1], "samples": samples,
         "events": events["errors"],
+        "kill_log": events.get("kill_log", []),
     }
     text = json.dumps(report, indent=2)
     if args.out:
         with open(args.out, "w") as handle:
             handle.write(text)
-    summary = {key: value for key, value in report.items() if key not in ("samples", "memory_first", "memory_last")}
+    summary = {key: value for key, value in report.items() if key not in ("samples", "memory_first", "memory_last", "kill_log")}
     print(json.dumps(summary, indent=2))
 
 
