@@ -58,7 +58,7 @@ application (2 per worker); post-boot closes it once in the zygote.
 
 | | ON | OFF |
 |---|---|---|
-| Octane's own suite through the PAM client | pass | pass |
+| Octane 2.24 suite on PAM's PHP and through the PAM client | 182 pass, 0 fail, 43 skip (112 exchanges, 0 mismatches) | same |
 | Laravel 12 + 13 matrix (35 checks each) | 69/70 | 68/70 |
 | Ecosystem app (Livewire, Inertia, Filament, Horizon, Reverb), 17 steps | 17/17 | 17/17 |
 | Server logs | `post-boot zygote ready in 247-263 ms` on every start/reload | pre-boot |

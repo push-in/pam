@@ -19,7 +19,7 @@ p.add_argument('--hog-every', type=float, default=0); p.add_argument('--disconne
 p.add_argument('--port', type=int, default=18600); p.add_argument('--sample-every', type=float, default=30)
 p.add_argument('--label', default='soak'); p.add_argument('--path', default='')
 a = p.parse_args()
-S = os.path.dirname(os.path.abspath(__file__))
+S = os.environ.get('SOAK_OUT', os.getcwd())
 ADMIN = a.port + 99
 BASE = f'http://127.0.0.1:{a.port}'
 stop = threading.Event()
@@ -199,7 +199,7 @@ for t in threads: t.start()
 
 duration = int(a.minutes * 60)
 wrk_cmd = ['wrk', '-t', str(a.wrk_threads), '-c', str(a.wrk_connections), '-d', f'{duration}s', '--timeout', '30s', '--latency']
-wrk_cmd += [BASE + a.path] if a.path else ['-s', f'{S}/mix.lua', BASE]
+wrk_cmd += [BASE + a.path] if a.path else ['-s', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mix.lua'), BASE]
 wrk = subprocess.run(wrk_cmd, capture_output=True, text=True)
 stop.set()
 for t in threads: t.join(timeout=70)
