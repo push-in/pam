@@ -229,6 +229,16 @@ Route::prefix('_r')->group(function (): void {
         return response()->json(['slept' => $ms, 'pid' => getmypid()]);
     });
 
+    // Symfony's Response::send() sends a raw `HTTP/1.1 200 OK` status line.
+    Route::get('/send', fn () => response('sent')->send());
+
+    // A request whose upload is on disk when the request timeout cuts it.
+    Route::post('/upload-sleep/{ms}', function (int $ms) {
+        usleep($ms * 1000);
+
+        return response()->json(['slept' => $ms]);
+    });
+
     Route::get('/crash', function () {
         // Simulates a fatal native crash of the worker process.
         posix_kill(getmypid(), SIGKILL);

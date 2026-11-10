@@ -169,6 +169,11 @@ def basics(app):
         problems.append("HEAD")
     if app.get("/_r/abort")[0] != 418:
         problems.append("abort")
+    for _ in range(3):
+        status, _, body = app.get("/_r/send")
+        if status != 200 or not body.startswith(b"sent") or app.get("/_r/hello")[0] != 200:
+            problems.append(f"response()->send() HTTP {status}")
+            break
     conn = http.client.HTTPConnection("127.0.0.1", app.port, timeout=10)
     conn.request("GET", "/_r/cookie")
     response = conn.getresponse()
@@ -577,6 +582,20 @@ def timeout(app):
     record("Request timeout answers 504 (2 s limit, blocking 6 s handler)", "PASS" if ok else "FAIL",
            f"HTTP {status} after {elapsed:.1f}s, connection={headers.get('connection')}, "
            f"20/20 healthy afterwards={recovered}, stuck worker replaced={replaced}")
+
+    started = time.time()
+    try:
+        status, _, _ = stream_upload(app, "/_r/upload-sleep/6000", 100 * 1024 * 1024, timeout=30)
+    except Exception as error:  # noqa: BLE001
+        status = type(error).__name__
+    leftovers = os.listdir(app.upload_dir)
+    deadline = time.time() + 10
+    while leftovers and time.time() < deadline:
+        time.sleep(0.2)
+        leftovers = os.listdir(app.upload_dir)
+    ok = status == 504 and not leftovers
+    record("Request timeout during a 100 MB upload leaves no temporary file", "PASS" if ok else "FAIL",
+           f"HTTP {status} after {time.time() - started:.1f}s, temp files left={len(leftovers)}")
     app.start("--workers=2")
 
 

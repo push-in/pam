@@ -1393,7 +1393,7 @@ namespace Pam\Internal {
             $_SERVER = is_array($dispatch->globals['_SERVER'] ?? null) ? $dispatch->globals['_SERVER'] : [];
             $_SESSION = is_array($dispatch->globals['_SESSION'] ?? null) ? $dispatch->globals['_SESSION'] : [];
 
-            header_remove();
+            self::resetNativeResponse();
             foreach ($dispatch->nativeHeaders as $header) {
                 header($header, false);
             }
@@ -1407,6 +1407,41 @@ namespace Pam\Internal {
             }
         }
 
+        /**
+         * `php-pam-<pid namespace>-<pid>-`, the prefix of the transport's
+         * streamed uploads: files a worker could not delete at the end of the
+         * request (it exited on a wedged request or crashed) are deleted by
+         * the next worker or by the cluster master.
+         */
+        private static function temporaryUploadPrefix(): string
+        {
+            static $prefix = null;
+            if ($prefix === null) {
+                $namespace = @readlink('/proc/self/ns/pid');
+                $namespace = is_string($namespace) ? preg_replace('/\D+/', '', $namespace) : '';
+                $prefix = 'php-pam-' . ($namespace === '' || $namespace === null ? '0' : $namespace)
+                    . '-' . getmypid() . '-';
+            }
+            return $prefix;
+        }
+
+        /**
+         * Resets the SAPI header bag, the raw `HTTP/` status line and the
+         * response code. header_remove() keeps a status line sent with
+         * header('HTTP/1.1 ...') (Symfony's Response::send() does), and on
+         * PHP 8.5 http_response_code() then warns, which an application error
+         * handler turns into a failed request.
+         */
+        private static function resetNativeResponse(int $statusCode = 200): void
+        {
+            if (function_exists('pam_native_reset_response')) {
+                pam_native_reset_response($statusCode);
+                return;
+            }
+            header_remove();
+            @http_response_code($statusCode);
+        }
+
         private static function clearHttpEnvironment(): void
         {
             if (session_status() === PHP_SESSION_ACTIVE) {
@@ -1417,8 +1452,7 @@ namespace Pam\Internal {
             }
             $_GET = $_POST = $_COOKIE = $_FILES = $_REQUEST = $_SERVER = [];
             $_SESSION = [];
-            header_remove();
-            http_response_code(200);
+            self::resetNativeResponse();
         }
 
         private static function mergeCapturedOutput(string $serialized, string $output): string
@@ -1697,7 +1731,7 @@ namespace Pam\Internal {
 
                 $filename = basename(str_replace('\\', '/', $filenameMatch[1]));
                 $mediaType = $partHeaders['content-type'] ?? 'application/octet-stream';
-                $temporary = tempnam(sys_get_temp_dir(), 'pam-upload-');
+                $temporary = tempnam(sys_get_temp_dir(), self::temporaryUploadPrefix());
                 $handle = $temporary === false ? false : fopen($temporary, 'wb');
                 if ($temporary === false || $handle === false) {
                     throw new \RuntimeException('Unable to persist a temporary upload.');

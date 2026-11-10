@@ -17,6 +17,16 @@ if ($failedGeneration > 0 && $workerGeneration === $failedGeneration) {
     throw new RuntimeException("Intentional startup failure for generation {$workerGeneration}");
 }
 
+if (getenv('PAM_TEST_STRICT_ERRORS') === '1') {
+    // Like Laravel's HandleExceptions: every warning fails the request.
+    set_error_handler(static function (int $level, string $message, string $file = '', int $line = 0): bool {
+        if ((error_reporting() & $level) === 0) {
+            return false;
+        }
+        throw new ErrorException($message, 0, $level, $file, $line);
+    });
+}
+
 $app = new App();
 $app->get('/ping', static fn (Request $request, Response $response) => $response->json([
     'message' => 'pong',
@@ -152,6 +162,23 @@ $app->get('/session', static function (Request $request, Response $response): Re
     return $response->json(['visits' => $_SESSION['visits']]);
 });
 $app->get('/block', static function (Request $request, Response $response): Response {
+    usleep(10_000_000);
+    return $response->send('late');
+});
+$app->get('/status-line', static function (Request $request, Response $response): Response {
+    // Symfony's Response::send() sends a raw status line, then flushes.
+    header('HTTP/1.1 200 OK');
+    header('Content-Type: text/plain');
+    echo 'status-line';
+    flush();
+    return $response;
+});
+$app->get('/response-code', static function (Request $request, Response $response): Response {
+    http_response_code(201);
+    echo 'created';
+    return $response;
+});
+$app->post('/upload-block', static function (Request $request, Response $response): Response {
     usleep(10_000_000);
     return $response->send('late');
 });

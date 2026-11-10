@@ -683,6 +683,17 @@ fn records_real_requests_with_telescope_and_pulse_enabled() {
 fn serves_laravel_with_isolated_requests_and_bounded_memory() {
     let mut pam = LaravelProcess::start();
 
+    // response()->send() sends a raw `HTTP/1.1 200 OK` status line; the
+    // end-of-request reset must not raise a warning (PHP 8.5) that Laravel's
+    // error handler turns into a 500, for this request or the next one.
+    for _ in 0..2 {
+        let sent = request(pam.port, "GET", "/api/send", "", &[]).unwrap();
+        assert!(sent.starts_with("HTTP/1.1 200"), "{sent}");
+        assert!(response_body(&sent).starts_with("sent"), "{sent}");
+        let next = request(pam.port, "GET", "/api/ping", "", &[]).unwrap();
+        assert!(next.contains(r#"{"message":"pong"}"#), "{next}");
+    }
+
     let response = request(
         pam.port,
         "POST",

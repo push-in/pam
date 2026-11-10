@@ -1367,6 +1367,18 @@ impl fmt::Display for ServerError {
 
 pub fn run(config: ServerConfig) -> Result<(), ServerError> {
     release_php_termination_signals();
+    // Uploads of requests that never reached their end in a worker that is
+    // gone (crashed, killed past a deadline) are deleted before serving, and
+    // this worker deletes its own when it exits.
+    let uploads = config.uploads.clone();
+    crate::worker_state::set_upload_directory(&uploads.directory());
+    crate::upload::sweep_orphans(&uploads);
+    let result = serve(config);
+    crate::upload::sweep_own(&uploads);
+    result
+}
+
+fn serve(config: ServerConfig) -> Result<(), ServerError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .thread_name("pam-io")
@@ -1717,6 +1729,8 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
             tracker.wait_idle(Duration::from_secs(30)).await;
             // Give the accept loop time to sweep and close the listener.
             tokio::time::sleep(Duration::from_millis(200)).await;
+            // The stuck request never releases its uploads.
+            crate::upload::sweep_own(&state.config.uploads);
             eprintln!("pam: worker drained after a request timeout; exiting");
             let _ = std::io::stderr().flush();
             // SAFETY: _exit terminates the process without running PHP's
