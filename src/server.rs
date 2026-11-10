@@ -1,9 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fmt;
-use std::fs::OpenOptions;
 use std::future::Future;
-use std::io::{BufRead, BufReader, Seek, SeekFrom, Write};
+use std::io::Write;
 use std::net::SocketAddr;
 use std::net::ToSocketAddrs;
 use std::os::fd::{AsRawFd, RawFd};
@@ -39,6 +38,8 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use socket2::{Domain, Protocol, Socket, Type};
 
+use crate::page_cache::policy::{Purge, RequestKey, UrlPattern};
+use crate::page_cache::{Flight, HitKind, Lookup, PageCache};
 use crate::php::{self, ServerConfig};
 use crate::protocol::{
     PhpDispatchState, PhpHttpResponse, PhpOperation, PhpOperationKind, parse_dispatch_envelope,
@@ -60,26 +61,6 @@ const REQUEST_DURATION_UPPER_BOUNDS_MICROS: [u64; 10] = [
 
 unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
-}
-
-#[derive(Clone)]
-struct CachedResponse {
-    status: StatusCode,
-    headers: HeaderMap,
-    body: Bytes,
-    expires_at: Instant,
-    stale_until: Instant,
-    last_access: Arc<AtomicU64>,
-    tags: Arc<HashSet<String>>,
-}
-
-impl CachedResponse {
-    fn response(&self) -> Response {
-        let mut response = Response::new(Body::from(self.body.clone()));
-        *response.status_mut() = self.status;
-        *response.headers_mut() = self.headers.clone();
-        response
-    }
 }
 
 #[derive(Clone)]
@@ -105,14 +86,9 @@ struct ServerState {
     last_reported_active_requests: Arc<AtomicU64>,
     worker_metrics_refresh_scheduled: Arc<AtomicBool>,
     active_php_executions: Arc<StdMutex<HashMap<String, u64>>>,
-    response_cache: Arc<RwLock<HashMap<String, CachedResponse>>>,
-    response_cache_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
-    response_cache_clock: Arc<AtomicU64>,
+    page_cache: Arc<PageCache>,
     php_metrics: Arc<StdMutex<php::RuntimeMetrics>>,
     next_php_metrics_at: Arc<AtomicU64>,
-    cache_invalidation_log: Option<Arc<PathBuf>>,
-    cache_invalidation_offset: Arc<AtomicU64>,
-    next_cache_invalidation_at: Arc<AtomicU64>,
     drain: Arc<crate::http_serve::Drain>,
     php: PhpExecutor,
 }
@@ -123,6 +99,7 @@ impl ServerState {
         let worker = std::env::var("PAM_WORKER_ID").unwrap_or_else(|_| "standalone".to_owned());
         let route_metrics = config.route_metrics;
         let route_metrics_max_entries = config.route_metrics_max_entries;
+        let page_cache = PageCache::new(page_cache_config(&config));
         let otlp = crate::otlp::Exporter::from_environment()?;
         let otlp_counters = otlp
             .as_ref()
@@ -158,16 +135,9 @@ impl ServerState {
             last_reported_active_requests: Arc::new(AtomicU64::new(0)),
             worker_metrics_refresh_scheduled: Arc::new(AtomicBool::new(false)),
             active_php_executions: Arc::new(StdMutex::new(HashMap::new())),
-            response_cache: Arc::new(RwLock::new(HashMap::new())),
-            response_cache_locks: Arc::new(Mutex::new(HashMap::new())),
-            response_cache_clock: Arc::new(AtomicU64::new(1)),
+            page_cache,
             php_metrics: Arc::new(StdMutex::new(php::RuntimeMetrics::default())),
             next_php_metrics_at: Arc::new(AtomicU64::new(0)),
-            cache_invalidation_log: std::env::var_os("PAM_CACHE_INVALIDATION_LOG")
-                .map(PathBuf::from)
-                .map(Arc::new),
-            cache_invalidation_offset: Arc::new(AtomicU64::new(0)),
-            next_cache_invalidation_at: Arc::new(AtomicU64::new(0)),
             drain: crate::http_serve::Drain::new(),
             php,
         })
@@ -283,222 +253,13 @@ impl ServerState {
         false
     }
 
-    fn response_cache_key(
-        &self,
-        method: &Method,
-        uri: &Uri,
-        headers: &HeaderMap,
-    ) -> Option<String> {
-        if method != Method::GET
-            || self.config.response_cache_max_entries == 0
-            || self.config.response_cache_max_bytes == 0
-            || self.config.response_cache_ttl_ms == 0
-            || !self
-                .config
-                .response_cache_paths
-                .iter()
-                .any(|path| path == uri.path())
-            || headers.contains_key("authorization")
-            || headers.contains_key("cookie")
-            || headers
-                .get("cache-control")
-                .and_then(|value| value.to_str().ok())
-                .is_some_and(|value| {
-                    value
-                        .split(',')
-                        .any(|directive| directive.trim().eq_ignore_ascii_case("no-cache"))
-                })
-        {
-            return None;
-        }
-        let mut material = uri
-            .path_and_query()
-            .map_or_else(|| uri.path().to_owned(), ToString::to_string);
-        for configured in &self.config.response_cache_vary_headers {
-            let name = configured.to_ascii_lowercase();
-            material.push('\n');
-            material.push_str(&name);
-            material.push(':');
-            for value in headers.get_all(name.as_str()) {
-                if let Ok(value) = value.to_str() {
-                    material.push_str(&value.len().to_string());
-                    material.push(':');
-                    material.push_str(value);
-                    material.push(';');
-                }
-            }
-        }
-        Some(format!("{:x}", Sha256::digest(material.as_bytes())))
-    }
-
-    async fn cached_response(&self, key: &str, allow_stale: bool) -> Option<(Response, usize)> {
-        let now = Instant::now();
-        let cached = self.response_cache.read().await.get(key).cloned();
-        match cached {
-            Some(cached)
-                if cached.expires_at > now || (allow_stale && cached.stale_until > now) =>
-            {
-                cached.last_access.store(
-                    self.response_cache_clock.fetch_add(1, Ordering::Relaxed),
-                    Ordering::Relaxed,
-                );
-                let bytes = cached.body.len();
-                Some((cached.response(), bytes))
-            }
-            Some(cached) if cached.stale_until <= now => {
-                self.response_cache.write().await.remove(key);
-                None
-            }
-            Some(_) => None,
-            None => None,
-        }
-    }
-
-    async fn response_cache_lock(&self, key: &str) -> Arc<Mutex<()>> {
-        self.response_cache_locks
-            .lock()
-            .await
-            .entry(key.to_owned())
-            .or_insert_with(|| Arc::new(Mutex::new(())))
-            .clone()
-    }
-
-    async fn store_cached_response(&self, key: String, cached: CachedResponse) {
-        let mut cache = self.response_cache.write().await;
-        let now = Instant::now();
-        cache.retain(|_, entry| entry.stale_until > now);
-        if cached.body.len() > self.config.response_cache_max_bytes {
-            return;
-        }
-        while !cache.contains_key(&key)
-            && (cache.len() >= self.config.response_cache_max_entries
-                || cache.values().map(|entry| entry.body.len()).sum::<usize>() + cached.body.len()
-                    > self.config.response_cache_max_bytes)
-        {
-            let Some(eviction_key) = cache
-                .iter()
-                .min_by_key(|(_, entry)| entry.last_access.load(Ordering::Relaxed))
-                .map(|(key, _)| key.clone())
-            else {
-                break;
-            };
-            cache.remove(&eviction_key);
-        }
-        cache.insert(key, cached);
-    }
-
-    async fn purge_cached_responses(&self, tag: Option<&str>) -> usize {
-        let mut cache = self.response_cache.write().await;
-        let before = cache.len();
-        match tag {
-            Some(tag) => cache.retain(|_, entry| !entry.tags.contains(tag)),
-            None => cache.clear(),
-        }
-        let purged = before.saturating_sub(cache.len());
-        self.metrics
-            .response_cache_purges
-            .fetch_add(1, Ordering::Relaxed);
-        purged
-    }
-
-    async fn synchronize_cache_invalidations(&self, force: bool) {
-        let Some(path) = self.cache_invalidation_log.as_deref() else {
-            return;
-        };
-        let now = worker_epoch_millis();
-        let next = self.next_cache_invalidation_at.load(Ordering::Relaxed);
-        if !force
-            && (now < next
-                || self
-                    .next_cache_invalidation_at
-                    .compare_exchange(
-                        next,
-                        now.saturating_add(100),
-                        Ordering::Relaxed,
-                        Ordering::Relaxed,
-                    )
-                    .is_err())
-        {
-            return;
-        }
-        self.next_cache_invalidation_at
-            .store(now.saturating_add(100), Ordering::Relaxed);
-
-        let Ok(mut file) = OpenOptions::new().read(true).open(path) else {
-            return;
-        };
-        let length = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
-        let mut offset = self.cache_invalidation_offset.load(Ordering::Relaxed);
-        let mut purge_all = length < offset;
-        if purge_all {
-            offset = 0;
-        }
-        if file.seek(SeekFrom::Start(offset)).is_err() {
-            return;
-        }
-        let mut reader = BufReader::new(file);
-        let mut tags = HashSet::new();
-        let mut line = String::new();
-        loop {
-            line.clear();
-            match reader.read_line(&mut line) {
-                Ok(0) => break,
-                Ok(_) => {
-                    let invalidation = line.trim();
-                    if invalidation == "*" {
-                        purge_all = true;
-                    } else if valid_cache_tag(invalidation) {
-                        tags.insert(invalidation.to_owned());
-                    }
-                }
-                Err(_) => return,
-            }
-        }
-        if let Ok(position) = reader.stream_position() {
-            self.cache_invalidation_offset
-                .store(position, Ordering::Relaxed);
-        }
-        if purge_all || !tags.is_empty() {
-            let mut cache = self.response_cache.write().await;
-            if purge_all {
-                cache.clear();
-            } else {
-                cache.retain(|_, entry| tags.is_disjoint(&entry.tags));
-            }
-        }
-    }
-
-    async fn publish_cache_invalidation(&self, tag: Option<&str>) -> Result<(), String> {
-        let Some(path) = self.cache_invalidation_log.as_deref() else {
-            return Ok(());
-        };
-        self.synchronize_cache_invalidations(true).await;
-        #[cfg(unix)]
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut options = OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        options.mode(0o600);
-        let mut file = options
-            .open(path)
-            .map_err(|error| format!("cannot open cache invalidation log: {error}"))?;
-        let record = format!("{}\n", tag.unwrap_or("*"));
-        file.write_all(record.as_bytes())
-            .and_then(|()| file.sync_data())
-            .map_err(|error| format!("cannot publish cache invalidation: {error}"))?;
-        if let Ok(length) = file.metadata().map(|metadata| metadata.len()) {
-            self.cache_invalidation_offset
-                .store(length, Ordering::Relaxed);
-        }
-        Ok(())
-    }
-
     fn metrics_snapshot(&self) -> WorkerMetricsSnapshot {
         let runtime = self
             .php_metrics
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
+        let cache = self.page_cache.stats();
         WorkerMetricsSnapshot {
             requests: self.metrics.requests.load(Ordering::Relaxed),
             errors: self.metrics.errors.load(Ordering::Relaxed),
@@ -513,14 +274,17 @@ impl ServerState {
             }),
             request_bytes: self.metrics.request_bytes.load(Ordering::Relaxed),
             response_bytes: self.metrics.response_bytes.load(Ordering::Relaxed),
-            response_cache_hits: self.metrics.response_cache_hits.load(Ordering::Relaxed),
-            response_cache_misses: self.metrics.response_cache_misses.load(Ordering::Relaxed),
-            response_cache_collapsed: self
-                .metrics
-                .response_cache_collapsed
-                .load(Ordering::Relaxed),
-            response_cache_stale: self.metrics.response_cache_stale.load(Ordering::Relaxed),
-            response_cache_purges: self.metrics.response_cache_purges.load(Ordering::Relaxed),
+            response_cache_hits: cache.hits,
+            response_cache_misses: cache.misses,
+            response_cache_collapsed: cache.collapsed,
+            response_cache_stale: cache.stale,
+            response_cache_purges: cache.purges,
+            response_cache_entries: cache.entries,
+            response_cache_bytes: cache.bytes,
+            response_cache_stores: cache.stores,
+            response_cache_evictions: cache.evictions,
+            response_cache_not_modified: cache.not_modified,
+            response_cache_revalidations: cache.revalidations,
             websocket_connections: self.metrics.websocket_connections.load(Ordering::Relaxed),
             websocket_messages: self.metrics.websocket_messages.load(Ordering::Relaxed),
             websocket_backpressure: self.metrics.websocket_backpressure.load(Ordering::Relaxed),
@@ -920,11 +684,6 @@ struct Metrics {
     request_duration_buckets: [AtomicU64; 11],
     request_bytes: AtomicU64,
     response_bytes: AtomicU64,
-    response_cache_hits: AtomicU64,
-    response_cache_misses: AtomicU64,
-    response_cache_collapsed: AtomicU64,
-    response_cache_stale: AtomicU64,
-    response_cache_purges: AtomicU64,
     websocket_connections: AtomicU64,
     websocket_messages: AtomicU64,
     websocket_backpressure: AtomicU64,
@@ -973,11 +732,6 @@ impl Metrics {
             request_duration_buckets: Default::default(),
             request_bytes: AtomicU64::new(0),
             response_bytes: AtomicU64::new(0),
-            response_cache_hits: AtomicU64::new(0),
-            response_cache_misses: AtomicU64::new(0),
-            response_cache_collapsed: AtomicU64::new(0),
-            response_cache_stale: AtomicU64::new(0),
-            response_cache_purges: AtomicU64::new(0),
             websocket_connections: AtomicU64::new(0),
             websocket_messages: AtomicU64::new(0),
             websocket_backpressure: AtomicU64::new(0),
@@ -993,7 +747,12 @@ impl Metrics {
         }
     }
 
-    fn render(&self, websocket_connections: usize, runtime: &php::RuntimeMetrics) -> String {
+    fn render(
+        &self,
+        websocket_connections: usize,
+        runtime: &php::RuntimeMetrics,
+        cache: &crate::page_cache::Stats,
+    ) -> String {
         let mut output = format!(
             concat!(
                 "# TYPE pam_http_requests_total counter\n",
@@ -1055,11 +814,11 @@ impl Metrics {
             self.active_requests.load(Ordering::Relaxed),
             self.request_bytes.load(Ordering::Relaxed),
             self.response_bytes.load(Ordering::Relaxed),
-            self.response_cache_hits.load(Ordering::Relaxed),
-            self.response_cache_misses.load(Ordering::Relaxed),
-            self.response_cache_collapsed.load(Ordering::Relaxed),
-            self.response_cache_stale.load(Ordering::Relaxed),
-            self.response_cache_purges.load(Ordering::Relaxed),
+            cache.hits,
+            cache.misses,
+            cache.collapsed,
+            cache.stale,
+            cache.purges,
             websocket_connections,
             self.websocket_messages.load(Ordering::Relaxed),
             self.websocket_backpressure.load(Ordering::Relaxed),
@@ -1085,6 +844,7 @@ impl Metrics {
             self.otlp.errors.load(Ordering::Relaxed),
             self.otlp.rejected.load(Ordering::Relaxed),
         );
+        crate::page_cache::render_metrics(&mut output, cache);
         output.push_str("# TYPE pam_http_request_duration_seconds histogram\n");
         let labels = [
             "0.0001", "0.0005", "0.001", "0.005", "0.01", "0.05", "0.1", "0.5", "1", "5", "+Inf",
@@ -1559,6 +1319,7 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
     let (php_sender, php_receiver) = mpsc::channel(config.php_executor_queue_capacity.max(1));
     let state = ServerState::new(config, PhpExecutor { sender: php_sender })
         .map_err(ServerError::Configuration)?;
+    crate::page_cache::register_global(&state.page_cache);
     start_php_executor(state.clone(), php_receiver);
     let recycle = state.shutdown.subscribe();
     let shutdown_sender = state.shutdown.clone();
@@ -1962,9 +1723,11 @@ async fn handle_http3_request(
 
     let (response, response_bytes, cors_origin) = if uri.path() == state.config.metrics_path {
         let runtime_metrics = state.php.metrics().await;
-        let body = state
-            .metrics
-            .render(state.clients.read().await.len(), &runtime_metrics);
+        let body = state.metrics.render(
+            state.clients.read().await.len(),
+            &runtime_metrics,
+            &state.page_cache.stats(),
+        );
         let response_bytes = body.len();
         (
             Response::builder()
@@ -2052,22 +1815,20 @@ async fn handle_http3_request(
                     .metrics
                     .request_bytes
                     .fetch_add(body.len() as u64, Ordering::Relaxed);
-                let (response, bytes) = with_hard_deadline(
+                state.page_cache.synchronize(false);
+                let (response, bytes) = serve_through_page_cache(
                     &state,
+                    remote,
+                    &client,
+                    &method,
+                    &uri,
+                    &target,
+                    Version::HTTP_3,
+                    &headers,
+                    Bytes::from(body),
+                    None,
                     &request_id,
-                    invoke_php_http(
-                        &state,
-                        remote,
-                        &client,
-                        &method,
-                        &target,
-                        Version::HTTP_3,
-                        &headers,
-                        Bytes::from(body),
-                        None,
-                        &request_id,
-                        &traceparent,
-                    ),
+                    &traceparent,
                 )
                 .await;
                 (response, bytes, cors_origin)
@@ -2168,9 +1929,11 @@ async fn http_dispatch(
 
     if uri.path() == state.config.metrics_path {
         let runtime_metrics = state.php.metrics().await;
-        let body = state
-            .metrics
-            .render(state.clients.read().await.len(), &runtime_metrics);
+        let body = state.metrics.render(
+            state.clients.read().await.len(),
+            &runtime_metrics,
+            &state.page_cache.stats(),
+        );
         let bytes = body.len();
         let response = Response::builder()
             .status(StatusCode::OK)
@@ -2336,7 +2099,7 @@ async fn http_dispatch(
         .metrics
         .request_bytes
         .fetch_add(body.len() as u64, Ordering::Relaxed);
-    state.synchronize_cache_invalidations(false).await;
+    state.page_cache.synchronize(false);
 
     if state.config.response_cache_purge_path.as_deref() == Some(uri.path()) {
         let response = handle_cache_purge(&state, &method, &headers, &body).await;
@@ -2357,130 +2120,21 @@ async fn http_dispatch(
         );
     }
 
-    let cache_key = state.response_cache_key(&method, &uri, &headers);
-    let _cache_guard = if let Some(key) = cache_key.as_deref() {
-        if let Some((response, response_bytes)) = state.cached_response(key, false).await {
-            state
-                .metrics
-                .response_cache_hits
-                .fetch_add(1, Ordering::Relaxed);
-            return telemetry.finish(
-                response,
-                response_bytes,
-                &request_id,
-                &traceparent,
-                &method,
-                target,
-                cors_origin.as_deref(),
-            );
-        }
-        state
-            .metrics
-            .response_cache_misses
-            .fetch_add(1, Ordering::Relaxed);
-        let lock = state.response_cache_lock(key).await;
-        let (guard, collapsed) = match lock.clone().try_lock_owned() {
-            Ok(guard) => (guard, false),
-            Err(_) => {
-                if let Some((response, response_bytes)) = state.cached_response(key, true).await {
-                    state
-                        .metrics
-                        .response_cache_stale
-                        .fetch_add(1, Ordering::Relaxed);
-                    return telemetry.finish(
-                        response,
-                        response_bytes,
-                        &request_id,
-                        &traceparent,
-                        &method,
-                        target,
-                        cors_origin.as_deref(),
-                    );
-                }
-                (lock.lock_owned().await, true)
-            }
-        };
-        if collapsed {
-            state
-                .metrics
-                .response_cache_collapsed
-                .fetch_add(1, Ordering::Relaxed);
-            if let Some((response, response_bytes)) = state.cached_response(key, false).await {
-                state
-                    .metrics
-                    .response_cache_hits
-                    .fetch_add(1, Ordering::Relaxed);
-                return telemetry.finish(
-                    response,
-                    response_bytes,
-                    &request_id,
-                    &traceparent,
-                    &method,
-                    target,
-                    cors_origin.as_deref(),
-                );
-            }
-        }
-        Some(guard)
-    } else {
-        None
-    };
-
-    let (mut response, mut response_bytes) = with_hard_deadline(
+    let (response, response_bytes) = serve_through_page_cache(
         &state,
+        remote,
+        &client,
+        &method,
+        &uri,
+        target,
+        version,
+        &headers,
+        body,
+        upload,
         &request_id,
-        invoke_php_http(
-            &state,
-            remote,
-            &client,
-            &method,
-            target,
-            version,
-            &headers,
-            body,
-            upload,
-            &request_id,
-            &traceparent,
-        ),
+        &traceparent,
     )
     .await;
-    let cache_tags = extract_cache_tags(&mut response, &state.config.response_cache_tag_header);
-    if let Some(cache_key) = cache_key
-        && cacheable_response(&response)
-    {
-        let (parts, response_body) = response.into_parts();
-        match to_bytes(response_body, state.config.max_response_bytes).await {
-            Ok(bytes) => {
-                response_bytes = bytes.len();
-                let cached = CachedResponse {
-                    status: parts.status,
-                    headers: parts.headers,
-                    body: bytes,
-                    expires_at: Instant::now()
-                        + Duration::from_millis(state.config.response_cache_ttl_ms),
-                    stale_until: Instant::now()
-                        + Duration::from_millis(
-                            state.config.response_cache_ttl_ms.saturating_add(
-                                state.config.response_cache_stale_while_revalidate_ms,
-                            ),
-                        ),
-                    last_access: Arc::new(AtomicU64::new(
-                        state.response_cache_clock.fetch_add(1, Ordering::Relaxed),
-                    )),
-                    tags: Arc::new(cache_tags),
-                };
-                response = cached.response();
-                state.store_cached_response(cache_key, cached).await;
-            }
-            Err(error) => {
-                response = error_response(
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    &format!("cannot buffer cacheable response: {error}"),
-                );
-                response_bytes = 0;
-            }
-        }
-    }
     telemetry.finish(
         response,
         response_bytes,
@@ -2490,6 +2144,271 @@ async fn http_dispatch(
         target,
         cors_origin.as_deref(),
     )
+}
+
+/// Request headers that would let PHP answer 304 or a partial body; removed
+/// from cache fills so the stored copy is always the full representation.
+const CONDITIONAL_REQUEST_HEADERS: [HeaderName; 4] = [
+    http::header::IF_NONE_MATCH,
+    http::header::IF_MODIFIED_SINCE,
+    http::header::IF_MATCH,
+    http::header::IF_UNMODIFIED_SINCE,
+];
+
+fn without_conditional_headers(headers: &HeaderMap) -> HeaderMap {
+    let mut stripped = headers.clone();
+    for name in CONDITIONAL_REQUEST_HEADERS {
+        stripped.remove(name);
+    }
+    stripped
+}
+
+fn cache_status(response: &mut Response, state: &ServerState, label: &'static str) {
+    if state.page_cache.config().status_header {
+        response.headers_mut().insert(
+            HeaderName::from_static("x-pam-cache"),
+            HeaderValue::from_static(label),
+        );
+    }
+}
+
+/// Serves a request from the edge page cache when it can, otherwise from PHP,
+/// storing the response when it opts in.
+#[allow(clippy::too_many_arguments)]
+async fn serve_through_page_cache(
+    state: &ServerState,
+    remote: SocketAddr,
+    client: &str,
+    method: &Method,
+    uri: &Uri,
+    target: &str,
+    version: Version,
+    headers: &HeaderMap,
+    body: Bytes,
+    upload: Option<Arc<crate::upload::MultipartBody>>,
+    request_id: &str,
+    traceparent: &str,
+) -> (Response, usize) {
+    let cache = &state.page_cache;
+    let scheme = if state.config.tls_cert.is_some() {
+        "https"
+    } else {
+        "http"
+    };
+    let key = if cache.enabled() && upload.is_none() {
+        cache
+            .request_key(
+                method,
+                scheme,
+                uri.authority().map(|authority| authority.as_str()),
+                uri.path(),
+                uri.query(),
+                headers,
+            )
+            .ok()
+    } else {
+        None
+    };
+    let Some(key) = key else {
+        let (mut response, bytes) = with_hard_deadline(
+            state,
+            request_id,
+            invoke_php_http(
+                state,
+                remote,
+                client,
+                method,
+                target,
+                version,
+                headers,
+                body,
+                upload,
+                request_id,
+                traceparent,
+            ),
+        )
+        .await;
+        cache.take_tags(response.headers_mut());
+        if cache.enabled() {
+            cache_status(&mut response, state, "BYPASS");
+        }
+        return (response, bytes);
+    };
+
+    if !key.refresh {
+        match cache.lookup(&key, headers) {
+            Lookup::Hit(entry, HitKind::Fresh) => {
+                cache.counters.hits.fetch_add(1, Ordering::Relaxed);
+                return cache.respond(&entry, "HIT", headers, key.head);
+            }
+            Lookup::Hit(entry, HitKind::Stale) => {
+                cache.counters.stale.fetch_add(1, Ordering::Relaxed);
+                if let Flight::Leader(guard) = cache.begin_flight(&key.primary) {
+                    cache.counters.revalidations.fetch_add(1, Ordering::Relaxed);
+                    let state = state.clone();
+                    let key = key.clone();
+                    let client = client.to_owned();
+                    let target = target.to_owned();
+                    let request_headers = without_conditional_headers(headers);
+                    let request_id = state.allocate_request_id();
+                    let traceparent = traceparent.to_owned();
+                    tokio::spawn(async move {
+                        let _flight = guard;
+                        let epoch = state.page_cache.epoch();
+                        let (response, bytes) = with_hard_deadline(
+                            &state,
+                            &request_id,
+                            invoke_php_http(
+                                &state,
+                                remote,
+                                &client,
+                                &Method::GET,
+                                &target,
+                                version,
+                                &request_headers,
+                                Bytes::new(),
+                                None,
+                                &request_id,
+                                &traceparent,
+                            ),
+                        )
+                        .await;
+                        let _ = fill_page_cache(
+                            &state,
+                            &key,
+                            &request_headers,
+                            response,
+                            bytes,
+                            epoch,
+                            true,
+                        )
+                        .await;
+                    });
+                }
+                return cache.respond(&entry, "STALE", headers, key.head);
+            }
+            Lookup::Miss => {}
+        }
+    }
+    cache.counters.misses.fetch_add(1, Ordering::Relaxed);
+
+    // HEAD misses go to PHP as HEAD and are never stored (no body to keep).
+    let collapsible = !key.head && !key.refresh && !cache.recently_uncacheable(&key.primary);
+    let mut _flight = None;
+    if collapsible {
+        match cache.begin_flight(&key.primary) {
+            Flight::Leader(guard) => _flight = Some(guard),
+            Flight::Follower(mut done) => {
+                cache.counters.collapsed.fetch_add(1, Ordering::Relaxed);
+                let _ = tokio::time::timeout(
+                    Duration::from_millis(state.config.request_timeout_ms),
+                    done.changed(),
+                )
+                .await;
+                if let Lookup::Hit(entry, kind) = cache.lookup(&key, headers) {
+                    let (counter, label) = match kind {
+                        HitKind::Fresh => (&cache.counters.hits, "HIT"),
+                        HitKind::Stale => (&cache.counters.stale, "STALE"),
+                    };
+                    counter.fetch_add(1, Ordering::Relaxed);
+                    return cache.respond(&entry, label, headers, key.head);
+                }
+            }
+        }
+    }
+    let epoch = cache.epoch();
+    let php_headers;
+    let php_headers = if key.head {
+        headers
+    } else {
+        php_headers = without_conditional_headers(headers);
+        &php_headers
+    };
+    let (response, bytes) = with_hard_deadline(
+        state,
+        request_id,
+        invoke_php_http(
+            state,
+            remote,
+            client,
+            method,
+            target,
+            version,
+            php_headers,
+            body,
+            None,
+            request_id,
+            traceparent,
+        ),
+    )
+    .await;
+    if key.head {
+        let mut response = response;
+        cache.take_tags(response.headers_mut());
+        cache_status(&mut response, state, "MISS");
+        return (response, bytes);
+    }
+    match fill_page_cache(state, &key, php_headers, response, bytes, epoch, false).await {
+        Filled::Stored(entry) => cache.respond(&entry, "MISS", headers, false),
+        Filled::NotStored(mut response, bytes) => {
+            cache_status(&mut response, state, "MISS");
+            (response, bytes)
+        }
+    }
+}
+
+enum Filled {
+    Stored(Arc<crate::page_cache::Entry>),
+    NotStored(Response, usize),
+}
+
+/// Stores a PHP response when its headers allow it. Never stores responses
+/// that do not opt in, and drops variants that stopped being cacheable.
+#[allow(clippy::too_many_arguments)]
+async fn fill_page_cache(
+    state: &ServerState,
+    key: &RequestKey,
+    request_headers: &HeaderMap,
+    mut response: Response,
+    response_bytes: usize,
+    epoch: u64,
+    background: bool,
+) -> Filled {
+    let cache = &state.page_cache;
+    let tags = cache.take_tags(response.headers_mut());
+    let policy = match cache.store_policy(key, response.status(), response.headers()) {
+        Ok(policy) => policy,
+        Err(_) => {
+            // A failed background revalidation (5xx, timeout) keeps serving
+            // the stale copy; anything else that is not cacheable evicts it.
+            if !(background && response.status().is_server_error()) {
+                cache.reject(key, request_headers);
+            }
+            return Filled::NotStored(response, response_bytes);
+        }
+    };
+    let (parts, body) = response.into_parts();
+    match crate::page_cache::collect_limited(body, cache.config().max_object_bytes).await {
+        Ok(bytes) => {
+            match cache.store(
+                key,
+                request_headers,
+                parts.status,
+                &parts.headers,
+                bytes.clone(),
+                policy,
+                tags,
+                epoch,
+            ) {
+                Some(entry) => Filled::Stored(entry),
+                None => {
+                    let length = bytes.len();
+                    Filled::NotStored(Response::from_parts(parts, Body::from(bytes)), length)
+                }
+            }
+        }
+        Err(body) => Filled::NotStored(Response::from_parts(parts, body), response_bytes),
+    }
 }
 
 async fn handle_cache_purge(
@@ -2515,18 +2434,55 @@ async fn handle_cache_purge(
         Ok(payload) => payload,
         Err(_) => return error_response(StatusCode::BAD_REQUEST, "invalid purge JSON payload"),
     };
-    let all = payload.get("all").and_then(Value::as_bool) == Some(true);
-    let tag = payload.get("tag").and_then(Value::as_str);
-    if all == tag.is_some() || tag.is_some_and(|tag| !valid_cache_tag(tag)) {
+    let ignored = &state.page_cache.config().requests.ignored_query_params;
+    let mut purges = Vec::new();
+    let mut valid = payload.is_object();
+    if payload.get("all").and_then(Value::as_bool) == Some(true) {
+        purges.push(Purge::All);
+    }
+    let strings = |name: &str| -> Option<Vec<String>> {
+        match payload.get(name) {
+            None => Some(Vec::new()),
+            Some(Value::String(value)) => Some(vec![value.clone()]),
+            Some(Value::Array(values)) => values
+                .iter()
+                .map(|value| value.as_str().map(str::to_owned))
+                .collect(),
+            Some(_) => None,
+        }
+    };
+    match (
+        strings("tag"),
+        strings("tags"),
+        strings("url"),
+        strings("urls"),
+    ) {
+        (Some(tag), Some(tags), Some(url), Some(urls)) => {
+            for tag in tag.into_iter().chain(tags) {
+                match crate::page_cache::policy::valid_tag(&tag) {
+                    true => purges.push(Purge::Tag(tag)),
+                    false => valid = false,
+                }
+            }
+            for url in url.into_iter().chain(urls) {
+                match UrlPattern::parse(&url, ignored) {
+                    Some(pattern) => purges.push(Purge::Url(pattern)),
+                    None => valid = false,
+                }
+            }
+        }
+        _ => valid = false,
+    }
+    if !valid || purges.is_empty() || purges.len() > 1_024 {
         return error_response(
             StatusCode::BAD_REQUEST,
-            "provide either all=true or one valid cache tag",
+            "provide all=true, valid cache tags (tag/tags) or URLs (url/urls)",
         );
     }
-    if let Err(error) = state.publish_cache_invalidation(tag).await {
-        return internal_error(error);
-    }
-    let purged = state.purge_cached_responses(tag).await;
+    let purged = match state.page_cache.purge_everywhere(&purges) {
+        Ok(purged) => purged,
+        Err(error) => return internal_error(error),
+    };
     Response::builder()
         .status(StatusCode::OK)
         .header("content-type", "application/json; charset=utf-8")
@@ -2549,14 +2505,6 @@ fn constant_time_token_eq(expected: &str, supplied: &str) -> bool {
         == 0
 }
 
-fn valid_cache_tag(tag: &str) -> bool {
-    !tag.is_empty()
-        && tag.len() <= 64
-        && tag.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':' | b'/')
-        })
-}
-
 fn valid_route_template(route: &str) -> bool {
     route.starts_with('/')
         && route.len() <= 256
@@ -2565,39 +2513,56 @@ fn valid_route_template(route: &str) -> bool {
             .all(|byte| byte.is_ascii_graphic() && !matches!(byte, b'\\' | b'"'))
 }
 
-fn extract_cache_tags(response: &mut Response, configured_header: &str) -> HashSet<String> {
-    let Ok(header) = HeaderName::try_from(configured_header) else {
-        return HashSet::new();
-    };
-    let tags = response
-        .headers()
-        .get_all(&header)
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .flat_map(|value| value.split([',', ' ', '\t']))
-        .filter(|tag| valid_cache_tag(tag))
-        .take(32)
-        .map(ToOwned::to_owned)
-        .collect();
-    response.headers_mut().remove(header);
-    tags
-}
-
-fn cacheable_response(response: &Response) -> bool {
-    response.status() == StatusCode::OK
-        && !response.headers().contains_key("set-cookie")
-        && !response
-            .headers()
-            .get("cache-control")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| {
-                value.split(',').any(|directive| {
-                    matches!(
-                        directive.trim().to_ascii_lowercase().as_str(),
-                        "private" | "no-store"
-                    )
-                })
-            })
+fn page_cache_config(config: &ServerConfig) -> crate::page_cache::PageCacheConfig {
+    use crate::page_cache::policy::{RequestRules, ResponseRules};
+    let mut tag_headers: Vec<HeaderName> = Vec::new();
+    for name in [
+        config.response_cache_tag_header.as_str(),
+        "pam-cache-tags",
+        "x-pam-cache-tags",
+    ] {
+        if let Ok(name) = HeaderName::try_from(name.to_ascii_lowercase())
+            && !tag_headers.contains(&name)
+        {
+            tag_headers.push(name);
+        }
+    }
+    crate::page_cache::PageCacheConfig {
+        requests: RequestRules {
+            header_driven: config.response_cache,
+            paths: config.response_cache_paths.clone(),
+            allow_cookies: config.response_cache_allow_cookies,
+            allow_authorization: config.response_cache_allow_authorization,
+            ignored_query_params: config.response_cache_ignored_query_params.clone(),
+            vary_headers: config
+                .response_cache_vary_headers
+                .iter()
+                .filter_map(|name| HeaderName::try_from(name.to_ascii_lowercase()).ok())
+                .collect(),
+        },
+        responses: ResponseRules {
+            statuses: config.response_cache_statuses.clone(),
+            default_ttl: Duration::from_millis(config.response_cache_ttl_ms),
+            default_stale_while_revalidate: Duration::from_millis(
+                config.response_cache_stale_while_revalidate_ms,
+            ),
+            max_ttl: Duration::from_millis(config.response_cache_max_ttl_ms.max(1)),
+        },
+        max_entries: config.response_cache_max_entries,
+        max_bytes: config.response_cache_max_bytes,
+        max_object_bytes: config
+            .response_cache_max_object_bytes
+            .min(config.response_cache_max_bytes)
+            .min(config.max_response_bytes),
+        compress: config.response_cache_compress,
+        tag_headers,
+        invalidation_log: config
+            .response_cache_invalidation_log
+            .clone()
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("PAM_CACHE_INVALIDATION_LOG").map(PathBuf::from)),
+        status_header: config.response_cache_status_header,
+    }
 }
 
 fn advertised_http3(config: &ServerConfig) -> Option<HeaderValue> {

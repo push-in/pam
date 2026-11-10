@@ -4,6 +4,7 @@
 #if PHP_VERSION_ID >= 80200
 #include <ext/random/php_random.h>
 #endif
+#include <Zend/zend_smart_str.h>
 
 #include "pam.h"
 
@@ -146,7 +147,105 @@ static PHP_FUNCTION(pam_native_reset_response)
     pam_reset_sapi_response((int) status_code);
 }
 
+static volatile pam_cache_purge_handler pam_cache_purge_callback = NULL;
+
+void pam_php_set_cache_purge_handler(pam_cache_purge_handler handler)
+{
+    pam_cache_purge_callback = handler;
+}
+
+static bool pam_cache_purge_append(smart_str *lines, zend_string *value, const char *prefix)
+{
+    if (ZSTR_LEN(value) == 0 || memchr(ZSTR_VAL(value), '\n', ZSTR_LEN(value)) != NULL
+        || memchr(ZSTR_VAL(value), '\r', ZSTR_LEN(value)) != NULL) {
+        return false;
+    }
+    smart_str_appends(lines, prefix);
+    smart_str_append(lines, value);
+    smart_str_appendc(lines, '\n');
+    return true;
+}
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(
+    arginfo_pam_cache_purge,
+    0,
+    0,
+    MAY_BE_LONG | MAY_BE_FALSE
+)
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, tags, IS_ARRAY, 0, "[]")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, urls, IS_ARRAY, 0, "[]")
+    ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, all, _IS_BOOL, 0, "false")
+ZEND_END_ARG_INFO()
+
+/*
+ * pam_cache_purge(array $tags = [], array $urls = [], bool $all = false): int|false
+ * Purges the PAM edge page cache of this worker and publishes the purge to
+ * sibling workers. Returns the entries purged here, or false when no page
+ * cache runs in this process (callers then use the invalidation log).
+ */
+static PHP_FUNCTION(pam_cache_purge)
+{
+    HashTable *tags = NULL;
+    HashTable *urls = NULL;
+    bool all = false;
+    smart_str lines = {0};
+    zval *item;
+    int64_t result;
+
+    ZEND_PARSE_PARAMETERS_START(0, 3)
+        Z_PARAM_OPTIONAL
+        Z_PARAM_ARRAY_HT(tags)
+        Z_PARAM_ARRAY_HT(urls)
+        Z_PARAM_BOOL(all)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (all) {
+        smart_str_appends(&lines, "*\n");
+    }
+    if (tags != NULL) {
+        ZEND_HASH_FOREACH_VAL(tags, item) {
+            if (Z_TYPE_P(item) != IS_STRING || !pam_cache_purge_append(&lines, Z_STR_P(item), "")) {
+                smart_str_free(&lines);
+                zend_argument_value_error(1, "must contain only non-empty single-line strings");
+                RETURN_THROWS();
+            }
+        } ZEND_HASH_FOREACH_END();
+    }
+    if (urls != NULL) {
+        ZEND_HASH_FOREACH_VAL(urls, item) {
+            if (Z_TYPE_P(item) != IS_STRING || !pam_cache_purge_append(&lines, Z_STR_P(item), "!url ")) {
+                smart_str_free(&lines);
+                zend_argument_value_error(2, "must contain only non-empty single-line strings");
+                RETURN_THROWS();
+            }
+        } ZEND_HASH_FOREACH_END();
+    }
+    if (pam_cache_purge_callback == NULL) {
+        smart_str_free(&lines);
+        RETURN_FALSE;
+    }
+    smart_str_0(&lines);
+    result = pam_cache_purge_callback(
+        lines.s == NULL ? "" : ZSTR_VAL(lines.s),
+        lines.s == NULL ? 0 : ZSTR_LEN(lines.s)
+    );
+    smart_str_free(&lines);
+    if (result == -1) {
+        RETURN_FALSE;
+    }
+    if (result == -2) {
+        zend_value_error("pam_cache_purge(): invalid cache tag or URL");
+        RETURN_THROWS();
+    }
+    if (result < 0) {
+        zend_throw_error(NULL, "pam_cache_purge(): the invalidation log could not be written");
+        RETURN_THROWS();
+    }
+    RETURN_LONG((zend_long) result);
+}
+
 static const zend_function_entry pam_native_functions[] = {
+    PHP_FE(pam_cache_purge, arginfo_pam_cache_purge)
     PHP_FE(pam_native_abi_version, arginfo_pam_native_abi_version)
     PHP_FE(pam_native_stream_fd, arginfo_pam_native_stream_fd)
     PHP_FE(pam_native_reset_response, arginfo_pam_native_reset_response)

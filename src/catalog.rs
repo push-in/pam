@@ -320,6 +320,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Observe",
         ),
         command("top", "Stream live runtime metrics", "Observe"),
+        command(
+            "cache:purge",
+            "Purge the edge page cache by tag, URL or all",
+            "Runtime",
+        ),
         command("catalog", "Discover the versioned CLI contract", "Advanced"),
         command("completion", "Generate shell completion", "Advanced"),
         command(
