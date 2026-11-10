@@ -87,9 +87,11 @@ every 90 s (9 total).
 - Per-worker cache stayed at its bound throughout: ~2.0 MB / 1 024 entries
   with continuous LRU eviction under the cache-busting stream, back to empty
   after each reload or kill and refilled within one sample.
-- Process RSS/PSS flat across the 15 minutes (no growth trend). Absolute
-  values are not reported because other agents' PAM processes on the same
-  host matched the sampler.
+- Worker RSS/PSS could not be isolated in this run: other agents' PAM
+  processes on the same host matched the sampler. Sampled totals showed no
+  upward trend (1.56 GB at t=0, 1.77 GB at t=870 s with more processes
+  matched), and the readiness check "Memory stability over 50k requests"
+  passes with the cache on (PHP heap and worker RSS unchanged).
 
 ## Benchmark (cache OFF vs ON)
 
