@@ -431,6 +431,9 @@ Route::prefix('_r/parity')->group(function (): void {
             'dispatcher' => get_class(Octane::tasks()),
         ]);
     });
+    Route::get('/task-memory', fn () => response()->json(Octane::concurrently([
+        fn () => ['pid' => getmypid(), 'memory' => memory_get_usage(), 'peak' => memory_get_peak_usage()],
+    ])[0]));
     Route::get('/concurrently/error', function () {
         try {
             Octane::concurrently([fn () => throw new RuntimeException('task failed on purpose')]);

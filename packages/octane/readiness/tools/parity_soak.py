@@ -64,8 +64,23 @@ def master_pid(port):
     return None
 
 
-def tree(pid):
-    """(pid, role) of every process under the master."""
+def listeners():
+    """pid -> ports it listens on."""
+    ports = {}
+    for line in subprocess.run(["ss", "-ltnpH"], capture_output=True, text=True).stdout.splitlines():
+        port = line.split()[3].rsplit(":", 1)[-1]
+        for pid in re.findall(r"pid=(\d+)", line):
+            ports.setdefault(int(pid), set()).add(int(port))
+    return ports
+
+
+def tree(pid, port):
+    """(pid, role) of every process under the master.
+
+    Workers are forked from the zygote and keep its command line and initial
+    environment, so they are told apart by what they listen on: HTTP workers
+    on the application port, task workers on their private loopback port.
+    """
     children = {}
     for entry in os.listdir("/proc"):
         if entry.isdigit():
@@ -74,23 +89,21 @@ def tree(pid):
             except OSError:
                 continue
             children.setdefault(parent, []).append(int(entry))
-    result, stack = [], [pid]
+    ports = listeners()
+    result, stack = [], [(pid, None)]
     while stack:
-        current = stack.pop()
+        current, parent_role = stack.pop()
         try:
-            environ = open(f"/proc/{current}/environ", "rb").read()
             cmdline = open(f"/proc/{current}/cmdline", "rb").read()
         except OSError:
             continue
         role = "master"
-        if b"__zygote" in cmdline:
+        if parent_role in ("zygote", "http", "task") and current in ports:
+            role = "http" if port in ports[current] else "task"
+        elif parent_role is not None and b"__zygote" in cmdline:
             role = "zygote"
-        elif b"PAM_TASK_WORKER=1" in environ:
-            role = "task"
-        elif b"PAM_WORKER_ID=" in environ:
-            role = "http"
         result.append((current, role))
-        stack.extend(children.get(current, []))
+        stack.extend((child, role) for child in children.get(current, []))
     return result
 
 
@@ -106,9 +119,9 @@ def memory(pid):
     return values
 
 
-def snapshot(master):
+def snapshot(master, port):
     roles = {}
-    for pid, role in tree(master):
+    for pid, role in tree(master, port):
         roles.setdefault(role, []).append({"pid": pid, **memory(pid)})
     return roles
 
@@ -163,7 +176,7 @@ def main():
     start_votes = (get(base, "/_r/parity/table/get?key=soak")["row"] or {}).get("votes", 0)
     get(base, "/_r/parity/cache/put?key=soak-cache&value=soak")
     master = master_pid(args.port)
-    samples = [{"t": 0, **snapshot(master)}]
+    samples = [{"t": 0, **snapshot(master, args.port)}]
 
     scripts = tempfile.mkdtemp(prefix="pam-soak-")
     wrks = {}
@@ -189,7 +202,7 @@ def main():
                 events["errors"].append(f"reload: {proc.stderr.strip()[:200]}")
             next_reload = now + args.reload_every
         if next_kill and now >= next_kill:
-            victims = [(pid, role) for pid, role in tree(master) if role in ("http", "task")]
+            victims = [(pid, role) for pid, role in tree(master, args.port) if role in ("http", "task")]
             if victims:
                 pid, role = random.choice(victims)
                 try:
@@ -199,13 +212,13 @@ def main():
                     pass
             next_kill = now + args.kill_every * random.uniform(0.5, 1.5)
         if now >= next_sample:
-            samples.append({"t": int(now - started), **snapshot(master)})
+            samples.append({"t": int(now - started), **snapshot(master, args.port)})
             next_sample = now + args.sample_every
         time.sleep(0.2)
 
     results = {name: parse_wrk(proc.communicate()[0]) for name, proc in wrks.items()}
     time.sleep(2)
-    samples.append({"t": int(time.time() - started), **snapshot(master)})
+    samples.append({"t": int(time.time() - started), **snapshot(master, args.port)})
 
     # Integrity: every successful increment response is one increment. wrk
     # does not count the requests still in flight when its duration ends (at
