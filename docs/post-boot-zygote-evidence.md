@@ -209,3 +209,23 @@ The final release build (with the OOM fix) passes `zygote_e2e.py` with 0
 failures: 8 workers 152.5 MB PSS (14.9 MB per worker), spawn-to-ready p50
 3 ms (max 6); 16 workers 193.0 MB PSS (10.2 MB per worker), p50 2 ms (max
 4); reloads 362-584 ms.
+
+The readiness suite was run again ON with the final binary
+(`readiness.sh on suite matrix ecosystem`): Octane suite 182 pass / 0 fail /
+43 skip (112 exchanges, 0 mismatches), ecosystem 17/17, matrix 69/70. The
+one failure is the same pre-existing recycling reset of section 3, this time
+in the keep-alive variant (1 of 96,369 requests).
+
+## 10. CI
+
+All PR checks green on 9a844a22 (OOM fix), including the cluster suite run
+twice (default and `PAM_PREFORK_BOOT=app`) and the readiness workflow. The
+only red check on the branch (aea0200a, "Laravel 13.0") exited with code 100
+in its package-install step (apt) and passed on the next commits.
+
+## Open item (outside this feature)
+
+Resets during `--max-requests` recycling: 1-4 per ~50-100k requests in both
+modes, with and without `tcp_migrate_req`, gone with `PAM_BALANCE=0`
+(section 3). The connection balancer's hand-off during a worker drain needs
+its own fix.
