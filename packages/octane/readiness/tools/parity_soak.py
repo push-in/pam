@@ -18,6 +18,7 @@ import argparse
 import json
 import os
 import random
+import shutil
 import re
 import subprocess
 import tempfile
@@ -248,6 +249,7 @@ def main():
     after = get(base, "/_r/parity/table/get?key=soak-after")["row"]["votes"]
     stats = get(base, "/_r/parity/table/stats")
     pam(args, "octane:stop", check=False)
+    shutil.rmtree(scripts, ignore_errors=True)
 
     report = {
         "seconds": args.seconds, "workers": args.workers, "task_workers": args.task_workers,
