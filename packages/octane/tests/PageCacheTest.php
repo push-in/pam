@@ -99,7 +99,7 @@ final class PageCacheTest extends TestCase
             } catch (\InvalidArgumentException) {
             }
         }
-        foreach (['relative', "/a\n*", 'ftp://x/y', ''] as $url) {
+        foreach (['relative', "/a\n*", 'ftp://x/y', '', '/a b', "/caf\u{e9}"] as $url) {
             try {
                 $cache->purgeUrl($url);
                 self::fail("accepted {$url}");

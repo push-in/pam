@@ -612,7 +612,10 @@ pub struct UrlPattern {
 impl UrlPattern {
     pub fn parse(url: &str, ignored: &[String]) -> Option<Self> {
         let url = url.trim();
-        if url.is_empty() || url.len() > 8192 || url.bytes().any(|byte| byte.is_ascii_control()) {
+        // Request targets are visible ASCII (hyper rejects anything else), so
+        // whitespace or raw UTF-8 could never match and would not round-trip
+        // through the invalidation log (found by fuzzing).
+        if url.is_empty() || url.len() > 8192 || !url.bytes().all(|byte| byte.is_ascii_graphic()) {
             return None;
         }
         let (host, rest) = match url.split_once("://") {
@@ -1234,6 +1237,8 @@ mod tests {
         assert_eq!(Purge::parse_line("bad tag", &ignored), None);
         assert_eq!(Purge::parse_line("!url relative", &ignored), None);
         assert_eq!(Purge::parse_line("!url ftp://x/y", &ignored), None);
+        assert_eq!(Purge::parse_line("!url /a?b=1 &&", &ignored), None);
+        assert_eq!(Purge::parse_line("!url /caf\u{e9}", &ignored), None);
         let pattern = UrlPattern::parse("https://Example.com/products/*", &ignored).unwrap();
         assert!(pattern.matches("example.com", "/products/42", "page=2"));
         assert!(!pattern.matches("other.com", "/products/42", ""));

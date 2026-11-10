@@ -69,7 +69,7 @@ final class PageCache
             }
         }
         foreach ($urls as $url) {
-            if ($url === '' || preg_match('/[\x00-\x1f\x7f]/', $url) === 1
+            if (preg_match('/\A[\x21-\x7e]{1,8192}\z/', $url) !== 1
                 || !(str_starts_with($url, '/') || preg_match('#\Ahttps?://#i', $url) === 1)) {
                 throw new InvalidArgumentException("Invalid PAM cache URL [{$url}].");
             }

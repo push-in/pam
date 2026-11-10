@@ -47,6 +47,12 @@ run_flow() {
 }
 
 cd "$APP"
+# READINESS_RESPONSE_CACHE=1 runs the flow with PAM's edge page cache on (and
+# cookies allowed, the most permissive setting): session pages must still work.
+sed -i '/^PAM_RESPONSE_CACHE/d' .env
+if [ "${READINESS_RESPONSE_CACHE:-0}" = 1 ]; then
+    printf 'PAM_RESPONSE_CACHE=true\nPAM_RESPONSE_CACHE_ALLOW_COOKIES=true\n' >> .env
+fi
 SERVERS="${ECO_SERVERS:-pam frankenphp}"
 if [[ " $SERVERS " == *" pam "* ]]; then run_flow pam "$PAM"; fi
 # Horizon re-executes PHP_BINARY for its workers, which is not usable as a
