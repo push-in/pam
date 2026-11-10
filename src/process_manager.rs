@@ -2169,6 +2169,10 @@ fn supervise_applications(executable: &OsStr, paths: &ManagerPaths) -> Result<Op
         if record.recovery_state_code != RecoveryState::Backoff as u8
             || record.next_restart_at_millis.is_none()
         {
+            eprintln!(
+                "pamd: {:?} is not running any more; scheduling a restart",
+                record.name
+            );
             record.last_exit_detected_at_millis = Some(now);
             record.last_recovery_started_at_millis = None;
             record.last_recovery_ready_at_millis = None;
@@ -3296,6 +3300,13 @@ fn daemon_serve(executable: &OsStr) -> Result<u8, String> {
     listener
         .set_nonblocking(true)
         .map_err(|error| format!("cannot configure daemon socket: {error}"))?;
+    // Masters are started through a short-lived `pam start` process; as the
+    // child subreaper pamd adopts them and learns how each one ended.
+    #[cfg(target_os = "linux")]
+    // SAFETY: plain prctl with integer arguments.
+    unsafe {
+        libc::prctl(libc::PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0);
+    }
     let paths = ManagerPaths::load()?;
     let dump = paths.base.join("dump.json");
     if dump.exists()
@@ -4252,13 +4263,58 @@ fn terminate_master(state: &MasterState, graceful_timeout_millis: u64) -> Result
 fn reap_daemon_children() -> bool {
     let mut reaped = false;
     loop {
-        let result = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
-        if result <= 0 {
+        let mut status = 0;
+        // SAFETY: non-blocking wait for any child; `status` outlives the call.
+        let pid = unsafe { libc::waitpid(-1, &mut status, libc::WNOHANG) };
+        if pid <= 0 {
             break;
         }
         reaped = true;
+        log_unexpected_exit(pid as u32, status);
     }
     reaped
+}
+
+/// How a reaped process ended, for the daemon log.
+fn describe_wait_status(status: i32) -> String {
+    if libc::WIFSIGNALED(status) {
+        let signal = libc::WTERMSIG(status);
+        // SAFETY: strsignal returns a static or thread-local string.
+        let name = unsafe { std::ffi::CStr::from_ptr(libc::strsignal(signal)) }
+            .to_string_lossy()
+            .into_owned();
+        let core = if libc::WCOREDUMP(status) {
+            ", core dumped"
+        } else {
+            ""
+        };
+        format!("killed by signal {signal} ({name}{core})")
+    } else if libc::WIFEXITED(status) {
+        format!("exited with status {}", libc::WEXITSTATUS(status))
+    } else {
+        format!("ended with wait status {status:#x}")
+    }
+}
+
+/// pamd is the child subreaper of the masters it starts, so it sees how a
+/// master ended. A master that disappears without writing anything (SIGKILL,
+/// the OOM killer, a crash) is otherwise impossible to diagnose.
+fn log_unexpected_exit(pid: u32, status: i32) {
+    let master_of = ManagerPaths::load()
+        .and_then(|paths| read_all_records(&paths))
+        .unwrap_or_default()
+        .into_iter()
+        .find(|record| running_state(record).is_some_and(|state| state.pid == pid))
+        .map(|record| record.name);
+    let clean = libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0;
+    match master_of {
+        Some(name) => eprintln!(
+            "pamd: master {pid} of {name:?} {}",
+            describe_wait_status(status)
+        ),
+        None if !clean => eprintln!("pamd: process {pid} {}", describe_wait_status(status)),
+        None => {}
+    }
 }
 
 fn watch_running_masters(paths: &ManagerPaths, listener: &UnixListener) -> MasterWatchers {
@@ -5127,6 +5183,15 @@ fn epoch_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wait_statuses_name_the_signal_or_the_exit_code() {
+        // Encoded as by the kernel: exit code in bits 8-15, signal in 0-6,
+        // core-dump flag 0x80.
+        assert_eq!(super::describe_wait_status(3 << 8), "exited with status 3");
+        assert!(super::describe_wait_status(9).starts_with("killed by signal 9 ("));
+        assert!(super::describe_wait_status(11 | 0x80).ends_with(", core dumped)"));
+    }
+
     #[test]
     fn parses_linux_process_state_and_start_ticks_after_complex_names() {
         let mut fields = vec!["0"; 20];
