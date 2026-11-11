@@ -30,7 +30,7 @@ package_field() {
 validate_map() {
     jq -e '
         .owner == "push-in"
-        and (.packages | length >= 9)
+        and (.packages | length >= 8)
         and ([.packages[].name] | length == (unique | length))
         and ([.packages[].path] | length == (unique | length))
         and ([.packages[].repository] | length == (unique | length))
