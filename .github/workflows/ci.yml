@@ -42,17 +42,7 @@ jobs:
       - name: Install PHP Embed development package
         timeout-minutes: 12
         run: |
-          repository_added=false
-          for attempt in 1 2 3; do
-            if timeout 60s sudo add-apt-repository --no-update -y ppa:ondrej/php; then
-              repository_added=true
-              break
-            fi
-            if [ "${attempt}" -lt 3 ]; then
-              sleep "$((attempt * 5))"
-            fi
-          done
-          test "${repository_added}" = true
+          .github/scripts/add-ondrej-php-ppa.sh
           sudo sed -i \
             's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
             /etc/apt/apt-mirrors.txt

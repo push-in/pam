@@ -58,7 +58,7 @@ jobs:
             'ghcr.io/open-telemetry/opentelemetry-collector-releases/opentelemetry-collector:0.157.0@sha256:4019ce4d7e7791a1a255fffb2f407af66d5017cc65543469ba565c4f47f795b8'
       - name: Install PHP Embed build dependencies
         run: |
-          sudo add-apt-repository -y ppa:ondrej/php
+          .github/scripts/add-ondrej-php-ppa.sh
           sudo apt-get update
           sudo apt-get install -y libphp8.5-embed php8.5-dev
       - uses: Swatinem/rust-cache@v2

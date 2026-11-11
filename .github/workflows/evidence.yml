@@ -76,7 +76,7 @@ jobs:
           cache-dependency-path: benchmarks/process-manager/pm2/package-lock.json
       - name: Install benchmark system dependencies
         run: |
-          sudo add-apt-repository -y ppa:ondrej/php
+          .github/scripts/add-ondrej-php-ppa.sh
           sudo apt-get update
           sudo apt-get install -y libphp8.5-embed php8.5-dev php8.5-sqlite3 wrk
       - uses: Swatinem/rust-cache@v2
