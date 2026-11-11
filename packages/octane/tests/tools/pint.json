@@ -1,4 +1,4 @@
 {
     "preset": "psr12",
-    "exclude": ["tests/Fixtures", "vendor"]
+    "exclude": ["tests/Fixtures", "vendor", "readiness"]
 }
