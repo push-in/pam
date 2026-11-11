@@ -929,6 +929,16 @@ pub fn registered_commands(context: &ProjectContext) -> Result<Vec<RegisteredCom
                     .or_else(|| package.get("install_path"))
                     .and_then(serde_json::Value::as_str)
                     .unwrap_or(".");
+                // A package deleted from vendor (or a dangling path
+                // repository link) provides no commands: Composer itself
+                // must still run to install it again.
+                if !vendor_directory
+                    .join("composer")
+                    .join(install_path)
+                    .exists()
+                {
+                    continue;
+                }
                 let package_root =
                     package_command_root(&vendor_directory, install_path, &context.root)?;
                 // A package's commands must stay inside that package. Composer
@@ -1643,6 +1653,16 @@ mod tests {
                 .unwrap_err()
                 .contains("must be relative")
         );
+
+        // A package deleted from vendor offers no commands and blocks nothing
+        // (`pam composer install` must still run Composer to restore it).
+        fs::remove_file(project.join("vendor/pushinbr/tool")).unwrap();
+        fs::write(
+            project.join("vendor/composer/installed.json"),
+            r#"{"packages":[{"name":"pushinbr/tool","install-path":"../pushinbr/tool","extra":{"pam":{"commands":{"tool:run":{"script":"bin/tool.php"}}}}}]}"#,
+        )
+        .unwrap();
+        assert!(registered_commands(&context).unwrap().is_empty());
         fs::remove_dir_all(root).unwrap();
     }
 

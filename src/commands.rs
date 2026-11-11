@@ -439,13 +439,7 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     }
 
     let directory = &options.directory;
-    if directory.exists()
-        && directory
-            .read_dir()
-            .map_err(|error| error.to_string())?
-            .next()
-            .is_some()
-    {
+    if directory.exists() && !only_version_control(directory)? {
         return Err(format!("{} is not empty", directory.display()));
     }
     let created = !directory.exists();
@@ -476,7 +470,7 @@ fn init_project(
     if template == InitTemplate::Raw {
         init_raw(directory, socket)?;
     } else if template == InitTemplate::Desktop {
-        init_desktop(directory)?;
+        init_desktop(directory, options.application_name.as_deref())?;
     } else if template == InitTemplate::Product {
         init_product(directory, options)?;
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
@@ -2406,7 +2400,7 @@ fn init_product_desktop(directory: &Path) -> Result<(), String> {
         fs::create_dir_all(directory.join(folder))
             .map_err(|error| format!("cannot create desktop {folder}: {error}"))?;
     }
-    init_desktop(directory)?;
+    init_desktop(directory, None)?;
     write_new(
         &directory.join("index.php"),
         r#"<?php
@@ -2681,28 +2675,55 @@ echo "ok\n";
     )
 }
 
+/// An empty directory, or one that only holds version control (`.git`, a
+/// directory in a new repository or a file in a `git worktree`).
+fn only_version_control(directory: &Path) -> Result<bool, String> {
+    for entry in directory.read_dir().map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.file_name() != ".git" {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The Composer package name of a new desktop application (`app/<slug>`):
+/// from `--name` when given ("Pushin One" gives `pushin-one`), else from the
+/// directory (`.` is the current directory's own name).
+fn desktop_package_slug(directory: &Path, application_name: Option<&str>) -> String {
+    let slugify = |name: &str| {
+        let mut slug = String::new();
+        for character in name.chars() {
+            if character.is_ascii_alphanumeric() {
+                slug.push(character.to_ascii_lowercase());
+            } else if !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+        slug.trim_matches('-').to_owned()
+    };
+    let from_directory = || {
+        let resolved = directory
+            .canonicalize()
+            .unwrap_or_else(|_| directory.to_path_buf());
+        resolved
+            .file_name()
+            .and_then(OsStr::to_str)
+            .map(slugify)
+            .filter(|slug| !slug.is_empty())
+    };
+    application_name
+        .map(slugify)
+        .filter(|slug| !slug.is_empty())
+        .or_else(from_directory)
+        .unwrap_or_else(|| "desktop-app".to_owned())
+}
+
 /// `--template desktop`: a PAM Desktop 2 application. Only the Composer
 /// manifest is written here; `pam desktop init` writes the rest after the
 /// install (`run_desktop_init`).
-fn init_desktop(directory: &Path) -> Result<(), String> {
-    let slug = directory
-        .file_name()
-        .and_then(OsStr::to_str)
-        .map(|name| {
-            name.chars()
-                .map(|character| {
-                    if character.is_ascii_alphanumeric() {
-                        character.to_ascii_lowercase()
-                    } else {
-                        '-'
-                    }
-                })
-                .collect::<String>()
-                .trim_matches('-')
-                .to_owned()
-        })
-        .filter(|slug| !slug.is_empty())
-        .unwrap_or_else(|| "desktop-app".to_owned());
+fn init_desktop(directory: &Path, application_name: Option<&str>) -> Result<(), String> {
+    let slug = desktop_package_slug(directory, application_name);
     let manifest = serde_json::json!({
         "name": format!("app/{slug}"),
         "description": "A PAM Desktop application",
@@ -3679,6 +3700,33 @@ pub fn default_script(target: Option<OsString>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn desktop_package_names_come_from_the_name_then_the_directory() {
+        let root = std::env::temp_dir().join(format!("pam-init-slug-{}", std::process::id()));
+        let directory = root.join("x");
+        std::fs::create_dir_all(&directory).unwrap();
+        assert_eq!(
+            super::desktop_package_slug(&directory, Some("Pushin One")),
+            "pushin-one"
+        );
+        assert_eq!(
+            super::desktop_package_slug(&directory, Some("  Ação!! App ")),
+            "a-o-app"
+        );
+        assert_eq!(super::desktop_package_slug(&directory, None), "x");
+        assert_eq!(super::desktop_package_slug(&directory, Some("!!!")), "x");
+        // Only `.git` (a new repository, or the file of a worktree) counts as empty.
+        assert!(super::only_version_control(&directory).unwrap());
+        std::fs::create_dir_all(directory.join(".git")).unwrap();
+        assert!(super::only_version_control(&directory).unwrap());
+        std::fs::remove_dir_all(directory.join(".git")).unwrap();
+        std::fs::write(directory.join(".git"), "gitdir: ../.git/worktrees/x\n").unwrap();
+        assert!(super::only_version_control(&directory).unwrap());
+        std::fs::write(directory.join("README.md"), "").unwrap();
+        assert!(!super::only_version_control(&directory).unwrap());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     use super::{
         HttpEndpoint, MobilePlatform, current_worker_lag_seconds, parse_control_plane_diagnostics,
         visible_top_metric,
