@@ -607,7 +607,7 @@ mod linux {
                         .sun_path
                         .iter()
                         .take_while(|byte| **byte != 0)
-                        .map(|byte| *byte as u8)
+                        .map(|byte| byte.to_ne_bytes()[0])
                         .collect::<Vec<_>>();
                     Some(format!("unix:{}", String::from_utf8_lossy(&path)))
                 }
