@@ -1304,7 +1304,7 @@ fn run() -> Result<u8, CliError> {
                 .and_then(|value| value.into_string().ok())
                 .ok_or_else(|| {
                     CliError::Commands(format!(
-                        "pam {} target requires a target: android, ios or android-tv",
+                        "pam {} target requires a target: android, ios, android-tv, tizen or webos",
                         script_arg.to_string_lossy()
                     ))
                 })?;
