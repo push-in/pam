@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- `pam test` runs PHPUnit 12 process-isolated tests (`#[RunInSeparateProcess]`,
+  `processIsolation="true"`) with preserved global state. PAM preloads the
+  Composer autoloader before the main script, so `get_included_files()` did not
+  start with the main script as in php-cli; PHPUnit skips that first entry when
+  it rebuilds a child process, and every isolated test re-required
+  `vendor/bin/phpunit` and ran the runner again (a hang, a syntax error or a
+  stray PAM error line instead of the test). The main script is now listed
+  first.
+
 ## 2.2.16 - 2026-11-11
 
 TV apps for PAM Native (PAM Native 1.47.0).

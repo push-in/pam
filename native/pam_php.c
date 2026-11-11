@@ -658,7 +658,36 @@ int pam_php_eval(
     return exit_code;
 }
 
-int pam_php_execute_file(const char *filename)
+/*
+ * php-cli runs the main script before anything else, so get_included_files()
+ * starts with it. PAM preloads the Composer autoloader first; without this
+ * the main script was listed after the autoloader's files, and tools that
+ * drop the first entry as "the entry script" re-included it. PHPUnit's
+ * process isolation (preserveGlobalState) required vendor/bin/phpunit inside
+ * every child, which then ran the whole runner again.
+ */
+static void pam_list_primary_script_first(const char *filename)
+{
+    char resolved[MAXPATHLEN];
+    HashTable reordered;
+    zend_string *key;
+
+    if (zend_hash_num_elements(&EG(included_files)) == 0 ||
+        VCWD_REALPATH(filename, resolved) == NULL) {
+        return;
+    }
+    zend_hash_init(&reordered, zend_hash_num_elements(&EG(included_files)) + 1, NULL, NULL, 0);
+    zend_hash_str_add_empty_element(&reordered, resolved, strlen(resolved));
+    ZEND_HASH_FOREACH_STR_KEY(&EG(included_files), key) {
+        if (key != NULL) {
+            zend_hash_add_empty_element(&reordered, key);
+        }
+    } ZEND_HASH_FOREACH_END();
+    zend_hash_destroy(&EG(included_files));
+    EG(included_files) = reordered;
+}
+
+int pam_php_execute_file(const char *filename, int primary)
 {
     int exit_code = PAM_SUCCESS;
 
@@ -668,6 +697,9 @@ int pam_php_execute_file(const char *filename)
 
     zend_first_try {
         zend_file_handle script;
+        if (primary) {
+            pam_list_primary_script_first(filename);
+        }
         zend_stream_init_filename(&script, filename);
         CG(skip_shebang) = 1;
         pam_reset_sapi_response(200);

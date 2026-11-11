@@ -5088,3 +5088,51 @@ fn benchmarks_an_http_endpoint() {
     );
     assert!(report.contains("Latency p95"), "{report}");
 }
+
+/// php-cli lists the main script first in get_included_files(); PAM preloads
+/// the Composer autoloader, which must not take that place. PHPUnit drops the
+/// first entry as the entry script when it rebuilds an isolated child process,
+/// so with the autoloader first every child re-required vendor/bin/phpunit.
+#[test]
+fn main_script_is_the_first_included_file_after_composer_preload() {
+    let project = temporary_path("primary-script-first");
+    let runner = project.join("vendor/phpunit/phpunit");
+    fs::create_dir_all(&runner).unwrap();
+    fs::write(project.join("composer.json"), "{}").unwrap();
+    fs::write(
+        project.join("vendor/autoload.php"),
+        "<?php require_once __DIR__ . '/loaded.php';",
+    )
+    .unwrap();
+    fs::write(project.join("vendor/loaded.php"), "<?php").unwrap();
+    let report = "<?php echo json_encode(array_map('basename', get_included_files())), \"\\n\";";
+    fs::write(project.join("main.php"), report).unwrap();
+    fs::write(
+        runner.join("phpunit"),
+        format!("#!/usr/bin/env php\n{report}"),
+    )
+    .unwrap();
+
+    let script = run_pam_in(&project, &["main.php"]);
+    assert!(
+        script.status.success(),
+        "{}",
+        String::from_utf8_lossy(&script.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&script.stdout).trim(),
+        r#"["main.php","autoload.php","loaded.php"]"#
+    );
+
+    let test = run_pam_in(&project, &["test", ".", "--phpunit"]);
+    assert!(
+        test.status.success(),
+        "{}",
+        String::from_utf8_lossy(&test.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&test.stdout).trim(),
+        r#"["phpunit","autoload.php","loaded.php"]"#
+    );
+    fs::remove_dir_all(project).unwrap();
+}

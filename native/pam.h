@@ -19,7 +19,7 @@ enum pam_native_status {
 uint32_t pam_native_abi_version(void);
 int pam_php_init(int argc, char **argv);
 int pam_php_eval(const char *source, size_t source_length, const char *source_name);
-int pam_php_execute_file(const char *filename);
+int pam_php_execute_file(const char *filename, int primary);
 int pam_php_server_config(char **output, size_t *output_length);
 int pam_php_runtime_info(char **output, size_t *output_length);
 int pam_php_runtime_metrics(char **output, size_t *output_length);

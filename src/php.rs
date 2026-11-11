@@ -92,7 +92,7 @@ unsafe extern "C" {
         source_length: usize,
         source_name: *const c_char,
     ) -> c_int;
-    fn pam_php_execute_file(filename: *const c_char) -> c_int;
+    fn pam_php_execute_file(filename: *const c_char, primary: c_int) -> c_int;
     fn pam_php_server_config(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
     fn pam_php_runtime_info(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
     fn pam_php_runtime_metrics(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
@@ -403,9 +403,10 @@ impl PhpRuntime {
         PhpEngine::start(script, arguments)?.into_runtime(preload_composer)
     }
 
+    /// Runs the process's main script (listed first by get_included_files(), as in php-cli).
     pub fn execute_file(&mut self, script: &Path) -> Result<u8, String> {
         ensure_owner()?;
-        execute_file_raw(script)
+        execute_script(script, true)
     }
 
     pub fn execute_file_quiet(&mut self, script: &Path) -> Result<u8, String> {
@@ -891,10 +892,15 @@ fn ensure_owner() -> Result<(), String> {
 }
 
 fn execute_file_raw(script: &Path) -> Result<u8, String> {
+    execute_script(script, false)
+}
+
+fn execute_script(script: &Path, primary: bool) -> Result<u8, String> {
     let filename = to_c_buffer(script.as_os_str())?;
 
     // SAFETY: The filename is NUL-terminated and PHP is active on this thread.
-    let status = unsafe { pam_php_execute_file(filename.as_ptr().cast::<c_char>()) };
+    let status =
+        unsafe { pam_php_execute_file(filename.as_ptr().cast::<c_char>(), c_int::from(primary)) };
     Ok(normalize_exit_status(status))
 }
 
