@@ -849,6 +849,10 @@ namespace Pam\Internal {
             return $result;
         }
 
+        /**
+         * @param array<string, mixed> $options
+         * @return list<string>
+         */
         private static function stringListOption(array $options, string $key): array
         {
             $value = $options[$key] ?? [];
