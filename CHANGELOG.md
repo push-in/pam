@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 2.2.17 - 2026-11-11
+
+Samsung and LG TVs for PAM Native (PAM Native 1.48.0).
+
+- `pam add target tizen` and `pam add target webos` (also `samsung` and
+  `lg`) add Samsung Tizen and LG webOS TVs to `pam-native.json`; those apps
+  are compiled to static HTML/JS with `pushinbr/pam-native-web`, without a
+  server (`pam mobile tizen:build`, `webos:build`).
 - `pam test` runs PHPUnit 12 process-isolated tests (`#[RunInSeparateProcess]`,
   `processIsolation="true"`) with preserved global state. PAM preloads the
   Composer autoloader before the main script, so `get_included_files()` did not
