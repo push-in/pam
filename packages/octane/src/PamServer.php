@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Pam\Octane;
 
 use Laravel\Octane\ApplicationFactory;
+use Laravel\Octane\Stream;
 use Laravel\Octane\Worker;
 use Pam\Contracts\Runtime\RuntimeCompatibility;
 use Pam\Http\Response as PamResponse;
@@ -27,9 +28,17 @@ final class PamServer
         return self::$serving;
     }
 
+    private float $requestStartedAt = 0.0;
+
+    /**
+     * @param bool $streamRequests write every handled request of a `local` or
+     *                             `testing` application to stdout, where
+     *                             `octane:start --server=pam` prints it
+     */
     public function __construct(
         private readonly string $basePath,
         private readonly PamClient $client = new PamClient(),
+        private readonly bool $streamRequests = false,
     ) {
     }
 
@@ -39,24 +48,80 @@ final class PamServer
         int $port = 8000,
         array $options = [],
     ): void {
+        $this->serve($host, $port, static fn (): array => $options);
+    }
+
+    /**
+     * Listens with the `pam-octane.server` options of the booted application
+     * itself; used by the worker script of `octane:start --server=pam`.
+     */
+    public function listenWithApplicationConfig(string $host = '127.0.0.1', int $port = 8000): void
+    {
+        $this->serve(
+            $host,
+            $port,
+            static fn (\Illuminate\Contracts\Foundation\Application $application): array => self::serverOptions(
+                self::config($application, 'pam-octane.server', []),
+            ),
+        );
+    }
+
+    /**
+     * Validates the `pam-octane.server` configuration.
+     *
+     * @return array<string, mixed>
+     */
+    public static function serverOptions(mixed $options): array
+    {
+        if (!is_array($options)) {
+            throw new \UnexpectedValueException('The pam-octane.server configuration must be an array.');
+        }
+
+        $serverOptions = [];
+        foreach ($options as $key => $value) {
+            if (!is_string($key)) {
+                throw new \UnexpectedValueException('The pam-octane.server configuration requires string keys.');
+            }
+            $serverOptions[$key] = $value;
+        }
+
+        return $serverOptions;
+    }
+
+    /** @param \Closure(\Illuminate\Contracts\Foundation\Application): array<string, mixed> $resolveOptions */
+    private function serve(string $host, int $port, \Closure $resolveOptions): void
+    {
         $this->assertPamRuntime();
+
+        self::$serving = true;
+        $worker = new Worker(new ApplicationFactory($this->basePath), $this->client);
+        $worker->boot();
+        self::registerForkHooks($worker->application());
+        if ($this->streamRequests) {
+            $this->streamHandledRequests($worker);
+        }
+
+        try {
+            $options = $resolveOptions($worker->application());
+        } catch (\Throwable $error) {
+            $worker->terminate();
+
+            throw $error;
+        }
 
         $options['maxConcurrentRequests'] = 1;
         $this->client->enableRouteMetrics(($options['routeMetrics'] ?? false) === true);
         $options['maxResponseBytes'] ??= self::DEFAULT_MAX_RESPONSE_BYTES;
         $maxResponseBytes = $options['maxResponseBytes'];
         if (!is_int($maxResponseBytes) || $maxResponseBytes < 1) {
+            $worker->terminate();
+
             throw new \InvalidArgumentException('maxResponseBytes must be a positive integer.');
         }
         $options['maxResponseChunkBytes'] ??= min(
             1024 * 1024,
             $maxResponseBytes,
         );
-
-        self::$serving = true;
-        $worker = new Worker(new ApplicationFactory($this->basePath), $this->client);
-        $worker->boot();
-        self::registerForkHooks($worker->application());
 
         // Octane's request timeout: `octane.max_execution_time` seconds, 0
         // disables it. A request past it is answered 504 and its worker is
@@ -65,7 +130,10 @@ final class PamServer
             $worker->application()->make('config'),
         );
 
-        $staticFiles = $options['serveStaticFiles'] ?? true;
+        // Octane's own `octane.serve_static_files` (honoured by Swoole) can
+        // turn static files off too.
+        $staticFiles = ($options['serveStaticFiles'] ?? true) === true
+            && self::config($worker->application(), 'octane.serve_static_files', true) !== false;
         unset($options['serveStaticFiles'], $options['staticFileHeaders']);
 
         if (class_exists(Tasks::class, false) && Tasks::isTaskWorker()) {
@@ -73,7 +141,7 @@ final class PamServer
 
             return;
         }
-        if ($staticFiles === true) {
+        if ($staticFiles) {
             $application = $worker->application();
             $this->client->serveStaticFilesFrom(
                 $application->publicPath(),
@@ -92,6 +160,7 @@ final class PamServer
                 if ($taskHandler !== null && Tasks::isTaskWorker()) {
                     return $taskHandler($response);
                 }
+                $this->requestStartedAt = microtime(true);
                 $worker->handle(...$this->client->marshalNativeRequest($response));
 
                 return $response;
@@ -107,6 +176,29 @@ final class PamServer
         // when PAM shuts the PHP engine down after serving.
         register_shutdown_function(static function () use ($worker): void {
             $worker->terminate();
+        });
+    }
+
+    private static function config(\Illuminate\Contracts\Foundation\Application $application, string $key, mixed $default): mixed
+    {
+        $config = $application->make('config');
+
+        return $config instanceof \Illuminate\Contracts\Config\Repository ? $config->get($key, $default) : $default;
+    }
+
+    private function streamHandledRequests(Worker $worker): void
+    {
+        $worker->onRequestHandled(function ($request, $response, $sandbox): void {
+            if (!$sandbox->environment('local', 'testing')) {
+                return;
+            }
+
+            Stream::request(
+                $request->getMethod(),
+                $request->fullUrl(),
+                $response->getStatusCode(),
+                (microtime(true) - $this->requestStartedAt) * 1000,
+            );
         });
     }
 
@@ -256,11 +348,15 @@ final class PamServer
     /** @return array<string, array<string, string>> */
     private static function staticFileHeaders(mixed $config): array
     {
+        $octane = $config instanceof \Illuminate\Contracts\Config\Repository
+            ? $config->get('octane.static_file_headers', [])
+            : [];
         $configured = $config instanceof \Illuminate\Contracts\Config\Repository
             ? $config->get('pam-octane.static_file_headers', [])
             : [];
         $headers = [];
-        foreach (is_array($configured) ? $configured : [] as $pattern => $values) {
+        $sources = [is_array($octane) ? $octane : [], is_array($configured) ? $configured : []];
+        foreach (array_merge(...$sources) as $pattern => $values) {
             if (!is_string($pattern) || !is_array($values)) {
                 continue;
             }

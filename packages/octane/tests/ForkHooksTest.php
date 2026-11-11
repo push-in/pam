@@ -12,7 +12,7 @@ final class ForkHooksTest extends TestCase
 {
     public function testConnectionsOpenedWhileBootingCloseBeforeTheZygoteForks(): void
     {
-        $database = new class {
+        $database = new class () {
             /** @var list<string> */
             public array $disconnected = [];
 
@@ -27,7 +27,7 @@ final class ForkHooksTest extends TestCase
                 $this->disconnected[] = $name;
             }
         };
-        $redis = new class {
+        $redis = new class () {
             /** @var list<string> */
             public array $purged = [];
 

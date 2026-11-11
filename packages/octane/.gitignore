@@ -3,3 +3,5 @@
 /.phpstan-cache/
 /composer.lock
 /vendor/
+/.pam-runtime/
+/.octane-suite/

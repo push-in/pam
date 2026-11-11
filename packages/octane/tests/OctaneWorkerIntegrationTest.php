@@ -10,12 +10,33 @@ use Laravel\Octane\Worker;
 use Pam\Http\Request as PamRequest;
 use Pam\Http\Response as PamResponse;
 use Pam\Octane\PamClient;
-use PHPUnit\Framework\Attributes\RunInSeparateProcess;
 use PHPUnit\Framework\TestCase;
 
 final class OctaneWorkerIntegrationTest extends TestCase
 {
-    #[RunInSeparateProcess]
+    /** @var array<string, mixed> */
+    private array $server = [];
+
+    /** @var array<string, mixed> */
+    private array $environment = [];
+
+    protected function setUp(): void
+    {
+        $this->server = $_SERVER;
+        $this->environment = $_ENV;
+    }
+
+    protected function tearDown(): void
+    {
+        $_SERVER = $this->server;
+        $_ENV = $this->environment;
+        $_GET = $_POST = $_COOKIE = $_FILES = [];
+        \Illuminate\Foundation\Bootstrap\HandleExceptions::flushState($this);
+        \Illuminate\Container\Container::setInstance(null);
+        \Illuminate\Support\Facades\Facade::clearResolvedInstances();
+        \Illuminate\Support\Facades\Facade::setFacadeApplication(null);
+    }
+
     public function testTheRealOctaneWorkerStaysWarmAndIsolatesRequests(): void
     {
         $_ENV['APP_KEY'] = $_SERVER['APP_KEY'] = 'base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';

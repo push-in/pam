@@ -20,6 +20,23 @@ HTTP ← PAM / Tokio ← PamClient ← Octane Worker ← Laravel
 
 ## Start here
 
+With stock `laravel/octane` (2.19+), Octane's own commands run on PAM:
+
+```bash
+composer require laravel/octane pushinbr/pam-octane
+php artisan octane:install --server=pam   # finds pam or offers PAM's install script
+php artisan octane:start                  # OCTANE_SERVER=pam; also --server=pam
+php artisan octane:reload                 # zero downtime
+php artisan octane:status
+php artisan octane:stop
+```
+
+`Octane::table()`, the shared `octane` cache store, `Octane::concurrently()`
+and task dispatch (`--task-workers=N`) and `Octane::tick()` work as on Swoole.
+Every command also runs as `pam artisan ...`. The PAM-managed commands below
+(`pam octane:start` and so on) keep working and run a detached application
+under PAM's supervisor.
+
 PAM Octane is a Composer product that connects a Laravel application to the
 PAM Runtime; it is not a standalone server. Install PAM first, then add Octane
 and the bridge from inside the Laravel application:
