@@ -1034,11 +1034,24 @@ fn recycled_workers_and_reloads_reuse_the_listeners_the_master_keeps() {
         thread::sleep(Duration::from_millis(25));
     }
     cluster.request_with_retry();
-    // Recycled and reloaded workers adopted the same two sockets.
+    // Recycled and reloaded workers adopted the same two sockets. Workers of
+    // the first generation may still be draining (they no longer hold one).
     assert_eq!(listening_inodes(cluster.port), listeners);
-    for worker in cluster.children() {
-        let held = socket_inodes(worker);
-        assert_eq!(held.intersection(&listeners).count(), 1, "worker {worker}");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let workers = cluster.children();
+        let held = workers
+            .iter()
+            .map(|worker| socket_inodes(*worker).intersection(&listeners).count())
+            .collect::<Vec<_>>();
+        if workers.len() == 2 && held.iter().all(|count| *count == 1) {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "workers {workers:?} hold {held:?} of the master's listeners"
+        );
+        thread::sleep(Duration::from_millis(25));
     }
     cluster.stop();
 }
