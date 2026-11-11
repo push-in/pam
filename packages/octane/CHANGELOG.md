@@ -2,7 +2,7 @@
 
 All notable changes to PAM Octane will be documented here.
 
-## Unreleased
+## 1.3.0 - 2026-11-11
 
 Requires PAM 2.2.15 for the edge page cache, the post-boot zygote, shared
 tables, task workers and ticks; the package keeps working on 2.2.11+ (the
@@ -12,7 +12,8 @@ page cache headers are then set and simply not acted upon).
   workers are forked from a booted Laravel application. The bridge closes the
   database and Redis connections of both the console and the Octane worker
   application before the fork (`PamServer::registerForkHooks()`), so every
-  worker opens its own connections lazily.
+  worker opens its own connections lazily. Task workers forked from the
+  booted application take the task handler per request.
 - `Pam\Octane\Http\Middleware\CacheResponse` (alias `pam.cache`) marks
   routes for PAM's edge page cache with a TTL, stale window and tags
   (`product:{product}` resolves route parameters).
