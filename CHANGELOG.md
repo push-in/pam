@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.2.16 - 2026-11-11
+
+TV apps for PAM Native (PAM Native 1.47.0).
+
+- `pam init --template native --platform android,ios,android-tv` (also
+  `tv` and `all`, comma lists): the interactive prompt asks for the targets,
+  and `pam-native.json` gets `targets` when Android TV is one of them.
+- `pam add target <android|ios|android-tv>` and `pam remove target <name>`
+  change the targets of an existing PAM Native app. Only the `targets` entry
+  of `pam-native.json` is rewritten.
+- The Android runtime builder builds `armeabi-v7a` when asked for it
+  explicitly (not part of `all`). PAM Native does not ship 32-bit apps yet.
+
 ## 2.2.15 - 2026-11-11
 
 Four changes for Laravel Octane on PAM: reloads and recycling without reset

@@ -15,12 +15,12 @@ while (($# > 0)); do
             runtime_selector="${2:?--php requires a version such as 8.5}"
             shift 2
             ;;
-        all|arm64-v8a|x86_64)
+        all|arm64-v8a|armeabi-v7a|x86_64)
             abi_selector="$1"
             shift
             ;;
         *)
-            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|arm64-v8a|x86_64]" >&2
+            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|arm64-v8a|armeabi-v7a|x86_64]" >&2
             exit 64
             ;;
     esac
@@ -102,7 +102,14 @@ build_abi() {
     local clang_prefix="$3"
     local build="${BUILD_ROOT}/build-${android_abi}"
     local install="${BUILD_ROOT}/install-${android_abi}"
-        local destination="${PAM_ROOT}/runtime/android/${RUNTIME_ID}/${android_abi}"
+    local destination="${PAM_ROOT}/runtime/android/${RUNTIME_ID}/${android_abi}"
+    local abi_cflags=""
+    if [[ "${android_abi}" == "armeabi-v7a" ]]; then
+        # main/streams/cast.c hands funopen a seeker taking zend_off_t (int)
+        # where bionic declares fpos_t (long): both are 32 bits on ARMv7, so
+        # the mismatch is in name only.
+        abi_cflags=" -Wno-error=incompatible-function-pointer-types"
+    fi
 
     mkdir -p "${build}"
     (
@@ -112,7 +119,7 @@ build_abi() {
         AR="${TOOLCHAIN}/bin/llvm-ar" \
         RANLIB="${TOOLCHAIN}/bin/llvm-ranlib" \
         STRIP="${TOOLCHAIN}/bin/llvm-strip" \
-        CFLAGS="-O2 -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections" \
+        CFLAGS="-O2 -fPIC -fvisibility=hidden -ffunction-sections -fdata-sections${abi_cflags}" \
         CPPFLAGS="-D__ANDROID__ -DANDROID" \
         ac_cv_c_bigendian_php=no \
         ac_cv_func_getentropy=no \
@@ -197,11 +204,16 @@ case "${abi_selector}" in
     arm64-v8a)
         build_abi "arm64-v8a" "aarch64-linux-android" "aarch64-linux-android"
         ;;
+    armeabi-v7a)
+        # 32-bit ARM (TV sticks with 32-bit Android). Not in "all": the PAM
+        # PHP SDK still needs 64-bit integers.
+        build_abi "armeabi-v7a" "armv7a-linux-androideabi" "armv7a-linux-androideabi"
+        ;;
     x86_64)
         build_abi "x86_64" "x86_64-linux-android" "x86_64-linux-android"
         ;;
     *)
-        echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|arm64-v8a|x86_64]" >&2
+        echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|arm64-v8a|armeabi-v7a|x86_64]" >&2
         exit 64
         ;;
 esac

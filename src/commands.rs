@@ -357,15 +357,52 @@ impl MobileStarter {
 pub enum MobilePlatform {
     Android = 1,
     Ios = 2,
+    /// Android TV, Google TV and Fire TV: the same APK with a TV launcher
+    /// entry and D-pad focus.
+    AndroidTv = 3,
 }
 
 impl MobilePlatform {
+    /// `android`, `ios`, `android-tv` (or `tv`), `all` (phones) or a comma
+    /// list such as `android,ios,android-tv`.
     pub fn parse(value: &str) -> Result<Vec<Self>, String> {
-        match value {
-            "android" => Ok(vec![Self::Android]),
-            "ios" => Ok(vec![Self::Ios]),
-            "all" | "both" => Ok(vec![Self::Android, Self::Ios]),
-            _ => Err("platform requires android, ios, or all".to_owned()),
+        let mut platforms = Vec::new();
+        for part in value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+        {
+            let parsed: &[Self] = match part {
+                "android" => &[Self::Android],
+                "ios" => &[Self::Ios],
+                "android-tv" | "tv" => &[Self::AndroidTv],
+                "all" | "both" => &[Self::Android, Self::Ios],
+                _ => {
+                    return Err(
+                        "platform requires android, ios, android-tv, all, or a comma list"
+                            .to_owned(),
+                    );
+                }
+            };
+            for platform in parsed {
+                if !platforms.contains(platform) {
+                    platforms.push(*platform);
+                }
+            }
+        }
+        if platforms.is_empty() {
+            return Err(
+                "platform requires android, ios, android-tv, all, or a comma list".to_owned(),
+            );
+        }
+        Ok(platforms)
+    }
+
+    fn target(self) -> &'static str {
+        match self {
+            Self::Android => "android",
+            Self::Ios => "ios",
+            Self::AndroidTv => "android-tv",
         }
     }
 }
@@ -402,13 +439,7 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
     }
 
     let directory = &options.directory;
-    if directory.exists()
-        && directory
-            .read_dir()
-            .map_err(|error| error.to_string())?
-            .next()
-            .is_some()
-    {
+    if directory.exists() && !only_version_control(directory)? {
         return Err(format!("{} is not empty", directory.display()));
     }
     let created = !directory.exists();
@@ -439,7 +470,7 @@ fn init_project(
     if template == InitTemplate::Raw {
         init_raw(directory, socket)?;
     } else if template == InitTemplate::Desktop {
-        init_desktop(directory)?;
+        init_desktop(directory, options.application_name.as_deref())?;
     } else if template == InitTemplate::Product {
         init_product(directory, options)?;
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
@@ -568,7 +599,10 @@ fn configure_mobile_options(options: &mut InitOptions) -> Result<(), String> {
     }
     if options.mobile_platforms.is_empty() {
         options.mobile_platforms = if interactive {
-            MobilePlatform::parse(&prompt_value("Platforms: android, ios, or all", "all")?)?
+            MobilePlatform::parse(&prompt_value(
+                "Platforms: android, ios, android-tv (comma separated), or all",
+                "all",
+            )?)?
         } else {
             vec![MobilePlatform::Android, MobilePlatform::Ios]
         };
@@ -2366,7 +2400,7 @@ fn init_product_desktop(directory: &Path) -> Result<(), String> {
         fs::create_dir_all(directory.join(folder))
             .map_err(|error| format!("cannot create desktop {folder}: {error}"))?;
     }
-    init_desktop(directory)?;
+    init_desktop(directory, None)?;
     write_new(
         &directory.join("index.php"),
         r#"<?php
@@ -2641,28 +2675,55 @@ echo "ok\n";
     )
 }
 
+/// An empty directory, or one that only holds version control (`.git`, a
+/// directory in a new repository or a file in a `git worktree`).
+fn only_version_control(directory: &Path) -> Result<bool, String> {
+    for entry in directory.read_dir().map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if entry.file_name() != ".git" {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The Composer package name of a new desktop application (`app/<slug>`):
+/// from `--name` when given ("Pushin One" gives `pushin-one`), else from the
+/// directory (`.` is the current directory's own name).
+fn desktop_package_slug(directory: &Path, application_name: Option<&str>) -> String {
+    let slugify = |name: &str| {
+        let mut slug = String::new();
+        for character in name.chars() {
+            if character.is_ascii_alphanumeric() {
+                slug.push(character.to_ascii_lowercase());
+            } else if !slug.ends_with('-') {
+                slug.push('-');
+            }
+        }
+        slug.trim_matches('-').to_owned()
+    };
+    let from_directory = || {
+        let resolved = directory
+            .canonicalize()
+            .unwrap_or_else(|_| directory.to_path_buf());
+        resolved
+            .file_name()
+            .and_then(OsStr::to_str)
+            .map(slugify)
+            .filter(|slug| !slug.is_empty())
+    };
+    application_name
+        .map(slugify)
+        .filter(|slug| !slug.is_empty())
+        .or_else(from_directory)
+        .unwrap_or_else(|| "desktop-app".to_owned())
+}
+
 /// `--template desktop`: a PAM Desktop 2 application. Only the Composer
 /// manifest is written here; `pam desktop init` writes the rest after the
 /// install (`run_desktop_init`).
-fn init_desktop(directory: &Path) -> Result<(), String> {
-    let slug = directory
-        .file_name()
-        .and_then(OsStr::to_str)
-        .map(|name| {
-            name.chars()
-                .map(|character| {
-                    if character.is_ascii_alphanumeric() {
-                        character.to_ascii_lowercase()
-                    } else {
-                        '-'
-                    }
-                })
-                .collect::<String>()
-                .trim_matches('-')
-                .to_owned()
-        })
-        .filter(|slug| !slug.is_empty())
-        .unwrap_or_else(|| "desktop-app".to_owned());
+fn init_desktop(directory: &Path, application_name: Option<&str>) -> Result<(), String> {
+    let slug = desktop_package_slug(directory, application_name);
     let manifest = serde_json::json!({
         "name": format!("app/{slug}"),
         "description": "A PAM Desktop application",
@@ -2776,7 +2837,7 @@ fn init_mobile(
             .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
             + "\n"),
     )?;
-    let native_manifest = serde_json::json!({
+    let mut native_manifest = serde_json::json!({
         "$schema": "vendor/pushinbr/pam-native/resources/pam-native.schema.json",
         "version": 1,
         "applicationId": options.application_id.as_deref().unwrap_or("app.pam.hello"),
@@ -2790,6 +2851,19 @@ fn init_mobile(
         "modules": [],
         "views": []
     });
+    if options
+        .mobile_platforms
+        .contains(&MobilePlatform::AndroidTv)
+    {
+        // Older PAM Native manifests have no targets: write them only for TV.
+        native_manifest["targets"] = serde_json::json!(
+            options
+                .mobile_platforms
+                .iter()
+                .map(|platform| platform.target())
+                .collect::<Vec<_>>()
+        );
+    }
     write_new(
         &directory.join("pam-native.json"),
         &(serde_json::to_string_pretty(&native_manifest)
@@ -3626,10 +3700,64 @@ pub fn default_script(target: Option<OsString>) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn desktop_package_names_come_from_the_name_then_the_directory() {
+        let root = std::env::temp_dir().join(format!("pam-init-slug-{}", std::process::id()));
+        let directory = root.join("x");
+        std::fs::create_dir_all(&directory).unwrap();
+        assert_eq!(
+            super::desktop_package_slug(&directory, Some("Pushin One")),
+            "pushin-one"
+        );
+        assert_eq!(
+            super::desktop_package_slug(&directory, Some("  Ação!! App ")),
+            "a-o-app"
+        );
+        assert_eq!(super::desktop_package_slug(&directory, None), "x");
+        assert_eq!(super::desktop_package_slug(&directory, Some("!!!")), "x");
+        // Only `.git` (a new repository, or the file of a worktree) counts as empty.
+        assert!(super::only_version_control(&directory).unwrap());
+        std::fs::create_dir_all(directory.join(".git")).unwrap();
+        assert!(super::only_version_control(&directory).unwrap());
+        std::fs::remove_dir_all(directory.join(".git")).unwrap();
+        std::fs::write(directory.join(".git"), "gitdir: ../.git/worktrees/x\n").unwrap();
+        assert!(super::only_version_control(&directory).unwrap());
+        std::fs::write(directory.join("README.md"), "").unwrap();
+        assert!(!super::only_version_control(&directory).unwrap());
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     use super::{
-        HttpEndpoint, current_worker_lag_seconds, parse_control_plane_diagnostics,
+        HttpEndpoint, MobilePlatform, current_worker_lag_seconds, parse_control_plane_diagnostics,
         visible_top_metric,
     };
+
+    #[test]
+    fn mobile_platforms_accept_android_tv_and_comma_lists() {
+        assert_eq!(
+            MobilePlatform::parse("android,ios,android-tv").unwrap(),
+            vec![
+                MobilePlatform::Android,
+                MobilePlatform::Ios,
+                MobilePlatform::AndroidTv
+            ]
+        );
+        assert_eq!(
+            MobilePlatform::parse("tv").unwrap(),
+            vec![MobilePlatform::AndroidTv]
+        );
+        assert_eq!(
+            MobilePlatform::parse("all, tv, android").unwrap(),
+            vec![
+                MobilePlatform::Android,
+                MobilePlatform::Ios,
+                MobilePlatform::AndroidTv
+            ]
+        );
+        assert!(MobilePlatform::parse("roku").is_err());
+        assert!(MobilePlatform::parse(",").is_err());
+        assert_eq!(MobilePlatform::AndroidTv.target(), "android-tv");
+    }
 
     #[test]
     fn classifies_only_finite_current_worker_lag_samples() {

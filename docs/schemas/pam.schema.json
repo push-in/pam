@@ -44,8 +44,8 @@
                     "items": {
                         "type": "integer",
                         "minimum": 1,
-                        "maximum": 2,
-                        "description": "1 Android, 2 iOS"
+                        "maximum": 3,
+                        "description": "1 Android, 2 iOS, 3 Android TV"
                     }
                 }
             }
