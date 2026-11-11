@@ -302,36 +302,38 @@ fn continues_w3c_traces_with_a_distinct_server_span() {
 #[test]
 fn serves_stale_cache_entries_while_one_request_revalidates() {
     let server = ServerProcess::start_with_response_cache();
-    let warm =
-        response_json(&server.http_request(
-            "GET /cached-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-        ));
+    let request = "GET /cached-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n";
+    let warm = response_json(&server.http_request(request));
     assert_eq!(warm["calls"], 1);
     thread::sleep(Duration::from_millis(150));
 
-    let port = server.port;
-    let refresh = thread::spawn(move || {
-        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
-        stream
-            .write_all(b"GET /cached-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-            .unwrap();
-        let mut response = String::new();
-        stream.read_to_string(&mut response).unwrap();
-        response_json(&response)
-    });
-    thread::sleep(Duration::from_millis(40));
-
-    let stale =
-        response_json(&server.http_request(
-            "GET /cached-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-        ));
+    // Expired but inside the stale window: answered at once from the cache
+    // while one background request revalidates (the slow PHP call).
+    let started = Instant::now();
+    let stale = response_json(&server.http_request(request));
     assert_eq!(stale["calls"], 1, "stale response should not wait for PHP");
-    assert_eq!(refresh.join().unwrap()["calls"], 2);
+    assert!(
+        started.elapsed() < Duration::from_millis(90),
+        "{:?}",
+        started.elapsed()
+    );
+    let concurrent = response_json(&server.http_request(request));
+    assert_eq!(concurrent["calls"], 1, "one revalidation at a time");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let refreshed = response_json(&server.http_request(request));
+        if refreshed["calls"] == 2 {
+            break;
+        }
+        assert!(Instant::now() < deadline, "the revalidation never landed");
+        thread::sleep(Duration::from_millis(20));
+    }
 
     let metrics = server
         .http_request("GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     assert!(
-        metrics.contains("pam_http_response_cache_stale_total 1"),
+        metrics.contains("pam_http_response_cache_revalidations_total 1"),
         "{metrics}"
     );
 }

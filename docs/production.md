@@ -357,7 +357,7 @@ aplicação pode complementar, mas não substituir, `/ready`. Métricas importan
   enfileirada ou suspensa;
 - `pam_http_active_requests` e duração acumulada;
 - bytes de request/response;
-- hits, misses e requisições colapsadas do cache de resposta;
+- hits, misses, stale, colapsadas, bytes e entradas do cache de página;
 - conexões e mensagens WebSocket, backpressure;
 - `pam_event_loop_lag_seconds` (maior lag atual entre os workers);
 - `pam_event_loop_lag_max_seconds` e
@@ -431,46 +431,98 @@ aceitam percent-encoding e nunca são escritos nos logs. Monitore
 `pam_otlp_export_errors_total` e `pam_otlp_spans_rejected_total`.
 Veja também a [matriz cross-surface e a certificação reproduzível do Collector](observability.md).
 
-## Cache nativo de respostas
+## Cache de página na borda (edge page cache)
 
-`responseCachePaths` aceita uma lista explícita de caminhos públicos. O cache
-fica antes do slot PHP e usa uma trava assíncrona por chave para que uma rajada
-fria execute Laravel apenas uma vez. Configure também `responseCacheTtlMs` e
-`responseCacheMaxEntries` e `responseCacheMaxBytes`. O limite em bytes impede que
-respostas grandes consumam memória sem controle; ao atingir qualquer limite, o
-PAM remove a entrada menos recentemente usada.
+O PAM traz um cache de página completo dentro da camada HTTP em Rust/Tokio:
+uma resposta armazenada é servida sem entrar no PHP (sem slot, sem Laravel),
+como um Varnish embutido. É opt-in em dois níveis: o servidor precisa de
+`responseCache: true` e cada resposta precisa pedir cache com headers padrão.
 
-`responseCacheStaleWhileRevalidateMs` mantém uma janela opcional de resposta
-stale. Uma requisição renova a entrada executando Laravel e as demais recebem a
-última resposta durante essa renovação, evitando uma avalanche no worker. O
-cache continua desabilitado para requisições com cookies, autorização ou
-`Cache-Control: no-cache` e nunca armazena respostas privadas ou com `Set-Cookie`.
-Use `responseCacheVaryHeaders` para separar variantes públicas, como idioma. Os
-valores entram em uma chave SHA-256 de tamanho constante; `Authorization`,
-`Cookie` e `Set-Cookie` são recusados nessa lista para evitar exposição de
-credenciais e fragmentação perigosa do cache.
+```php
+// Qualquer handler: a resposta pede cache compartilhado por 10 minutos,
+// aceita servir stale por mais 60 s enquanto revalida e recebe tags.
+$response->header('Cache-Control', 'public, s-maxage=600, stale-while-revalidate=60')
+         ->header('Pam-Cache-Tags', 'products,product:42');
+```
 
-Para invalidação por domínio, a aplicação pode devolver tags no header interno
-configurado por `responseCacheTagHeader` (padrão `X-Pam-Cache-Tags`). O PAM
-remove esse header antes de responder. Habilite a API com
-`responseCachePurgePath` e um `responseCachePurgeSecret` aleatório de pelo menos
-32 bytes. Uma invalidação autenticada usa `POST`, `Authorization: Bearer ...` e
-um corpo `{"tag":"catalog"}`; `{"all":true}` limpa tudo. Em modo cluster, o
-supervisor fornece um log privado e todos os workers aplicam a invalidação em
-até 100 ms, inclusive os que não receberam o POST.
+Regras de armazenamento (todas obrigatórias):
 
-PAM ignora o cache para métodos diferentes de GET, `Authorization`, `Cookie` e
-`Cache-Control: no-cache`. Respostas com status diferente de 200, `Set-Cookie`,
-`private` ou `no-store` nunca são armazenadas. Não adicione endpoints privados,
-personalizados ou cuja resposta varie por headers não representados na URL.
+- método GET (HEAD é servido a partir da entrada GET); requisições com
+  `Range`, `Upgrade` ou corpo multipart nunca usam o cache;
+- a requisição não tem `Cookie` nem `Authorization`, a menos que
+  `responseCacheAllowCookies` / `responseCacheAllowAuthorization` sejam
+  ligados explicitamente (somente quando as rotas cacheadas não dependem de
+  sessão);
+- a resposta tem `s-maxage=N` (ou `public` + `max-age=N`) com N > 0 e status
+  em `responseCacheStatuses` (padrão 200, 203, 204, 300, 301, 308, 404, 410);
+- a resposta não tem `Set-Cookie`, `private`, `no-store`, `no-cache`,
+  `Pragma: no-cache`, `Vary: *` nem `Content-Range`. Uma resposta que deixa de
+  ser cacheável remove a cópia armazenada daquela variante.
 
-Os contadores Prometheus são
-`pam_http_response_cache_hits_total`,
-`pam_http_response_cache_misses_total` e
-`pam_http_response_cache_collapsed_total`.
-Respostas servidas durante a renovação aparecem em
-`pam_http_response_cache_stale_total`.
-Operações de purge aparecem em `pam_http_response_cache_purges_total`.
+A chave é esquema + host + caminho + query normalizada + headers que mudam a
+URL gerada pelo framework (`X-Forwarded-Host`, `X-Forwarded-Proto`,
+`X-Forwarded-Port`, `X-Forwarded-Prefix`, `Forwarded`, ...), o que impede
+envenenamento por headers fora da chave. A query só é reordenada quando todos
+os nomes são simples e únicos (o `$_GET` não depende da ordem);
+`responseCacheIgnoredQueryParams` (`utm_*`, `gclid`) remove parâmetros de
+rastreamento. Cada header listado no `Vary` da resposta precisa coincidir
+byte a byte; `Vary: Cookie` só faz sentido com cookies liberados e mantém uma
+cópia por sessão. `Accept-Encoding` é negociado pelo próprio cache.
+
+Comportamento:
+
+- **Memória limitada**: LRU por bytes (`responseCacheMaxBytes`, padrão 64 MiB)
+  e por entradas (`responseCacheMaxEntries`), com teto por objeto
+  (`responseCacheMaxObjectBytes`, 8 MiB) e no máximo 16 variantes por URL. O
+  limite vale por worker: o total é workers × `responseCacheMaxBytes`.
+- **Compressão prévia**: corpos textuais ≥ 1 KiB ganham cópias brotli e gzip,
+  geradas fora do event loop, uma por vez por worker (sob carga a entrada é
+  servida sem compressão em vez de acumular CPU).
+- **ETag/304**: a entrada guarda o `ETag` da aplicação ou gera um forte;
+  `If-None-Match` e `If-Modified-Since` recebem 304 direto do cache. Em um
+  miss, os headers condicionais chegam ao PHP normalmente; um 304 da aplicação
+  não é armazenado nem remove a cópia, e a próxima resposta completa preenche
+  o cache.
+- **Single flight**: misses concorrentes da mesma URL executam o PHP uma vez;
+  os demais esperam e recebem a cópia. URLs que responderam não cacheável não
+  colapsam por 10 s (hit-for-miss).
+- **stale-while-revalidate**: dentro da janela, a resposta stale sai na hora e
+  uma única requisição em segundo plano revalida. Uma revalidação que falha com
+  5xx mantém a cópia stale.
+- `Cache-Control: no-cache` do cliente pula a leitura mas pode renovar a
+  entrada. `X-Pam-Cache: HIT|STALE|MISS|BYPASS` identifica o caminho
+  (`responseCacheStatusHeader: false` desliga).
+
+### Purge
+
+- PHP: `pam_cache_purge(array $tags = [], array $urls = [], bool $all = false)`
+  purga o worker atual na hora e publica para os demais. URLs aceitam
+  `/products/42`, `/products/*` (prefixo) e `https://host/caminho?query`; sem
+  query, todas as queries do caminho são purgadas.
+- CLI: `pam cache:purge --tag=products --url=/home --all [--log=PATH]`.
+- HTTP: com `responseCachePurgePath` e `responseCachePurgeSecret` (≥ 32 bytes),
+  `POST` com `Authorization: Bearer ...` e `{"tags":["products"]}`,
+  `{"urls":["/home"]}` ou `{"all":true}`.
+
+Purges chegam aos outros workers por um log de invalidação append-only que
+todos leem a cada 100 ms. Em `pam start` o supervisor cria um log privado; para
+que filas, Artisan e `pam cache:purge` alcancem os workers, configure um caminho
+estável em `responseCacheInvalidationLog` (o pam-octane usa
+`storage/framework/cache/pam-page-cache.log`). O log é rotacionado ao passar de
+1 MiB e a rotação purga tudo, então nenhuma linha perdida mantém página velha.
+Uma busca iniciada antes de um purge nunca é armazenada depois dele.
+
+O modo antigo continua: `responseCachePaths` cacheia caminhos explícitos com
+`responseCacheTtlMs`/`responseCacheStaleWhileRevalidateMs` mesmo sem headers,
+e `responseCacheVaryHeaders` entra sempre na chave (`Authorization`, `Cookie` e
+`Set-Cookie` são recusados).
+
+Métricas Prometheus (por worker e agregadas pelo control plane):
+`pam_http_response_cache_hits_total`, `_misses_total`, `_stale_total`,
+`_collapsed_total`, `_revalidations_total`, `_not_modified_total`,
+`_stores_total`, `_evictions_total`, `_purges_total`,
+`_purged_entries_total`, `_bypass_total`, `_uncacheable_total` e os gauges
+`pam_http_response_cache_entries` e `pam_http_response_cache_bytes`.
 
 As latências HTTP são expostas como histograma Prometheus em
 `pam_http_request_duration_seconds`, incluindo contagem, soma e buckets de

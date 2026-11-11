@@ -720,6 +720,16 @@ namespace Pam\Internal {
                 'responseCachePurgePath' => self::nullableStringOption($options, 'responseCachePurgePath'),
                 'responseCachePurgeSecret' => self::nullableStringOption($options, 'responseCachePurgeSecret'),
                 'responseCacheTagHeader' => self::stringOption($options, 'responseCacheTagHeader', 'x-pam-cache-tags'),
+                'responseCache' => self::booleanOption($options, 'responseCache', false),
+                'responseCacheAllowCookies' => self::booleanOption($options, 'responseCacheAllowCookies', false),
+                'responseCacheAllowAuthorization' => self::booleanOption($options, 'responseCacheAllowAuthorization', false),
+                'responseCacheIgnoredQueryParams' => self::stringListOption($options, 'responseCacheIgnoredQueryParams'),
+                'responseCacheStatuses' => self::statusListOption($options, 'responseCacheStatuses', [200, 203, 204, 300, 301, 308, 404, 410]),
+                'responseCacheMaxObjectBytes' => self::integerOption($options, 'responseCacheMaxObjectBytes', 8 * 1024 * 1024),
+                'responseCacheMaxTtlMs' => self::integerOption($options, 'responseCacheMaxTtlMs', 7 * 24 * 3600 * 1000),
+                'responseCacheCompress' => self::booleanOption($options, 'responseCacheCompress', true),
+                'responseCacheStatusHeader' => self::booleanOption($options, 'responseCacheStatusHeader', true),
+                'responseCacheInvalidationLog' => self::nullableStringOption($options, 'responseCacheInvalidationLog'),
                 'gcCollectCyclesEvery' => self::integerOption($options, 'gcCollectCyclesEvery', 256, true),
                 'gcMemCachesEvery' => self::integerOption($options, 'gcMemCachesEvery', 1024, true),
                 'leakDetectionSampleRate' => self::integerOption(
@@ -809,6 +819,34 @@ namespace Pam\Internal {
         {
             $value = self::$server[$key] ?? $default;
             return is_int($value) ? $value : $default;
+        }
+
+        /**
+         * @param array<string, mixed> $options
+         * @return list<string>
+         */
+        /**
+         * @param array<string, mixed> $options
+         * @param list<int> $default
+         * @return list<int>
+         */
+        private static function statusListOption(array $options, string $key, array $default): array
+        {
+            $value = $options[$key] ?? $default;
+            if (!is_array($value)) {
+                throw new \InvalidArgumentException("{$key} must be a list of HTTP status codes.");
+            }
+            $result = [];
+            foreach ($value as $item) {
+                if (is_string($item) && ctype_digit($item)) {
+                    $item = (int) $item;
+                }
+                if (!is_int($item) || $item < 100 || $item > 599) {
+                    throw new \InvalidArgumentException("{$key} must be a list of HTTP status codes.");
+                }
+                $result[] = $item;
+            }
+            return $result;
         }
 
         /**

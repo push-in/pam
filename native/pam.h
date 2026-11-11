@@ -63,6 +63,8 @@ int pam_php_dispatch_ws(
     char **output,
     size_t *output_length
 );
+typedef int64_t (*pam_cache_purge_handler)(const char *lines, size_t length);
+void pam_php_set_cache_purge_handler(pam_cache_purge_handler handler);
 void pam_php_string_free(char *value);
 void pam_php_shutdown(void);
 /* Resets process-bound engine state in a worker forked from a booted zygote. */

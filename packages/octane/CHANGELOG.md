@@ -4,11 +4,21 @@ All notable changes to PAM Octane will be documented here.
 
 ## Unreleased
 
+Requires PAM 2.2.15 for the edge page cache; without it the headers are set
+and simply not acted upon.
+
 - With PAM's post-boot zygote (the default for `octane:start` on Linux),
   workers are forked from a booted Laravel application. The bridge closes the
   database and Redis connections of both the console and the Octane worker
   application before the fork (`PamServer::registerForkHooks()`), so every
   worker opens its own connections lazily.
+- `Pam\Octane\Http\Middleware\CacheResponse` (alias `pam.cache`) marks
+  routes for PAM's edge page cache with a TTL, stale window and tags
+  (`product:{product}` resolves route parameters).
+- `Pam\Octane\Facades\Pam::purge()`, `purgeUrl()` and `purgeAll()`, and the
+  `PurgesPageCache` model trait that purges a model's tags after commit.
+  Purges from queue workers and Artisan use the invalidation log.
+- New `PAM_RESPONSE_CACHE*` settings in `config/pam-octane.php`.
 
 ## 1.2.0 - 2026-11-09
 

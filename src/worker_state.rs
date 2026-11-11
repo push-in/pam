@@ -56,6 +56,18 @@ pub struct WorkerMetricsSnapshot {
     pub response_cache_collapsed: u64,
     pub response_cache_stale: u64,
     pub response_cache_purges: u64,
+    #[serde(default)]
+    pub response_cache_entries: u64,
+    #[serde(default)]
+    pub response_cache_bytes: u64,
+    #[serde(default)]
+    pub response_cache_stores: u64,
+    #[serde(default)]
+    pub response_cache_evictions: u64,
+    #[serde(default)]
+    pub response_cache_not_modified: u64,
+    #[serde(default)]
+    pub response_cache_revalidations: u64,
     pub websocket_connections: u64,
     pub websocket_messages: u64,
     pub websocket_backpressure: u64,

@@ -99,6 +99,9 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam diagnostics` — Capture runtime diagnostics.
 - `pam timeline` — Export a bounded performance timeline.
 - `pam top` — Stream live runtime metrics.
+## Runtime
+
+- `pam cache:purge` — Purge the edge page cache by tag, URL or all.
 ## Advanced
 
 - `pam catalog` — Discover the versioned CLI contract.

@@ -41,6 +41,7 @@ mod ingress;
 mod listener_registry;
 mod manager_dashboard;
 mod otlp;
+mod page_cache;
 mod php;
 mod prefork;
 mod process_manager;
@@ -692,6 +693,10 @@ fn run() -> Result<u8, CliError> {
     {
         let command = script_arg.to_string_lossy();
         return process_manager::run(&executable, &command, raw_args).map_err(CliError::Commands);
+    }
+
+    if script_arg == "cache:purge" {
+        return page_cache::cli(raw_args).map_err(CliError::Commands);
     }
 
     if script_arg == "timeline" {

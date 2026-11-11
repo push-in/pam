@@ -125,6 +125,7 @@ unsafe extern "C" {
     ) -> c_int;
     fn pam_php_cancel_http(request_id: *const c_char, request_id_length: usize) -> c_int;
     fn pam_php_register_upload(path: *const c_char, path_length: usize) -> c_int;
+    fn pam_php_set_cache_purge_handler(handler: Option<CachePurgeHandler>);
     fn pam_php_release_upload(path: *const c_char, path_length: usize) -> c_int;
     fn pam_php_dispatch_ws(
         event_kind: c_int,
@@ -222,6 +223,28 @@ pub struct ServerConfig {
     pub response_cache_purge_secret: Option<String>,
     #[serde(default = "default_response_cache_tag_header")]
     pub response_cache_tag_header: String,
+    /// Header-driven edge page cache: any GET/HEAD response that opts in with
+    /// `Cache-Control: public, s-maxage=N` is stored.
+    #[serde(default)]
+    pub response_cache: bool,
+    #[serde(default)]
+    pub response_cache_allow_cookies: bool,
+    #[serde(default)]
+    pub response_cache_allow_authorization: bool,
+    #[serde(default)]
+    pub response_cache_ignored_query_params: Vec<String>,
+    #[serde(default = "default_response_cache_statuses")]
+    pub response_cache_statuses: Vec<u16>,
+    #[serde(default = "default_response_cache_max_object_bytes")]
+    pub response_cache_max_object_bytes: usize,
+    #[serde(default = "default_response_cache_max_ttl_ms")]
+    pub response_cache_max_ttl_ms: u64,
+    #[serde(default = "default_true")]
+    pub response_cache_compress: bool,
+    #[serde(default = "default_true")]
+    pub response_cache_status_header: bool,
+    #[serde(default)]
+    pub response_cache_invalidation_log: Option<String>,
     #[serde(default)]
     pub websocket_resume_secret: Option<String>,
     #[serde(default = "default_websocket_resume_ttl_seconds")]
@@ -265,6 +288,18 @@ fn default_response_cache_max_entries() -> usize {
 }
 fn default_response_cache_max_bytes() -> usize {
     64 * 1024 * 1024
+}
+fn default_response_cache_statuses() -> Vec<u16> {
+    vec![200, 203, 204, 300, 301, 308, 404, 410]
+}
+fn default_response_cache_max_object_bytes() -> usize {
+    8 * 1024 * 1024
+}
+fn default_response_cache_max_ttl_ms() -> u64 {
+    7 * 24 * 3600 * 1000
+}
+fn default_true() -> bool {
+    true
 }
 fn default_response_cache_tag_header() -> String {
     "x-pam-cache-tags".to_owned()
@@ -731,6 +766,16 @@ pub fn cancel_http(request_id: &str) -> Result<(), String> {
 
 /// Registers a streamed upload with PHP so `is_uploaded_file()` and
 /// `move_uploaded_file()` accept it, like PHP's own multipart handler.
+/// Native callback behind PHP's `pam_cache_purge()`.
+pub type CachePurgeHandler = extern "C" fn(lines: *const c_char, length: usize) -> i64;
+
+/// Routes PHP's `pam_cache_purge()` to the page cache of this process.
+pub fn register_cache_purge_handler(handler: CachePurgeHandler) {
+    // SAFETY: stores a function pointer with static lifetime; the C side
+    // reads it only on the PHP thread when `pam_cache_purge()` is called.
+    unsafe { pam_php_set_cache_purge_handler(Some(handler)) };
+}
+
 pub fn register_upload(path: &str) -> Result<(), String> {
     ensure_owner()?;
     // SAFETY: the path bytes stay valid for this synchronous owner-thread call.
