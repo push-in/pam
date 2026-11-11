@@ -184,7 +184,7 @@ soaks. Reported for follow-up rather than explained away.
       B  Laravel 12, master in the foreground under gdb -batch (backtrace on
          a caught signal, exit status otherwise)
     Result after 2 h (20:41-22:42): 430 stress rounds (215 per server),
-    121 reloads per server (generations up to 120+), 864 intended
+    about 120 reloads per server (worker generation 120 reached), 864 intended
     memory_limit fatals per app. Neither master changed or died: pamd logged
     no master exit, gdb reported only the final "exited normally" after the
     harness's SIGTERM. Logs: 0 "Uncaught", 0 "Couldn't execute"; the Laravel
