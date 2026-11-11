@@ -985,7 +985,10 @@ fn recycled_workers_and_reloads_reuse_the_listeners_the_master_keeps() {
         let _ = cluster.request();
     }
     while cluster.children().len() != 2 {
-        assert!(Instant::now() < deadline, "the recycled worker did not exit");
+        assert!(
+            Instant::now() < deadline,
+            "the recycled worker did not exit"
+        );
         thread::sleep(Duration::from_millis(25));
     }
     cluster.signal(SIGHUP);
