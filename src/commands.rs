@@ -357,15 +357,45 @@ impl MobileStarter {
 pub enum MobilePlatform {
     Android = 1,
     Ios = 2,
+    /// Android TV, Google TV and Fire TV: the same APK with a TV launcher
+    /// entry, D-pad focus and 32-bit ARM.
+    AndroidTv = 3,
 }
 
 impl MobilePlatform {
+    /// `android`, `ios`, `android-tv` (or `tv`), `all` (phones) or a comma
+    /// list such as `android,ios,android-tv`.
     pub fn parse(value: &str) -> Result<Vec<Self>, String> {
-        match value {
-            "android" => Ok(vec![Self::Android]),
-            "ios" => Ok(vec![Self::Ios]),
-            "all" | "both" => Ok(vec![Self::Android, Self::Ios]),
-            _ => Err("platform requires android, ios, or all".to_owned()),
+        let mut platforms = Vec::new();
+        for part in value.split(',').map(str::trim).filter(|part| !part.is_empty()) {
+            let parsed: &[Self] = match part {
+                "android" => &[Self::Android],
+                "ios" => &[Self::Ios],
+                "android-tv" | "tv" => &[Self::AndroidTv],
+                "all" | "both" => &[Self::Android, Self::Ios],
+                _ => {
+                    return Err(
+                        "platform requires android, ios, android-tv, all, or a comma list".to_owned(),
+                    )
+                }
+            };
+            for platform in parsed {
+                if !platforms.contains(platform) {
+                    platforms.push(*platform);
+                }
+            }
+        }
+        if platforms.is_empty() {
+            return Err("platform requires android, ios, android-tv, all, or a comma list".to_owned());
+        }
+        Ok(platforms)
+    }
+
+    fn target(self) -> &'static str {
+        match self {
+            Self::Android => "android",
+            Self::Ios => "ios",
+            Self::AndroidTv => "android-tv",
         }
     }
 }
@@ -568,7 +598,10 @@ fn configure_mobile_options(options: &mut InitOptions) -> Result<(), String> {
     }
     if options.mobile_platforms.is_empty() {
         options.mobile_platforms = if interactive {
-            MobilePlatform::parse(&prompt_value("Platforms: android, ios, or all", "all")?)?
+            MobilePlatform::parse(&prompt_value(
+                "Platforms: android, ios, android-tv (comma separated), or all",
+                "all",
+            )?)?
         } else {
             vec![MobilePlatform::Android, MobilePlatform::Ios]
         };
@@ -2776,7 +2809,7 @@ fn init_mobile(
             .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
             + "\n"),
     )?;
-    let native_manifest = serde_json::json!({
+    let mut native_manifest = serde_json::json!({
         "$schema": "vendor/pushinbr/pam-native/resources/pam-native.schema.json",
         "version": 1,
         "applicationId": options.application_id.as_deref().unwrap_or("app.pam.hello"),
@@ -2790,6 +2823,16 @@ fn init_mobile(
         "modules": [],
         "views": []
     });
+    if options.mobile_platforms.contains(&MobilePlatform::AndroidTv) {
+        // Older PAM Native manifests have no targets: write them only for TV.
+        native_manifest["targets"] = serde_json::json!(
+            options
+                .mobile_platforms
+                .iter()
+                .map(|platform| platform.target())
+                .collect::<Vec<_>>()
+        );
+    }
     write_new(
         &directory.join("pam-native.json"),
         &(serde_json::to_string_pretty(&native_manifest)
@@ -3627,9 +3670,25 @@ pub fn default_script(target: Option<OsString>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        HttpEndpoint, current_worker_lag_seconds, parse_control_plane_diagnostics,
-        visible_top_metric,
+        HttpEndpoint, MobilePlatform, current_worker_lag_seconds,
+        parse_control_plane_diagnostics, visible_top_metric,
     };
+
+    #[test]
+    fn mobile_platforms_accept_android_tv_and_comma_lists() {
+        assert_eq!(
+            MobilePlatform::parse("android,ios,android-tv").unwrap(),
+            vec![MobilePlatform::Android, MobilePlatform::Ios, MobilePlatform::AndroidTv]
+        );
+        assert_eq!(MobilePlatform::parse("tv").unwrap(), vec![MobilePlatform::AndroidTv]);
+        assert_eq!(
+            MobilePlatform::parse("all, tv, android").unwrap(),
+            vec![MobilePlatform::Android, MobilePlatform::Ios, MobilePlatform::AndroidTv]
+        );
+        assert!(MobilePlatform::parse("roku").is_err());
+        assert!(MobilePlatform::parse(",").is_err());
+        assert_eq!(MobilePlatform::AndroidTv.target(), "android-tv");
+    }
 
     #[test]
     fn classifies_only_finite_current_worker_lag_samples() {

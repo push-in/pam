@@ -930,7 +930,7 @@ fn run() -> Result<u8, CliError> {
                 }
                 "--platform" => {
                     let value = raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--platform requires android, ios, or all".to_owned())
+                        CliError::Commands("--platform requires android, ios, android-tv, or all".to_owned())
                     })?;
                     mobile_platforms = commands::MobilePlatform::parse(&value.to_string_lossy())
                         .map_err(CliError::Commands)?;

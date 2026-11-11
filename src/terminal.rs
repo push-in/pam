@@ -516,7 +516,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "--starter PRESET",
                     "blank, tabs, auth, ecommerce, chat, or showcase",
                 ),
-                ("--platform TARGET", "android, ios, or all"),
+                ("--platform TARGET", "android, ios, android-tv, all, or a comma list"),
                 ("--no-install", "Create files without installing packages"),
                 ("--no-interaction", "Use API when no preset is supplied"),
             ],
