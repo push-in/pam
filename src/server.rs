@@ -1241,6 +1241,13 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
         config.tls_key = None;
         config.http3 = false;
     }
+    if std::env::var_os(crate::task_workers::ROLE_ENV).is_some() {
+        // A task worker forked from a post-boot zygote inherits the HTTP
+        // workers' configuration; serialized tasks need a larger body limit.
+        config.max_body_bytes = config
+            .max_body_bytes
+            .max(crate::task_workers::MIN_BODY_BYTES);
+    }
     for configured in &config.response_cache_vary_headers {
         let normalized = configured.to_ascii_lowercase();
         if HeaderName::try_from(normalized.as_str()).is_err() {

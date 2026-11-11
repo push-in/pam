@@ -22,6 +22,9 @@ use http_body_util::{BodyExt, Full};
 pub const ADDRESS_ENV: &str = "PAM_TASK_ADDRESS";
 pub const TOKEN_ENV: &str = "PAM_TASK_TOKEN";
 pub const ROLE_ENV: &str = "PAM_TASK_WORKER";
+/// Smallest body limit of a task worker (serialized tasks), the same as
+/// `PamServer::TASK_MAX_BODY_BYTES` in the Octane bridge.
+pub const MIN_BODY_BYTES: usize = 64 * 1024 * 1024;
 pub const TOKEN_HEADER: &str = "x-pam-task-token";
 pub const KIND_HEADER: &str = "x-pam-task";
 /// Largest task result accepted back from a task worker.

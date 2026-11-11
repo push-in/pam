@@ -20,44 +20,74 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt};
 const REQUEST_LIMIT: usize = 512;
 
 pub struct SegmentServer {
-    task: tokio::task::JoinHandle<()>,
+    shutdown: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 impl SegmentServer {
     /// Starts serving segments on `socket` (created with mode 0600 inside a
     /// private directory). `budget` caps the total bytes of all segments.
+    ///
+    /// The server runs on its own thread: a post-boot zygote opens tables
+    /// while the application boots, when the master's runtime is blocked
+    /// waiting for that zygote's first fork.
     pub fn start(socket: &Path, budget: u64) -> Result<Self, String> {
-        let listener = tokio::net::UnixListener::bind(socket).map_err(|error| {
-            format!(
-                "cannot listen for shared memory on {}: {error}",
-                socket.display()
-            )
-        })?;
+        let listener = std::os::unix::net::UnixListener::bind(socket)
+            .and_then(|listener| listener.set_nonblocking(true).map(|()| listener))
+            .map_err(|error| {
+                format!(
+                    "cannot listen for shared memory on {}: {error}",
+                    socket.display()
+                )
+            })?;
         let segments: Arc<Mutex<Segments>> = Arc::new(Mutex::new(Segments {
             by_key: HashMap::new(),
             bytes: 0,
             budget,
         }));
-        let task = tokio::spawn(async move {
-            loop {
-                let Ok((stream, _)) = listener.accept().await else {
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                    continue;
-                };
-                let segments = segments.clone();
-                tokio::spawn(async move {
-                    let _ = tokio::time::timeout(Duration::from_secs(10), serve(stream, segments))
-                        .await;
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|error| format!("cannot start the shared memory server: {error}"))?;
+        let (shutdown, mut stopped) = tokio::sync::oneshot::channel::<()>();
+        std::thread::Builder::new()
+            .name("pam-shm".to_owned())
+            .spawn(move || {
+                runtime.block_on(async move {
+                    let Ok(listener) = tokio::net::UnixListener::from_std(listener) else {
+                        return;
+                    };
+                    loop {
+                        let accepted = tokio::select! {
+                            _ = &mut stopped => return,
+                            accepted = listener.accept() => accepted,
+                        };
+                        let Ok((stream, _)) = accepted else {
+                            tokio::time::sleep(Duration::from_millis(50)).await;
+                            continue;
+                        };
+                        let segments = segments.clone();
+                        tokio::spawn(async move {
+                            let _ = tokio::time::timeout(
+                                Duration::from_secs(10),
+                                serve(stream, segments),
+                            )
+                            .await;
+                        });
+                    }
                 });
-            }
-        });
-        Ok(Self { task })
+            })
+            .map_err(|error| format!("cannot start the shared memory server: {error}"))?;
+        Ok(Self {
+            shutdown: Some(shutdown),
+        })
     }
 }
 
 impl Drop for SegmentServer {
     fn drop(&mut self) {
-        self.task.abort();
+        if let Some(shutdown) = self.shutdown.take() {
+            let _ = shutdown.send(());
+        }
     }
 }
 
@@ -284,14 +314,9 @@ mod tests {
         let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir(&directory).unwrap();
         let socket = directory.join("shm.sock");
-        let runtime = tokio::runtime::Builder::new_multi_thread()
-            .worker_threads(1)
-            .enable_all()
-            .build()
-            .unwrap();
-        let _server = runtime
-            .block_on(async { SegmentServer::start(&socket, 3 * 4096 * 4) })
-            .unwrap();
+        // No runtime on this thread: the server must answer while its caller
+        // is blocked, as the master is while a post-boot zygote boots.
+        let server = SegmentServer::start(&socket, 3 * 4096 * 4).unwrap();
 
         let layout = Layout::new(4, 16, 8, 1).unwrap();
         let first =
@@ -325,7 +350,7 @@ mod tests {
         );
         let huge = crate::shared_table::segment_client_request(&socket, "t.huge", 1 << 30);
         assert!(huge.err().unwrap().contains("budget"));
-        drop(runtime);
+        drop(server);
         std::fs::remove_dir_all(&directory).unwrap();
     }
 }

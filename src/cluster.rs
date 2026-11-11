@@ -909,6 +909,9 @@ fn start_zygote(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
     configure_runtime_command(&mut command, options);
+    // Shared tables, the shared `octane` cache and task dispatch are set up
+    // while the application boots, which is in the zygote in post-boot mode.
+    command.envs(options.shared_environment.iter().cloned());
     let mode = prefork_boot_mode(options);
     command.env(crate::prefork::BOOT_MODE_ENV, mode.as_str());
     if mode == crate::prefork::BootMode::Application {

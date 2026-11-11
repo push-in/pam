@@ -81,10 +81,17 @@ final class PamServer
             );
         }
 
+        // A post-boot zygote runs this script once, before it knows which
+        // forks become task workers: they take the task handler per request.
+        $taskHandler = self::forksTaskWorkers() ? $this->taskHandler($worker) : null;
+
         try {
             // Registers the handler; PAM starts serving after this script
             // returns, so the worker must stay alive past this call.
-            Server::createNative(function (PamResponse $response) use ($worker): PamResponse {
+            Server::createNative(function (PamResponse $response) use ($worker, $taskHandler): PamResponse {
+                if ($taskHandler !== null && Tasks::isTaskWorker()) {
+                    return $taskHandler($response);
+                }
                 $worker->handle(...$this->client->marshalNativeRequest($response));
 
                 return $response;
@@ -146,48 +153,12 @@ final class PamServer
      */
     private function listenForTasks(Worker $worker, string $host, int $port, array $options): void
     {
-        $token = getenv('PAM_TASK_TOKEN');
-        if (!is_string($token) || strlen($token) < 32) {
-            throw new \RuntimeException('PAM task workers require PAM_TASK_TOKEN.');
-        }
-        $config = $worker->application()->make('config');
-        $ticks = !$config instanceof \Illuminate\Contracts\Config\Repository || $config->get('octane.tick', true) !== false;
+        self::taskToken();
         $bodyBytes = $options['maxBodyBytes'] ?? 0;
         $options['maxBodyBytes'] = max(is_int($bodyBytes) ? $bodyBytes : 0, self::TASK_MAX_BODY_BYTES);
 
         try {
-            Server::createNative(static function (PamResponse $response) use ($worker, $token, $ticks): PamResponse {
-                $given = $_SERVER['HTTP_X_PAM_TASK_TOKEN'] ?? null;
-                if (!is_string($given) || !hash_equals($token, $given)) {
-                    return $response->status(403)->send('');
-                }
-
-                $kind = $_SERVER['HTTP_X_PAM_TASK'] ?? '';
-                if ($kind === 'tick') {
-                    if ($ticks) {
-                        $worker->handleTick();
-                    }
-
-                    return $response->status(204)->send('');
-                }
-
-                $task = unserialize((string) file_get_contents('php://input'));
-                $result = $worker->handleTask($task);
-                if ($kind === 'dispatch') {
-                    return $response->status(204)->send('');
-                }
-
-                try {
-                    $body = serialize($result);
-                } catch (\Throwable $error) {
-                    $body = serialize(TaskExceptionResult::from($error));
-                }
-
-                return $response
-                    ->status(200)
-                    ->header('Content-Type', 'application/octet-stream')
-                    ->send($body);
-            })->listen($port, $host, $options);
+            Server::createNative($this->taskHandler($worker))->listen($port, $host, $options);
         } catch (\Throwable $error) {
             $worker->terminate();
 
@@ -197,6 +168,72 @@ final class PamServer
         register_shutdown_function(static function () use ($worker): void {
             $worker->terminate();
         });
+    }
+
+    /**
+     * Whether this process is a post-boot zygote that will also fork task
+     * workers (PAM 2.2.15+ forks every worker from the booted application).
+     */
+    private static function forksTaskWorkers(): bool
+    {
+        return getenv('PAM_PREFORK_BOOT') === 'app'
+            && class_exists(Tasks::class, false)
+            && is_string(getenv('PAM_TASK_TOKEN'));
+    }
+
+    private static function taskToken(): string
+    {
+        $token = getenv('PAM_TASK_TOKEN');
+        if (!is_string($token) || strlen($token) < 32) {
+            throw new \RuntimeException('PAM task workers require PAM_TASK_TOKEN.');
+        }
+
+        return $token;
+    }
+
+    /**
+     * Runs Octane tasks and ticks authenticated with the cluster's task token.
+     *
+     * @return \Closure(PamResponse): PamResponse
+     */
+    private function taskHandler(Worker $worker): \Closure
+    {
+        $token = self::taskToken();
+        $config = $worker->application()->make('config');
+        $ticks = !$config instanceof \Illuminate\Contracts\Config\Repository || $config->get('octane.tick', true) !== false;
+
+        return static function (PamResponse $response) use ($worker, $token, $ticks): PamResponse {
+            $given = $_SERVER['HTTP_X_PAM_TASK_TOKEN'] ?? null;
+            if (!is_string($given) || !hash_equals($token, $given)) {
+                return $response->status(403)->send('');
+            }
+
+            $kind = $_SERVER['HTTP_X_PAM_TASK'] ?? '';
+            if ($kind === 'tick') {
+                if ($ticks) {
+                    $worker->handleTick();
+                }
+
+                return $response->status(204)->send('');
+            }
+
+            $task = unserialize((string) file_get_contents('php://input'));
+            $result = $worker->handleTask($task);
+            if ($kind === 'dispatch') {
+                return $response->status(204)->send('');
+            }
+
+            try {
+                $body = serialize($result);
+            } catch (\Throwable $error) {
+                $body = serialize(TaskExceptionResult::from($error));
+            }
+
+            return $response
+                ->status(200)
+                ->header('Content-Type', 'application/octet-stream')
+                ->send($body);
+        };
     }
 
     private const UNLIMITED_REQUEST_TIMEOUT_MS = 365 * 24 * 3600 * 1000;
