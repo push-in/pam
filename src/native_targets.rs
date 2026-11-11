@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::Path;
 
-const TARGETS: [&str; 3] = ["android", "ios", "android-tv"];
+const TARGETS: [&str; 5] = ["android", "ios", "android-tv", "tizen", "webos"];
 /// Manifests without `targets` build for phones and tablets.
 const DEFAULT_TARGETS: [&str; 2] = ["android", "ios"];
 
@@ -14,6 +14,8 @@ pub fn parse(name: &str) -> Result<&'static str, String> {
         "android" => Ok("android"),
         "ios" => Ok("ios"),
         "android-tv" | "androidtv" | "tv" => Ok("android-tv"),
+        "tizen" | "samsung" => Ok("tizen"),
+        "webos" | "lg" => Ok("webos"),
         other => Err(format!(
             "unknown target `{other}`; use one of: {}",
             TARGETS.join(", ")
@@ -51,6 +53,11 @@ fn change(root: &Path, name: &str, add: bool) -> Result<u8, String> {
     if add && target == "android-tv" {
         println!(
             "`pam mobile run` now installs the TV launcher entry; see docs/tv.md in PAM Native"
+        );
+    }
+    if add && matches!(target, "tizen" | "webos") {
+        println!(
+            "`pam mobile {target}:build` compiles the app to static HTML/JS (after `pam composer require --dev pushinbr/pam-native-web`); see docs/tv.md in PAM Native"
         );
     }
     Ok(0)
@@ -186,6 +193,8 @@ mod tests {
     #[test]
     fn accepts_tv_aliases_only() {
         assert_eq!(parse("TV").unwrap(), "android-tv");
-        assert!(parse("tizen").is_err());
+        assert_eq!(parse("Samsung").unwrap(), "tizen");
+        assert_eq!(parse("webOS").unwrap(), "webos");
+        assert!(parse("roku").is_err());
     }
 }
