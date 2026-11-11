@@ -35,7 +35,9 @@ state_a=$(ls "$PAM_MANAGER_RUNTIME_DIR"/*.master.json)
 gdb_pid=$!
 until curl -fs -o /dev/null http://127.0.0.1:8190/_r/hello; do sleep 0.5; done
 until curl -fs -o /dev/null http://127.0.0.1:8180/_r/hello; do sleep 0.5; done
-master_b=$(pgrep -P "$gdb_pid" -f "bin/pam start artisan" | head -1)
+# The subshell's child is gdb; gdb's child is the master.
+gdb_process=$(pgrep -P "$gdb_pid" -x gdb | head -1)
+master_b=$(pgrep -P "$gdb_process" -x pam | head -1)
 echo "$(date +%T) start A=$(python3 -c "import json;print(json.load(open('$state_a'))['pid'])") B=$master_b gdb=$gdb_pid" >> "$OUT/events.log"
 
 deadline=$((SECONDS + SECONDS_TOTAL))

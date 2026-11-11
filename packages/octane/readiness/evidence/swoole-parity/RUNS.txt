@@ -157,3 +157,44 @@ master disappeared once without any log line and pamd restarted it within
 1 s. No crash, OOM-kill or signal could be attributed; it did not recur in
 15 later stress rounds with a liveness watcher on the master, nor in the
 soaks. Reported for follow-up rather than explained away.
+
+14. Follow-up: Whoops noise after a memory_limit fatal (fixed, df168dbe).
+    Cause: the fatal cuts the request before PAM resets the SAPI response,
+    leaving a raw HTTP/ status line. At worker exit Laravel's shutdown
+    handler re-handles the fatal (and logs it, which is wanted), Collision
+    then registers Whoops, and Whoops' http_response_code(500) became a PHP
+    8.5 warning and an "Uncaught Whoops\Exception\ErrorException" fatal.
+    PAM now resets the response state before PHP shutdown. Check: /_r/oom and
+    a task-worker OOM, then the server error log: 0 "Uncaught", 0 "Couldn't
+    execute"; the memory_limit fatals are still logged once each.
+
+15. Follow-up: the master that disappeared without a log line.
+    What was added: pamd is now the child subreaper of its masters and logs
+    how each one ends (11e7c78f), e.g. after kill -9 of a master:
+      pamd: master 3225344 of "octane-l13-a40f165c" killed by signal 9 (Killed)
+      pamd: "octane-l13-a40f165c" is not running any more; scheduling a restart
+    Core dumps: core_pattern pipes to apport and cannot be changed without
+    root, so the run used ulimit -c unlimited plus a master under gdb.
+    Hunt: tools/master_hunt.sh WORK pam-final 7200 (release build of the PR
+    head), two servers, 4 HTTP + 2 task workers each, both under continuous
+    parity_stress.py (parallel table writers, 2,048 cache misses, 400 clients
+    hanging up during concurrently(), 200 slowloris clients, HTTP and task
+    worker memory_limit fatals) and a reload every 60 s:
+      A  Laravel 13 via pamd (exit status logged by pamd)
+      B  Laravel 12, master in the foreground under gdb -batch (backtrace on
+         a caught signal, exit status otherwise)
+    Result after 2 h (20:41-22:42): 430 stress rounds (215 per server),
+    121 reloads per server (generations up to 120+), 864 intended
+    memory_limit fatals per app. Neither master changed or died: pamd logged
+    no master exit, gdb reported only the final "exited normally" after the
+    harness's SIGTERM. Logs: 0 "Uncaught", 0 "Couldn't execute"; the Laravel
+    logs hold only the intended memory_limit fatals.
+    Stress failures: 3 of 430 rounds, 1 request each out of ~45k in the
+    slowloris phase, whose probes open a new connection per request while a
+    reload runs every 60 s: the kernel-default handshake reset on a closing
+    listener (tcp_migrate_req=0), the same class as the matrix's
+    new-connection check; being fixed with the balancer work.
+    Not reproduced in 2 h. The original disappearance happened on the old
+    build, whose pamd discarded the wait status of its masters (it reaped
+    them with a null status); with pamd now logging every master's end, a
+    recurrence will name the signal or exit code. (hunt-events.log)
