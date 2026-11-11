@@ -46,7 +46,7 @@ jobs:
           key: desktop-product-visual
       - name: Install pinned host and capture prerequisites
         run: |
-          sudo add-apt-repository -y ppa:ondrej/php
+          .github/scripts/add-ondrej-php-ppa.sh
           sudo apt-get update
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
             build-essential clang imagemagick libclang-dev libfontconfig1-dev \
