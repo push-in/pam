@@ -137,9 +137,15 @@ Applications that depend on Laravel Octane can use the optional PAM bridge while
 keeping Octane's application factory, worker lifecycle events and request cleanup:
 
 ```bash
-pam composer require laravel/octane pushinbr/pam-octane
-pam octane:start
+composer require laravel/octane pushinbr/pam-octane
+php artisan octane:install --server=pam
+php artisan octane:start
 ```
+
+`pushinbr/pam-octane` 1.4 adds `pam` to Octane's own commands (`octane:start`,
+`octane:reload`, `octane:stop`, `octane:status`, `octane:install`) with stock
+`laravel/octane`. `pam octane:start` still starts a detached application under
+PAM's supervisor.
 
 PAM owns the native HTTP transport, Tokio I/O, streaming and process supervision;
 Octane tables, the shared `octane` cache store, `Octane::concurrently()` on task

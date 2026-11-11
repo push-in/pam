@@ -2,6 +2,41 @@
 
 All notable changes to PAM Octane will be documented here.
 
+## 1.4.0 - 2026-11-11
+
+Laravel Octane will not ship PAM itself (laravel/octane#1188 was closed in
+favour of a package), so this release makes the package the full replacement
+for that pull request. No breaking changes; requires PAM 2.2.15 for
+`--server=pam`.
+
+- `php artisan octane:start --server=pam` (or `OCTANE_SERVER=pam`), plus
+  `octane:reload`, `octane:stop` and `octane:status`, with stock
+  `laravel/octane` 2.19+. The service provider binds Octane's command classes
+  to small subclasses that answer for `pam` and hand every other server back
+  to Octane. `octane:start` runs a foreground `pam start` cluster supervised
+  like Octane's other servers (request log, `--watch`, `Ctrl+C`), with
+  `--workers`, `--task-workers` and `--max-requests`; `octane:reload` is a
+  zero-downtime `SIGHUP` reload. Also through `pam artisan`.
+- `php artisan octane:install --server=pam` (and `pam` in the server prompt)
+  finds the `pam` binary or, after confirmation, installs it with PAM's
+  official install script, warns when PAM is older than 2.2.15, and points
+  Windows users to WSL 2 or Docker.
+- `Octane::table()` returns the PAM shared-memory table inside PAM workers, so
+  code written for Swoole's tables runs unchanged (`PamOctane::table()` stays).
+- `octane.serve_static_files` and `octane.static_file_headers` are honoured.
+- `PamServer::listenWithApplicationConfig()` reads `pam-octane.server` from
+  the booted application; `PamServer::serverOptions()` validates it.
+- Tests: the fork's PAM server tests (binary requirements, process inspector,
+  state file), Octane's 35 Swoole-only `TableTest` and `OctaneStoreTest`
+  ported to PAM tables, the commands on Octane 2.19 and 2.24 with Laravel 12
+  and 13, `tests/tools/octane-suite.sh` (laravel/octane's own suite with this
+  package installed: 260 tests, 0 failures, 112 exchanges cross-checked
+  through the PAM client) and `tests/tools/e2e-smoke.sh` (a fresh application in
+  a container: install, start, a request, reloads under load with no failed
+  request, stop). CI runs them on every pull request.
+- The test suite no longer needs PHPUnit process isolation, which PAM 2.2.15
+  cannot run under PHPUnit 12 (Laravel 12).
+
 ## 1.3.0 - 2026-11-11
 
 Requires PAM 2.2.15 for the edge page cache, the post-boot zygote, shared

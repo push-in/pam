@@ -10,6 +10,7 @@
         <testsuite name="PAM Octane">
             <directory>tests</directory>
             <exclude>tests/Fixtures</exclude>
+            <exclude>tests/OctaneSuite</exclude>
         </testsuite>
     </testsuites>
     <php>
