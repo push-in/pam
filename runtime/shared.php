@@ -219,7 +219,7 @@ namespace Pam\Shared {
          * $waitMilliseconds. Each result is the task worker's response, or
          * null when the task was still running when the wait ended.
          *
-         * @param list<string> $payloads
+         * @param array<array-key, string> $payloads
          * @return list<string|null>
          */
         public static function resolve(array $payloads, int $waitMilliseconds): array
@@ -227,7 +227,7 @@ namespace Pam\Shared {
             return $payloads === [] ? [] : \pam_native_task_resolve(array_values($payloads), $waitMilliseconds);
         }
 
-        /** @param list<string> $payloads */
+        /** @param array<array-key, string> $payloads */
         public static function dispatch(array $payloads): void
         {
             if ($payloads !== []) {
