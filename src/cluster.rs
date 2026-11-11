@@ -50,7 +50,15 @@ pub struct StartOptions {
     pub ingress_address: Option<SocketAddr>,
     pub pools: Vec<PoolSpec>,
     pub php_extensions: Option<Vec<String>>,
+    /// Extra workers that run tasks and ticks instead of public HTTP.
+    pub task_workers: usize,
+    /// Filled by the master at start: the task pool and the environment that
+    /// connects workers to the master's shared memory and task pool.
+    task_pool: Option<RuntimePool>,
+    shared_environment: Vec<(String, String)>,
 }
+
+const TASK_POOL: &str = "tasks";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PoolSpec {
@@ -81,6 +89,7 @@ impl StartOptions {
         let mut php_extensions = Vec::new();
         let mut isolate_php_extensions = false;
         let mut script_args = Vec::new();
+        let mut task_workers = 0;
 
         while let Some(argument) = arguments.next() {
             let text = argument.to_string_lossy();
@@ -128,6 +137,17 @@ impl StartOptions {
                     php_extensions.push(parse_php_extension(arguments.next())?);
                 }
                 "--isolate-php-extensions" => isolate_php_extensions = true,
+                "--task-workers" => {
+                    let value = arguments
+                        .next()
+                        .ok_or_else(|| "--task-workers requires a number".to_owned())?;
+                    task_workers = match value.to_string_lossy().as_ref() {
+                        "auto" => std::thread::available_parallelism().map_or(1, usize::from),
+                        text => text
+                            .parse()
+                            .map_err(|_| "--task-workers requires a number or auto".to_owned())?,
+                    };
+                }
                 "--" => {
                     script_args.extend(arguments);
                     break;
@@ -141,6 +161,9 @@ impl StartOptions {
 
         if workers > 256 {
             return Err("--workers cannot exceed 256".to_owned());
+        }
+        if task_workers > 64 {
+            return Err("--task-workers cannot exceed 64".to_owned());
         }
         if !pools.is_empty() {
             if ingress_address.is_none() {
@@ -193,6 +216,9 @@ impl StartOptions {
             ingress_address,
             pools,
             php_extensions: isolate_php_extensions.then_some(php_extensions),
+            task_workers,
+            task_pool: None,
+            shared_environment: Vec::new(),
         })
     }
 }
@@ -403,9 +429,12 @@ pub fn run(executable: &OsStr, options: StartOptions) -> Result<u8, String> {
     runtime.block_on(supervise(executable, options))
 }
 
-async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, String> {
+async fn supervise(executable: &OsStr, mut options: StartOptions) -> Result<u8, String> {
     let runtime_directory = RuntimeDirectory::create()?;
     let pools = prepare_pools(&options)?;
+    let _shared_memory = start_shared_memory(&mut options, runtime_directory.path())?;
+    let ticker = prepare_task_pool(&mut options)?;
+    let mut next_tick = Instant::now() + Duration::from_secs(1);
     let ingress = if let Some(address) = options.ingress_address {
         Some(
             Ingress::start(
@@ -539,6 +568,16 @@ async fn supervise(executable: &OsStr, options: StartOptions) -> Result<u8, Stri
                 }
             }
             _ = checks.tick() => {
+                if let Some(ticker) = &ticker
+                    && Instant::now() >= next_tick
+                {
+                    // A steady one-second cadence (no drift from the 100 ms checks).
+                    next_tick += Duration::from_secs(1);
+                    if next_tick <= Instant::now() {
+                        next_tick = Instant::now() + Duration::from_secs(1);
+                    }
+                    ticker.tick();
+                }
                 for index in (0..workers.len()).rev() {
                     if worker_timed_out(&workers[index], options.watchdog_grace) {
                         let request = worker_record(&workers[index])
@@ -813,25 +852,24 @@ fn spawn_generation(
 ) -> Result<Vec<Worker>, String> {
     let zygote = start_zygote(executable, options, generation)?;
     let zygote = zygote.as_ref();
-    if pools.is_empty() {
-        return (1..=options.workers)
-            .map(|id| {
-                launch_worker(
-                    executable,
-                    options,
-                    id,
-                    generation,
-                    runtime_directory,
-                    0,
-                    None,
-                    zygote,
-                )
-            })
-            .collect();
-    }
+    let mut workers = Vec::with_capacity(options.workers + options.task_workers);
     let mut id = 0;
-    let mut workers = Vec::with_capacity(options.workers);
-    for pool in pools {
+    if pools.is_empty() {
+        for _ in 0..options.workers {
+            id += 1;
+            workers.push(launch_worker(
+                executable,
+                options,
+                id,
+                generation,
+                runtime_directory,
+                0,
+                None,
+                zygote,
+            )?);
+        }
+    }
+    for pool in pools.iter().chain(options.task_pool.as_ref()) {
         for _ in 0..pool.workers {
             id += 1;
             workers.push(launch_worker(
@@ -857,7 +895,9 @@ fn start_zygote(
     options: &StartOptions,
     generation: u64,
 ) -> Result<Option<SharedZygote>, String> {
-    if options.workers < 2 || std::env::var_os("PAM_PREFORK").is_some_and(|value| value == "0") {
+    if options.workers + options.task_workers < 2
+        || std::env::var_os("PAM_PREFORK").is_some_and(|value| value == "0")
+    {
         return Ok(None);
     }
     let mut command = Command::new(executable);
@@ -869,6 +909,9 @@ fn start_zygote(
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
     configure_runtime_command(&mut command, options);
+    // Shared tables, the shared `octane` cache and task dispatch are set up
+    // while the application boots, which is in the zygote in post-boot mode.
+    command.envs(options.shared_environment.iter().cloned());
     let mode = prefork_boot_mode(options);
     command.env(crate::prefork::BOOT_MODE_ENV, mode.as_str());
     if mode == crate::prefork::BootMode::Application {
@@ -1027,7 +1070,11 @@ fn worker_environment(
             ));
         }
     }
+    environment.extend(options.shared_environment.iter().cloned());
     if let Some(pool) = pool {
+        if pool.name == TASK_POOL && pool.prefixes.is_empty() {
+            environment.push((crate::task_workers::ROLE_ENV.to_owned(), "1".to_owned()));
+        }
         environment.push(("PAM_WORKER_POOL".to_owned(), pool.name.clone()));
         environment.push((
             "PAM_INTERNAL_LISTEN_ADDRESS".to_owned(),
@@ -1103,6 +1150,66 @@ fn launch_worker(
     })
 }
 
+/// Serves shared-memory segments (shared tables) to the workers. Nothing is
+/// allocated until a worker opens a table.
+#[cfg(target_os = "linux")]
+fn start_shared_memory(
+    options: &mut StartOptions,
+    runtime_directory: &Path,
+) -> Result<Option<crate::shared_memory_server::SegmentServer>, String> {
+    let socket = runtime_directory.join("shm.sock");
+    let Some(text) = socket.to_str().filter(|text| text.len() < 100) else {
+        // Too long for a Unix socket address: named tables stay per worker.
+        return Ok(None);
+    };
+    let server = crate::shared_memory_server::SegmentServer::start(
+        &socket,
+        crate::shared_memory_server::default_budget(),
+    )?;
+    options
+        .shared_environment
+        .push((crate::shared_table::SOCKET_ENV.to_owned(), text.to_owned()));
+    Ok(Some(server))
+}
+
+#[cfg(not(target_os = "linux"))]
+fn start_shared_memory(
+    _options: &mut StartOptions,
+    _runtime_directory: &Path,
+) -> Result<Option<()>, String> {
+    Ok(None)
+}
+
+/// Reserves the task pool's private address and token.
+fn prepare_task_pool(
+    options: &mut StartOptions,
+) -> Result<Option<crate::task_workers::Ticker>, String> {
+    if options.task_workers == 0 {
+        return Ok(None);
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("cannot reserve the task worker address: {error}"))?;
+    let address = listener.local_addr().map_err(|error| error.to_string())?;
+    drop(listener);
+    let token = format!("{}{}", random_token()?, random_token()?);
+    options.task_pool = Some(RuntimePool {
+        name: TASK_POOL.to_owned(),
+        workers: options.task_workers,
+        prefixes: Vec::new(),
+        address,
+    });
+    options.shared_environment.extend([
+        (
+            crate::task_workers::ADDRESS_ENV.to_owned(),
+            address.to_string(),
+        ),
+        (crate::task_workers::TOKEN_ENV.to_owned(), token.clone()),
+    ]);
+    Ok(Some(crate::task_workers::Ticker::new(
+        crate::task_workers::Endpoint { address, token },
+    )))
+}
+
 fn prepare_pools(options: &StartOptions) -> Result<Vec<RuntimePool>, String> {
     options
         .pools
@@ -1147,8 +1254,9 @@ fn staggered_max_requests(options: &StartOptions, worker_id: usize) -> u64 {
         return options.max_requests;
     }
     let spread = options.max_requests / 4;
-    let offset = spread.saturating_mul(worker_id.saturating_sub(1) as u64)
-        / options.workers.saturating_sub(1) as u64;
+    // Task workers (ids past --workers) reuse the same spread.
+    let position = worker_id.saturating_sub(1) % options.workers;
+    let offset = spread.saturating_mul(position as u64) / options.workers.saturating_sub(1) as u64;
     options.max_requests.saturating_sub(offset).max(1)
 }
 

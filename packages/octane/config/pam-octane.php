@@ -6,6 +6,11 @@ return [
     'host' => env('PAM_HOST', '127.0.0.1'),
     'port' => (int) env('PAM_PORT', 8000),
 
+    // The `octane` cache store in shared memory (one cache for every worker,
+    // like on Swoole, sized by `octane.cache`). null: shared when task
+    // workers run (--task-workers), per worker otherwise.
+    'shared_cache' => env('PAM_OCTANE_SHARED_CACHE') === null ? null : (bool) env('PAM_OCTANE_SHARED_CACHE'),
+
     // Headers added to static files served from public/, by path pattern.
     'static_file_headers' => [
         // 'build/*' => ['Cache-Control' => 'public, max-age=31536000, immutable'],

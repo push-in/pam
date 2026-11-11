@@ -319,18 +319,123 @@ def concurrently(app):
            "(sequential outside Swoole, same as RoadRunner/FrankenPHP)")
 
 
-@check("Octane cache / tables / ticks", "swoole-only")
+def parallel(fn, count, threads=32):
+    results, lock = [], threading.Lock()
+    queue = list(range(count))
+
+    def run():
+        while True:
+            with lock:
+                if not queue:
+                    return
+                index = queue.pop()
+            value = fn(index)
+            with lock:
+                results.append(value)
+
+    workers = [threading.Thread(target=run) for _ in range(threads)]
+    for worker in workers:
+        worker.start()
+    for worker in workers:
+        worker.join()
+    return results
+
+
+@check("Swoole-parity features (tables, cache, tasks, ticks)", "swoole-parity")
 def swoole_only(app):
+    """Octane::table(), the shared `octane` cache, task workers, ticks and
+    intervals: Swoole-only in Octane itself, provided by PAM >= 2.2.15."""
+    # Without task workers the `octane` store keeps its per-worker behavior.
     status, body = app.json("/_r/octane-cache")
     record("Octane cache store (`octane` driver)", "PASS" if status == 200 and body.get("ok") else "FAIL",
-           f"{body.get('driver', body)}: worker-local array store outside Swoole (shared Swoole table only on Swoole)",
-           "swoole-only")
-    status, body = app.json("/_r/octane-table")
-    expected = status == 501 and "Swoole" in str(body)
-    record("Octane::table()", "N/A" if expected else "FAIL",
-           "Swoole-only in Octane itself (throws on every other server)", "swoole-only")
-    record("Octane::tick() / intervals", "N/A", "Swoole-only in Octane itself (requires Swoole timers)", "swoole-only")
-    record("Task workers (--task-workers)", "N/A", "Swoole-only in Octane itself", "swoole-only")
+           f"{body.get('driver', body)} without --task-workers (per worker, as before)")
+    try:
+        app.start("--workers=4", "--task-workers=2")
+        status, body = app.json("/_r/parity/table/count")
+    except Exception as error:  # noqa: BLE001 - older runtimes reject --task-workers
+        status, body = 0, str(error)
+    if status != 200 or "PamTable" not in str(body):
+        for feature in ("Octane::table()", "Octane cache store (`octane` driver, shared)", "Octane::concurrently() on task workers",
+                        "Task dispatch (--task-workers)", "Octane::tick()", "Octane cache intervals"):
+            record(feature, "N/A", f"needs PAM >= 2.2.15 ({status})", "swoole-only")
+        app.start("--workers=2")
+        return
+
+    # Tables: one row written by one worker is read by every worker; 400
+    # concurrent increments spread over all workers lose nothing.
+    key = f"t{os.getpid()}{int(time.time())}"
+    app.json(f"/_r/parity/table/set?key={key}&name=pam&votes=0")
+    seen = parallel(lambda _: app.json(f"/_r/parity/table/get?key={key}")[1], 60, 12)
+    pids = {item["pid"] for item in seen}
+    rows_ok = all(item["row"] == {"name": "pam", "votes": 0} for item in seen)
+    incr = parallel(lambda _: app.json(f"/_r/parity/table/incr?key={key}")[1], 400, 32)
+    final = app.json(f"/_r/parity/table/get?key={key}")[1]["row"]["votes"]
+    distinct = len({item["votes"] for item in incr})
+    ok = rows_ok and len(pids) >= 2 and final == 400 and distinct == 400
+    record("Octane::table()", "PASS" if ok else "FAIL",
+           f"same row in {len(pids)} workers; 400 concurrent incr -> {final} ({distinct} distinct values)", "swoole-parity")
+
+    # Cache: a value put by one worker is read by all of them.
+    app.json(f"/_r/parity/cache/put?key={key}&value=shared")
+    seen = parallel(lambda _: app.json(f"/_r/parity/cache/get?key={key}")[1], 60, 12)
+    pids = {item["pid"] for item in seen}
+    values = {item["value"] for item in seen}
+    counter = [app.json(f"/_r/parity/cache/incr?key=c{key}")[1]["value"] for _ in range(20)]
+    ok = values == {"shared"} and len(pids) >= 2 and counter == list(range(1, 21))
+    record("Octane cache store (`octane` driver, shared)", "PASS" if ok else "FAIL",
+           f"value seen by {len(pids)} workers; increments {counter[0]}..{counter[-1]}", "swoole-parity")
+
+    # concurrently(): 4 tasks of 300 ms on 2 task workers finish in ~600 ms
+    # (sequential: 1200 ms) and run outside the HTTP worker.
+    status, body = app.json("/_r/parity/concurrently?sleep=300&count=2")
+    status4, body4 = app.json("/_r/parity/concurrently?sleep=300&count=4")
+    _, error = app.json("/_r/parity/concurrently/error")
+    ok = (status == 200 and body["ms"] < 550 and len(set(body["pids"])) == 2 and body["worker"] not in body["pids"]
+          and status4 == 200 and body4["ms"] < 1000 and "PamTaskDispatcher" in body["dispatcher"]
+          and error.get("class", "").endswith("TaskException") and "on purpose" in error.get("message", ""))
+    record("Octane::concurrently() on task workers", "PASS" if ok else "FAIL",
+           f"2x300 ms in {body.get('ms')} ms on {len(set(body.get('pids', [])))} task workers, 4x300 ms in {body4.get('ms')} ms; "
+           f"exceptions -> {error.get('class', '').split(chr(92))[-1]}", "swoole-parity")
+
+    before = app.json("/_r/parity/dispatched")[1]["value"] or 0
+    for _ in range(5):
+        app.json("/_r/parity/dispatch")
+    deadline = time.time() + 10
+    after = before
+    while time.time() < deadline and after < before + 5:
+        time.sleep(0.2)
+        after = app.json("/_r/parity/dispatched")[1]["value"] or 0
+    record("Task dispatch (--task-workers)", "PASS" if after == before + 5 else "FAIL",
+           f"5 dispatched tasks ran ({before} -> {after})", "swoole-parity")
+
+    first = app.json("/_r/parity/ticks")[1]["ticks"] or 0
+    time.sleep(3.5)
+    second = app.json("/_r/parity/ticks")[1]["ticks"] or 0
+    record("Octane::tick()", "PASS" if 2 <= second - first <= 5 else "FAIL",
+           f"{second - first} ticks in 3.5 s (one per second, task workers)", "swoole-parity")
+
+    first = app.json("/_r/parity/interval")[1]["value"]
+    time.sleep(2.2)
+    second = app.json("/_r/parity/interval")[1]["value"]
+    record("Octane cache intervals", "PASS" if first and second and first != second else "FAIL",
+           f"{first} -> {second} after 2.2 s", "swoole-parity")
+
+    # Rows survive a reload (new worker generation) and a killed worker.
+    app.pam_cmd("octane:reload", check=True)
+    time.sleep(3)
+    app.wait()
+    after_reload = app.json(f"/_r/parity/table/get?key={key}")[1]["row"]
+    cache_after = app.json(f"/_r/parity/cache/get?key={key}")[1]["value"]
+    victim = app.json("/_r/pid")[1].get("pid") if app.get("/_r/pid")[0] == 200 else None
+    if victim:
+        os.kill(int(victim), 9)
+        time.sleep(1.5)
+        app.wait()
+    after_kill = app.json(f"/_r/parity/table/get?key={key}")[1]["row"]
+    ok = after_reload == {"name": "pam", "votes": 400} and cache_after == "shared" and after_kill == after_reload
+    record("Tables and cache survive reload and a killed worker", "PASS" if ok else "FAIL",
+           f"after reload {after_reload}, cache {cache_after!r}, after SIGKILL of {victim}: {after_kill}", "swoole-parity")
+    app.start("--workers=2")
 
 
 def stream_upload(app, path, size, field="file", filename="big.bin", extra_parts=b"", timeout=600):
@@ -654,7 +759,9 @@ def wrk(app, seconds, connections=64, path="/_r/hello"):
     errors = re.search(r"Socket errors: connect (\d+), read (\d+), write (\d+), timeout (\d+)", out)
     socket_errors = sum(int(value) for value in errors.groups()) if errors else 0
     non2xx = re.search(r"Non-2xx or 3xx responses: (\d+)", out)
-    return {"requests": requests, "socket_errors": socket_errors,
+    kinds = {name: int(value) for name, value in zip(("connect", "read", "write", "timeout"), errors.groups())
+             if int(value)} if errors else {}
+    return {"requests": requests, "socket_errors": socket_errors, "socket_error_kinds": kinds,
             "non_2xx": int(non2xx.group(1)) if non2xx else 0,
             "rps": float(re.search(r"Requests/sec:\s+([\d.]+)", out).group(1)), "raw": out}
 
@@ -687,7 +794,8 @@ def zero_loss(app):
     ok = lost == 0 and result["requests"] >= 100_000 and reloads[0] >= 5
     record("Zero-loss: wrk -c64 keep-alive, --max-requests=2000 and a reload every 4 s", "PASS" if ok else "FAIL",
            f"{result['requests']} requests in {seconds}s ({result['rps']:.0f} rps), {reloads[0]} reloads, "
-           f"{len(pids)}+ worker pids seen, socket errors={result['socket_errors']}, non-2xx={result['non_2xx']}")
+           f"{len(pids)}+ worker pids seen, socket errors={result['socket_errors']} {result['socket_error_kinds'] or ''}, "
+           f"non-2xx={result['non_2xx']}")
     app.start("--workers=2")
 
 

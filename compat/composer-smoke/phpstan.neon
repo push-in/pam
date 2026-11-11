@@ -1,5 +1,7 @@
 parameters:
     level: 9
+    scanFiles:
+        - native-shared-stubs.php
     excludePaths:
         analyse:
             - ../../runtime/laravel.php

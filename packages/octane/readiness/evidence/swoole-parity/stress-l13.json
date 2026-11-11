@@ -1,0 +1,260 @@
+{
+  "rounds": [
+    {
+      "writers": {
+        "sent": 5120,
+        "failed": 0,
+        "errors": {},
+        "final": 5120,
+        "distinct_results": true,
+        "ok": true
+      },
+      "misses": {
+        "fresh": 1024,
+        "same_key": 1024,
+        "failed": 0,
+        "errors": {},
+        "ok": true
+      },
+      "disconnects": {
+        "dropped": 400,
+        "drained_seconds": 10.7,
+        "concurrently_after": {
+          "pids": [
+            2991372,
+            2991373
+          ],
+          "ms": 55,
+          "worker": 2991370,
+          "dispatcher": "Pam\\Octane\\PamTaskDispatcher"
+        },
+        "hello_failed": 0,
+        "ok": true
+      },
+      "slow": {
+        "slow_clients": 200,
+        "sent": 12177,
+        "failed": 0,
+        "ok": true
+      },
+      "oom": {
+        "http_status": 500,
+        "task": {
+          "failed": "Laravel\\Octane\\Exceptions\\TaskException"
+        },
+        "after_failed": 0,
+        "ok": true
+      },
+      "health": {
+        "hello_failed": 0,
+        "concurrently_ms": 307,
+        "ok": true
+      }
+    },
+    {
+      "writers": {
+        "sent": 5120,
+        "failed": 0,
+        "errors": {},
+        "final": 5120,
+        "distinct_results": true,
+        "ok": true
+      },
+      "misses": {
+        "fresh": 1024,
+        "same_key": 1024,
+        "failed": 0,
+        "errors": {},
+        "ok": true
+      },
+      "disconnects": {
+        "dropped": 400,
+        "drained_seconds": 12.2,
+        "concurrently_after": {
+          "pids": [
+            2993923,
+            2991373
+          ],
+          "ms": 73,
+          "worker": 2993924,
+          "dispatcher": "Pam\\Octane\\PamTaskDispatcher"
+        },
+        "hello_failed": 0,
+        "ok": true
+      },
+      "slow": {
+        "slow_clients": 200,
+        "sent": 12606,
+        "failed": 0,
+        "ok": true
+      },
+      "oom": {
+        "http_status": 500,
+        "task": {
+          "failed": "Laravel\\Octane\\Exceptions\\TaskException"
+        },
+        "after_failed": 0,
+        "ok": true
+      },
+      "health": {
+        "hello_failed": 0,
+        "concurrently_ms": 302,
+        "ok": true
+      }
+    },
+    {
+      "writers": {
+        "sent": 5120,
+        "failed": 0,
+        "errors": {},
+        "final": 5120,
+        "distinct_results": true,
+        "ok": true
+      },
+      "misses": {
+        "fresh": 1024,
+        "same_key": 1024,
+        "failed": 0,
+        "errors": {},
+        "ok": true
+      },
+      "disconnects": {
+        "dropped": 400,
+        "drained_seconds": 10.5,
+        "concurrently_after": {
+          "pids": [
+            2995083,
+            2993923
+          ],
+          "ms": 51,
+          "worker": 2991370,
+          "dispatcher": "Pam\\Octane\\PamTaskDispatcher"
+        },
+        "hello_failed": 0,
+        "ok": true
+      },
+      "slow": {
+        "slow_clients": 200,
+        "sent": 20526,
+        "failed": 0,
+        "ok": true
+      },
+      "oom": {
+        "http_status": 500,
+        "task": {
+          "failed": "Laravel\\Octane\\Exceptions\\TaskException"
+        },
+        "after_failed": 0,
+        "ok": true
+      },
+      "health": {
+        "hello_failed": 0,
+        "concurrently_ms": 307,
+        "ok": true
+      }
+    },
+    {
+      "writers": {
+        "sent": 5120,
+        "failed": 0,
+        "errors": {},
+        "final": 5120,
+        "distinct_results": true,
+        "ok": true
+      },
+      "misses": {
+        "fresh": 1024,
+        "same_key": 1024,
+        "failed": 0,
+        "errors": {},
+        "ok": true
+      },
+      "disconnects": {
+        "dropped": 400,
+        "drained_seconds": 12.1,
+        "concurrently_after": {
+          "pids": [
+            2996467,
+            2995083
+          ],
+          "ms": 65,
+          "worker": 2993924,
+          "dispatcher": "Pam\\Octane\\PamTaskDispatcher"
+        },
+        "hello_failed": 0,
+        "ok": true
+      },
+      "slow": {
+        "slow_clients": 200,
+        "sent": 6006,
+        "failed": 0,
+        "ok": true
+      },
+      "oom": {
+        "http_status": 500,
+        "task": {
+          "failed": "Laravel\\Octane\\Exceptions\\TaskException"
+        },
+        "after_failed": 0,
+        "ok": true
+      },
+      "health": {
+        "hello_failed": 0,
+        "concurrently_ms": 304,
+        "ok": true
+      }
+    },
+    {
+      "writers": {
+        "sent": 5120,
+        "failed": 0,
+        "errors": {},
+        "final": 5120,
+        "distinct_results": true,
+        "ok": true
+      },
+      "misses": {
+        "fresh": 1024,
+        "same_key": 1024,
+        "failed": 0,
+        "errors": {},
+        "ok": true
+      },
+      "disconnects": {
+        "dropped": 400,
+        "drained_seconds": 10.8,
+        "concurrently_after": {
+          "pids": [
+            2996467,
+            2997873
+          ],
+          "ms": 53,
+          "worker": 2991370,
+          "dispatcher": "Pam\\Octane\\PamTaskDispatcher"
+        },
+        "hello_failed": 0,
+        "ok": true
+      },
+      "slow": {
+        "slow_clients": 200,
+        "sent": 18150,
+        "failed": 0,
+        "ok": true
+      },
+      "oom": {
+        "http_status": 500,
+        "task": {
+          "failed": "Laravel\\Octane\\Exceptions\\TaskException"
+        },
+        "after_failed": 0,
+        "ok": true
+      },
+      "health": {
+        "hello_failed": 0,
+        "concurrently_ms": 303,
+        "ok": true
+      }
+    }
+  ],
+  "ok": true
+}

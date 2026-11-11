@@ -32,6 +32,31 @@
   endpoint and `pam cache:purge`, propagated to every worker. HTTP/3 requests
   now use the response cache too, and stale-while-revalidate no longer makes
   the first request after expiry wait for PHP.
+- Shared-memory tables (`Pam\Shared\Table`, `Swoole\Table` semantics): every
+  worker of a cluster sees the same rows. The master hands out `memfd`
+  segments, so rows survive `--max-requests` recycling, reloads and crashed
+  workers and are freed when the master exits; memory is only committed as
+  rows are written. Writes hold one of up to 256 lock stripes; a worker killed
+  while holding one is detected and its interrupted write dropped, never seen
+  torn. `PAM_SHARED_MEMORY_MAX_BYTES` caps the total.
+- `--task-workers N|auto` (`pam start`, `pam up`, `octane:start`): workers that
+  run tasks (`Pam\Shared\Tasks`, Octane's `concurrently()` and task dispatch)
+  on a private, token-authenticated loopback pool, plus one tick per second.
+  Off by default; a new task goes to an idle task worker first.
+- Connection balancing between zygote siblings no longer moves a connection to
+  a worker of another pool.
+- Task requests whose connection is refused or reset during the handshake (a
+  task worker closing its listener on reload or recycling, with
+  `net.ipv4.tcp_migrate_req=0`) are retried for up to 1 s; nothing was sent,
+  so a sibling or the replacement worker takes the task.
+- After a fatal error (such as `memory_limit`) bails out of a request, PAM no
+  longer calls back into the failed engine to cancel the dispatch, which
+  logged a second fatal ("Couldn't execute method ...cancelHttpDispatch").
+- After such a fatal, the worker's PHP shutdown starts from a clean response
+  state, so Laravel/Collision's shutdown handling no longer adds a Whoops
+  "http_response_code()" warning and uncaught fatal to the logs.
+- pamd logs how each master it supervises ended (exit code or signal) and when
+  it schedules a restart.
 
 ## 2.2.14 - 2026-11-10
 

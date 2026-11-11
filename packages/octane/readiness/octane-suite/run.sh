@@ -6,23 +6,38 @@ SUITE_DIR="$WORK_DIR/octane-src"
 OUT="$RESULTS_DIR/octane-suite"
 mkdir -p "$OUT"
 
+# OCTANE_REPO / OCTANE_REF run another Octane revision, for example the fork
+# branch with PAM table support: OCTANE_REPO=../octane-fork OCTANE_REF=2.x-pam-swoole-parity
+OCTANE_REPO="${OCTANE_REPO:-https://github.com/laravel/octane}"
+if [ -n "${OCTANE_REF:-}" ]; then
+    SUITE_DIR="$WORK_DIR/octane-src-$(printf '%s' "$OCTANE_REPO@$OCTANE_REF" | sha1sum | cut -c1-10)"
+fi
 if [ ! -d "$SUITE_DIR/.git" ]; then
-    git clone -q https://github.com/laravel/octane "$SUITE_DIR"
+    git clone -q "$OCTANE_REPO" "$SUITE_DIR"
 fi
 (
     cd "$SUITE_DIR"
     git fetch -q --tags
-    TAG="${OCTANE_TAG:-$(git describe --tags --abbrev=0 "$(git rev-list --tags --max-count=1)")}"
-    git checkout -q -f "$TAG"
+    if [ -n "${OCTANE_REF:-}" ]; then
+        git fetch -q origin "$OCTANE_REF" 2>/dev/null || true
+        TAG="$OCTANE_REF"
+        git checkout -q -f "origin/$OCTANE_REF" 2>/dev/null || git checkout -q -f "$OCTANE_REF"
+    else
+        TAG="${OCTANE_TAG:-$(git describe --tags --abbrev=0 "$(git rev-list --tags --max-count=1)")}"
+        git checkout -q -f "$TAG"
+    fi
     git clean -qfd tests
     echo "$TAG" > "$OUT/octane-tag.txt"
-    log "laravel/octane $TAG"
+    log "laravel/octane $TAG ($OCTANE_REPO)"
     [ -f vendor/autoload.php ] || "$PAM" composer install --no-interaction --no-progress >/dev/null 2>&1
 
     # Minimal adapter: the PAM client, its tests, and one hook in TestCase.
     mkdir -p tests/Pam
     cp "$READINESS_DIR/octane-suite/adapter/PamFakeClient.php" tests/Pam/
-    cp "$READINESS_DIR/octane-suite/adapter/PamClientTest.php" tests/
+    [ -f tests/PamClientTest.php ] || cp "$READINESS_DIR/octane-suite/adapter/PamClientTest.php" tests/
+    # PAM ports of the Swoole table and Octane cache tests (pam-octane tables).
+    cp "$READINESS_DIR/octane-suite/adapter/PamTableTest.php" tests/
+    cp "$READINESS_DIR/octane-suite/adapter/PamOctaneStoreTest.php" tests/
     cp "$READINESS_DIR/octane-suite/adapter/bootstrap.php" tests/Pam/
     python3 - "$PACKAGE_DIR" <<'PY'
 import json, sys

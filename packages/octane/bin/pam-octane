@@ -65,8 +65,8 @@ function pam_octane_parse(array $arguments): array
     $supervisor = [];
     $server = [];
     $serverOptions = ['host', 'port'];
-    $supervisorValues = ['workers', 'max-requests'];
-    $ignored = ['poll', 'log-level', 'server', 'task-workers', 'rpc-host', 'rpc-port', 'rr-config', 'caddyfile', 'admin-port'];
+    $supervisorValues = ['workers', 'max-requests', 'task-workers'];
+    $ignored = ['poll', 'log-level', 'server', 'rpc-host', 'rpc-port', 'rr-config', 'caddyfile', 'admin-port'];
 
     for ($index = 0; $index < count($arguments); $index++) {
         $argument = $arguments[$index];
@@ -106,7 +106,7 @@ function pam_octane_parse(array $arguments): array
             fwrite(STDERR, "pam-octane: --https is FrankenPHP-specific; set PAM_TLS_CERT and PAM_TLS_KEY instead\n");
             exit(64);
         } elseif (in_array($option, $ignored, true)) {
-            if ($value === null && in_array($option, ['log-level', 'server', 'task-workers', 'rpc-host', 'rpc-port', 'rr-config', 'caddyfile', 'admin-port'], true)) {
+            if ($value === null && in_array($option, ['log-level', 'server', 'rpc-host', 'rpc-port', 'rr-config', 'caddyfile', 'admin-port'], true)) {
                 $index++;
             }
         } else {
@@ -134,6 +134,14 @@ switch ($mode) {
             // Octane's --watch runs in the foreground and restarts on change;
             // `pam dev` provides exactly that for the artisan entrypoint.
             exit(pam_octane_run(array_merge([$pam, 'dev', 'artisan', 'pam:octane'], $parsed['server'])));
+        }
+
+        // Task workers (Octane::concurrently(), task dispatch, ticks) are
+        // opt-in; PAM_OCTANE_TASK_WORKERS sets a default for --task-workers.
+        $taskWorkers = getenv('PAM_OCTANE_TASK_WORKERS');
+        if (is_string($taskWorkers) && $taskWorkers !== '' && !in_array('--task-workers', $parsed['supervisor'], true)) {
+            $parsed['supervisor'][] = '--task-workers';
+            $parsed['supervisor'][] = $taskWorkers;
         }
 
         // A stopped record from a previous run is replaced; an online one is

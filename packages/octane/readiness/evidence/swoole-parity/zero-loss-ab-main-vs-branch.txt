@@ -1,0 +1,10 @@
+main 1 310272 requests in 40s (7753 rps), 9 reloads, 8+ worker pids seen, socket errors=0 , non-2xx=0
+new 1 326895 requests in 40s (8167 rps), 9 reloads, 8+ worker pids seen, socket errors=0 , non-2xx=0
+main 2 379604 requests in 40s (9486 rps), 9 reloads, 8+ worker pids seen, socket errors=1 {'write': 1}, non-2xx=0
+new 2 386312 requests in 40s (9654 rps), 9 reloads, 9+ worker pids seen, socket errors=0 , non-2xx=0
+main 3 373699 requests in 40s (9336 rps), 9 reloads, 8+ worker pids seen, socket errors=0 , non-2xx=0
+new 3 238640 requests in 40s (5959 rps), 9 reloads, 8+ worker pids seen, socket errors=0 , non-2xx=0
+main 4 106069 requests in 40s (2645 rps), 8 reloads, 8+ worker pids seen, socket errors=0 , non-2xx=0
+new 4 156656 requests in 40s (3908 rps), 8 reloads, 9+ worker pids seen, socket errors=0 , non-2xx=0
+main 5 231550 requests in 40s (5784 rps), 9 reloads, 9+ worker pids seen, socket errors=0 , non-2xx=0
+new 5 222379 requests in 40s (5549 rps), 9 reloads, 8+ worker pids seen, socket errors=0 , non-2xx=0

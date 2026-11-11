@@ -26,6 +26,7 @@ const WS_BOOTSTRAP: &str = include_str!("../runtime/ws.php");
 const OBSERVABILITY_BOOTSTRAP: &str = include_str!("../runtime/observability.php");
 const SCOPE_BOOTSTRAP: &str = include_str!("../runtime/scope.php");
 const NATIVE_BOOTSTRAP: &str = include_str!("../runtime/native.php");
+const SHARED_BOOTSTRAP: &str = include_str!("../runtime/shared.php");
 const DIAGNOSTICS_BOOTSTRAP: &str = include_str!("../runtime/diagnostics.php");
 const LARAVEL_BOOTSTRAP: &str = include_str!("../runtime/laravel.php");
 const EX_SOFTWARE: c_int = 70;
@@ -570,6 +571,7 @@ impl PhpEngine {
 
         // SAFETY: Argument buffers are writable and NUL-terminated, and remain owned
         // by PhpRuntime until shutdown.
+        crate::native_shared::register();
         let status = unsafe { pam_php_init(argc, pointers.as_mut_ptr()) };
 
         if status != 0 {
@@ -646,6 +648,9 @@ impl PhpEngine {
             })
             .and_then(|()| evaluate_runtime_source(NATIVE_BOOTSTRAP, b"Pam Native API bootstrap\0"))
             .and_then(|()| {
+                evaluate_runtime_source(SHARED_BOOTSTRAP, b"Pam shared tables bootstrap\0")
+            })
+            .and_then(|()| {
                 evaluate_runtime_source(DIAGNOSTICS_BOOTSTRAP, b"Pam diagnostics bootstrap\0")
             })
             .and_then(|()| evaluate_runtime_source(BOOTSTRAP, b"Pam runtime bootstrap\0"))
@@ -692,6 +697,9 @@ impl Drop for PhpRuntime {
             // SAFETY: PhpRuntime uniquely owns the active PHP lifecycle.
             unsafe { pam_php_shutdown() };
         }
+        // Tasks dispatched to task workers (also from shutdown functions)
+        // are delivered before the worker exits; instant when there are none.
+        crate::task_workers::flush(std::time::Duration::from_secs(5));
         ACTIVE.store(false, Ordering::SeqCst);
     }
 }
@@ -754,6 +762,12 @@ pub fn resume_http(
 
 pub fn cancel_http(request_id: &str) -> Result<(), String> {
     ensure_owner()?;
+    if engine_failed() {
+        // A fatal error bailed out of the dispatch: there is nothing left to
+        // unwind, and calling into the engine again raises a second fatal
+        // ("Couldn't execute method"). The worker is being recycled.
+        return Ok(());
+    }
     // SAFETY: The request ID remains valid for this synchronous owner-thread call.
     let status =
         unsafe { pam_php_cancel_http(request_id.as_ptr().cast::<c_char>(), request_id.len()) };

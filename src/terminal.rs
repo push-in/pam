@@ -413,6 +413,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("--workers N", "Worker process count"),
                 ("--max-requests N", "Recycle a worker after N requests"),
                 (
+                    "--task-workers N|auto",
+                    "Background workers for tasks and ticks (default 0)",
+                ),
+                (
                     "--php-extension NAME",
                     "Repeatable isolated PHP extension allowlist",
                 ),
@@ -449,6 +453,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[
                 ("--workers N", "Number of isolated Laravel workers"),
                 ("--max-requests N", "Recycle workers after N requests"),
+                (
+                    "--task-workers N|auto",
+                    "Workers for Octane::concurrently(), tasks and ticks",
+                ),
                 (
                     "--php-extension NAME",
                     "Repeatable isolated PHP extension allowlist",

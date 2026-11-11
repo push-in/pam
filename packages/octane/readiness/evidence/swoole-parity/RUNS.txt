@@ -1,0 +1,200 @@
+Swoole-parity battery (shared tables, task workers, ticks). Release build
+(cargo build --release, Ubuntu 22.04 builder, PHP 8.5.12), Intel Core Ultra 9
+185H, 30 GiB, Linux 7.0.11, net.ipv4.tcp_migrate_req=0 unless noted.
+App: readiness Laravel 12 app (lib.sh provision_app), workers=4, task-workers=2.
+
+1. Unit tests: cargo test --release --bins
+   136 passed; 2 failed (editor::tests, need the pam-native/editors checkout
+   checkout that CI provides and this worktree lacks; unrelated).
+   cargo fmt --check: clean. cargo clippy --release --all-targets -D warnings: clean.
+   pam-octane: phpunit 34/34 under PAM (143 assertions), 34 (5 skipped) under
+   php-cli; phpstan: no errors.
+
+2. Fuzz: cargo +nightly fuzz run shared_table <corpus> -- -max_total_time=1200
+   5,884,593 runs in 1201 s, 0 crashes, RSS flat at 580 MB (fuzz-shared-table.txt).
+
+3. Chaos soak #1 (before fixes), 30 min:
+   parity_soak.py --seconds 1800 --reload-every 60 --chaos --kill-every 15 --max-requests 2000
+   5,067,909 requests, 29 reloads, 4 failed, increments exact, 0 table repairs.
+   Root causes:
+   - 2 x "cannot reach the task workers: Connection reset by peer": a task
+     worker closing its listener on reload resets queued handshakes
+     (tcp_migrate_req=0). Fixed in a9a050d4 (connect retry, nothing was sent).
+   - 2 wrk socket errors on HTTP connections during reloads: the documented
+     kernel behaviour with tcp_migrate_req=0 (READINESS.md, recycling section).
+   - Chaos killed nothing: the tool classified workers by command line, which
+     they inherit from the zygote. Fixed in 39362075.
+   (soak-chaos-30min-before-fixes.json)
+
+4. Leak run, 15 min, no recycling (--max-requests 100000000):
+   4,377,589 requests, 0 failed, increments exact.
+   HTTP workers flat (RSS 84-90 MB from minute 2 to 15).
+   Task workers grow ~0.27 KB per task (75 -> 166 MB over ~168k tasks each):
+   reproduced in plain php-cli 8.5 with laravel/serializable-closure alone
+   (unserialize + call, 60k iterations: +16 MB), i.e. PHP keeps compiled
+   closure code; not PAM. Bounded by --max-requests, which task workers honour
+   (soak #1: all workers flat with --max-requests 2000). Documented in README.
+   (soak-leak-15min-no-recycling.json)
+
+5. laravel/octane suite (release build, ran alongside soak #2):
+   READINESS_WORK_DIR=... PAM=pam-run bash octane-suite/run.sh
+   - Upstream v2.24.0 (feature off: no PAM tables in Octane): 260 tests,
+     217 pass, 0 fail, 43 skipped (Swoole-only); through PamClient the same;
+     112 exchanges cross-checked, 0 mismatches.
+   - OCTANE_REPO=octane-fork OCTANE_REF=2.x-pam-swoole-parity (feature on):
+     273 tests, 265 pass, 0 fail, 8 skipped; of the 43 Swoole-only tests 35
+     now run and pass on PAM; same through PamClient; 112 exchanges, 0 mismatches.
+
+6. Concurrency and chaos stress (Laravel 13 app, 4 workers, 2 task workers):
+   parity_stress.py --port 8180 --rounds 5          (stress-l13.json, all ok)
+   Per round: 256 clients x 20 increments on one table row -> exactly 5120,
+   every result distinct; 1024 concurrent cache misses on fresh keys and 1024
+   on one key, 0 failed; 400 clients hanging up while Octane::concurrently()
+   waits -> backlog drained in 10-11 s, 0 failed hello during it;
+   200 slowloris clients for 20 s while 17-21k requests ran, 0 failed;
+   memory_limit fatal in an HTTP worker (500) and in a task worker
+   (TaskException), 20/20 concurrently() right after; health check ok.
+   Laravel log: only the 20 intended memory_limit fatals. A second run of
+   10 rounds (stress-l13-10-rounds.json): all ok, master never restarted.
+   Findings on the way, root-caused:
+   - First design (500 drops of 2 x 300 ms tasks) timed out a probe: 300
+     task-seconds of abandoned work on 2 task workers. Requests whose client
+     left keep running, as on Swoole and PHP-FPM; the scenario now measures
+     the drain.
+   - After a memory_limit fatal PAM called cancelHttpDispatch into the
+     bailed-out engine: a second fatal "Couldn't execute method
+     Pam\Internal\Runtime::cancelHttpDispatch" in the logs (4 per round).
+     Fixed: no cancellation into a failed engine (the worker is recycled).
+   - One run (before the fix, stress-l13-before-cancel-fix.json) had 29
+     client-side failures among 2048 cache misses right after the previous
+     round's OOM recycling; not reproduced in 5 rounds on the fixed build.
+     With APP_DEBUG=true, Whoops still prints "http_response_code() after
+     header()" when the recycled worker exits after a fatal: Laravel's
+     shutdown handler re-renders the (already answered and logged) fatal;
+     not emitted with APP_DEBUG=false.
+
+7. Chaos soak #2 (after the connect-retry and tool fixes), 30 min, release build:
+   parity_soak.py --app l12 --port 8160 --seconds 1800 --reload-every 60 \
+     --chaos --kill-every 15 --max-requests 2000        (soak-chaos-30min.json)
+   4,945,448 requests; 29 reloads; SIGKILL of 70 HTTP and 46 task workers;
+   increments exact (1,553,486 answered, 1,553,506 applied: the difference is
+   requests in flight at the deadline or cut by a kill; 20,000/20,000 in the
+   exact run afterwards); 0 table repairs needed; PSS flat (HTTP workers
+   88-93 MB total, task workers 25-44 MB, master 4-5 MB from minute 5 to 30).
+   Failures: 1,008 (0.02 %), all caused by the SIGKILLs: 944 socket errors
+   on connections of killed HTTP workers (in-flight plus their accept queue
+   with tcp_migrate_req=0), 64 concurrently() calls whose task worker was
+   killed mid-task (Laravel log: 64 "task request failed", 0 "cannot reach").
+   No other error in the Laravel or server logs.
+
+8. Feature matrix, release build (pam-rt3), 39 checks per version
+   (features off: no --task-workers checks; on: table, shared cache,
+   concurrently/dispatch on task workers, ticks, intervals, survival):
+   - READINESS_MIGRATE=1 run-local.sh matrix (tcp_migrate_req=1):
+     Laravel 12: 39/39 PASS. Laravel 13: 39/39 PASS.   (matrix/*-migrate.json)
+   - Kernel default (tcp_migrate_req=0), run next to the reload soak:
+     Laravel 13: 38/39, Laravel 12: 37/39. Failures: --max-requests=500 with a
+     new connection per request, 1 of 36,089 and 2 of 59,523 reset (the
+     documented kernel-default limitation, 0 with tcp_migrate_req=1), and in
+     Laravel 12 one wrk socket error in the 40 s keep-alive zero-loss run with
+     reloads every 4 s (see 9).
+   - A first Laravel 12 run is discarded: it shared the app name with the soak
+     running on the same directory, so the soak's reloads hit the matrix
+     server (and vice versa). The soak was restarted on a copy (soak12).
+
+9. Reload and recycling soak (no kills), 30 min, release build with all fixes:
+   parity_soak.py --app soak12 --port 8160 --seconds 1800 --reload-every 60 \
+     --max-requests 2000                            (soak-reload-recycle-30min.json)
+   7,655,704 requests; 29 reloads plus --max-requests recycling of every
+   HTTP and task worker; 448,320 concurrently() calls on task workers with 0
+   failures (the connect retry covers the pool reloads); increments exact;
+   memory flat. 1 failure: a wrk write error on a keep-alive connection
+   (cache-miss endpoint) -- an idle keep-alive connection closed by a draining
+   worker at the instant the client reused it. Same class as the single
+   socket error in the matrix zero-loss run (8).
+
+10. Keep-alive socket error during reloads: main vs this branch.
+    origin/main (83dfb5fb) built with the same builder into the same runtime
+    layout; matrix.py --only zero_loss (wrk -c64 keep-alive 40 s,
+    --max-requests=2000, reload every 4 s), alternating, 5 runs each:
+    main: 1 run with 1 socket error (write); branch: 0 errors in 5 runs
+    (zero-loss-ab-main-vs-branch.txt). The rare write error predates this
+    branch: a keep-alive connection closed by a draining worker in the same
+    instant the client reuses it. Not a regression; tracked separately.
+    Throughput in the same runs overlaps (other jobs on the machine).
+
+11. Ecosystem app (Laravel 12 + Livewire 3, Inertia 2/Vue, Filament 4,
+    Sanctum, Horizon 5 + Redis, Reverb 1, scheduler, mail, storage; headless
+    Chrome on the GPU), release build:
+    ECO_SERVERS=pam ecosystem/run.sh                       -> 17/17 PASS (off)
+    ECO_SERVERS=pam ECO_PAM_FLAGS=--task-workers=2 ...     -> 17/17 PASS (on)
+    Laravel log: no errors. (ecosystem/off.md, ecosystem/on.md)
+
+12. Benchmark A/B (no regression check), readiness Laravel 12 app, 8 workers
+    pinned to CPUs 0-7, wrk -t4 -c64 20 s (+5 s warm-up) from CPUs 8-11,
+    2 alternating rounds (other jobs were running on the machine):
+    ROUNDS=2 bench/ab-local.sh l12 main=<origin/main build> \
+      branch-off=<branch> "branch-on=<branch>:--task-workers=2"
+    mean req/s       main     branch-off        branch-on (2 task workers)
+    hello           11512     11424 (-0.8 %)    11133 (-3.3 %)
+    json            11528     11639 (+1.0 %)    10904 (-5.4 %)
+    db               9482      9600 (+1.3 %)     9438 (-0.5 %)
+    view             9985      9911 (-0.7 %)     9789 (-2.0 %)
+    0 errors in every run. With the feature off the branch is within noise
+    of main (round-to-round spread 5-10 %). With task workers on, two more
+    PHP processes and the 1 s tick share the same 8 pinned CPUs.
+    (bench-ab-local.tsv)
+
+13. Final checks on the PR head (release profile):
+    cargo fmt --check: clean; cargo clippy --release --all-targets -D warnings:
+    clean; cargo test --release --bins: 137 passed, 2 failed (the two
+    editor::tests that need the pam-native/editors checkout CI provides).
+    pam-octane: phpunit 34/34 under PAM, 34 (5 skipped) under php-cli;
+    phpstan: no errors.
+
+Open observation: in the first stress run (old build) the Laravel 13 server's
+master disappeared once without any log line and pamd restarted it within
+1 s. No crash, OOM-kill or signal could be attributed; it did not recur in
+15 later stress rounds with a liveness watcher on the master, nor in the
+soaks. Reported for follow-up rather than explained away.
+
+14. Follow-up: Whoops noise after a memory_limit fatal (fixed, df168dbe).
+    Cause: the fatal cuts the request before PAM resets the SAPI response,
+    leaving a raw HTTP/ status line. At worker exit Laravel's shutdown
+    handler re-handles the fatal (and logs it, which is wanted), Collision
+    then registers Whoops, and Whoops' http_response_code(500) became a PHP
+    8.5 warning and an "Uncaught Whoops\Exception\ErrorException" fatal.
+    PAM now resets the response state before PHP shutdown. Check: /_r/oom and
+    a task-worker OOM, then the server error log: 0 "Uncaught", 0 "Couldn't
+    execute"; the memory_limit fatals are still logged once each.
+
+15. Follow-up: the master that disappeared without a log line.
+    What was added: pamd is now the child subreaper of its masters and logs
+    how each one ends (11e7c78f), e.g. after kill -9 of a master:
+      pamd: master 3225344 of "octane-l13-a40f165c" killed by signal 9 (Killed)
+      pamd: "octane-l13-a40f165c" is not running any more; scheduling a restart
+    Core dumps: core_pattern pipes to apport and cannot be changed without
+    root, so the run used ulimit -c unlimited plus a master under gdb.
+    Hunt: tools/master_hunt.sh WORK pam-final 7200 (release build of the PR
+    head), two servers, 4 HTTP + 2 task workers each, both under continuous
+    parity_stress.py (parallel table writers, 2,048 cache misses, 400 clients
+    hanging up during concurrently(), 200 slowloris clients, HTTP and task
+    worker memory_limit fatals) and a reload every 60 s:
+      A  Laravel 13 via pamd (exit status logged by pamd)
+      B  Laravel 12, master in the foreground under gdb -batch (backtrace on
+         a caught signal, exit status otherwise)
+    Result after 2 h (20:41-22:42): 430 stress rounds (215 per server),
+    about 120 reloads per server (worker generation 120 reached), 864 intended
+    memory_limit fatals per app. Neither master changed or died: pamd logged
+    no master exit, gdb reported only the final "exited normally" after the
+    harness's SIGTERM. Logs: 0 "Uncaught", 0 "Couldn't execute"; the Laravel
+    logs hold only the intended memory_limit fatals.
+    Stress failures: 3 of 430 rounds, 1 request each out of ~45k in the
+    slowloris phase, whose probes open a new connection per request while a
+    reload runs every 60 s: the kernel-default handshake reset on a closing
+    listener (tcp_migrate_req=0), the same class as the matrix's
+    new-connection check; being fixed with the balancer work.
+    Not reproduced in 2 h. The original disappearance happened on the old
+    build, whose pamd discarded the wait status of its masters (it reaped
+    them with a null status); with pamd now logging every master's end, a
+    recurrence will name the signal or exit code. (hunt-events.log)

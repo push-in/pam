@@ -45,6 +45,29 @@ struct Slot {
     pid: AtomicU32,
     accepting: AtomicU32,
     connections: AtomicU32,
+    /// Workers only hand connections to siblings of the same pool: a task
+    /// worker's connection must never reach an HTTP worker and vice versa.
+    group: AtomicU32,
+}
+
+/// The balancing group of this worker: a hash of its pool name (0 for the
+/// default pool).
+fn group_from_environment() -> u32 {
+    std::env::var("PAM_WORKER_POOL").map_or(0, |pool| {
+        pool.bytes().fold(0x811c_9dc5_u32, |hash, byte| {
+            (hash ^ u32::from(byte)).wrapping_mul(0x0100_0193)
+        }) | 1
+    })
+}
+
+/// Task workers run one task at a time, so a second task goes to any idle
+/// sibling; HTTP workers tolerate a small imbalance (keep-alive connections).
+fn threshold_from_environment() -> u32 {
+    if std::env::var_os(crate::task_workers::ROLE_ENV).is_some() {
+        1
+    } else {
+        HANDOFF_THRESHOLD
+    }
 }
 
 static TABLE: AtomicPtr<Slot> = AtomicPtr::new(std::ptr::null_mut());
@@ -80,6 +103,8 @@ fn shared_table() -> Option<&'static [Slot]> {
 
 pub struct Balancer {
     slot: usize,
+    group: u32,
+    threshold: u32,
     slots: &'static [Slot],
     directory: PathBuf,
     generation: u64,
@@ -103,7 +128,8 @@ impl Balancer {
             .map(PathBuf::from)?
             .parent()?
             .to_path_buf();
-        let slot = claim_slot(slots)?;
+        let group = group_from_environment();
+        let slot = claim_slot(slots, group)?;
         let channel = (|| {
             let path = socket_path(&directory, generation, slot);
             let _ = std::fs::remove_file(&path);
@@ -125,6 +151,8 @@ impl Balancer {
         Some((
             Arc::new(Self {
                 slot,
+                group,
+                threshold: threshold_from_environment(),
                 slots,
                 directory,
                 generation,
@@ -144,7 +172,7 @@ impl Balancer {
         // a sibling that keeps serving.
         let draining = self.slots[self.slot].accepting.load(Ordering::Acquire) == 0;
         if let Some((sibling, pid, load)) = self.least_loaded_sibling()
-            && (draining || own >= load.saturating_add(HANDOFF_THRESHOLD))
+            && (draining || own >= load.saturating_add(self.threshold))
         {
             if process_alive(pid) {
                 // Count the connection before it is in flight so concurrent
@@ -200,7 +228,10 @@ impl Balancer {
     fn least_loaded_sibling(&self) -> Option<(usize, u32, u32)> {
         let mut best: Option<(usize, u32, u32)> = None;
         for (index, slot) in self.slots.iter().enumerate().skip(1) {
-            if index == self.slot || slot.accepting.load(Ordering::Acquire) == 0 {
+            if index == self.slot
+                || slot.accepting.load(Ordering::Acquire) == 0
+                || slot.group.load(Ordering::Acquire) != self.group
+            {
                 continue;
             }
             let pid = slot.pid.load(Ordering::Acquire);
@@ -231,7 +262,7 @@ impl Drop for Balancer {
 }
 
 /// Claims a slot that is free or whose owner process no longer exists.
-fn claim_slot(slots: &'static [Slot]) -> Option<usize> {
+fn claim_slot(slots: &'static [Slot], group: u32) -> Option<usize> {
     let pid = std::process::id();
     for (index, slot) in slots.iter().enumerate().skip(1) {
         let owner = slot.pid.load(Ordering::Acquire);
@@ -245,6 +276,7 @@ fn claim_slot(slots: &'static [Slot]) -> Option<usize> {
         {
             slot.accepting.store(0, Ordering::Release);
             slot.connections.store(0, Ordering::Release);
+            slot.group.store(group, Ordering::Release);
             return Some(index);
         }
     }
@@ -603,7 +635,31 @@ mod tests {
             pid: AtomicU32::new(1),
             accepting: AtomicU32::new(1),
             connections: AtomicU32::new(connections),
+            group: AtomicU32::new(0),
         }
+    }
+
+    #[test]
+    fn siblings_of_another_pool_never_receive_connections() {
+        let slots: &'static [Slot] =
+            Box::leak(vec![slot(0), slot(3), slot(0), slot(1)].into_boxed_slice());
+        slots[2].group.store(7, Ordering::Relaxed);
+        let balancer = Balancer {
+            slot: 1,
+            group: 0,
+            threshold: HANDOFF_THRESHOLD,
+            slots,
+            directory: std::env::temp_dir(),
+            generation: 1,
+            sender: UnixDatagram::unbound().unwrap(),
+        };
+        // Slot 2 is idle but belongs to another pool (task workers).
+        assert_eq!(
+            balancer.least_loaded_sibling().map(|(index, _, _)| index),
+            Some(3)
+        );
+        slots[3].group.store(7, Ordering::Relaxed);
+        assert_eq!(balancer.least_loaded_sibling(), None);
     }
 
     #[test]
@@ -659,6 +715,8 @@ mod tests {
         let _receiver = UnixDatagram::bind(&path).unwrap();
         let balancer = Balancer {
             slot: 2,
+            group: 0,
+            threshold: HANDOFF_THRESHOLD,
             slots,
             directory: directory.clone(),
             generation: 7,
@@ -688,6 +746,8 @@ mod tests {
         inbox.set_nonblocking(true).unwrap();
         let balancer = Arc::new(Balancer {
             slot: 1,
+            group: 0,
+            threshold: HANDOFF_THRESHOLD,
             slots,
             directory: directory.clone(),
             generation: 3,

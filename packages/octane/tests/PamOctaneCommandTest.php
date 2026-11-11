@@ -63,11 +63,30 @@ final class PamOctaneCommandTest extends TestCase
         self::assertSame([['dev', 'artisan', 'pam:octane', '--port=8080']], $calls);
     }
 
+    public function testTaskWorkersAreForwardedToTheSupervisor(): void
+    {
+        $calls = $this->invoke(['start', '--task-workers=2']);
+        self::assertSame(
+            ['up', 'artisan', '--name', $calls[0][1], '--task-workers', '2', '--', 'pam:octane'],
+            $calls[1],
+        );
+
+        $calls = $this->invoke(['start'], ['PAM_OCTANE_TASK_WORKERS' => 'auto']);
+        self::assertSame(['--task-workers', 'auto'], array_slice($calls[1], 4, 2));
+
+        $calls = $this->invoke(['start', '--task-workers', '3'], ['PAM_OCTANE_TASK_WORKERS' => '9']);
+        self::assertSame(['--task-workers', '3', '--'], array_slice($calls[1], 4, 3));
+
+        // Control commands never receive the start-only default.
+        self::assertSame([['stop', $calls[0][1]]], $this->invoke(['stop'], ['PAM_OCTANE_TASK_WORKERS' => '2']));
+    }
+
     /**
      * @param list<string> $arguments
+     * @param array<string, string> $environment
      * @return list<list<string>>
      */
-    private function invoke(array $arguments): array
+    private function invoke(array $arguments, array $environment = []): array
     {
         @unlink($this->log);
         $fake = $this->project.'/fake-pam';
@@ -79,7 +98,10 @@ final class PamOctaneCommandTest extends TestCase
             [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $this->project,
-            ['PAM_BINARY' => $fake, 'PATH' => (string) getenv('PATH')],
+            // The inherited environment keeps PHPRC, PAM_HOME and the
+            // extension directory that PAM's launcher sets when the suite
+            // itself runs inside PAM.
+            ['PAM_BINARY' => $fake] + $environment + getenv(),
         );
         self::assertIsResource($process);
         fclose($pipes[0]);

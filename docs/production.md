@@ -248,6 +248,30 @@ que chegam durante essa inicialização. Um corte estrito deixaria o slot vazio
 nesse intervalo e, com um único worker, recusaria conexões. Calibre o valor
 final a partir do RSS observado no soak test.
 
+### Task workers e tabelas compartilhadas
+
+`--task-workers N` (ou `auto`, um por CPU) inicia, além dos workers HTTP, N
+workers que não recebem tráfego público: eles executam tarefas
+(`Octane::concurrently()`, dispatch de tasks) e recebem um tick por segundo
+(`Octane::tick()`, intervalos do cache `octane`). Escutam apenas num endereço de
+loopback privado, autenticado por um token aleatório por servidor, e são
+reciclados, recarregados e reiniciados como os workers HTTP. Uma nova tarefa vai
+primeiro para um task worker ocioso. O padrão é 0: sem a opção não existe
+processo, timer nem conexão extra.
+
+Tabelas compartilhadas (`Pam\Shared\Table`, as tabelas e o cache do Octane)
+ficam em segmentos `memfd` que o master entrega aos workers via `SCM_RIGHTS`,
+criados na primeira vez que um worker abre a tabela. O conteúdo sobrevive a
+`--max-requests`, `SIGHUP` e workers mortos, e o kernel libera tudo quando o
+master termina, inclusive após `SIGKILL`. Páginas só são consumidas conforme
+linhas são escritas. `PAM_SHARED_MEMORY_MAX_BYTES` limita o total reservado
+(padrão: metade da RAM).
+
+Um worker morto no meio de uma escrita (`kill -9`, OOM) nunca deixa uma linha
+corrompida visível: o próximo worker que precisa daquele trecho da tabela assume
+o lock do processo morto, descarta a escrita interrompida (como uma entrada
+expulsa do cache) e recupera as linhas perdidas quando a tabela enche.
+
 ### Reciclagem sem perda (make-before-break)
 
 `--max-requests` e `SIGHUP` nunca reduzem a capacidade nem derrubam requisições:

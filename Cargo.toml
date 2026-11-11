@@ -7,6 +7,10 @@ description = "Pam — PHP, Always in Memory: a persistent PHP runtime powered b
 license = "Apache-2.0"
 build = "build.rs"
 
+[lints.rust]
+# cargo-fuzz compiles src/shared_table.rs into the fuzz targets with --cfg fuzzing.
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(fuzzing)"] }
+
 [dependencies]
 axum = { version = "0.8.9", default-features = false, features = ["http1", "http2", "tokio", "ws"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }

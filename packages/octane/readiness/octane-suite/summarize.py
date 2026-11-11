@@ -7,6 +7,7 @@ import xml.etree.ElementTree as ET
 
 out = sys.argv[1]
 SWOOLE_HINTS = ("Swoole", "swoole", "Table", "TaskDispatcher", "Tick", "OctaneStore")
+SWOOLE_ONLY = ("TableTest::", "OctaneStoreTest::", "SwooleRequestTest::")
 
 
 def cases(path):
@@ -40,7 +41,15 @@ def count(column, status):
     return sum(1 for row in rows if row[column] == status)
 
 
+# The tests Octane skips without the Swoole extension, and how many run on PAM.
+swoole_only = [row for row in rows if row["test"].startswith(SWOOLE_ONLY)]
+
+
 summary = {
+    "swoole_only_tests": {
+        "total": len(swoole_only),
+        "upstream": {s: sum(1 for row in swoole_only if row["upstream"] == s) for s in ("PASS", "FAIL", "SKIP")},
+    },
     "octane_tag": open(os.path.join(out, "octane-tag.txt")).read().strip() if os.path.exists(os.path.join(out, "octane-tag.txt")) else None,
     "tests": len(rows),
     "upstream": {s: count("upstream", s) for s in ("PASS", "FAIL", "SKIP")},

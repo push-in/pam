@@ -6,9 +6,12 @@ namespace Pam\Octane;
 
 use Illuminate\Routing\Router;
 use Illuminate\Support\ServiceProvider;
+use Laravel\Octane\Contracts\DispatchesTasks;
 use Pam\Octane\Cache\PageCache;
 use Pam\Octane\Commands\StartPamOctaneCommand;
 use Pam\Octane\Http\Middleware\CacheResponse;
+use Pam\Octane\Tables\PamTables;
+use Pam\Shared\Tasks;
 
 final class PamOctaneServiceProvider extends ServiceProvider
 {
@@ -22,10 +25,47 @@ final class PamOctaneServiceProvider extends ServiceProvider
 
             return new PageCache(is_string($log) && $log !== '' ? $log : null);
         });
+        $this->registerSharedFeatures();
         $this->app->singleton(PamServer::class, fn (): PamServer => new PamServer(
             basePath: $this->app->basePath(),
             client: $this->app->make(PamClient::class),
         ));
+    }
+
+    /**
+     * Inside a PAM Octane worker: Octane's tables live in shared memory (one
+     * copy for every worker, like on Swoole) and Octane::concurrently() runs
+     * on the task workers. The `octane` cache store moves to a shared table
+     * when task workers run (ticks and intervals need one clock for every
+     * worker) or when `pam-octane.shared_cache` is true; otherwise it stays
+     * the per-worker array store of earlier releases. Tables are attached
+     * lazily, so configured but unused tables cost nothing.
+     */
+    private function registerSharedFeatures(): void
+    {
+        if (!PamServer::serving() || !PamTables::available()) {
+            return;
+        }
+        $config = $this->app->make('config');
+        if (!$config instanceof \Illuminate\Contracts\Config\Repository) {
+            return;
+        }
+
+        $cache = $config->get('octane.cache');
+        $shared = $config->get('pam-octane.shared_cache');
+        $shared = is_bool($shared) ? $shared : class_exists(Tasks::class, false) && (Tasks::available() || Tasks::isTaskWorker());
+        if ($shared && is_array($cache) && !$this->app->bound('octane.cacheTable')) {
+            $this->app->instance('octane.cacheTable', PamTables::cache($cache));
+        }
+
+        $tables = $config->get('octane.tables', []);
+        $this->app->instance(PamOctane::TABLES, PamTables::fromConfig(is_array($tables) ? $tables : []));
+        // Read by Octane::table() on Octane versions that support PAM tables.
+        $this->app->alias(PamOctane::TABLES, 'octane.tables');
+
+        if (class_exists(Tasks::class, false) && Tasks::available()) {
+            $this->app->bind(DispatchesTasks::class, PamTaskDispatcher::class);
+        }
     }
 
     public function boot(): void

@@ -6,6 +6,7 @@ readiness gate, crash recovery, worker recycling, and generational reload.
 
 ```bash
 pam up --name billing --workers 8
+pam up --name billing --workers 8 --task-workers 2   # Octane tasks and ticks
 pam up --name critical --restart-delay-ms 250 --restart-backoff-max-ms 15000 \
   --max-unstable-restarts 10 --min-uptime-ms 30000
 pam up --name production --env-file .env.production

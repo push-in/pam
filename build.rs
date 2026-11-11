@@ -13,6 +13,9 @@ fn main() {
     println!("cargo:rerun-if-changed=native/pam_php.c");
     println!("cargo:rerun-if-changed=native/resolver_shim.c");
     println!("cargo:rerun-if-changed=native/pam.h");
+    println!("cargo:rerun-if-changed=native/pam_shared.h");
+    println!("cargo:rerun-if-changed=native/pam_shared_php.inc");
+    println!("cargo:rerun-if-changed=runtime/shared.php");
     println!("cargo:rerun-if-changed=runtime/bootstrap.php");
     println!("cargo:rerun-if-changed=runtime/redis.php");
     println!("cargo:rerun-if-changed=runtime/database.php");

@@ -40,6 +40,7 @@ mod ingress;
 #[cfg(target_os = "linux")]
 mod listener_registry;
 mod manager_dashboard;
+mod native_shared;
 mod otlp;
 mod page_cache;
 mod php;
@@ -52,8 +53,12 @@ mod quality;
 mod resource_monitor;
 mod self_update;
 mod server;
+#[cfg(target_os = "linux")]
+mod shared_memory_server;
+mod shared_table;
 mod ship;
 mod support;
+mod task_workers;
 mod terminal;
 mod timeline;
 mod traffic;
