@@ -14,12 +14,12 @@ while (($# > 0)); do
             runtime_selector=${2:?--php requires 8.4, 8.5, or an exact runtime id}
             shift 2
             ;;
-        all|ios|device|simulator|macos)
+        all|ios|device|simulator|macos|tvos|tvos-device|tvos-simulator)
             slice_selector=$1
             shift
             ;;
         *)
-            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|ios|device|simulator|macos]" >&2
+            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|ios|device|simulator|macos|tvos|tvos-device|tvos-simulator]" >&2
             exit 64
             ;;
     esac
@@ -65,7 +65,7 @@ ios_minimum=${runtime_values_array[5]}
 php_extensions=${runtime_values_array[6]}
 
 build_root=$(mktemp -d "${TMPDIR:-/tmp}/pam-php-ios.XXXXXX")
-trap 'rm -rf -- "${build_root}"' EXIT
+trap '[[ -n ${PAM_KEEP_BUILD:-} ]] || rm -rf -- "${build_root}"' EXIT
 archive=${build_root}/php-${php_version}.tar.xz
 curl --fail --location --retry 3 "${php_url}" --output "${archive}"
 echo "${php_sha256}  ${archive}" | shasum -a 256 --check
@@ -125,6 +125,30 @@ if [[ ${php_version} == 8.4.* ]]; then
     opcache_enabled=no
 fi
 
+# tvOS runs no other process: fork, exec and posix_spawn are not even declared
+# as available. PHP keeps compiling its process functions; on tvOS they fail
+# with ENOTSUP, like a sandbox refusing them.
+write_tvos_compat_header() {
+    local header=${build_root}/pam-tvos-compat.h
+    {
+        # Assembly sources (Zend fibers) get the -include too.
+        printf '#pragma once\n#ifndef __ASSEMBLER__\n#include <errno.h>\n#include <signal.h>\n#include <spawn.h>\n#include <unistd.h>\n'
+        printf 'static inline int pam_tvos_unavailable(void) { errno = ENOTSUP; return -1; }\n'
+        for function in fork vfork execl execle execlp execv execve execvp sigaltstack \
+            posix_spawn_file_actions_init posix_spawn_file_actions_destroy posix_spawn_file_actions_addclose \
+            posix_spawn_file_actions_adddup2 posix_spawn_file_actions_addopen posix_spawn_file_actions_addinherit_np \
+            posix_spawn_file_actions_addchdir posix_spawn_file_actions_addchdir_np \
+            posix_spawn_file_actions_addfchdir posix_spawn_file_actions_addfchdir_np \
+            posix_spawnattr_init posix_spawnattr_destroy posix_spawnattr_setflags posix_spawnattr_getflags \
+            posix_spawnattr_setpgroup posix_spawnattr_getpgroup posix_spawnattr_setsigmask posix_spawnattr_getsigmask \
+            posix_spawnattr_setsigdefault posix_spawnattr_getsigdefault posix_spawn posix_spawnp; do
+            printf '#define %s(...) pam_tvos_unavailable()\n' "${function}"
+        done
+        printf '#endif\n'
+    } > "${header}"
+    echo "${header}"
+}
+
 build_php_slice() {
     local name=$1
     local sdk=$2
@@ -134,6 +158,10 @@ build_php_slice() {
     local sdk_path
     local build=${build_root}/build-${name}
     local install=${build_root}/install-${name}
+    local platform_flags=
+    if [[ ${name} == tvos-* ]]; then
+        platform_flags="-include $(write_tvos_compat_header)"
+    fi
     sdk_path=$(xcrun --sdk "${sdk}" --show-sdk-path)
     mkdir -p "${build}"
     (
@@ -172,7 +200,11 @@ build_php_slice() {
             -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR 1$/d' \
             -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR_NP 1$/d' \
             main/php_config.h
-        if [[ ${name} == simulator-x86_64 ]]; then
+        if [[ -n ${platform_flags} ]]; then
+            # After configure: its function probes must see the real SDK.
+            sed -i '' "s|^CFLAGS_CLEAN = |CFLAGS_CLEAN = ${platform_flags} |" Makefile
+        fi
+        if [[ ${name} == *simulator-x86_64 ]]; then
             # The distinct iOS host triplet is required to keep Autoconf in
             # cross-compilation mode, but PHP classifies only darwin* as
             # Mach-O when selecting its fiber assembly. Correct that generated
@@ -191,6 +223,14 @@ build_engine_slice() {
     rustup target add "${target}"
     cargo build --locked --release --manifest-path "${pam_root}/pam-native/Cargo.toml" \
         -p pam-native-engine --target "${target}"
+}
+
+# tvOS targets are Rust tier 3: nightly builds their standard library.
+build_tvos_engine_slice() {
+    local target=$1
+    rustup toolchain install nightly --profile minimal --component rust-src
+    cargo +nightly build --locked --release --manifest-path "${pam_root}/pam-native/Cargo.toml" \
+        -p pam-native-engine --target "${target}" -Z build-std=std,panic_abort
 }
 
 build_macos_embed_sdk() {
@@ -289,6 +329,45 @@ if [[ ${slice_selector} == all || ${slice_selector} == ios || ${slice_selector} 
     build_engine_slice x86_64-apple-ios
 fi
 
+if [[ ${slice_selector} == tvos || ${slice_selector} == tvos-device ]]; then
+    build_php_slice tvos-device-arm64 appletvos arm64 aarch64-apple-darwin -mtvos-version-min
+    build_tvos_engine_slice aarch64-apple-tvos
+fi
+if [[ ${slice_selector} == tvos || ${slice_selector} == tvos-simulator ]]; then
+    # PAM_TVOS_SIMULATOR_ARCHS=x86_64 builds only the Intel slice (local checks).
+    for arch in ${PAM_TVOS_SIMULATOR_ARCHS:-arm64 x86_64}; do
+        if [[ ${arch} == arm64 ]]; then
+            build_php_slice tvos-simulator-arm64 appletvsimulator arm64 aarch64-apple-darwin -mtvos-simulator-version-min
+            build_tvos_engine_slice aarch64-apple-tvos-sim
+        else
+            # A tvOS host triplet keeps Autoconf cross-compiling on an x86_64 Mac, as for iOS.
+            build_php_slice tvos-simulator-x86_64 appletvsimulator x86_64 x86_64-apple-tvos -mtvos-simulator-version-min
+            build_tvos_engine_slice x86_64-apple-tvos
+        fi
+    done
+fi
+if [[ ${slice_selector} == tvos ]]; then
+    tv_destination=${pam_root}/runtime/tvos/${runtime_id}
+    tv_simulator=${build_root}/tvos-simulator
+    mkdir -p "${tv_destination}" "${tv_simulator}/php" "${tv_simulator}/engine"
+    lipo -create \
+        "${build_root}/install-tvos-simulator-arm64/lib/libphp.a" \
+        "${build_root}/install-tvos-simulator-x86_64/lib/libphp.a" \
+        -output "${tv_simulator}/php/libphp.a"
+    lipo -create \
+        "${pam_root}/pam-native/target/aarch64-apple-tvos-sim/release/libpam_native_engine.a" \
+        "${pam_root}/pam-native/target/x86_64-apple-tvos/release/libpam_native_engine.a" \
+        -output "${tv_simulator}/engine/libpam_native_engine.a"
+    rm -rf -- "${tv_destination}/PamPhp.xcframework" "${tv_destination}/PamNativeEngine.xcframework"
+    xcodebuild -create-xcframework \
+        -library "${build_root}/install-tvos-device-arm64/lib/libphp.a" -headers "${build_root}/install-tvos-device-arm64/include" \
+        -library "${tv_simulator}/php/libphp.a" -headers "${build_root}/install-tvos-simulator-arm64/include" \
+        -output "${tv_destination}/PamPhp.xcframework"
+    xcodebuild -create-xcframework \
+        -library "${pam_root}/pam-native/target/aarch64-apple-tvos/release/libpam_native_engine.a" -headers "${pam_root}/pam-native/native" \
+        -library "${tv_simulator}/engine/libpam_native_engine.a" -headers "${pam_root}/pam-native/native" \
+        -output "${tv_destination}/PamNativeEngine.xcframework"
+fi
 if [[ ${slice_selector} == all || ${slice_selector} == ios ]]; then
     simulator=${build_root}/simulator
     mkdir -p "${simulator}/php" "${simulator}/engine"
