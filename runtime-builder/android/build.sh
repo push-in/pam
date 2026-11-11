@@ -199,14 +199,14 @@ PY
 case "${abi_selector}" in
     all)
         build_abi "arm64-v8a" "aarch64-linux-android" "aarch64-linux-android"
-        build_abi "armeabi-v7a" "armv7a-linux-androideabi" "armv7a-linux-androideabi"
         build_abi "x86_64" "x86_64-linux-android" "x86_64-linux-android"
         ;;
     arm64-v8a)
         build_abi "arm64-v8a" "aarch64-linux-android" "aarch64-linux-android"
         ;;
     armeabi-v7a)
-        # 32-bit ARM: most Android TV sticks and many TV sets.
+        # 32-bit ARM (TV sticks with 32-bit Android). Not in "all": the PAM
+        # PHP SDK still needs 64-bit integers.
         build_abi "armeabi-v7a" "armv7a-linux-androideabi" "armv7a-linux-androideabi"
         ;;
     x86_64)

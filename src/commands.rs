@@ -358,7 +358,7 @@ pub enum MobilePlatform {
     Android = 1,
     Ios = 2,
     /// Android TV, Google TV and Fire TV: the same APK with a TV launcher
-    /// entry, D-pad focus and 32-bit ARM.
+    /// entry and D-pad focus.
     AndroidTv = 3,
 }
 
