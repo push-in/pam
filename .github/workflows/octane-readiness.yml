@@ -40,8 +40,8 @@ jobs:
       SMOKE_SOFTWARE_GL: '1'   # hosted runners have no GPU
       CHROME_BIN: /usr/bin/google-chrome
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
@@ -72,14 +72,14 @@ jobs:
           "$runtime/bin/pam-run" -r 'exit(function_exists("pcntl_async_signals") ? 0 : 1);'
       - name: Lossless SO_REUSEPORT hand-over (recommended production setting)
         run: sudo sysctl -w net.ipv4.tcp_migrate_req=1
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: '22'
       - name: Run readiness stages
         run: packages/octane/readiness/run-local.sh ${{ github.event.inputs.stages || 'suite matrix ecosystem' }}
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: pam-octane-readiness
           path: .readiness/results
