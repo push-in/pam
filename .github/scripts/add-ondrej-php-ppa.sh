@@ -31,8 +31,12 @@ fi
 install -D -m 0644 "${work}/ondrej-php.gpg" "${keyring}"
 
 # A copy added earlier (setup-php, the runner image) would duplicate the source.
-grep -rlE 'ppa\.launchpad(content)?\.net/ondrej/php' /etc/apt/sources.list.d/ 2>/dev/null |
-    grep -vx "${list}" | xargs -r rm -f --
+for source in /etc/apt/sources.list.d/*; do
+    if [ -f "${source}" ] && [ "${source}" != "${list}" ] &&
+        grep -qE 'ppa\.launchpad(content)?\.net/ondrej/php' "${source}"; then
+        rm -f -- "${source}"
+    fi
+done
 printf 'deb [signed-by=%s] https://ppa.launchpadcontent.net/ondrej/php/ubuntu %s main\n' \
     "${keyring}" "${codename}" >"${list}"
 
