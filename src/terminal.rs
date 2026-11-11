@@ -313,6 +313,10 @@ pub fn print_help(executable: &OsStr) {
             ("info", "Describe the current project and active toolchain"),
             ("packages", "Explore official ecosystem capabilities"),
             ("add | remove <capability>", "Manage an official capability"),
+            (
+                "add | remove target <name>",
+                "Change the targets of a PAM Native app (android, ios, android-tv)",
+            ),
             ("make:*", "Generate project-native source files"),
             (
                 "format | lint",
