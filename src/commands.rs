@@ -367,7 +367,11 @@ impl MobilePlatform {
     /// list such as `android,ios,android-tv`.
     pub fn parse(value: &str) -> Result<Vec<Self>, String> {
         let mut platforms = Vec::new();
-        for part in value.split(',').map(str::trim).filter(|part| !part.is_empty()) {
+        for part in value
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+        {
             let parsed: &[Self] = match part {
                 "android" => &[Self::Android],
                 "ios" => &[Self::Ios],
@@ -375,8 +379,9 @@ impl MobilePlatform {
                 "all" | "both" => &[Self::Android, Self::Ios],
                 _ => {
                     return Err(
-                        "platform requires android, ios, android-tv, all, or a comma list".to_owned(),
-                    )
+                        "platform requires android, ios, android-tv, all, or a comma list"
+                            .to_owned(),
+                    );
                 }
             };
             for platform in parsed {
@@ -386,7 +391,9 @@ impl MobilePlatform {
             }
         }
         if platforms.is_empty() {
-            return Err("platform requires android, ios, android-tv, all, or a comma list".to_owned());
+            return Err(
+                "platform requires android, ios, android-tv, all, or a comma list".to_owned(),
+            );
         }
         Ok(platforms)
     }
@@ -2823,7 +2830,10 @@ fn init_mobile(
         "modules": [],
         "views": []
     });
-    if options.mobile_platforms.contains(&MobilePlatform::AndroidTv) {
+    if options
+        .mobile_platforms
+        .contains(&MobilePlatform::AndroidTv)
+    {
         // Older PAM Native manifests have no targets: write them only for TV.
         native_manifest["targets"] = serde_json::json!(
             options
@@ -3670,20 +3680,31 @@ pub fn default_script(target: Option<OsString>) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        HttpEndpoint, MobilePlatform, current_worker_lag_seconds,
-        parse_control_plane_diagnostics, visible_top_metric,
+        HttpEndpoint, MobilePlatform, current_worker_lag_seconds, parse_control_plane_diagnostics,
+        visible_top_metric,
     };
 
     #[test]
     fn mobile_platforms_accept_android_tv_and_comma_lists() {
         assert_eq!(
             MobilePlatform::parse("android,ios,android-tv").unwrap(),
-            vec![MobilePlatform::Android, MobilePlatform::Ios, MobilePlatform::AndroidTv]
+            vec![
+                MobilePlatform::Android,
+                MobilePlatform::Ios,
+                MobilePlatform::AndroidTv
+            ]
         );
-        assert_eq!(MobilePlatform::parse("tv").unwrap(), vec![MobilePlatform::AndroidTv]);
+        assert_eq!(
+            MobilePlatform::parse("tv").unwrap(),
+            vec![MobilePlatform::AndroidTv]
+        );
         assert_eq!(
             MobilePlatform::parse("all, tv, android").unwrap(),
-            vec![MobilePlatform::Android, MobilePlatform::Ios, MobilePlatform::AndroidTv]
+            vec![
+                MobilePlatform::Android,
+                MobilePlatform::Ios,
+                MobilePlatform::AndroidTv
+            ]
         );
         assert!(MobilePlatform::parse("roku").is_err());
         assert!(MobilePlatform::parse(",").is_err());
