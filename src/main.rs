@@ -41,6 +41,7 @@ mod ingress;
 mod listener_registry;
 mod manager_dashboard;
 mod native_shared;
+mod native_targets;
 mod otlp;
 mod page_cache;
 mod php;
@@ -930,7 +931,9 @@ fn run() -> Result<u8, CliError> {
                 }
                 "--platform" => {
                     let value = raw_args.next().ok_or_else(|| {
-                        CliError::Commands("--platform requires android, ios, or all".to_owned())
+                        CliError::Commands(
+                            "--platform requires android, ios, android-tv, or all".to_owned(),
+                        )
                     })?;
                     mobile_platforms = commands::MobilePlatform::parse(&value.to_string_lossy())
                         .map_err(CliError::Commands)?;
@@ -1295,6 +1298,37 @@ fn run() -> Result<u8, CliError> {
                 script_arg.to_string_lossy()
             ))
         })?;
+        if capability == "target" {
+            let target = raw_args
+                .next()
+                .and_then(|value| value.into_string().ok())
+                .ok_or_else(|| {
+                    CliError::Commands(format!(
+                        "pam {} target requires a target: android, ios or android-tv",
+                        script_arg.to_string_lossy()
+                    ))
+                })?;
+            if raw_args.next().is_some() {
+                return Err(CliError::Commands(format!(
+                    "pam {} target accepts one target at a time",
+                    script_arg.to_string_lossy()
+                )));
+            }
+            let context = current_project()
+                .filter(|context| context.root.join("pam-native.json").is_file())
+                .ok_or_else(|| {
+                    CliError::Commands(format!(
+                        "`pam {} target` must run inside a PAM Native app (pam-native.json)",
+                        script_arg.to_string_lossy()
+                    ))
+                })?;
+            return if script_arg == "add" {
+                native_targets::add(&context.root, &target)
+            } else {
+                native_targets::remove(&context.root, &target)
+            }
+            .map_err(CliError::Commands);
+        }
         if raw_args.next().is_some() {
             return Err(CliError::Commands(format!(
                 "pam {} accepts one capability at a time",

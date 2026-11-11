@@ -313,6 +313,10 @@ pub fn print_help(executable: &OsStr) {
             ("info", "Describe the current project and active toolchain"),
             ("packages", "Explore official ecosystem capabilities"),
             ("add | remove <capability>", "Manage an official capability"),
+            (
+                "add | remove target <name>",
+                "Change the targets of a PAM Native app (android, ios, android-tv)",
+            ),
             ("make:*", "Generate project-native source files"),
             (
                 "format | lint",
@@ -516,7 +520,10 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                     "--starter PRESET",
                     "blank, tabs, auth, ecommerce, chat, or showcase",
                 ),
-                ("--platform TARGET", "android, ios, or all"),
+                (
+                    "--platform TARGET",
+                    "android, ios, android-tv, all, or a comma list",
+                ),
                 ("--no-install", "Create files without installing packages"),
                 ("--no-interaction", "Use API when no preset is supplied"),
             ],
