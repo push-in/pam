@@ -259,7 +259,11 @@ static const zend_function_entry pam_native_functions[] = {
  * shuts down: objects destructed and shutdown functions run during
  * php_request_shutdown() (an Octane WorkerStopping listener, a table's
  * destructor) may still call them, and their call sites cache the function.
- * zend_shutdown() releases them with the rest of the function table.
+ * They are the SAPI's additional functions, registered by module startup
+ * and released by zend_shutdown() with the rest of the function table.
+ * Registered after the request had started (as before), the executor's
+ * shutdown discarded them without freeing them (valgrind: 14 definitely lost
+ * blocks), and their request-interned names cannot be freed later.
  */
 static const zend_function_entry pam_shared_functions[] = {
     PAM_SHARED_FUNCTION_ENTRIES
@@ -590,6 +594,7 @@ int pam_php_init(int argc, char **argv)
         php_embed_module.pretty_name = "PHP Embedded Library";
     }
     pam_reset_runtime_cache();
+    php_embed_module.additional_functions = pam_shared_functions;
     if (pam_embed_init(argc - 1, argv + 1) == FAILURE) {
         return PAM_INITIALIZATION_FAILURE;
     }
@@ -607,12 +612,6 @@ int pam_php_init(int argc, char **argv)
         return PAM_INITIALIZATION_FAILURE;
     }
     pam_native_functions_registered = true;
-    if (zend_register_functions(NULL, pam_shared_functions, NULL, MODULE_PERSISTENT) == FAILURE) {
-        pam_unregister_native_functions();
-        php_embed_shutdown();
-        pam_initialized = false;
-        return PAM_INITIALIZATION_FAILURE;
-    }
     if (pam_register_file_handles() == FAILURE) {
         pam_unregister_native_functions();
         php_embed_shutdown();

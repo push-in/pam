@@ -1,8 +1,11 @@
 # PAM Octane release checklist
 
-PAM Octane is released from `packages/octane` as the independent Composer
-package `pushinbr/pam-octane`. Runtime and package changes are tagged together so
-their native contracts cannot drift.
+PAM Octane is developed in `packages/octane` and ships as the independent
+Composer package `pushinbr/pam-octane` from its own repository,
+`push-in/pam-octane`, with its own `vX.Y.Z` tags and release pull requests. It is
+not part of the runtime-tag Composer split (`packages/packages.json`): the
+standalone repository carries its own docs and workflows, and the monorepo-only
+readiness suite (`packages/octane/readiness`, `READINESS.md`) never ships.
 
 ## One-time publication setup
 

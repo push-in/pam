@@ -15,6 +15,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@1.88.0
+      # cargo-fuzz instruments with -Zsanitizer, which only a nightly accepts.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-25
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
@@ -53,8 +57,8 @@ jobs:
           audit_with_retry --working-dir=packages/octane
       - name: Coverage-guided dispatch protocol fuzzing
         run: |
-          cargo install cargo-fuzz --version 0.13.2 --locked
-          cargo fuzz run dispatch_envelope -- \
+          cargo +nightly-2026-07-25 install cargo-fuzz --version 0.13.2 --locked
+          cargo +nightly-2026-07-25 fuzz run dispatch_envelope -- \
             -max_total_time=120 -timeout=5 -rss_limit_mb=2048
       - name: Install locked Composer test dependencies
         run: |

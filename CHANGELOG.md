@@ -10,6 +10,13 @@
   `vendor/bin/phpunit` and ran the runner again (a hang, a syntax error or a
   stray PAM error line instead of the test). The main script is now listed
   first.
+- The shared-table and task functions (`Pam\Shared\Table`, task workers) are
+  registered at engine startup as SAPI functions. Registered after the request
+  had started, the executor's shutdown discarded them without freeing them,
+  leaking 14 allocations per process and failing the valgrind shutdown gate.
+- CI: the weekly fuzz job runs cargo-fuzz on a pinned nightly, and the
+  runtime-tag Composer split no longer includes `pushinbr/pam-octane`, which
+  ships from `push-in/pam-octane`.
 
 ## 2.2.16 - 2026-11-11
 
