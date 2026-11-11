@@ -57,7 +57,7 @@ jobs:
           audit_with_retry --working-dir=packages/octane
       - name: Coverage-guided dispatch protocol fuzzing
         run: |
-          cargo install cargo-fuzz --version 0.13.2 --locked
+          cargo +nightly-2026-07-25 install cargo-fuzz --version 0.13.2 --locked
           cargo +nightly-2026-07-25 fuzz run dispatch_envelope -- \
             -max_total_time=120 -timeout=5 -rss_limit_mb=2048
       - name: Install locked Composer test dependencies
