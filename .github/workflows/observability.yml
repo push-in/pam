@@ -33,10 +33,10 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@1.120.0
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
@@ -49,7 +49,7 @@ jobs:
           composer install --working-dir=compat/composer-smoke --dry-run --no-interaction --prefer-dist
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
       - name: Install the integrity-verified Cosign release
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532 # v4.1.3
       - name: Verify the official Collector image signature
         run: |
           cosign verify \
@@ -76,7 +76,7 @@ jobs:
         run: scripts/certify-otlp.sh
       - name: Verify bounded evidence
         run: python3 scripts/otlp-evidence.py artifacts/otlp 1 --verify
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: pam-otlp-collector-${{ github.sha }}
