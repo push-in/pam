@@ -151,10 +151,11 @@ How recycling works now:
    while the old worker's clients reconnect, sweeps the kernel queue with
    plain `accept(2)` calls until it is empty, and only then closes the
    listener.
-4. The one window left is in the kernel: Linux resets a handshake that
-   completes on a `SO_REUSEPORT` listener in the instant it closes.
-   `net.ipv4.tcp_migrate_req=1` moves it to a sibling listener instead; it is
-   the recommended production setting and CI sets it.
+4. Listening sockets belong to the master: the replacement adopts the
+   socket the old worker listened on, so no listener with queued connections
+   is closed by a recycle or a reload, with or without
+   `net.ipv4.tcp_migrate_req` (docs/listener-handoff-evidence.md: 0 failures
+   in 60 runs and 7.8M requests).
 
 ## 3. Ecosystem app: PAM Octane vs FrankenPHP 1.13.5 (same app, same PHP 8.5.12)
 
@@ -260,11 +261,9 @@ memory) are closed in PAM 2.2.13, see above. Still open:
    `ServerStateFile` and `ServerProcessInspector` are not used.
 5. **Platforms.** Only Linux x86_64 was validated here. Prefork and balancing
    are Linux-only.
-6. **Kernel setting.** Zero loss under constant new connections needs
-   `net.ipv4.tcp_migrate_req=1` (Linux 5.14+). Without it a handshake that
-   lands on a closing listener can still be reset (about 1 in 55k requests
-   when every request opens a new connection while workers recycle every 500
-   requests; none with keep-alive clients).
+6. **Kernel setting.** Not needed any more: since the master keeps the
+   listeners, recycling and reloads lose nothing with the kernel default
+   `tcp_migrate_req=0` either.
 7. **The bridge does not read `--max-requests` from Octane's config.** Octane
    has no config key for it (only the command option, default 500); PAM's own
    default limit is 10M.

@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- Recycling and reloads no longer reset connections. The cluster master keeps
+  every worker's listening socket and the next incarnation of the worker
+  adopts it, so a listener with queued connections is never closed while the
+  cluster runs. Before, closing a worker's `SO_REUSEPORT` listener reset the
+  handshakes queued on it (and `tcp_migrate_req=1` could not help when the
+  sibling it picked was closing too): 16 of 569k requests failed with a new
+  connection per request at `--max-requests=500`, and keep-alive clients saw
+  rare write errors during reloads. Now 0 of 7.8M requests in 60 runs, with
+  and without `tcp_migrate_req`.
+
 ## 2.2.14 - 2026-11-10
 
 Fixes found while preparing the Laravel Octane integration.

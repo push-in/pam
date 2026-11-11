@@ -590,16 +590,26 @@ fn recycles_workers_make_before_break_without_dropping_requests() {
         None,
         &[("PAM_TEST_RATE_LIMIT", "0")],
     ));
+    // Clients keep going until several replacements served (at least 600
+    // requests): a fast machine can finish a fixed number of requests before
+    // the first replacement is even ready.
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(HashSet::new()));
+    let deadline = Instant::now() + Duration::from_secs(20);
     let clients: Vec<_> = (0..4)
         .map(|_| {
             let cluster = cluster.clone();
+            let seen = seen.clone();
             thread::spawn(move || {
                 let mut failures = Vec::new();
                 let mut processes = HashSet::new();
-                for _ in 0..150 {
+                let mut sent = 0;
+                while sent < 150 || (seen.lock().unwrap().len() < 4 && Instant::now() < deadline) {
+                    sent += 1;
                     match cluster.request() {
                         Ok(response) => {
-                            processes.insert(request_identity(&response).1);
+                            let process = request_identity(&response).1;
+                            seen.lock().unwrap().insert(process.clone());
+                            processes.insert(process);
                         }
                         Err(error) => {
                             failures.push(error.lines().next().unwrap_or_default().to_owned())
@@ -916,4 +926,86 @@ fn deletes_the_uploads_of_requests_cut_by_a_deadline_or_a_killed_worker() {
     client.join().unwrap();
     cluster.stop();
     fs::remove_dir(&uploads).unwrap();
+}
+
+/// Inodes of the TCP sockets listening on `port`.
+#[cfg(target_os = "linux")]
+fn listening_inodes(port: u16) -> HashSet<u64> {
+    let mut inodes = HashSet::new();
+    for table in ["/proc/net/tcp", "/proc/net/tcp6"] {
+        for line in fs::read_to_string(table)
+            .unwrap_or_default()
+            .lines()
+            .skip(1)
+        {
+            let fields = line.split_whitespace().collect::<Vec<_>>();
+            let local_port = fields[1].rsplit(':').next().unwrap();
+            if fields[3] == "0A" && u16::from_str_radix(local_port, 16) == Ok(port) {
+                inodes.insert(fields[9].parse().unwrap());
+            }
+        }
+    }
+    inodes
+}
+
+/// Socket inodes a process holds open.
+#[cfg(target_os = "linux")]
+fn socket_inodes(pid: u32) -> HashSet<u64> {
+    fs::read_dir(format!("/proc/{pid}/fd"))
+        .map(|entries| {
+            entries
+                .filter_map(|entry| fs::read_link(entry.ok()?.path()).ok())
+                .filter_map(|target| {
+                    target
+                        .to_str()?
+                        .strip_prefix("socket:[")?
+                        .strip_suffix(']')?
+                        .parse()
+                        .ok()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn recycled_workers_and_reloads_reuse_the_listeners_the_master_keeps() {
+    let mut cluster =
+        ClusterProcess::start_with_env(30, 2, None, None, &[("PAM_TEST_RATE_LIMIT", "0")]);
+    let listeners = listening_inodes(cluster.port);
+    assert_eq!(listeners.len(), 2, "one listener per worker");
+    // The master holds every listener, so no recycle or reload closes one.
+    assert!(listeners.is_subset(&socket_inodes(cluster.child.id())));
+
+    let first_workers = cluster.children();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while cluster.children().is_subset(&first_workers) {
+        assert!(Instant::now() < deadline, "workers were not recycled");
+        let _ = cluster.request();
+    }
+    while cluster.children().len() != 2 {
+        assert!(
+            Instant::now() < deadline,
+            "the recycled worker did not exit"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+    cluster.signal(SIGHUP);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !cluster
+        .admin_request("/ready")
+        .contains(r#""generation":2"#)
+    {
+        assert!(Instant::now() < deadline, "the reload did not activate");
+        thread::sleep(Duration::from_millis(25));
+    }
+    cluster.request_with_retry();
+    // Recycled and reloaded workers adopted the same two sockets.
+    assert_eq!(listening_inodes(cluster.port), listeners);
+    for worker in cluster.children() {
+        let held = socket_inodes(worker);
+        assert_eq!(held.intersection(&listeners).count(), 1, "worker {worker}");
+    }
+    cluster.stop();
 }
