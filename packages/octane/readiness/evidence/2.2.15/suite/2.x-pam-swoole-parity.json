@@ -1,0 +1,1664 @@
+{
+  "swoole_only_tests": {
+    "total": 43,
+    "upstream": {
+      "PASS": 35,
+      "FAIL": 0,
+      "SKIP": 8
+    }
+  },
+  "octane_tag": "2.x-pam-swoole-parity",
+  "tests": 273,
+  "upstream": {
+    "PASS": 265,
+    "FAIL": 0,
+    "SKIP": 8
+  },
+  "pam_driver": {
+    "PASS": 265,
+    "FAIL": 0,
+    "SKIP": 8
+  },
+  "crosscheck_exchanges": 112,
+  "crosscheck_mismatches": [],
+  "rows": [
+    {
+      "test": "ApplicationFactoryTest::test_application_can_be_created",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ApplicationFactoryTest::test_services_can_be_warmed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "AuthenticationFlushingTest::test_authentication_state_is_flushed_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "AuthorizationStateTest::test_authorization_state_is_updated_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BinaryBootstrapTest::test_it_can_retrieve_base_path_from_environment_variable",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_container_instances_given_to_dependencies_can_be_stale_if_an_old_instance_is_given",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_container_instances_given_to_dependencies_will_be_fresh_if_injected_container_is_used",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_container_instances_given_to_dependencies_will_be_fresh_if_singleton_but_not_resolved_before_boot",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_container_instances_given_to_dependencies_will_be_stale_if_singleton_and_resolved_during_boot",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_default_listeners_are_bound_as_singletons",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_injecting_request_from_bind_will_always_be_fresh_since_sandbox_request_is_rebound",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_injecting_request_from_singleton_can_be_fresh_if_it_is_not_resolved_during_boot",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BindingStateTest::test_injecting_request_from_singleton_can_be_stale_if_it_is_resolved_during_boot",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "BroadcastManagerStateTest::test_broadcast_manager_has_fresh_application_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "CacheArrayStateTest::test_array_cache_is_flushed_between_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "CloseMonologHandlersTest::test_logger_are_closed_after_worker_termination",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "CommandTest::test_error",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "CommandTest::test_info",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "CommandTest::test_request",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "CommandTest::test_warn",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ConfigurationSandboxTest::test_config_is_reset_between_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "EnsureRequestsDontExceedMaxExecutionTimeTest::test_process_is_killed_if_current_request_exceeds_max_execution_time",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FilesystemManagerStateTest::test_filesystem_manager_has_fresh_application_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushLogContextTest::test_shared_context_is_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushMonologStateTest::test_logger_are_reset",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushOnceTest::test_once_is_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushOnceTest::test_once_is_flushed_when_previous_request_was_not_terminated",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushStrCacheTest::test_str_is_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushTranslatorCacheTest::test_parsed_keys_cache_is_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushUploadedFilesTest::test_files_removed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushViteTest::test_it_flushes_vite",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FlushViteTest::test_it_handles_instances_of_vite_without_flush_method",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpBinaryRequirementsTest::test_outdated_binary_in_project_root_is_replaced",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpBinaryRequirementsTest::test_outdated_binary_on_path_is_left_untouched",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpClientTest::test_marshal_request",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpClientTest::test_response",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpClientTest::test_streamed_generator_response_flushes_each_yielded_chunk",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpMercureConfigTest::test_hub_accepts_updates_published_over_http",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpMercureConfigTest::test_hub_follows_the_connection_claims_and_secrets",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpMercureConfigTest::test_hub_is_configured_from_the_mercure_broadcasting_connection",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpMercureConfigTest::test_hubs_on_another_origin_are_ignored",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpMercureConfigTest::test_mercure_is_disabled_by_default",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpMercureConfigTest::test_octane_mercure_configuration_can_disable_the_hub",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpMercureConfigTest::test_octane_mercure_configuration_takes_precedence",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "FrankenPhpServerStateFileTest::test_server_state_file_can_be_managed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "GiveNewApplicationInstanceToLogManagerTest::test_context_is_appened_to_logs",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "GiveNewApplicationInstanceToRouterTest::test_router_has_new_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "GiveNewApplicationInstanceToRouterTest::test_router_has_new_instance_when_compiled_route_name_cache_is_warmed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "GiveNewApplicationInstanceToRouterTest::test_router_has_new_instance_when_routes_are_compiled",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "InstallCommandTest::test_octane_server_variable_is_appended_when_missing",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "InstallCommandTest::test_octane_server_variable_is_updated_when_already_present",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "InvokeTickCallableTest::test_callable_is_invoked_when_due",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "InvokeTickCallableTest::test_callable_is_invoked_when_first_run_and_immediate",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "InvokeTickCallableTest::test_callable_is_not_invoked_when_first_run_and_not_immediate",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "InvokeTickCallableTest::test_callable_is_not_invoked_when_not_due",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "LocaleStateTest::test_carbon_and_app_locale_gets_updated_when_changing_app_locale",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "LocaleStateTest::test_carbon_state_is_reset_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "LocaleStateTest::test_translator_state_is_reset_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "MailManagerStateTest::test_mail_manager_has_fresh_application_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "NotificationChannelManagerStateTest::test_notification_channel_manager_has_fresh_application_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "OctaneStoreTest::test_can_forget_cache_items",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_can_retrieve_items_from_store",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_expired_items_return_null",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_forever_stores_value_in_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_get_method_can_resolve_pending_interval",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_increment_and_decrement_operations",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_intervals_are_not_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_intervals_can_be_refreshed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_many_method_can_return_many_values",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_missing_items_return_null",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_put_many_stores_value_in_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_put_stores_value_in_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_touch_returns_false_for_expired_items",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_touch_returns_false_for_missing_items",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OctaneStoreTest::test_touch_updates_expiration",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "OnWorkerStartTest::test_should_clear_opcache_returns_configured_value",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "OnWorkerStartTest::test_should_clear_opcache_returns_true_by_default",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PaginationStateTest::test_pagination_state_is_updated_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamBinaryRequirementsTest::test_binary_in_project_root_is_used",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamBinaryRequirementsTest::test_binary_on_path_is_used",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamBinaryRequirementsTest::test_missing_binary_is_installed_with_the_official_install_script",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamBinaryRequirementsTest::test_outdated_binary_is_reported",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_can_serve_static_files_within_public_directory",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_cant_serve_static_files_outside_public_directory_or_with_forbidden_extension",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_cant_serve_static_files_when_disabled",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_error",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_marshal_request",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_output_buffer_is_prepended_to_the_response",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_response_is_sent_through_the_sapi",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_static_files_are_streamed_with_configured_headers",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_streamed_generator_response_is_written_chunk_by_chunk",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamClientTest::test_streamed_response_to_head_request_has_no_body",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_can_forget_cache_items",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_can_retrieve_items_from_store",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_expired_items_return_null",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_forever_stores_value_in_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_get_method_can_resolve_pending_interval",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_increment_and_decrement_operations",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_intervals_are_not_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_intervals_can_be_refreshed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_many_method_can_return_many_values",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_missing_items_return_null",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_put_many_stores_value_in_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_put_stores_value_in_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_touch_returns_false_for_expired_items",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_touch_returns_false_for_missing_items",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamOctaneStoreTest::test_touch_updates_expiration",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamServerProcessInspectorTest::test_can_determine_if_pam_server_process_is_running_when_master_cant_be_communicated_with",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamServerProcessInspectorTest::test_can_determine_if_pam_server_process_is_running_when_master_is_running",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamServerProcessInspectorTest::test_can_determine_if_pam_server_process_is_running_without_a_process_id",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamServerProcessInspectorTest::test_pam_server_process_can_be_reloaded",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamServerProcessInspectorTest::test_pam_server_process_can_be_stopped",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamServerStateFileTest::test_server_state_file_can_be_managed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "PamTableTest::test_can_use_all_available_rows",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes with data set #0",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes with data set #1",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes with data set #2",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes with data set #3",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes with data set #4",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes with data set #5",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes with data set #6",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes_only_on_declared_columns",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_ensures_string_sizes_only_on_string_types",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_it_gets_used_while_creating_an_octane_store",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_it_gets_used_while_creating_an_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_it_gets_used_while_creating_an_timer_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_set_of_string_columns with data set #0",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_set_of_string_columns with data set #1",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_set_of_string_columns with data set #2",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_set_of_string_columns with data set #3",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_set_of_string_columns with data set #4",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_set_of_string_columns with data set #5",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PamTableTest::test_set_of_string_columns with data set #6",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "PipelineHubStateTest::test_pipeline_hub_has_fresh_application_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "QueueManagerStateTest::test_queue_manager_has_fresh_application_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "QueuedCookieFlushingTest::test_queued_cookies_from_previous_requests_are_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RedirectorStateTest::test_redirector_has_correct_request_state_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ReleaseFreedMemoryTest::test_freed_memory_is_released_to_the_system",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ReportExceptionTest::test_dd_calls_are_not_streamed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ReportExceptionTest::test_exceptions_are_reported",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ReportExceptionTest::test_exceptions_are_streamed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RequestSchemeEnforcementTest::test_request_scheme_is_enforced",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RequestServerPortTest::test_request_server_port_is_correct",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RequestStateTest::test_form_requests_contain_the_correct_state_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RequestStateTest::test_request_is_rebound_on_sandbox",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RequestStateTest::test_request_routes_controller_does_not_leak",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RequestStateTest::test_request_routes_flush_controller_state",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_supported_binary_is_left_untouched with data set #0",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_supported_binary_is_left_untouched with data set #1",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_supported_binary_is_left_untouched with data set #2",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_supported_binary_is_left_untouched with data set #3",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_supported_binary_is_left_untouched with data set #4",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_supported_binary_is_left_untouched with data set #5",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_unsupported_binary_is_replaced with data set #0",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_unsupported_binary_is_replaced with data set #1",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_unsupported_binary_is_replaced with data set #2",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerBinaryRequirementsTest::test_unsupported_binary_is_replaced with data set #3",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_error_method_sends_detailed_error_response_to_roadrunner_in_debug_mode",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_error_method_sends_error_response_to_roadrunner",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_marshal_request_method_marshals_proper_illuminate_request",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_respond_method_ends_streamed_generator_response_quietly_when_roadrunner_stops_it",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_respond_method_send_response_to_roadrunner",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_respond_method_send_streamed_generator_response_to_roadrunner",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_respond_method_send_streamed_response_to_roadrunner",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerClientTest::test_respond_method_send_streamed_untyped_generator_response_to_roadrunner",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerServerProcessInspectorTest::test_can_determine_if_roadrunner_server_process_is_running_when_master_cant_be_communicated_with",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerServerProcessInspectorTest::test_can_determine_if_roadrunner_server_process_is_running_when_master_is_running",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerServerProcessInspectorTest::test_roadrunner_server_process_can_be_reloaded",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RoadRunnerServerStateFileTest::test_server_state_file_can_be_managed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "RouterStateTest::test_router_and_route_container_is_refreshed_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "SequentialCoroutineDispatcherTest::test_coroutines_can_be_resolved",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "SequentialTaskDispatcherTest::test_dispatching_tasks_do_not_propagate_exceptions",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SequentialTaskDispatcherTest::test_resolving_tasks_propagate_dd_calls",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SequentialTaskDispatcherTest::test_resolving_tasks_propagate_exceptions",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SequentialTaskDispatcherTest::test_resolving_tasks_with_exceptions_do_not_effect_other_tasks",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SequentialTaskDispatcherTest::test_tasks_can_be_dispatched",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SequentialTaskDispatcherTest::test_tasks_can_be_resolved",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SessionFlushingTest::test_session_is_flushed_between_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "StartCommandTest::test_stopping_before_the_input_is_bound_falls_back_to_the_configured_server",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "StartRoadRunnerCommandTest::test_configured_absolute_worker_command_is_not_prefixed_with_the_base_path",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "StartRoadRunnerCommandTest::test_configured_relative_worker_command_is_resolved_relative_to_the_base_path",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "StartRoadRunnerCommandTest::test_default_worker_command_is_resolved_relative_to_the_base_path",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "SwooleClientTest::test_can_serve_static_files_if_configured_to_and_file_is_within_public_directory",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_can_serve_static_files_through_symlink",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_can_serve_static_files_when_explicitly_enabled",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_cant_serve_static_files_if_file_has_forbidden_extension",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_cant_serve_static_files_if_file_is_outside_public_directory",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_cant_serve_static_files_through_symlink_using_directory_traversal",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_cant_serve_static_files_when_disabled",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_error_method_sends_detailed_error_response_to_swoole_in_debug_mode",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_error_method_sends_error_response_to_swoole",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_marshal_request_method_marshals_proper_illuminate_request",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_closes_output_buffer_when_streamed_response_throws",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_preserves_header_formatting_if_configured",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_send_chunked_response_to_swoole",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_send_not_chunked_response_to_swoole",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_send_streamed_generator_response_to_swoole",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_send_streamed_response_to_swoole",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_sends_response_to_swoole",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_stops_streamed_generator_response_when_client_disconnects",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_respond_method_with_laravel_specific_status_code_sends_response_to_swoole",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_static_file_can_be_served",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleClientTest::test_static_file_headers_can_be_sent",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleExtensionTest::test_container_cpu_count_ignores_invalid_v2_data",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleExtensionTest::test_container_cpu_count_reads_cgroup_v1_quota",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleExtensionTest::test_container_cpu_count_reads_cgroup_v2_quota",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleExtensionTest::test_container_cpu_count_returns_null_when_unlimited_or_missing",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleExtensionTest::test_cpu_count",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleExtensionTest::test_cpu_count_falls_back_when_no_cgroup_limit",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleExtensionTest::test_cpu_count_respects_cgroup_v2_limit",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_dispatching_tasks_do_not_propagate_exceptions",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_resolving_tasks_may_timeout",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_resolving_tasks_propagate_dd_calls",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_resolving_tasks_propagate_exceptions",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_tasks_can_be_dispatched_via_fallback_dispatcher",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_tasks_can_be_dispatched_via_http",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_tasks_can_be_resolved_via_fallback_dispatcher",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleHttpTaskDispatcherTest::test_tasks_can_be_resolved_via_http",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_convert_swoole_request_to_illuminate_request",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_cookie",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_delete",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_get",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_patch",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_post",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_put",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleRequestTest::test_server_variables",
+      "upstream": "SKIP",
+      "pam_driver": "SKIP",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleServerProcessInspectorTest::test_can_determine_if_swoole_server_process_is_running_when_manager_cant_be_communicated_with",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleServerProcessInspectorTest::test_can_determine_if_swoole_server_process_is_running_when_manager_is_running",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleServerProcessInspectorTest::test_can_determine_if_swoole_server_process_is_running_when_master_cant_be_communicated_with",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleServerProcessInspectorTest::test_can_determine_if_swoole_server_process_is_running_when_only_master_is_running",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleServerProcessInspectorTest::test_swoole_server_process_can_be_stop",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleServerStateFileTest::test_server_state_file_can_be_managed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleTaskDispatcherTest::test_dispatching_tasks_do_not_propagate_exceptions",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleTaskDispatcherTest::test_resolving_tasks_may_timeout",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleTaskDispatcherTest::test_resolving_tasks_propagate_dd_calls",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleTaskDispatcherTest::test_resolving_tasks_propagate_exceptions",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleTaskDispatcherTest::test_tasks_can_be_resolved",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleTaskDispatcherTest::test_tasks_can_only_be_dispatched_via_server_context",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "SwooleTaskDispatcherTest::test_tasks_can_only_be_resolved_via_server_context",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_can_use_all_available_rows",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes with data set #0",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes with data set #1",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes with data set #2",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes with data set #3",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes with data set #4",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes with data set #5",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes with data set #6",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes_only_on_declared_columns",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_ensures_string_sizes_only_on_string_types",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_it_gets_used_while_creating_an_octane_store",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_it_gets_used_while_creating_an_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_it_gets_used_while_creating_an_timer_table",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_set_of_string_columns with data set #0",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_set_of_string_columns with data set #1",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_set_of_string_columns with data set #2",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_set_of_string_columns with data set #3",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_set_of_string_columns with data set #4",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_set_of_string_columns with data set #5",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TableTest::test_set_of_string_columns with data set #6",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "swoole-only"
+    },
+    {
+      "test": "TemporaryContainerInstanceFlushingTest::test_temporary_container_bindings_are_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "TerminalTest::test_width",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "UrlGenerationTest::test_url_generator_creates_correct_urls_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "UrlGeneratorSandboxTest::test_url_is_reset_between_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "UrlTest::test_url_defaults_are_flushed",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ValidationFactoryStateTest::test_validation_factory_has_fresh_application_instance",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ViewFactoryStateTest::test_shared_view_state_is_persisted_across_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "ViewFactoryStateTest::test_view_factory_application_is_updated_on_subsequent_requests",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "WorkerTest::test_worker_can_dispatch_request_to_application_and_returns_responses_to_client",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "WorkerTest::test_worker_can_dispatch_task_to_application_and_returns_responses_to_client",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "WorkerTest::test_worker_can_dispatch_ticks_to_application_and_returns_responses_to_client",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "WorkerTest::test_worker_doesnt_throw_buffer_error",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "WorkerTest::test_worker_releases_the_request_once_it_is_handled",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    },
+    {
+      "test": "WorkerTest::test_worker_reports_exceptions_thrown_by_operation_released_listeners",
+      "upstream": "PASS",
+      "pam_driver": "PASS",
+      "scope": "all servers"
+    }
+  ]
+}
