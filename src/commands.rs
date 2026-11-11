@@ -462,7 +462,7 @@ fn init_project(
             run_composer_in(executable, directory, &["install", "--no-interaction"])?;
         }
         if template == InitTemplate::Desktop {
-            run_desktop_init(executable, directory)?;
+            run_desktop_init(executable, directory, options)?;
         }
     }
     Ok(())
@@ -471,9 +471,22 @@ fn init_project(
 /// PAM Desktop 2 owns its application skeleton: once the package is
 /// installed, `pam desktop init` (the package's own command) writes it, so a
 /// new project always matches the installed release.
-fn run_desktop_init(executable: &OsStr, directory: &Path) -> Result<(), String> {
+/// `--name` and `--application-id` become the window title and the
+/// application id of `pam-desktop.json`.
+fn run_desktop_init(
+    executable: &OsStr,
+    directory: &Path,
+    options: &InitOptions,
+) -> Result<(), String> {
+    let mut arguments = vec!["desktop", "init"];
+    if let Some(name) = options.application_name.as_deref() {
+        arguments.extend(["--name", name]);
+    }
+    if let Some(id) = options.application_id.as_deref() {
+        arguments.extend(["--id", id]);
+    }
     let status = std::process::Command::new(executable)
-        .args(["desktop", "init"])
+        .args(&arguments)
         .current_dir(directory)
         .status()
         .map_err(|error| format!("cannot run `pam desktop init`: {error}"))?;
