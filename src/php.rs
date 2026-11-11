@@ -51,6 +51,8 @@ fn track_engine_failure<T>(result: Result<T, String>) -> Result<T, String> {
 static OWNER: OnceLock<ThreadId> = OnceLock::new();
 static PROCESS_STARTED_AT_MILLIS: OnceLock<u64> = OnceLock::new();
 static STARTUP_MILESTONES: OnceLock<StartupMilestones> = OnceLock::new();
+/// Set in a worker forked from a booted zygote: its startup is the fork.
+static FORKED_MILESTONES: OnceLock<StartupMilestones> = OnceLock::new();
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -66,7 +68,10 @@ pub fn mark_process_entry() {
 }
 
 pub fn startup_milestones() -> Option<StartupMilestones> {
-    STARTUP_MILESTONES.get().copied()
+    FORKED_MILESTONES
+        .get()
+        .or_else(|| STARTUP_MILESTONES.get())
+        .copied()
 }
 
 fn epoch_millis() -> u64 {
@@ -132,6 +137,8 @@ unsafe extern "C" {
     ) -> c_int;
     fn pam_php_string_free(value: *mut c_char);
     fn pam_php_shutdown();
+    #[cfg(target_os = "linux")]
+    fn pam_php_after_fork();
 }
 
 #[derive(Clone, Debug, Deserialize, serde::Serialize)]
@@ -392,6 +399,44 @@ impl PhpRuntime {
             )
         };
         Ok(normalize_exit_status(status))
+    }
+
+    /// Runs the application's `Pam\Fork::beforeFork()` callbacks in a zygote
+    /// that booted the application, once, before the first worker is forked.
+    #[cfg(target_os = "linux")]
+    pub fn prepare_fork(&mut self) -> Result<(), String> {
+        self.run_fork_phase("prepare", "before-fork")
+    }
+
+    /// Resets process-bound state in a worker forked from a booted zygote:
+    /// PRNG seeds and timers in the engine, then PAM's own per-process state
+    /// and the application's `Pam\Fork::afterFork()` callbacks.
+    #[cfg(target_os = "linux")]
+    pub fn after_fork(&mut self) -> Result<(), String> {
+        ensure_owner()?;
+        let now = epoch_millis();
+        let _ = FORKED_MILESTONES.set(StartupMilestones {
+            process_started_at_millis: now,
+            engine_ready_at_millis: now,
+            composer_ready_at_millis: now,
+            runtime_ready_at_millis: now,
+        });
+        // SAFETY: PHP is initialized and owned by this (only) thread.
+        unsafe { pam_php_after_fork() };
+        self.run_fork_phase("forked", "after-fork")
+    }
+
+    #[cfg(target_os = "linux")]
+    fn run_fork_phase(&mut self, method: &str, label: &str) -> Result<(), String> {
+        let source = format!(
+            "if (class_exists('Pam\\Fork', false)) {{ try {{ \\Pam\\Fork::{method}(); }} \
+             catch (\\Throwable $error) {{ fwrite(STDERR, 'pam: {label} hook failed: ' \
+             . get_class($error) . ': ' . $error->getMessage() . \"\\n\"); exit(70); }} }}"
+        );
+        match self.execute_code(&source)? {
+            0 => Ok(()),
+            status => Err(format!("{label} hooks failed with status {status}")),
+        }
     }
 
     pub fn server_config(&mut self) -> Result<Option<ServerConfig>, String> {

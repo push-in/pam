@@ -138,6 +138,78 @@ master.
   `exec`, sem compartilhar OPcache, até o próximo reload.
 - Conexões TLS terminadas pelo próprio Pam ainda não são balanceadas.
 
+### Zygote pós-boot (`PAM_PREFORK_BOOT=app`)
+
+No modo pós-boot o zygote vai além do engine: ele inicializa Composer, o runtime
+e a aplicação uma vez (para o Laravel Octane: cria a aplicação, roda os
+bootstrappers, carrega config, rotas e providers, exatamente o que o worker do
+Octane faz antes da primeira requisição) e faz `fork` dos workers a partir desse
+estado quente. Um worker fica pronto em poucos milissegundos e todas as páginas
+tocadas no boot ficam compartilhadas por copy-on-write.
+
+- `PAM_PREFORK_BOOT=app` liga o modo; `PAM_PREFORK_BOOT=engine` volta ao fork
+  pré-boot. O padrão é `app` para `artisan pam:octane` (`pam octane:start`) e
+  `engine` para os demais scripts.
+- Um `SIGHUP` (`pam octane:reload`) cria um zygote novo, que inicializa a
+  aplicação a partir do código atual antes de forkar a nova geração; a geração
+  anterior continua atendendo até a nova ficar pronta.
+- Recycling por `--max-requests` e workers que caem são forkados de novo do
+  mesmo zygote, sem reinicializar a aplicação.
+
+O Pam trata de forma genérica o que não pode atravessar o `fork`:
+
+- **Conexões e listeners:** depois dos hooks `beforeFork`, todo socket que a
+  aplicação deixou aberto (MySQL, Redis, brokers, sockets crus, listeners) é
+  desconectado no zygote, uma vez, antes do primeiro fork: o descritor vira um
+  socket novo e desconectado, então o objeto PHP dono dele recebe "not
+  connected" no primeiro uso e reconecta, em vez de dois processos dividirem a
+  mesma conexão. Cada um gera uma linha de log
+  (`pam: post-boot zygote closed a connection to 127.0.0.1:3306 ...`).
+- **Arquivos:** cada worker reabre os arquivos regulares herdados
+  (`/proc/self/fd/N`) e ganha offset e `flock` próprios.
+- **Aleatoriedade:** as sementes de `mt_rand`/`rand`/`shuffle`/`str_shuffle`/
+  `array_rand`, `lcg_value` e `uniqid` são reiniciadas em cada worker;
+  `random_bytes`/`random_int` usam o CSPRNG do kernel.
+- **PIDs, identidade e timers:** `PAM_WORKER_ID` e o resto do ambiente do
+  worker são aplicados antes dos hooks `afterFork`; `max_execution_time` é
+  rearmado; a identidade de nó dos sockets do Pam usa o PID do worker.
+- **OPcache/JIT:** continuam no segmento compartilhado da geração, como no modo
+  pré-boot e no PHP-FPM.
+- **OOM killer:** cada worker forkado soma 300 ao próprio `oom_score_adj`, então
+  sob falta de memória o kernel mata o worker que está crescendo, e não o
+  zygote (o maior processo ocioso no modo pós-boot), cuja morte derrubaria
+  todos os workers da geração de uma vez.
+
+Hooks para o framework resetar o resto:
+
+```php
+\Pam\Fork::beforeFork(fn () => $broker->disconnect()); // uma vez, no zygote
+\Pam\Fork::afterFork(fn () => $metrics->setWorker(getenv('PAM_WORKER_ID')));
+pam_before_fork($callback); pam_on_fork($callback);    // atalhos globais
+\Pam\Fork::isForkedWorker();                          // true num worker forkado
+```
+
+O `pushinbr/pam-octane` registra o `beforeFork` que fecha as conexões de banco
+(`DB::disconnect`) e Redis (`Redis::purge`) das duas aplicações que o comando
+`pam:octane` mantém (a do console e a do worker do Octane).
+
+O Pam volta sozinho ao fork pré-boot, com uma linha
+`pam: post-boot zygote disabled (<motivo>); falling back to pre-boot forking`,
+quando o boot da aplicação falha ou sai com status diferente de zero, quando o
+script não inicia um servidor HTTP, quando um hook `beforeFork` lança exceção,
+quando o processo tem mais de uma thread depois do boot e quando há pools de
+runtime (`--pool`), que inicializam um runtime por pool.
+
+Medido (build release, Laravel 12 + Octane, MySQL 8.4 e Redis 7 em containers,
+Intel Core Ultra 9 185H):
+
+| | pós-boot, 8 workers | pré-boot, 8 workers | pós-boot, 16 workers | pré-boot, 16 workers |
+|---|---:|---:|---:|---:|
+| PSS total (workers + zygote) | 158 MB | 225 MB | 199 MB | 317 MB |
+| PSS por worker | 15,2 MB | 25,5 MB | 10,4 MB | 18,6 MB |
+| spawn → pronto (p50) | 4 ms | 31 ms | 2 ms | 452 ms |
+| reload (`SIGHUP` → geração pronta) | 342–524 ms | 423–564 ms | 363–504 ms | 524–646 ms |
+
 Garantias de segurança e robustez:
 
 - O diretório de runtime do master é criado de forma atômica com modo 0700

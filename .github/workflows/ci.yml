@@ -121,6 +121,8 @@ jobs:
       - name: Rust and integration tests
         run: |
           cargo test --locked --all-targets --all-features -- --test-threads=1
+          # Every cluster contract again with workers forked from a booted application.
+          PAM_PREFORK_BOOT=app cargo test --locked --test cluster -- --test-threads=1
           cargo test --locked --manifest-path pam-native/Cargo.toml
           php pam-native/packages/native/tests/run.php
       - name: Produce and consume portable CLI catalog evidence

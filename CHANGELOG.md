@@ -11,6 +11,16 @@
   connection per request at `--max-requests=500`, and keep-alive clients saw
   rare write errors during reloads. Now 0 of 7.8M requests in 60 runs, with
   and without `tcp_migrate_req`.
+- Post-boot prefork zygote (`PAM_PREFORK_BOOT=app`, the default for
+  `artisan pam:octane`): the zygote boots the application once and forks
+  workers from the booted state. Workers are ready in a few milliseconds
+  (spawn to ready p50 2-4 ms instead of 31-452 ms for Laravel 12) and share
+  the booted memory (16 workers: 199 MB PSS instead of 317 MB). Sockets left
+  open after boot are disconnected before the first fork, inherited files are
+  reopened per worker, PRNG seeds and `max_execution_time` are reset per
+  worker. `\Pam\Fork::beforeFork()`/`afterFork()` (`pam_before_fork()`,
+  `pam_on_fork()`) let frameworks reset more. A zygote that cannot fork its
+  booted state safely falls back to pre-boot forking with one log line.
 
 ## 2.2.14 - 2026-11-10
 

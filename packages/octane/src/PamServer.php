@@ -43,6 +43,7 @@ final class PamServer
 
         $worker = new Worker(new ApplicationFactory($this->basePath), $this->client);
         $worker->boot();
+        self::registerForkHooks($worker->application());
 
         // Octane's request timeout: `octane.max_execution_time` seconds, 0
         // disables it. A request past it is answered 504 and its worker is
@@ -80,6 +81,41 @@ final class PamServer
         // when PAM shuts the PHP engine down after serving.
         register_shutdown_function(static function () use ($worker): void {
             $worker->terminate();
+        });
+    }
+
+    /**
+     * With PAM's post-boot zygote (the default for `pam:octane` on Linux) this
+     * booted application is forked into every worker. Database and Redis
+     * connections opened while booting are closed once, before the first
+     * fork, so each worker reconnects lazily on first use instead of sharing
+     * a socket. PAM disconnects any other socket still open at fork time.
+     */
+    public static function registerForkHooks(\Illuminate\Contracts\Foundation\Application $application): void
+    {
+        if (!class_exists(\Pam\Fork::class)) {
+            return;
+        }
+
+        \Pam\Fork::beforeFork(static function () use ($application): void {
+            if ($application->resolved('db')) {
+                $database = $application->make('db');
+                if (is_object($database) && method_exists($database, 'getConnections') && method_exists($database, 'disconnect')) {
+                    $connections = $database->getConnections();
+                    foreach (is_array($connections) ? array_keys($connections) : [] as $name) {
+                        $database->disconnect($name);
+                    }
+                }
+            }
+            if ($application->resolved('redis')) {
+                $redis = $application->make('redis');
+                if (is_object($redis) && method_exists($redis, 'connections') && method_exists($redis, 'purge')) {
+                    $connections = $redis->connections();
+                    foreach (is_array($connections) ? array_keys($connections) : [] as $name) {
+                        $redis->purge($name);
+                    }
+                }
+            }
         });
     }
 

@@ -2,6 +2,14 @@
 
 All notable changes to PAM Octane will be documented here.
 
+## Unreleased
+
+- With PAM's post-boot zygote (the default for `octane:start` on Linux),
+  workers are forked from a booted Laravel application. The bridge closes the
+  database and Redis connections of both the console and the Octane worker
+  application before the fork (`PamServer::registerForkHooks()`), so every
+  worker opens its own connections lazily.
+
 ## 1.2.0 - 2026-11-09
 
 Requires PAM 2.2.13 for the transport fixes (streamed uploads, 504 on timeout,

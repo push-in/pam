@@ -232,6 +232,12 @@ impl ClusterProcess {
         if let Some(generation) = failed_generation {
             command.env("PAM_TEST_FAIL_GENERATION", generation.to_string());
         }
+        if let Some((_, path)) = environment
+            .iter()
+            .find(|(name, _)| *name == "PAM_TEST_STDERR_FILE")
+        {
+            command.stderr(fs::File::create(path).unwrap());
+        }
         command.envs(environment.iter().copied());
         let child = command.spawn().unwrap();
         let mut cluster = Self {
@@ -969,6 +975,33 @@ fn socket_inodes(pid: u32) -> HashSet<u64> {
 }
 
 #[cfg(target_os = "linux")]
+fn fork_probe(cluster: &ClusterProcess) -> serde_json::Value {
+    let response = cluster.request_path("/fork").unwrap();
+    let body = response.split("\r\n\r\n").nth(1).unwrap();
+    serde_json::from_str(body).unwrap_or_else(|error| panic!("{error}: {response}"))
+}
+
+/// Samples `/fork` until `workers` distinct worker PIDs answered, keeping
+/// every response in order.
+#[cfg(target_os = "linux")]
+fn fork_probes(cluster: &ClusterProcess, workers: usize) -> Vec<serde_json::Value> {
+    let mut probes = Vec::new();
+    let mut pids = HashSet::new();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while pids.len() < workers {
+        assert!(
+            Instant::now() < deadline,
+            "only {} workers answered",
+            pids.len()
+        );
+        let probe = fork_probe(cluster);
+        pids.insert(probe["pid"].as_u64().unwrap());
+        probes.push(probe);
+    }
+    probes
+}
+
+#[cfg(target_os = "linux")]
 #[test]
 fn recycled_workers_and_reloads_reuse_the_listeners_the_master_keeps() {
     let mut cluster =
@@ -1008,4 +1041,212 @@ fn recycled_workers_and_reloads_reuse_the_listeners_the_master_keeps() {
         assert_eq!(held.intersection(&listeners).count(), 1, "worker {worker}");
     }
     cluster.stop();
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn post_boot_zygote_forks_isolated_workers_from_the_booted_application() {
+    let directory = std::env::temp_dir().join(format!("pam-post-boot-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let log = directory.join("fork.log");
+    let _ = fs::remove_file(&log);
+    // A connection the application opens while booting and never closes.
+    let peer = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let peer_port = peer.local_addr().unwrap().port().to_string();
+    let (accepted, connections) = std::sync::mpsc::channel();
+    thread::spawn(move || {
+        for stream in peer.incoming() {
+            let Ok(mut stream) = stream else { return };
+            let accepted = accepted.clone();
+            thread::spawn(move || {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                let mut received = Vec::new();
+                let closed = stream.read_to_end(&mut received).is_ok();
+                let _ = accepted.send((closed, received));
+            });
+        }
+    });
+
+    let workers = 4;
+    let mut cluster = ClusterProcess::start_with_env(
+        1_000,
+        workers,
+        None,
+        None,
+        &[
+            ("PAM_PREFORK_BOOT", "app"),
+            ("PAM_TEST_FORK", "1"),
+            ("PAM_TEST_FORK_LOG", log.to_str().unwrap()),
+            ("PAM_TEST_BOOT_SOCKET_PORT", &peer_port),
+        ],
+    );
+
+    // The zygote closed the boot connection before forking: its peer sees
+    // EOF without a single byte, and no worker ever writes into it.
+    let (closed, received) = connections.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert!(closed && received.is_empty(), "{received:?}");
+
+    let probes = fork_probes(&cluster, workers);
+    let boot_pid = probes[0]["bootPid"].as_u64().unwrap();
+    let mut first_by_pid = std::collections::HashMap::new();
+    let mut requests_by_pid = std::collections::HashMap::<u64, u64>::new();
+    for probe in &probes {
+        let pid = probe["pid"].as_u64().unwrap();
+        assert_ne!(pid, boot_pid, "workers must not be the zygote");
+        assert_eq!(
+            probe["bootPid"].as_u64(),
+            Some(boot_pid),
+            "booted once: {probe}"
+        );
+        assert_eq!(probe["forked"], serde_json::Value::Bool(true), "{probe}");
+        assert_eq!(
+            probe["socket"], "failed",
+            "a worker wrote into a boot-time connection"
+        );
+        // Each worker has its own offset in files opened while booting.
+        let seen = requests_by_pid.entry(pid).or_default();
+        assert_eq!(probe["offset"].as_u64(), Some(*seen * 5), "{probe}");
+        assert_eq!(
+            probe["chunk"], probe["expected"],
+            "a shared file offset: {probe}"
+        );
+        *seen += 1;
+        first_by_pid.entry(pid).or_insert_with(|| probe.clone());
+    }
+    for key in ["mt", "rand", "lcg", "uniqid", "shuffle"] {
+        let values = first_by_pid
+            .values()
+            .map(|probe| probe[key].to_string())
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            values.len(),
+            workers,
+            "workers drew the same {key}: {values:?}"
+        );
+    }
+    // The OOM killer prefers a worker over the zygote all workers depend on.
+    let adj = |pid: u64| {
+        fs::read_to_string(format!("/proc/{pid}/oom_score_adj"))
+            .unwrap()
+            .trim()
+            .parse::<i32>()
+            .unwrap()
+    };
+    for pid in first_by_pid.keys() {
+        assert_eq!(adj(*pid), (adj(boot_pid) + 300).min(1000), "worker {pid}");
+    }
+    let workers_seen = first_by_pid
+        .values()
+        .map(|probe| probe["worker"].as_str().unwrap().to_owned())
+        .collect::<HashSet<_>>();
+    assert_eq!(workers_seen.len(), workers);
+
+    let log_text = fs::read_to_string(&log).unwrap();
+    let before = log_text
+        .lines()
+        .filter(|line| line.starts_with("before:"))
+        .collect::<Vec<_>>();
+    assert_eq!(before, vec![format!("before:{boot_pid}")], "{log_text}");
+    let after = log_text
+        .lines()
+        .filter(|line| line.starts_with("after:"))
+        .count();
+    assert_eq!(after, workers, "{log_text}");
+
+    // A recycled or crashed worker is forked again from the same booted
+    // zygote, in milliseconds, and the before-fork hooks do not run again.
+    let victim = *first_by_pid.keys().next().unwrap();
+    // SAFETY: the PID belongs to a worker of the cluster this test started.
+    unsafe { kill(victim as i32, SIGKILL) };
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while cluster.children().contains(&(victim as u32)) || cluster.children().len() < workers {
+        assert!(
+            Instant::now() < deadline,
+            "the killed worker was not replaced"
+        );
+        thread::sleep(Duration::from_millis(10));
+    }
+    let replacement = fork_probes(&cluster, workers);
+    assert!(
+        replacement
+            .iter()
+            .all(|probe| probe["bootPid"].as_u64() == Some(boot_pid))
+    );
+    let log_text = fs::read_to_string(&log).unwrap();
+    assert_eq!(
+        log_text
+            .lines()
+            .filter(|line| line.starts_with("before:"))
+            .count(),
+        1
+    );
+
+    // A reload boots a fresh zygote from the current code.
+    cluster.signal(SIGHUP);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(Instant::now() < deadline, "the reload did not activate");
+        let ready = cluster.admin_request("/ready");
+        if ready.starts_with("HTTP/1.1 200") && ready.contains(r#""generation":2"#) {
+            let probe = fork_probe(&cluster);
+            if probe["bootPid"].as_u64() != Some(boot_pid) {
+                break;
+            }
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let log_text = fs::read_to_string(&log).unwrap();
+    assert_eq!(
+        log_text
+            .lines()
+            .filter(|line| line.starts_with("before:"))
+            .count(),
+        2
+    );
+    cluster.stop();
+    let _ = fs::remove_dir_all(&directory);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn post_boot_zygote_falls_back_to_pre_boot_forking_with_a_log_line() {
+    let directory =
+        std::env::temp_dir().join(format!("pam-post-boot-fallback-{}", std::process::id()));
+    fs::create_dir_all(&directory).unwrap();
+    let log = directory.join("fork.log");
+    let stderr = directory.join("stderr.log");
+    let mut cluster = ClusterProcess::start_with_env(
+        1_000,
+        2,
+        None,
+        None,
+        &[
+            ("PAM_PREFORK_BOOT", "app"),
+            ("PAM_TEST_FORK", "1"),
+            ("PAM_TEST_FORK_FAIL_IN_ZYGOTE", "1"),
+            ("PAM_TEST_FORK_LOG", log.to_str().unwrap()),
+            ("PAM_TEST_STDERR_FILE", stderr.to_str().unwrap()),
+        ],
+    );
+    let probes = fork_probes(&cluster, 2);
+    for probe in &probes {
+        // Pre-boot workers boot the application themselves.
+        assert_eq!(probe["forked"], serde_json::Value::Bool(false), "{probe}");
+        assert_eq!(probe["bootPid"], probe["pid"], "{probe}");
+    }
+    cluster.stop();
+    let output = fs::read_to_string(&stderr).unwrap();
+    assert!(
+        output.contains("post-boot zygote disabled (the application")
+            && output.contains("falling back to pre-boot forking"),
+        "{output}"
+    );
+    assert!(
+        !fs::read_to_string(&log)
+            .unwrap_or_default()
+            .contains("before:")
+    );
+    let _ = fs::remove_dir_all(&directory);
 }

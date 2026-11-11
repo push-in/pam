@@ -1492,17 +1492,99 @@ fn run_script(
 }
 
 /// Starts the Zend engine once and forks HTTP workers on the master's request,
-/// so all workers of a generation share one OPcache/JIT segment.
+/// so all workers of a generation share one OPcache/JIT segment. In the
+/// post-boot mode the zygote also boots the application before forking.
 #[cfg(target_os = "linux")]
 fn run_zygote(script: &Path, script_args: Vec<OsString>) -> Result<u8, CliError> {
+    let channel = prefork::Channel::claim().map_err(CliError::Cluster)?;
+    let mode = env::var(prefork::BOOT_MODE_ENV)
+        .ok()
+        .and_then(|value| prefork::BootMode::parse(&value))
+        .unwrap_or(prefork::BootMode::Engine);
+    // SAFETY: single-threaded; workers inherit the mode only for diagnostics.
+    unsafe { env::set_var(prefork::BOOT_MODE_ENV, mode.as_str()) };
     let engine = php::PhpEngine::start(script, &script_args).map_err(CliError::Runtime)?;
-    match prefork::serve(engine).map_err(CliError::Cluster)? {
-        prefork::ZygoteOutcome::Exit => Ok(0),
-        prefork::ZygoteOutcome::Worker(engine) => {
-            let php = engine.into_runtime(true).map_err(CliError::Runtime)?;
-            run_initialized_script(php, script)
+    if mode == prefork::BootMode::Engine {
+        return match prefork::serve(channel, engine, |engine| {
+            engine.adopt_after_fork();
+            Ok(())
+        })
+        .map_err(CliError::Cluster)?
+        {
+            prefork::ZygoteOutcome::Exit => Ok(0),
+            prefork::ZygoteOutcome::Worker(engine) => {
+                let php = engine.into_runtime(true).map_err(CliError::Runtime)?;
+                run_initialized_script(php, script)
+            }
+        };
+    }
+
+    let started = std::time::Instant::now();
+    let booted = boot_application_for_fork(engine, script, &channel);
+    let (php, config) = match booted {
+        Ok(booted) => booted,
+        Err(reason) => {
+            return Err(CliError::Cluster(channel.reexec_engine_mode(&reason)));
+        }
+    };
+    eprintln!(
+        "pam: post-boot zygote ready in {} ms; forking workers from the booted application",
+        started.elapsed().as_millis()
+    );
+    match prefork::serve(channel, php, |php| {
+        let reopened = prefork::fork_hygiene::reopen_regular_files();
+        if reopened > 0 && env::var_os("PAM_PREFORK_DEBUG").is_some() {
+            eprintln!("pam: worker reopened {reopened} inherited file(s)");
+        }
+        php.after_fork()
+    })
+    .map_err(CliError::Cluster)?
+    {
+        prefork::ZygoteOutcome::Exit => {
+            // The zygote's copy of the application never served a request;
+            // its shutdown hooks must not run (workers own the application).
+            // SAFETY: leave without PHP shutdown or Rust destructors.
+            unsafe { libc::_exit(0) }
+        }
+        prefork::ZygoteOutcome::Worker(php) => {
+            server::run(config).map_err(CliError::Server)?;
+            drop(php);
+            Ok(0)
         }
     }
+}
+
+/// Boots the application in the zygote and makes the booted state safe to
+/// fork. Any `Err` is a reason to fall back to pre-boot forking.
+#[cfg(target_os = "linux")]
+fn boot_application_for_fork(
+    engine: php::PhpEngine,
+    script: &Path,
+    channel: &prefork::Channel,
+) -> Result<(php::PhpRuntime, php::ServerConfig), String> {
+    let mut php = engine
+        .into_runtime(true)
+        .map_err(|error| format!("the runtime failed to start: {error}"))?;
+    sanitize_package_command_environment();
+    let status = php
+        .execute_file(script)
+        .map_err(|error| format!("the application failed to boot: {error}"))?;
+    if status != 0 {
+        return Err(format!("the application boot exited with status {status}"));
+    }
+    let config = php
+        .server_config()
+        .map_err(|error| format!("cannot read the server configuration: {error}"))?
+        .ok_or_else(|| "the script did not start an HTTP server".to_owned())?;
+    php.prepare_fork()?;
+    prefork::ensure_single_threaded()?;
+    for socket in prefork::fork_hygiene::disconnect_inherited_sockets(&channel.descriptors()) {
+        eprintln!(
+            "pam: post-boot zygote closed a {} left open after boot (fd {}); workers reconnect on first use",
+            socket.description, socket.fd
+        );
+    }
+    Ok((php, config))
 }
 
 #[cfg(not(target_os = "linux"))]

@@ -1,6 +1,9 @@
 #include <sapi/embed/php_embed.h>
 #include <main/php_memory_streams.h>
 #include <main/php_network.h>
+#if PHP_VERSION_ID >= 80200
+#include <ext/random/php_random.h>
+#endif
 
 #include "pam.h"
 
@@ -898,6 +901,32 @@ int pam_php_dispatch_ws(
 void pam_php_string_free(char *value)
 {
     free(value);
+}
+
+/*
+ * A worker forked from a booted zygote inherits the zygote's PRNG states and
+ * would draw the same mt_rand()/rand()/shuffle()/lcg_value()/uniqid() values
+ * as every sibling. Clearing the "seeded" flags makes each process reseed
+ * lazily from the CSPRNG, exactly like a fresh process. random_bytes() and
+ * random_int() read the kernel CSPRNG and carry no state. setitimer() based
+ * max_execution_time timers are not inherited by fork(2), so a configured
+ * limit is re-armed here.
+ */
+void pam_php_after_fork(void)
+{
+    if (!pam_initialized) {
+        return;
+    }
+#if PHP_VERSION_ID >= 80200
+    RANDOM_G(mt19937_seeded) = false;
+    RANDOM_G(combined_lcg_seeded) = false;
+#endif
+#if PHP_VERSION_ID >= 80400
+    RANDOM_G(fallback_seed_state).initialized = false;
+#endif
+    if (EG(timeout_seconds) > 0) {
+        zend_set_timeout(EG(timeout_seconds), 0);
+    }
 }
 
 void pam_php_shutdown(void)

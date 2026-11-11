@@ -65,6 +65,8 @@ int pam_php_dispatch_ws(
 );
 void pam_php_string_free(char *value);
 void pam_php_shutdown(void);
+/* Resets process-bound engine state in a worker forked from a booted zygote. */
+void pam_php_after_fork(void);
 
 #ifdef __cplusplus
 }

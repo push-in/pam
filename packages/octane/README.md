@@ -51,6 +51,19 @@ pam octane:status | pam octane:reload | pam octane:stop
 Each project gets its own managed application name, so several Laravel
 projects can run side by side; pass `--name=` to choose one.
 
+On Linux, `octane:start` boots Laravel once in a prefork zygote and forks the
+workers from that booted application: a worker (a new one, a recycled one after
+`--max-requests`, or one replacing a crashed worker) is ready in a few
+milliseconds and shares the booted memory copy-on-write. `octane:reload` boots
+a fresh zygote from the current code. Database and Redis connections opened
+while booting are closed before the fork, any other socket left open is
+disconnected by PAM, PRNG seeds and file offsets are per worker. Register
+`\Pam\Fork::beforeFork()` / `\Pam\Fork::afterFork()` (or `pam_on_fork()`)
+callbacks for anything else your application must reset per process. Set
+`PAM_PREFORK_BOOT=engine` to boot Laravel in every worker instead. See
+[docs/production.md](https://github.com/push-in/pam/blob/main/docs/production.md)
+for details and measurements.
+
 For public, anonymous read endpoints, PAM can serve an explicitly opted-in
 response from Rust without re-entering PHP. The cache is disabled until paths
 are listed, and authenticated or cookie-bearing requests always bypass it:
