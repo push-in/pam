@@ -52,6 +52,11 @@
 - After a fatal error (such as `memory_limit`) bails out of a request, PAM no
   longer calls back into the failed engine to cancel the dispatch, which
   logged a second fatal ("Couldn't execute method ...cancelHttpDispatch").
+- After such a fatal, the worker's PHP shutdown starts from a clean response
+  state, so Laravel/Collision's shutdown handling no longer adds a Whoops
+  "http_response_code()" warning and uncaught fatal to the logs.
+- pamd logs how each master it supervises ended (exit code or signal) and when
+  it schedules a restart.
 
 ## 2.2.14 - 2026-11-10
 
