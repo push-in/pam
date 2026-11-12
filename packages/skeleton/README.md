@@ -18,6 +18,7 @@ pam init my-app
 cd my-app
 pam composer install
 mkdir -p storage && touch storage/database.sqlite
+export DB_CONNECTION=sqlite DB_DATABASE=$PWD/storage/database.sqlite
 pam composer migrate
 pam composer dev
 ```
@@ -29,7 +30,7 @@ controller method orchestrates a service and returns a JSON Resource. Closures
 remain available for small endpoints, but application rules should live in
 services and persistence should live in repositories.
 
-It also ships an executable Eloquent vertical slice:
+It also ships an executable Arcano ORM vertical slice:
 
 ```bash
 curl -X POST http://127.0.0.1:3000/api/products \
@@ -40,7 +41,7 @@ curl http://127.0.0.1:3000/api/products
 
 `ProductController` stays thin, `StoreProductRequest` validates and hydrates a
 typed DTO, `ProductService` owns the use case, `ProductRepository` isolates
-Eloquent persistence, and `ProductResource` owns the response contract. Product
+Arcano persistence, and `ProductResource` owns the response contract. Product
 statuses are sequential integer-backed enum values (`1` active, `2` archived).
 Creation returns `201 Created`; resources may select any valid HTTP status while
 retaining PAM API's consistent `data` envelope.
@@ -59,7 +60,7 @@ index.php
 src/
 ├── Domain/Products/
 ├── Http/{Controllers,Requests,Resources}/
-├── Models/Product.php
+├── Models/Product.php          # #[Entity] mapped by Arcano
 ├── Providers/AppServiceProvider.php
 ├── Repositories/
 └── Services/
@@ -68,8 +69,20 @@ tests/{ApplicationTest.php,bootstrap.php}
 ```
 
 `index.php` validates typed configuration before listening, installs secure
-response headers, and boots Eloquent from environment configuration. Migrations
-are explicit so concurrent production workers never race schema changes.
+response headers, and boots Arcano from environment configuration (`DB_*`).
+The entities in `src/Models` are compiled into `var/cache/arcano-schema.php`;
+the cache is rebuilt when an entity changes, except with `PAM_ENV=production`.
+
+Migrations are explicit so concurrent production workers never race schema
+changes:
+
+```bash
+pam composer migrate              # run pending migrations
+pam composer migrate generate     # write a migration for changed entities
+pam composer migrate rollback 1   # revert the last migration
+pam composer migrate status       # list migrations and when they ran
+pam composer migrate cache        # rebuild the schema cache during deploy
+```
 
 ## License
 

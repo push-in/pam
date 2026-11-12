@@ -16,7 +16,8 @@
     },
     "require": {
         "php": "^8.5",
-        "pushinbr/pam-http": "^2.0",
+        "pushinbr/arcano": "^0.2.1",
+        "pushinbr/pam-http": "^2.1",
         "pushinbr/pam-http-psr": "^1.0",
         "pushinbr/pam-socket": "^1.1"
     },
@@ -35,6 +36,7 @@
         "sort-packages": true
     },
     "scripts": {
-        "test": "pam test . --phpunit -c phpunit.xml"
+        "test": "pam test . --phpunit -c phpunit.xml",
+        "migrate": "@php bin/migrate"
     }
 }

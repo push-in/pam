@@ -2,6 +2,14 @@
 
 All notable changes to PAM Skeleton are documented in this file.
 
+## Unreleased
+
+- Persist products with the Arcano ORM (`pushinbr/arcano`): `Product` is an
+  `#[Entity]`, `ArcanoProductRepository` replaces the Eloquent repository and
+  `bin/migrate` runs, generates, reverts and lists Arcano migrations and builds
+  the schema cache.
+- Require `pushinbr/pam-http` 2.1 for the Arcano integration.
+
 ## 2.0.1 - 2026-08-22
 
 - Require the permanent `pushinbr/pam-http-psr` interoperability package.
