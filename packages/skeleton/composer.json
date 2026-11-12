@@ -16,7 +16,7 @@
     },
     "require": {
         "php": "^8.5",
-        "pushinbr/arcano": "^0.2.1",
+        "pushinbr/arcano": "^0.2.2",
         "pushinbr/pam-http": "^2.1",
         "pushinbr/pam-http-psr": "^1.0",
         "pushinbr/pam-socket": "^1.1"

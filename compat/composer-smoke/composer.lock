@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "520c284771036c6d1f42dcfcd43baddc",
+    "content-hash": "5244eaa0166e9b626465e3eaafa6c68e",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2897,7 +2897,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http",
-                "reference": "4793c692fb4e0f8b36acf8d3ffe0885e4895181c"
+                "reference": "e60e8fffc4b2fa52494a0bb276a11538ffd9a246"
             },
             "require": {
                 "php": "^8.4",
@@ -2910,7 +2910,7 @@
                 "illuminate/pagination": "^13.0",
                 "phpstan/phpstan": "^2.1",
                 "phpunit/phpunit": "^11.5",
-                "pushinbr/arcano": "^0.2.1"
+                "pushinbr/arcano": "^0.2.2"
             },
             "suggest": {
                 "illuminate/database": "Required by the deprecated built-in Eloquent bridge; use the dedicated PAM database adapter when available.",
@@ -7432,16 +7432,16 @@
         },
         {
             "name": "pushinbr/arcano",
-            "version": "v0.2.1",
+            "version": "v0.2.2",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/arcano.git",
-                "reference": "43cab1a926278e827addaf7c7b6659079f972ff4"
+                "reference": "f5e129cb3dd13df3d53589fa3fc1e40c649dc37f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/arcano/zipball/43cab1a926278e827addaf7c7b6659079f972ff4",
-                "reference": "43cab1a926278e827addaf7c7b6659079f972ff4",
+                "url": "https://api.github.com/repos/push-in/arcano/zipball/f5e129cb3dd13df3d53589fa3fc1e40c649dc37f",
+                "reference": "f5e129cb3dd13df3d53589fa3fc1e40c649dc37f",
                 "shasum": ""
             },
             "require": {
@@ -7493,9 +7493,9 @@
             "description": "Arcano: a fast data mapper ORM for PHP and the PAM runtime, with attribute entities, schema builder and migrations. Derived from Cycle ORM.",
             "support": {
                 "issues": "https://github.com/push-in/arcano/issues",
-                "source": "https://github.com/push-in/arcano/tree/v0.2.1"
+                "source": "https://github.com/push-in/arcano/tree/v0.2.2"
             },
-            "time": "2026-11-12T18:44:13+00:00"
+            "time": "2026-11-12T19:15:13+00:00"
         },
         {
             "name": "pushinbr/pam-http-testing",

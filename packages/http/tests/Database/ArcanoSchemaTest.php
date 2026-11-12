@@ -11,6 +11,10 @@ use Pam\Api\Database\ArcanoManager;
 use Pam\Api\Database\ArcanoMigrationManager;
 use Pam\Api\Database\ArcanoSchemaCompiler;
 use Pam\Api\Database\ArcanoServiceProvider;
+use Pam\Api\Database\DatabaseConfig;
+use Pam\Api\Database\EloquentManager;
+use Pam\Api\Database\EloquentServiceProvider;
+use Pam\Api\Transactions\TransactionManager;
 use Pam\Api\Tests\Fixtures\Arcano\Author;
 use Pam\Api\Tests\Fixtures\Arcano\Post;
 use Pam\App;
@@ -162,6 +166,44 @@ final class ArcanoSchemaTest extends TestCase
         self::assertInstanceOf(Post::class, $post);
         self::assertSame($loaded, $post->author);
         $arcano->releaseCurrentRequest();
+    }
+
+    public function testEloquentAndArcanoShareTheDatabaseDuringAMigration(): void
+    {
+        if (ArcanoTestDatabase::driver() !== 'sqlite' || !class_exists(\Illuminate\Database\Capsule\Manager::class)) {
+            self::markTestSkipped('Runs on the SQLite file with illuminate/database installed.');
+        }
+        $config = new DatabaseConfig('default', [
+            'default' => ['driver' => 'sqlite', 'database' => $this->directory . '/app.sqlite', 'prefix' => ''],
+        ]);
+        $app = new App(discoverPackages: false);
+        $app->provider(new EloquentServiceProvider($config));
+        $app->provider(new ArcanoServiceProvider(
+            $config,
+            new ArcanoSchemaCompiler(self::ENTITIES),
+            $this->directory . '/migrations',
+        ));
+        $app->boot();
+        $migrations = $app->container()->get(ArcanoMigrationManager::class);
+        $arcano = $app->container()->get(ArcanoManager::class);
+        $eloquent = $app->container()->get(EloquentManager::class);
+        self::assertInstanceOf(ArcanoMigrationManager::class, $migrations);
+        self::assertInstanceOf(ArcanoManager::class, $arcano);
+        self::assertInstanceOf(EloquentManager::class, $eloquent);
+        // The provider registered last owns the application transactions.
+        self::assertSame($arcano, $app->container()->get(TransactionManager::class));
+        $migrations->generate();
+        $migrations->migrate();
+
+        $eloquent->connection()->table('authors')->insert(['name' => 'Written by Eloquent']);
+        $author = $arcano->repository(Author::class)->findOne(['name' => 'Written by Eloquent']);
+        self::assertInstanceOf(Author::class, $author);
+
+        $author->name = 'Renamed by Arcano';
+        $arcano->entityManager()->persist($author)->run();
+        self::assertSame('Renamed by Arcano', $eloquent->connection()->table('authors')->value('name'));
+        $arcano->releaseCurrentRequest();
+        $eloquent->releaseCurrentRequest();
     }
 
     private function databases(): ArcanoDatabaseProvider

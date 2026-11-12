@@ -22,6 +22,24 @@ baseline after approving compatible additions. Refreshing it for a breaking
 change is allowed only on an intentional major-version branch after documenting
 every reported break; normal `composer verify` never regenerates it.
 
+## From Eloquent to Arcano (2.1)
+
+The Eloquent bridge keeps working in 2.x; Arcano is the recommended ORM from
+2.1. The two can run side by side on the same `DatabaseConfig` while models
+move one at a time.
+
+1. `pam composer require pushinbr/arcano` and register `ArcanoServiceProvider`
+   with an `ArcanoSchemaCompiler` for the entity directory (see README).
+2. Turn each Eloquent model into a plain class with `#[Entity]` and `#[Column]`
+   attributes that map the existing table and column names (`table:`, `name:`).
+3. Replace `Model::query()` calls in repositories with
+   `ArcanoManager::select()`, `repository()` and `entityManager()->persist()`.
+4. Keep running the existing Eloquent migrations until every table is mapped;
+   then `ArcanoMigrationManager::generate()` must report no difference, and new
+   schema changes are generated from the entities.
+5. Remove `EloquentServiceProvider` and the `illuminate/*` packages when no
+   model is left.
+
 ## From 1.x to 2.0
 
 1. Upgrade the PAM runtime and PHP to supported versions before changing the
