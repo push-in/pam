@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace Pam\Api\Database;
 
 use Arcano\Database\Config\DatabaseConfig as ArcanoConfig;
+use Arcano\Database\Config\MySQL\SocketConnectionConfig as MySQLSocketConnection;
 use Arcano\Database\Config\MySQL\TcpConnectionConfig as MySQLConnection;
 use Arcano\Database\Config\MySQLDriverConfig;
+use Arcano\Database\Config\Postgres\DsnConnectionConfig as PostgresDsnConnection;
 use Arcano\Database\Config\Postgres\TcpConnectionConfig as PostgresConnection;
 use Arcano\Database\Config\PostgresDriverConfig;
 use Arcano\Database\Config\SQLite\FileConnectionConfig;
@@ -150,31 +152,102 @@ final class ArcanoDatabaseProvider
         $user = self::optional($connection, 'username');
         $password = self::optional($connection, 'password');
 
+        $options = self::pdoOptions($connection);
+
         return match ($driver) {
-            'pgsql' => new PostgresDriverConfig(new PostgresConnection(
-                database: $database,
-                host: $host,
-                port: self::port($connection, 5432),
-                user: $user,
-                password: $password,
-            )),
-            'mysql' => new MySQLDriverConfig(new MySQLConnection(
-                database: $database,
-                host: $host,
-                port: self::port($connection, 3306),
-                charset: self::optional($connection, 'charset'),
-                user: $user,
-                password: $password,
-            )),
+            'pgsql' => new PostgresDriverConfig(
+                self::postgresConnection($connection, $database, $host, $user, $password, $options),
+                schema: self::optional($connection, 'search_path') ?? self::optional($connection, 'schema') ?? 'public',
+            ),
+            'mysql' => new MySQLDriverConfig(($socket = self::optional($connection, 'unix_socket')) !== null
+                ? new MySQLSocketConnection(
+                    database: $database,
+                    socket: $socket,
+                    charset: self::optional($connection, 'charset'),
+                    user: $user,
+                    password: $password,
+                    options: $options,
+                )
+                : new MySQLConnection(
+                    database: $database,
+                    host: $host,
+                    port: self::port($connection, 3306),
+                    charset: self::optional($connection, 'charset'),
+                    user: $user,
+                    password: $password,
+                    options: $options,
+                )),
             'sqlsrv' => new SQLServerDriverConfig(new SQLServerConnection(
                 database: $database,
                 host: $host,
                 port: self::port($connection, 1433),
+                encrypt: self::flag($connection, 'encrypt'),
+                trustServerCertificate: self::flag($connection, 'trust_server_certificate'),
                 user: $user,
                 password: $password,
+                options: $options,
             )),
             default => throw new \InvalidArgumentException("The {$name} connection uses a driver Arcano does not support."),
         };
+    }
+
+    /**
+     * @param array<string, mixed> $connection
+     * @param array<int, mixed> $options
+     * @param non-empty-string $database
+     * @param non-empty-string $host
+     * @param non-empty-string|null $user
+     * @param non-empty-string|null $password
+     */
+    private static function postgresConnection(
+        array $connection,
+        string $database,
+        string $host,
+        ?string $user,
+        ?string $password,
+        array $options,
+    ): PostgresConnection|PostgresDsnConnection {
+        $port = self::port($connection, 5432);
+        $sslmode = self::optional($connection, 'sslmode');
+        if ($sslmode === null) {
+            return new PostgresConnection($database, $host, $port, $user, $password, $options);
+        }
+        return new PostgresDsnConnection(
+            "pgsql:host={$host};port={$port};dbname={$database};sslmode={$sslmode}",
+            $user,
+            $password,
+            $options,
+        );
+    }
+
+    /**
+     * PDO attributes from the `options` connection key.
+     *
+     * @param array<string, mixed> $connection
+     * @return array<int, mixed>
+     */
+    private static function pdoOptions(array $connection): array
+    {
+        $options = $connection['options'] ?? [];
+        if (!is_array($options) || array_filter(array_keys($options), is_string(...)) !== []) {
+            throw new \InvalidArgumentException('The options connection option must be an array of PDO attributes.');
+        }
+        /** @var array<int, mixed> $options */
+        return $options;
+    }
+
+    /** @param array<string, mixed> $connection */
+    private static function flag(array $connection, string $key): ?bool
+    {
+        $value = $connection[$key] ?? null;
+        if ($value === null || is_bool($value)) {
+            return $value;
+        }
+        $flag = filter_var($value, FILTER_VALIDATE_BOOL, FILTER_NULL_ON_FAILURE);
+        if ($flag === null) {
+            throw new \InvalidArgumentException("The {$key} connection option must be a boolean.");
+        }
+        return $flag;
     }
 
     /**

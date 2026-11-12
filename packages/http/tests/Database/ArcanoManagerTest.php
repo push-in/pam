@@ -13,7 +13,6 @@ use Pam\Api\Database\ArcanoManager;
 use Pam\Api\Database\ArcanoQueryLogger;
 use Pam\Api\Database\ArcanoTenantMapper;
 use Pam\Api\Database\ArcanoTenantScope;
-use Pam\Api\Database\DatabaseConfig;
 use Pam\Api\Database\DatabaseHealthCheck;
 use Pam\Api\Database\QueryBudget;
 use Pam\Api\Database\QueryBudgetViolation;
@@ -78,7 +77,9 @@ final class ArcanoManagerTest extends TestCase
         $manager->database()->insert('arcano_users')->values(['email' => 'lost@pam.dev'])->run();
         $manager->releaseCurrentRequest();
 
-        self::assertSame(0, $manager->database()->query('SELECT COUNT(*) FROM arcano_users')->fetchColumn());
+        $count = $manager->database()->query('SELECT COUNT(*) FROM arcano_users')->fetchColumn();
+        self::assertTrue(is_int($count) || is_string($count));
+        self::assertSame(0, (int) $count);
         $manager->releaseCurrentRequest();
     }
 
@@ -232,28 +233,22 @@ final class ArcanoManagerTest extends TestCase
     /** @return array{ArcanoManager, QueryMonitor, Container} */
     private static function environment(): array
     {
-        $driver = getenv('ARCANO_TEST_DRIVER') ?: 'sqlite';
-        $connection = $driver === 'sqlite'
-            ? ['driver' => 'sqlite', 'database' => self::$path ?? ':memory:', 'prefix' => '']
-            : [
-                'driver' => $driver,
-                'host' => getenv('ARCANO_TEST_HOST') ?: '127.0.0.1',
-                'port' => (int) (getenv('ARCANO_TEST_PORT') ?: ($driver === 'mysql' ? 3306 : 5432)),
-                'database' => getenv('ARCANO_TEST_DATABASE') ?: 'pam',
-                'username' => getenv('ARCANO_TEST_USERNAME') ?: 'root',
-                'password' => getenv('ARCANO_TEST_PASSWORD') ?: '',
-                'prefix' => '',
-            ];
-        $databases = new ArcanoDatabaseProvider(new DatabaseConfig('default', ['default' => $connection]));
+        $driver = ArcanoTestDatabase::driver();
+        $databases = new ArcanoDatabaseProvider(ArcanoTestDatabase::config(self::$path ?? ':memory:'));
         $monitor = QueryMonitor::forArcano($databases);
         $container = new Container();
         $manager = new ArcanoManager($databases, self::schema(), $container);
         $id = match ($driver) {
             'mysql' => 'INT AUTO_INCREMENT PRIMARY KEY',
             'pgsql' => 'SERIAL PRIMARY KEY',
+            'sqlsrv' => 'INT IDENTITY(1,1) PRIMARY KEY',
             default => 'INTEGER PRIMARY KEY AUTOINCREMENT',
         };
-        $text = $driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $text = match ($driver) {
+            'mysql' => 'VARCHAR(255)',
+            'sqlsrv' => 'NVARCHAR(255)',
+            default => 'TEXT',
+        };
         $database = $manager->database();
         $database->execute('DROP TABLE IF EXISTS arcano_users');
         $database->execute('DROP TABLE IF EXISTS arcano_records');

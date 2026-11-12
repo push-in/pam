@@ -13,10 +13,15 @@ use Pam\Contracts\Package\ServiceProviderInterface;
 
 final readonly class ArcanoServiceProvider implements ServiceProviderInterface
 {
-    /** @param SchemaInterface|array<array-key, array<int, mixed>> $schema */
+    /**
+     * @param SchemaInterface|ArcanoSchemaCompiler|array<array-key, array<int, mixed>> $schema
+     *        A compiled schema, or the compiler of the application's #[Entity] classes.
+     * @param ?string $migrations Directory of the Arcano migrations; registers ArcanoMigrationManager.
+     */
     public function __construct(
         private DatabaseConfig $config,
-        private SchemaInterface|array $schema,
+        private SchemaInterface|ArcanoSchemaCompiler|array $schema,
+        private ?string $migrations = null,
     ) {
     }
 
@@ -28,13 +33,26 @@ final readonly class ArcanoServiceProvider implements ServiceProviderInterface
 
         $container = $application->container();
         $databases = new ArcanoDatabaseProvider($this->config);
-        $arcano = new ArcanoManager($databases, $this->schema, $container);
+        $schema = $this->schema;
+        if ($schema instanceof ArcanoSchemaCompiler) {
+            $schema = $schema->schema($databases->manager());
+            // A compilation that read the tables must not leave the boot connection open.
+            $databases->releaseCurrent();
+        }
+        $arcano = new ArcanoManager($databases, $schema, $container);
         $container
             ->instance(DatabaseConfig::class, $this->config)
             ->instance(ArcanoDatabaseProvider::class, $databases)
             ->instance(ArcanoManager::class, $arcano)
             ->instance(QueryMonitor::class, QueryMonitor::forArcano($databases))
             ->instance(TransactionManager::class, $arcano);
+        if ($this->migrations !== null) {
+            $container->instance(ArcanoMigrationManager::class, new ArcanoMigrationManager(
+                $databases,
+                $this->migrations,
+                entities: $this->schema instanceof ArcanoSchemaCompiler ? $this->schema : null,
+            ));
+        }
         $application->middleware(new ArcanoLifecycleMiddleware($arcano));
     }
 

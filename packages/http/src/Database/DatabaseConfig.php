@@ -36,9 +36,14 @@ final readonly class DatabaseConfig
                 'database' => self::environment('DB_DATABASE', 'pam'),
                 'username' => self::environment('DB_USERNAME', 'pam'),
                 'password' => self::environment('DB_PASSWORD', ''),
-                'charset' => 'utf8',
+                // utf8 is the three-byte charset in MySQL.
+                'charset' => $driver === 'mysql' ? 'utf8mb4' : 'utf8',
                 'prefix' => '',
-            ],
+            ] + self::optionalEnvironment([
+                'sslmode' => 'DB_SSLMODE',
+                'unix_socket' => 'DB_SOCKET',
+                'trust_server_certificate' => 'DB_TRUST_SERVER_CERTIFICATE',
+            ]),
             default => throw new \InvalidArgumentException("Unsupported DB_CONNECTION: {$driver}."),
         };
 
@@ -49,6 +54,22 @@ final readonly class DatabaseConfig
     {
         $value = getenv($key);
         return is_string($value) && $value !== '' ? $value : $default;
+    }
+
+    /**
+     * @param array<string, string> $keys Connection option => environment variable.
+     * @return array<string, string>
+     */
+    private static function optionalEnvironment(array $keys): array
+    {
+        $options = [];
+        foreach ($keys as $option => $key) {
+            $value = getenv($key);
+            if (is_string($value) && $value !== '') {
+                $options[$option] = $value;
+            }
+        }
+        return $options;
     }
 
     private static function defaultPort(string $driver): string
