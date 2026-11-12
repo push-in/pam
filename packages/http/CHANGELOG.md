@@ -3,6 +3,20 @@
 All notable PAM API changes are documented here. The package follows Semantic
 Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 
+## Unreleased
+
+### Added
+
+- Arcano ORM integration: `ArcanoServiceProvider` and `ArcanoManager` with a
+  connection set and identity map per request Fiber, request cleanup through
+  `ArcanoLifecycleMiddleware`, tenant-protected roles (`ArcanoTenantScope`,
+  `ArcanoTenantMapper`), `QueryMonitor::forArcano()` budgets and Arcano support
+  in `DatabaseHealthCheck`.
+- `ArcanoSchemaCompiler` builds the schema from `#[Entity]` classes with a PHP
+  cache file; `ArcanoMigrationManager` generates migrations from entity changes,
+  runs and rolls them back. `ArcanoServiceProvider` accepts the compiler and a
+  migrations directory.
+
 ## 2.0.1 - 2026-08-22
 
 ### Changed

@@ -8,9 +8,10 @@ use App\Http\Controllers\ProductController;
 use App\Providers\AppServiceProvider;
 use Pam\Http\Request;
 use Pam\Http\Response;
+use Pam\Api\Database\ArcanoMigrationManager;
+use Pam\Api\Database\ArcanoSchemaCompiler;
+use Pam\Api\Database\ArcanoServiceProvider;
 use Pam\Api\Database\DatabaseConfig;
-use Pam\Api\Database\EloquentServiceProvider;
-use Pam\Api\Database\MigrationManager;
 use Pam\Api\Testing\TestClient;
 use PHPUnit\Framework\TestCase;
 
@@ -70,18 +71,22 @@ final class ApplicationTest extends TestCase
     private function application(): App
     {
         $app = new App(discoverPackages: false);
-        $app->provider(new EloquentServiceProvider(new DatabaseConfig('default', [
-            'default' => ['driver' => 'sqlite', 'database' => $this->database, 'prefix' => ''],
-        ])));
+        $app->provider(new ArcanoServiceProvider(
+            new DatabaseConfig('default', [
+                'default' => ['driver' => 'sqlite', 'database' => $this->database, 'prefix' => ''],
+            ]),
+            new ArcanoSchemaCompiler(dirname(__DIR__) . '/src/Models'),
+            migrations: dirname(__DIR__) . '/database/migrations',
+        ));
         $app->provider(new AppServiceProvider());
         $app->get('/api/products', [ProductController::class, 'index']);
         $app->post('/api/products', [ProductController::class, 'store']);
         $app->boot();
-        $migrations = $app->container()->get(MigrationManager::class);
-        if (!$migrations instanceof MigrationManager) {
+        $migrations = $app->container()->get(ArcanoMigrationManager::class);
+        if (!$migrations instanceof ArcanoMigrationManager) {
             throw new \LogicException('Migration manager binding is invalid.');
         }
-        $migrations->migrate(dirname(__DIR__) . '/database/migrations');
+        $migrations->migrate();
 
         return $app;
     }

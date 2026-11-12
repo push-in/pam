@@ -29,6 +29,7 @@
         "illuminate/events": "Required by the deprecated built-in Eloquent bridge.",
         "illuminate/filesystem": "Required by the deprecated built-in migration bridge.",
         "illuminate/pagination": "Required by the deprecated built-in Eloquent resource pagination bridge.",
+        "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
         "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
         "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
     },
@@ -73,6 +74,7 @@
         "illuminate/filesystem": "^13.0",
         "illuminate/pagination": "^13.0",
         "phpstan/phpstan": "^2.1",
-        "phpunit/phpunit": "^11.5"
+        "phpunit/phpunit": "^11.5",
+        "pushinbr/arcano": "^0.2.2"
     }
 }

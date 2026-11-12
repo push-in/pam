@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace App\Providers;
 
-use App\Repositories\EloquentProductRepository;
+use App\Repositories\ArcanoProductRepository;
 use App\Repositories\ProductRepository;
 use Pam\App;
 use Pam\Contracts\Http\ApplicationInterface;
@@ -18,7 +18,7 @@ final readonly class AppServiceProvider implements ServiceProviderInterface
             throw new \InvalidArgumentException('AppServiceProvider requires Pam\\App.');
         }
 
-        $application->container()->bind(ProductRepository::class, EloquentProductRepository::class);
+        $application->container()->bind(ProductRepository::class, ArcanoProductRepository::class);
     }
 
     public function boot(ApplicationInterface $application): void

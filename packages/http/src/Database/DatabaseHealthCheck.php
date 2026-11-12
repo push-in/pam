@@ -11,7 +11,7 @@ use Pam\Api\Health\HealthState;
 final readonly class DatabaseHealthCheck implements HealthCheck
 {
     public function __construct(
-        private EloquentManager $eloquent,
+        private EloquentManager|ArcanoManager $eloquent,
         private ?string $connection = null,
     ) {
     }
@@ -20,7 +20,11 @@ final readonly class DatabaseHealthCheck implements HealthCheck
     {
         $startedAt = hrtime(true);
         try {
-            $this->eloquent->connection($this->connection)->select('SELECT 1');
+            if ($this->eloquent instanceof ArcanoManager) {
+                $this->eloquent->database($this->connection)->query('SELECT 1')->close();
+            } else {
+                $this->eloquent->connection($this->connection)->select('SELECT 1');
+            }
             return new HealthResult(HealthState::Healthy, [
                 'latency_ms' => self::elapsedMilliseconds($startedAt),
             ]);
