@@ -62,6 +62,8 @@ runtime_revision=${runtime_values_array[2]}
 php_url=${runtime_values_array[3]}
 php_sha256=${runtime_values_array[4]}
 ios_minimum=${runtime_values_array[5]}
+# The PAM Native renderer runs on tvOS 15 and later.
+tvos_minimum=${PAM_TVOS_MINIMUM:-15.0}
 php_extensions=${runtime_values_array[6]}
 
 build_root=$(mktemp -d "${TMPDIR:-/tmp}/pam-php-ios.XXXXXX")
@@ -159,8 +161,10 @@ build_php_slice() {
     local build=${build_root}/build-${name}
     local install=${build_root}/install-${name}
     local platform_flags=
+    local minimum=${ios_minimum}
     if [[ ${name} == tvos-* ]]; then
         platform_flags="-include $(write_tvos_compat_header)"
+        minimum=${tvos_minimum}
     fi
     sdk_path=$(xcrun --sdk "${sdk}" --show-sdk-path)
     mkdir -p "${build}"
@@ -171,9 +175,9 @@ build_php_slice() {
         AR="$(xcrun --sdk "${sdk}" --find ar)" \
         RANLIB="$(xcrun --sdk "${sdk}" --find ranlib)" \
         STRIP="$(xcrun --sdk "${sdk}" --find strip)" \
-        CFLAGS="-O2 -fPIC -fvisibility=hidden -arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${ios_minimum}" \
+        CFLAGS="-O2 -fPIC -fvisibility=hidden -arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${minimum}" \
         CPPFLAGS="-arch ${arch} -isysroot ${sdk_path} -D__APPLE__" \
-        LDFLAGS="-arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${ios_minimum}" \
+        LDFLAGS="-arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${minimum}" \
         ac_cv_c_bigendian_php=no \
         ac_cv_func_getentropy=no \
         ac_cv_func_arc4random_buf=no \
@@ -346,27 +350,63 @@ if [[ ${slice_selector} == tvos || ${slice_selector} == tvos-simulator ]]; then
         fi
     done
 fi
-if [[ ${slice_selector} == tvos ]]; then
+if [[ ${slice_selector} == tvos || ${slice_selector} == tvos-simulator ]]; then
+    # The XCFrameworks take the slices this run built: device and simulator
+    # for `tvos`, the simulator only for `tvos-simulator` (local checks).
     tv_destination=${pam_root}/runtime/tvos/${runtime_id}
     tv_simulator=${build_root}/tvos-simulator
     mkdir -p "${tv_destination}" "${tv_simulator}/php" "${tv_simulator}/engine"
-    lipo -create \
-        "${build_root}/install-tvos-simulator-arm64/lib/libphp.a" \
-        "${build_root}/install-tvos-simulator-x86_64/lib/libphp.a" \
-        -output "${tv_simulator}/php/libphp.a"
-    lipo -create \
-        "${pam_root}/pam-native/target/aarch64-apple-tvos-sim/release/libpam_native_engine.a" \
-        "${pam_root}/pam-native/target/x86_64-apple-tvos/release/libpam_native_engine.a" \
-        -output "${tv_simulator}/engine/libpam_native_engine.a"
+    php_slices=()
+    engine_slices=()
+    tv_architectures=()
+    if [[ ${slice_selector} == tvos ]]; then
+        php_slices+=(-library "${build_root}/install-tvos-device-arm64/lib/libphp.a" -headers "${build_root}/install-tvos-device-arm64/include")
+        engine_slices+=(-library "${pam_root}/pam-native/target/aarch64-apple-tvos/release/libpam_native_engine.a" -headers "${pam_root}/pam-native/native")
+        tv_architectures+=("tvos-arm64")
+    fi
+    simulator_php=()
+    simulator_engine=()
+    simulator_headers=
+    for arch in ${PAM_TVOS_SIMULATOR_ARCHS:-arm64 x86_64}; do
+        simulator_php+=("${build_root}/install-tvos-simulator-${arch}/lib/libphp.a")
+        simulator_headers=${simulator_headers:-${build_root}/install-tvos-simulator-${arch}/include}
+        if [[ ${arch} == arm64 ]]; then
+            simulator_engine+=("${pam_root}/pam-native/target/aarch64-apple-tvos-sim/release/libpam_native_engine.a")
+        else
+            simulator_engine+=("${pam_root}/pam-native/target/x86_64-apple-tvos/release/libpam_native_engine.a")
+        fi
+    done
+    lipo -create "${simulator_php[@]}" -output "${tv_simulator}/php/libphp.a"
+    lipo -create "${simulator_engine[@]}" -output "${tv_simulator}/engine/libpam_native_engine.a"
+    php_slices+=(-library "${tv_simulator}/php/libphp.a" -headers "${simulator_headers}")
+    engine_slices+=(-library "${tv_simulator}/engine/libpam_native_engine.a" -headers "${pam_root}/pam-native/native")
+    tv_architectures+=("tvos-simulator")
     rm -rf -- "${tv_destination}/PamPhp.xcframework" "${tv_destination}/PamNativeEngine.xcframework"
-    xcodebuild -create-xcframework \
-        -library "${build_root}/install-tvos-device-arm64/lib/libphp.a" -headers "${build_root}/install-tvos-device-arm64/include" \
-        -library "${tv_simulator}/php/libphp.a" -headers "${build_root}/install-tvos-simulator-arm64/include" \
-        -output "${tv_destination}/PamPhp.xcframework"
-    xcodebuild -create-xcframework \
-        -library "${pam_root}/pam-native/target/aarch64-apple-tvos/release/libpam_native_engine.a" -headers "${pam_root}/pam-native/native" \
-        -library "${tv_simulator}/engine/libpam_native_engine.a" -headers "${pam_root}/pam-native/native" \
-        -output "${tv_destination}/PamNativeEngine.xcframework"
+    xcodebuild -create-xcframework "${php_slices[@]}" -output "${tv_destination}/PamPhp.xcframework"
+    xcodebuild -create-xcframework "${engine_slices[@]}" -output "${tv_destination}/PamNativeEngine.xcframework"
+    python3 - "${tv_destination}/runtime.json" "${tv_architectures[*]}" <<PY
+import json
+import sys
+manifest = {
+    "schemaVersion": 1,
+    "runtimeId": "${runtime_id}",
+    "phpVersion": "${php_version}",
+    "runtimeRevision": ${runtime_revision},
+    "sourceUrl": "${php_url}",
+    "sourceSha256": "${php_sha256}",
+    "tvosMinimumVersion": "${tvos_minimum}",
+    "architectures": sys.argv[2].split(),
+    "extensions": [
+        extension
+        for extension in "${php_extensions}".split(",")
+        if extension != "opcache" or "${opcache_enabled}" == "yes"
+    ],
+}
+with open(sys.argv[1], "w", encoding="utf-8") as stream:
+    json.dump(manifest, stream, indent=4)
+    stream.write("\n")
+PY
+    echo "Built verified PAM tvOS runtime ${runtime_id} at ${tv_destination}."
 fi
 if [[ ${slice_selector} == all || ${slice_selector} == ios ]]; then
     simulator=${build_root}/simulator
@@ -410,7 +450,7 @@ with open("${destination}/runtime.json", "w", encoding="utf-8") as stream:
     stream.write("\n")
 PY
     echo "Built verified PAM iOS runtime ${runtime_id} at ${destination}."
-elif [[ ${slice_selector} != macos ]]; then
+elif [[ ${slice_selector} != macos && ${slice_selector} != tvos* ]]; then
     echo "Built ${slice_selector} slices. Run with 'all' to create XCFrameworks."
 else
     echo "Built verified PAM macOS runtime ${runtime_id} at ${pam_root}/runtime/macos/${runtime_id}."
