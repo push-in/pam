@@ -48,10 +48,48 @@ final readonly class LoginController
 }
 ```
 
-## Eloquent ORM (optional)
+## Arcano ORM (optional)
 
-PAM HTTP keeps its kernel independent from any database. Install Eloquent only
-when the application needs the legacy built-in integration:
+Arcano is the PAM data mapper, derived from Cycle ORM. PAM HTTP keeps its kernel
+independent from any database; install Arcano when the application needs one:
+
+```bash
+pam composer require pushinbr/arcano
+```
+
+Every request Fiber gets its own connections and identity map, so transactions
+and loaded entities cannot leak between persistent-worker requests. Request
+cleanup rolls back unfinished transactions and disconnects.
+
+```php
+use Pam\Api\Database\ArcanoServiceProvider;
+use Pam\Api\Database\DatabaseConfig;
+
+$app->provider(new ArcanoServiceProvider(DatabaseConfig::fromEnvironment(), $schema));
+```
+
+`$schema` is an Arcano schema array (or `Arcano\ORM\Schema`) mapping plain
+entity classes to tables. The same `DB_*` variables configure the connection.
+Resolve `ArcanoManager` to work with entities:
+
+```php
+$arcano = $app->container()->get(ArcanoManager::class);
+
+$user = $arcano->repository(User::class)->findByPK($id);
+$user->name = 'Ada';
+$arcano->entityManager()->persist($user)->run();
+```
+
+`ArcanoManager` is the `TransactionManager` of the application, and
+`DatabaseHealthCheck` and `QueryMonitor` budgets work with it as with Eloquent.
+Tenant-owned roles are protected once during boot with
+`$arcano->protectTenant(Order::class)`: selects are limited to the current
+tenant, new entities get its key, and both fail closed without a `TenantContext`.
+
+## Eloquent ORM (optional, deprecated)
+
+Install Eloquent only when the application needs the legacy built-in
+integration:
 
 ```bash
 pam composer require illuminate/database illuminate/events illuminate/filesystem illuminate/pagination

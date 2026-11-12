@@ -13,22 +13,22 @@ final class QueryMonitor
 
     private ?QueryScope $mainScope = null;
 
-    public function __construct(FiberConnectionResolver $connections)
+    public function __construct(?FiberConnectionResolver $connections = null)
     {
         $this->fiberScopes = new \WeakMap();
-        $connections->eventDispatcher()->listen(
+        $connections?->eventDispatcher()->listen(
             QueryExecuted::class,
             function (QueryExecuted $event): void {
-                $scope = $this->currentScope();
-                if ($scope === null) {
-                    return;
-                }
-                ++$scope->count;
-                $scope->elapsedMilliseconds += $event->time;
-                $fingerprint = self::fingerprint($event->sql);
-                $scope->duplicates[$fingerprint] = ($scope->duplicates[$fingerprint] ?? 0) + 1;
+                $this->record($event->sql, $event->time);
             },
         );
+    }
+
+    public static function forArcano(ArcanoDatabaseProvider $databases): self
+    {
+        $monitor = new self();
+        $databases->onQuery($monitor->record(...));
+        return $monitor;
     }
 
     public function begin(QueryBudget $budget): void
@@ -71,6 +71,18 @@ final class QueryMonitor
             $duplicates,
             $violations,
         );
+    }
+
+    private function record(string $sql, float $elapsedMilliseconds): void
+    {
+        $scope = $this->currentScope();
+        if ($scope === null) {
+            return;
+        }
+        ++$scope->count;
+        $scope->elapsedMilliseconds += $elapsedMilliseconds;
+        $fingerprint = self::fingerprint($sql);
+        $scope->duplicates[$fingerprint] = ($scope->duplicates[$fingerprint] ?? 0) + 1;
     }
 
     private function currentScope(): ?QueryScope

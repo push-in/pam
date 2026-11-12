@@ -1849,6 +1849,365 @@
                 }
             }
         },
+        "Pam\\Api\\Database\\ArcanoManager": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Pam\\Api\\Transactions\\TransactionManager"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "databases",
+                            "type": "Pam\\Api\\Database\\ArcanoDatabaseProvider",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "schema",
+                            "type": "Arcano\\ORM\\SchemaInterface|array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "container",
+                            "type": "?Pam\\Api\\Container\\Container",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "database": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Arcano\\Database\\DatabaseInterface",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "UnitEnum|null|string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "entityManager": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Arcano\\ORM\\EntityManagerInterface",
+                    "parameters": []
+                },
+                "orm": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Arcano\\ORM\\ORMInterface",
+                    "parameters": []
+                },
+                "protectTenant": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "role",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "column",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "tenant_id",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "releaseCurrentRequest": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": []
+                },
+                "repository": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Arcano\\ORM\\RepositoryInterface",
+                    "parameters": [
+                        {
+                            "name": "role",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "transaction": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "mixed",
+                    "parameters": [
+                        {
+                            "name": "operation",
+                            "type": "callable",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Pam\\Api\\Database\\ArcanoServiceProvider": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Pam\\Contracts\\Package\\ServiceProviderInterface"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "config",
+                            "type": "Pam\\Api\\Database\\DatabaseConfig",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "schema",
+                            "type": "Arcano\\ORM\\SchemaInterface|array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "boot": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "application",
+                            "type": "Pam\\Contracts\\Http\\ApplicationInterface",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "register": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "application",
+                            "type": "Pam\\Contracts\\Http\\ApplicationInterface",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Pam\\Api\\Database\\ArcanoTenantMapper": {
+            "kind": "class",
+            "final": false,
+            "readonly": false,
+            "abstract": false,
+            "parent": "Arcano\\ORM\\Mapper\\Mapper",
+            "interfaces": [
+                "Arcano\\ORM\\MapperInterface"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "queueCreate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Arcano\\ORM\\Command\\CommandInterface",
+                    "parameters": [
+                        {
+                            "name": "entity",
+                            "type": "object",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "node",
+                            "type": "Arcano\\ORM\\Heap\\Node",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "state",
+                            "type": "Arcano\\ORM\\Heap\\State",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Pam\\Api\\Database\\ArcanoTenantScope": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Arcano\\ORM\\Select\\ScopeInterface"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "container",
+                            "type": "Pam\\Api\\Container\\Container",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "column",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "tenant_id",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "apply": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "query",
+                            "type": "Arcano\\ORM\\Select\\QueryBuilder",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "assign": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "state",
+                            "type": "Arcano\\ORM\\Heap\\State",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Pam\\Api\\Database\\DatabaseConfig": {
             "kind": "class",
             "final": true,
@@ -1928,7 +2287,7 @@
                     "parameters": [
                         {
                             "name": "eloquent",
-                            "type": "Pam\\Api\\Database\\EloquentManager",
+                            "type": "Pam\\Api\\Database\\ArcanoManager|Pam\\Api\\Database\\EloquentManager",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -2447,12 +2806,12 @@
                     "parameters": [
                         {
                             "name": "connections",
-                            "type": "Pam\\Api\\Database\\FiberConnectionResolver",
+                            "type": "?Pam\\Api\\Database\\FiberConnectionResolver",
                             "byReference": false,
                             "variadic": false,
-                            "optional": false,
+                            "optional": true,
                             "default": null,
-                            "hasDefault": false
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -2481,6 +2840,24 @@
                     "returnsReference": false,
                     "return": "Pam\\Api\\Database\\QueryReport",
                     "parameters": []
+                },
+                "forArcano": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "databases",
+                            "type": "Pam\\Api\\Database\\ArcanoDatabaseProvider",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
                 }
             }
         },
@@ -4815,6 +5192,74 @@
                         {
                             "name": "request",
                             "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Pam\\Api\\Middleware\\ArcanoLifecycleMiddleware": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Pam\\Contracts\\Http\\MiddlewareInterface"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "arcano",
+                            "type": "Pam\\Api\\Database\\ArcanoManager",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "process": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Pam\\Http\\Response",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "response",
+                            "type": "Pam\\Http\\Response",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "next",
+                            "type": "Pam\\Contracts\\Http\\RequestHandlerInterface",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
