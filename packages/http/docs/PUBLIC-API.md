@@ -29,6 +29,8 @@ Every symbol below is protected by the PAM API Semantic Versioning gate.
 - [`Pam\Api\Container\ContainerState`](#pamapicontainercontainerstate)
 - [`Pam\Api\ControllerHandler`](#pamapicontrollerhandler)
 - [`Pam\Api\Database\ArcanoManager`](#pamapidatabasearcanomanager)
+- [`Pam\Api\Database\ArcanoMigrationManager`](#pamapidatabasearcanomigrationmanager)
+- [`Pam\Api\Database\ArcanoSchemaCompiler`](#pamapidatabasearcanoschemacompiler)
 - [`Pam\Api\Database\ArcanoServiceProvider`](#pamapidatabasearcanoserviceprovider)
 - [`Pam\Api\Database\ArcanoTenantMapper`](#pamapidatabasearcanotenantmapper)
 - [`Pam\Api\Database\ArcanoTenantScope`](#pamapidatabasearcanotenantscope)
@@ -489,7 +491,35 @@ final class Pam\Api\Database\ArcanoManager implements Pam\Api\Transactions\Trans
 - `public protectTenant(string $role, string $column = "tenant_id"): void`
 - `public releaseCurrentRequest(): void`
 - `public repository(string $role): Arcano\ORM\RepositoryInterface`
+- `public select(string $role): Arcano\ORM\Select`
 - `public transaction(callable $operation): mixed`
+
+## `Pam\Api\Database\ArcanoMigrationManager`
+
+```php
+final class Pam\Api\Database\ArcanoMigrationManager
+```
+
+### Methods
+
+- `public __construct(Pam\Api\Database\ArcanoDatabaseProvider $databases, string $directory, string $table = "migrations", string $namespace = "Migration", ?Pam\Api\Database\ArcanoSchemaCompiler $entities = null): mixed`
+- `public generate(): array`
+- `public migrate(): array`
+- `public rollback(int $steps = 1): array`
+- `public status(): array`
+
+## `Pam\Api\Database\ArcanoSchemaCompiler`
+
+```php
+final readonly class Pam\Api\Database\ArcanoSchemaCompiler
+```
+
+### Methods
+
+- `public __construct(array|string $directories, ?string $cacheFile = null, bool $refresh = true): mixed`
+- `public clear(): void`
+- `public compile(Arcano\Database\DatabaseProviderInterface $databases, array $generators = []): array`
+- `public schema(Arcano\Database\DatabaseProviderInterface $databases): array`
 
 ## `Pam\Api\Database\ArcanoServiceProvider`
 
@@ -499,7 +529,7 @@ final readonly class Pam\Api\Database\ArcanoServiceProvider implements Pam\Contr
 
 ### Methods
 
-- `public __construct(Pam\Api\Database\DatabaseConfig $config, Arcano\ORM\SchemaInterface|array $schema): mixed`
+- `public __construct(Pam\Api\Database\DatabaseConfig $config, Arcano\ORM\SchemaInterface|Pam\Api\Database\ArcanoSchemaCompiler|array $schema, ?string $migrations = null): mixed`
 - `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
 - `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
 

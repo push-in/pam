@@ -75,6 +75,6 @@
         "illuminate/pagination": "^13.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",
-        "pushinbr/arcano": "^0.1"
+        "pushinbr/arcano": "^0.2.1"
     }
 }

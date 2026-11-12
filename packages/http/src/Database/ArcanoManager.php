@@ -14,6 +14,7 @@ use Arcano\ORM\ORMInterface;
 use Arcano\ORM\RepositoryInterface;
 use Arcano\ORM\Schema;
 use Arcano\ORM\SchemaInterface;
+use Arcano\ORM\Select;
 use Pam\Api\Container\Container;
 use Pam\Api\Transactions\TransactionManager;
 
@@ -60,6 +61,17 @@ final class ArcanoManager implements TransactionManager
     public function repository(string $role): RepositoryInterface
     {
         return $this->orm()->getRepository($role);
+    }
+
+    /**
+     * A query over the entities of a role, with relation loading (`load()`), filters and paging.
+     *
+     * @param class-string|non-empty-string $role
+     * @return Select<object>
+     */
+    public function select(string $role): Select
+    {
+        return new Select($this->orm(), $role);
     }
 
     /**

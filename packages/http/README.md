@@ -50,35 +50,86 @@ final readonly class LoginController
 
 ## Arcano ORM (optional)
 
-Arcano is the PAM data mapper, derived from Cycle ORM. PAM HTTP keeps its kernel
-independent from any database; install Arcano when the application needs one:
+Arcano is the PAM data mapper, derived from Cycle ORM: attribute entities,
+relations, an identity map, migrations and SQLite, MySQL, PostgreSQL and SQL
+Server drivers. PAM HTTP keeps its kernel independent from any database; install
+Arcano when the application needs one:
 
 ```bash
 pam composer require pushinbr/arcano
 ```
 
-Every request Fiber gets its own connections and identity map, so transactions
-and loaded entities cannot leak between persistent-worker requests. Request
-cleanup rolls back unfinished transactions and disconnects.
+Entities are plain classes with attributes:
 
 ```php
-use Pam\Api\Database\ArcanoServiceProvider;
-use Pam\Api\Database\DatabaseConfig;
+use Arcano\Annotated\Annotation\{Column, Entity};
+use Arcano\Annotated\Annotation\Relation\HasMany;
 
-$app->provider(new ArcanoServiceProvider(DatabaseConfig::fromEnvironment(), $schema));
+#[Entity(role: 'author')]
+class Author
+{
+    #[Column(type: 'primary')]
+    public ?int $id = null;
+
+    #[Column(type: 'string(120)')]
+    public string $name = '';
+
+    /** @var list<Post> */
+    #[HasMany(target: Post::class, collection: 'array')]
+    public array $posts = [];
+}
 ```
 
-`$schema` is an Arcano schema array (or `Arcano\ORM\Schema`) mapping plain
-entity classes to tables. The same `DB_*` variables configure the connection.
-Resolve `ArcanoManager` to work with entities:
+The provider compiles the entities of a directory and keeps the schema in a PHP
+cache file. In development the cache is rebuilt when an entity file changes; in
+production pass `refresh: false` and build the cache during deployment.
+
+```php
+use Pam\Api\Database\{ArcanoSchemaCompiler, ArcanoServiceProvider, DatabaseConfig};
+
+$app->provider(new ArcanoServiceProvider(
+    DatabaseConfig::fromEnvironment(),
+    new ArcanoSchemaCompiler(__DIR__ . '/src/Entities', __DIR__ . '/var/arcano-schema.php', refresh: $debug),
+    migrations: __DIR__ . '/database/arcano',
+));
+```
+
+A compiled schema array (or `Arcano\ORM\Schema`) is accepted in place of the
+compiler. The same `DB_*` variables configure the connection.
+
+Every request Fiber gets its own connections and identity map, so transactions
+and loaded entities cannot leak between persistent-worker requests. Request
+cleanup rolls back unfinished transactions and disconnects. Resolve
+`ArcanoManager` to work with entities:
 
 ```php
 $arcano = $app->container()->get(ArcanoManager::class);
 
-$user = $arcano->repository(User::class)->findByPK($id);
-$user->name = 'Ada';
-$arcano->entityManager()->persist($user)->run();
+$author = $arcano->select(Author::class)->load('posts')->wherePK($id)->fetchOne();
+$author->name = 'Ada';
+$arcano->entityManager()->persist($author)->run();
 ```
+
+### Migrations
+
+`ArcanoMigrationManager` writes migrations from the difference between the
+entities and the database, runs them and rolls them back. Each migration runs
+in its own transaction and is recorded in the `migrations` table.
+
+```php
+$migrations = $app->container()->get(ArcanoMigrationManager::class);
+
+$migrations->generate();   // new files in database/arcano for the changed entities
+$migrations->migrate();    // runs the pending ones, returns their names
+$migrations->rollback(1);  // reverts the last one
+$migrations->status();     // name, created_at, executed_at of every migration
+```
+
+Generated files can be edited, and migrations can be written by hand with the
+`Arcano\Migrations\Migration` table API. Generation requires every existing
+migration to have run, so the database reflects them.
+
+### Transactions, budgets and tenants
 
 `ArcanoManager` is the `TransactionManager` of the application, and
 `DatabaseHealthCheck` and `QueryMonitor` budgets work with it as with Eloquent.

@@ -1984,6 +1984,24 @@
                         }
                     ]
                 },
+                "select": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Arcano\\ORM\\Select",
+                    "parameters": [
+                        {
+                            "name": "role",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
                 "transaction": {
                     "static": false,
                     "final": false,
@@ -1994,6 +2012,215 @@
                         {
                             "name": "operation",
                             "type": "callable",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Pam\\Api\\Database\\ArcanoMigrationManager": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "databases",
+                            "type": "Pam\\Api\\Database\\ArcanoDatabaseProvider",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "directory",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "table",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "migrations",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "namespace",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "Migration",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "entities",
+                            "type": "?Pam\\Api\\Database\\ArcanoSchemaCompiler",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "generate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
+                },
+                "migrate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
+                },
+                "rollback": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": [
+                        {
+                            "name": "steps",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 1,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "status": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
+                }
+            }
+        },
+        "Pam\\Api\\Database\\ArcanoSchemaCompiler": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "directories",
+                            "type": "array|string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "cacheFile",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "refresh",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "clear": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": []
+                },
+                "compile": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": [
+                        {
+                            "name": "databases",
+                            "type": "Arcano\\Database\\DatabaseProviderInterface",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "generators",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "schema": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": [
+                        {
+                            "name": "databases",
+                            "type": "Arcano\\Database\\DatabaseProviderInterface",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -2034,12 +2261,21 @@
                         },
                         {
                             "name": "schema",
-                            "type": "Arcano\\ORM\\SchemaInterface|array",
+                            "type": "Arcano\\ORM\\SchemaInterface|Pam\\Api\\Database\\ArcanoSchemaCompiler|array",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
                             "default": null,
                             "hasDefault": false
+                        },
+                        {
+                            "name": "migrations",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
                         }
                     ]
                 },
