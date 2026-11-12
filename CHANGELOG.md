@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 2.2.18 - 2026-11-11
 
 - The ecosystem inventory includes `pushinbr/pam-native-web` (the Samsung and
   LG TV compiler, tooling); the 2.2.17 release build stopped on it.
