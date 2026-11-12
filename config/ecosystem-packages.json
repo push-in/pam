@@ -40,6 +40,7 @@
     {"repository": "pam-native-sync", "composerName": "pushinbr/pam-native-sync", "roleCode": 3, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-testing", "composerName": "pushinbr/pam-native-testing", "roleCode": 4, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-video", "composerName": "pushinbr/pam-native-video", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
+    {"repository": "pam-native-web", "composerName": "pushinbr/pam-native-web", "roleCode": 4, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-webrtc", "composerName": "pushinbr/pam-native-webrtc", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-widgets", "composerName": "pushinbr/pam-native-widgets", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},
     {"repository": "pam-native-contacts", "composerName": "pushinbr/pam-native-contacts", "roleCode": 2, "requiresNative": true, "testRequired": true, "phpConstraint": "^8.5", "phpSeries": ["8.5"]},

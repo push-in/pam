@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- The ecosystem inventory includes `pushinbr/pam-native-web` (the Samsung and
+  LG TV compiler, tooling); the 2.2.17 release build stopped on it.
 - `runtime-builder/ios/build.sh tvos` builds PHP and the PAM Native engine
   for Apple TV (tvOS 15+, device and simulator) into
   `runtime/tvos/<runtime>/` for `pam tvos:build`; `tvos-simulator` builds the
