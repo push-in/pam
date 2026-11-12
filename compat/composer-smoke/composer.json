@@ -49,11 +49,12 @@
         "symfony/http-kernel": "^8.0"
     },
     "require-dev": {
-        "pushinbr/pam-http-testing": "^1.0",
-        "pushinbr/pam-testing": "^2.0",
         "pestphp/pest": "^4.7",
         "phpstan/phpstan": "^2.2",
-        "phpunit/phpunit": "12.5.30"
+        "phpunit/phpunit": "12.5.30",
+        "pushinbr/arcano": "^0.2.1",
+        "pushinbr/pam-http-testing": "^1.0",
+        "pushinbr/pam-testing": "^2.0"
     },
     "autoload": {
         "psr-4": {
