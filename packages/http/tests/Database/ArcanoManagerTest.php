@@ -232,15 +232,33 @@ final class ArcanoManagerTest extends TestCase
     /** @return array{ArcanoManager, QueryMonitor, Container} */
     private static function environment(): array
     {
-        $config = new DatabaseConfig('default', [
-            'default' => ['driver' => 'sqlite', 'database' => self::$path ?? ':memory:', 'prefix' => ''],
-        ]);
-        $databases = new ArcanoDatabaseProvider($config);
+        $driver = getenv('ARCANO_TEST_DRIVER') ?: 'sqlite';
+        $connection = $driver === 'sqlite'
+            ? ['driver' => 'sqlite', 'database' => self::$path ?? ':memory:', 'prefix' => '']
+            : [
+                'driver' => $driver,
+                'host' => getenv('ARCANO_TEST_HOST') ?: '127.0.0.1',
+                'port' => (int) (getenv('ARCANO_TEST_PORT') ?: ($driver === 'mysql' ? 3306 : 5432)),
+                'database' => getenv('ARCANO_TEST_DATABASE') ?: 'pam',
+                'username' => getenv('ARCANO_TEST_USERNAME') ?: 'root',
+                'password' => getenv('ARCANO_TEST_PASSWORD') ?: '',
+                'prefix' => '',
+            ];
+        $databases = new ArcanoDatabaseProvider(new DatabaseConfig('default', ['default' => $connection]));
         $monitor = QueryMonitor::forArcano($databases);
         $container = new Container();
         $manager = new ArcanoManager($databases, self::schema(), $container);
-        $manager->database()->execute('CREATE TABLE arcano_users (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL)');
-        $manager->database()->execute('CREATE TABLE arcano_records (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT NOT NULL, title TEXT NOT NULL)');
+        $id = match ($driver) {
+            'mysql' => 'INT AUTO_INCREMENT PRIMARY KEY',
+            'pgsql' => 'SERIAL PRIMARY KEY',
+            default => 'INTEGER PRIMARY KEY AUTOINCREMENT',
+        };
+        $text = $driver === 'mysql' ? 'VARCHAR(255)' : 'TEXT';
+        $database = $manager->database();
+        $database->execute('DROP TABLE IF EXISTS arcano_users');
+        $database->execute('DROP TABLE IF EXISTS arcano_records');
+        $database->execute("CREATE TABLE arcano_users (id {$id}, email {$text} NOT NULL)");
+        $database->execute("CREATE TABLE arcano_records (id {$id}, tenant_id {$text} NOT NULL, title {$text} NOT NULL)");
         return [$manager, $monitor, $container];
     }
 
