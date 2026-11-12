@@ -14,12 +14,12 @@ while (($# > 0)); do
             runtime_selector=${2:?--php requires 8.4, 8.5, or an exact runtime id}
             shift 2
             ;;
-        all|ios|device|simulator|macos)
+        all|ios|device|simulator|macos|tvos|tvos-device|tvos-simulator)
             slice_selector=$1
             shift
             ;;
         *)
-            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|ios|device|simulator|macos]" >&2
+            echo "Usage: $0 [--php 8.4|8.5|EXACT-rN] [all|ios|device|simulator|macos|tvos|tvos-device|tvos-simulator]" >&2
             exit 64
             ;;
     esac
@@ -62,10 +62,12 @@ runtime_revision=${runtime_values_array[2]}
 php_url=${runtime_values_array[3]}
 php_sha256=${runtime_values_array[4]}
 ios_minimum=${runtime_values_array[5]}
+# The PAM Native renderer runs on tvOS 15 and later.
+tvos_minimum=${PAM_TVOS_MINIMUM:-15.0}
 php_extensions=${runtime_values_array[6]}
 
 build_root=$(mktemp -d "${TMPDIR:-/tmp}/pam-php-ios.XXXXXX")
-trap 'rm -rf -- "${build_root}"' EXIT
+trap '[[ -n ${PAM_KEEP_BUILD:-} ]] || rm -rf -- "${build_root}"' EXIT
 archive=${build_root}/php-${php_version}.tar.xz
 curl --fail --location --retry 3 "${php_url}" --output "${archive}"
 echo "${php_sha256}  ${archive}" | shasum -a 256 --check
@@ -125,6 +127,30 @@ if [[ ${php_version} == 8.4.* ]]; then
     opcache_enabled=no
 fi
 
+# tvOS runs no other process: fork, exec and posix_spawn are not even declared
+# as available. PHP keeps compiling its process functions; on tvOS they fail
+# with ENOTSUP, like a sandbox refusing them.
+write_tvos_compat_header() {
+    local header=${build_root}/pam-tvos-compat.h
+    {
+        # Assembly sources (Zend fibers) get the -include too.
+        printf '#pragma once\n#ifndef __ASSEMBLER__\n#include <errno.h>\n#include <signal.h>\n#include <spawn.h>\n#include <unistd.h>\n'
+        printf 'static inline int pam_tvos_unavailable(void) { errno = ENOTSUP; return -1; }\n'
+        for function in fork vfork execl execle execlp execv execve execvp sigaltstack \
+            posix_spawn_file_actions_init posix_spawn_file_actions_destroy posix_spawn_file_actions_addclose \
+            posix_spawn_file_actions_adddup2 posix_spawn_file_actions_addopen posix_spawn_file_actions_addinherit_np \
+            posix_spawn_file_actions_addchdir posix_spawn_file_actions_addchdir_np \
+            posix_spawn_file_actions_addfchdir posix_spawn_file_actions_addfchdir_np \
+            posix_spawnattr_init posix_spawnattr_destroy posix_spawnattr_setflags posix_spawnattr_getflags \
+            posix_spawnattr_setpgroup posix_spawnattr_getpgroup posix_spawnattr_setsigmask posix_spawnattr_getsigmask \
+            posix_spawnattr_setsigdefault posix_spawnattr_getsigdefault posix_spawn posix_spawnp; do
+            printf '#define %s(...) pam_tvos_unavailable()\n' "${function}"
+        done
+        printf '#endif\n'
+    } > "${header}"
+    echo "${header}"
+}
+
 build_php_slice() {
     local name=$1
     local sdk=$2
@@ -134,6 +160,12 @@ build_php_slice() {
     local sdk_path
     local build=${build_root}/build-${name}
     local install=${build_root}/install-${name}
+    local platform_flags=
+    local minimum=${ios_minimum}
+    if [[ ${name} == tvos-* ]]; then
+        platform_flags="-include $(write_tvos_compat_header)"
+        minimum=${tvos_minimum}
+    fi
     sdk_path=$(xcrun --sdk "${sdk}" --show-sdk-path)
     mkdir -p "${build}"
     (
@@ -143,9 +175,9 @@ build_php_slice() {
         AR="$(xcrun --sdk "${sdk}" --find ar)" \
         RANLIB="$(xcrun --sdk "${sdk}" --find ranlib)" \
         STRIP="$(xcrun --sdk "${sdk}" --find strip)" \
-        CFLAGS="-O2 -fPIC -fvisibility=hidden -arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${ios_minimum}" \
+        CFLAGS="-O2 -fPIC -fvisibility=hidden -arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${minimum}" \
         CPPFLAGS="-arch ${arch} -isysroot ${sdk_path} -D__APPLE__" \
-        LDFLAGS="-arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${ios_minimum}" \
+        LDFLAGS="-arch ${arch} -isysroot ${sdk_path} ${deployment_flag}=${minimum}" \
         ac_cv_c_bigendian_php=no \
         ac_cv_func_getentropy=no \
         ac_cv_func_arc4random_buf=no \
@@ -172,7 +204,11 @@ build_php_slice() {
             -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR 1$/d' \
             -e '/^#define HAVE_POSIX_SPAWN_FILE_ACTIONS_ADDFCHDIR_NP 1$/d' \
             main/php_config.h
-        if [[ ${name} == simulator-x86_64 ]]; then
+        if [[ -n ${platform_flags} ]]; then
+            # After configure: its function probes must see the real SDK.
+            sed -i '' "s|^CFLAGS_CLEAN = |CFLAGS_CLEAN = ${platform_flags} |" Makefile
+        fi
+        if [[ ${name} == *simulator-x86_64 ]]; then
             # The distinct iOS host triplet is required to keep Autoconf in
             # cross-compilation mode, but PHP classifies only darwin* as
             # Mach-O when selecting its fiber assembly. Correct that generated
@@ -191,6 +227,14 @@ build_engine_slice() {
     rustup target add "${target}"
     cargo build --locked --release --manifest-path "${pam_root}/pam-native/Cargo.toml" \
         -p pam-native-engine --target "${target}"
+}
+
+# tvOS targets are Rust tier 3: nightly builds their standard library.
+build_tvos_engine_slice() {
+    local target=$1
+    rustup toolchain install nightly --profile minimal --component rust-src
+    cargo +nightly build --locked --release --manifest-path "${pam_root}/pam-native/Cargo.toml" \
+        -p pam-native-engine --target "${target}" -Z build-std=std,panic_abort
 }
 
 build_macos_embed_sdk() {
@@ -289,6 +333,81 @@ if [[ ${slice_selector} == all || ${slice_selector} == ios || ${slice_selector} 
     build_engine_slice x86_64-apple-ios
 fi
 
+if [[ ${slice_selector} == tvos || ${slice_selector} == tvos-device ]]; then
+    build_php_slice tvos-device-arm64 appletvos arm64 aarch64-apple-darwin -mtvos-version-min
+    build_tvos_engine_slice aarch64-apple-tvos
+fi
+if [[ ${slice_selector} == tvos || ${slice_selector} == tvos-simulator ]]; then
+    # PAM_TVOS_SIMULATOR_ARCHS=x86_64 builds only the Intel slice (local checks).
+    for arch in ${PAM_TVOS_SIMULATOR_ARCHS:-arm64 x86_64}; do
+        if [[ ${arch} == arm64 ]]; then
+            build_php_slice tvos-simulator-arm64 appletvsimulator arm64 aarch64-apple-darwin -mtvos-simulator-version-min
+            build_tvos_engine_slice aarch64-apple-tvos-sim
+        else
+            # A tvOS host triplet keeps Autoconf cross-compiling on an x86_64 Mac, as for iOS.
+            build_php_slice tvos-simulator-x86_64 appletvsimulator x86_64 x86_64-apple-tvos -mtvos-simulator-version-min
+            build_tvos_engine_slice x86_64-apple-tvos
+        fi
+    done
+fi
+if [[ ${slice_selector} == tvos || ${slice_selector} == tvos-simulator ]]; then
+    # The XCFrameworks take the slices this run built: device and simulator
+    # for `tvos`, the simulator only for `tvos-simulator` (local checks).
+    tv_destination=${pam_root}/runtime/tvos/${runtime_id}
+    tv_simulator=${build_root}/tvos-simulator
+    mkdir -p "${tv_destination}" "${tv_simulator}/php" "${tv_simulator}/engine"
+    php_slices=()
+    engine_slices=()
+    tv_architectures=()
+    if [[ ${slice_selector} == tvos ]]; then
+        php_slices+=(-library "${build_root}/install-tvos-device-arm64/lib/libphp.a" -headers "${build_root}/install-tvos-device-arm64/include")
+        engine_slices+=(-library "${pam_root}/pam-native/target/aarch64-apple-tvos/release/libpam_native_engine.a" -headers "${pam_root}/pam-native/native")
+        tv_architectures+=("tvos-arm64")
+    fi
+    simulator_php=()
+    simulator_engine=()
+    simulator_headers=
+    for arch in ${PAM_TVOS_SIMULATOR_ARCHS:-arm64 x86_64}; do
+        simulator_php+=("${build_root}/install-tvos-simulator-${arch}/lib/libphp.a")
+        simulator_headers=${simulator_headers:-${build_root}/install-tvos-simulator-${arch}/include}
+        if [[ ${arch} == arm64 ]]; then
+            simulator_engine+=("${pam_root}/pam-native/target/aarch64-apple-tvos-sim/release/libpam_native_engine.a")
+        else
+            simulator_engine+=("${pam_root}/pam-native/target/x86_64-apple-tvos/release/libpam_native_engine.a")
+        fi
+    done
+    lipo -create "${simulator_php[@]}" -output "${tv_simulator}/php/libphp.a"
+    lipo -create "${simulator_engine[@]}" -output "${tv_simulator}/engine/libpam_native_engine.a"
+    php_slices+=(-library "${tv_simulator}/php/libphp.a" -headers "${simulator_headers}")
+    engine_slices+=(-library "${tv_simulator}/engine/libpam_native_engine.a" -headers "${pam_root}/pam-native/native")
+    tv_architectures+=("tvos-simulator")
+    rm -rf -- "${tv_destination}/PamPhp.xcframework" "${tv_destination}/PamNativeEngine.xcframework"
+    xcodebuild -create-xcframework "${php_slices[@]}" -output "${tv_destination}/PamPhp.xcframework"
+    xcodebuild -create-xcframework "${engine_slices[@]}" -output "${tv_destination}/PamNativeEngine.xcframework"
+    python3 - "${tv_destination}/runtime.json" "${tv_architectures[*]}" <<PY
+import json
+import sys
+manifest = {
+    "schemaVersion": 1,
+    "runtimeId": "${runtime_id}",
+    "phpVersion": "${php_version}",
+    "runtimeRevision": ${runtime_revision},
+    "sourceUrl": "${php_url}",
+    "sourceSha256": "${php_sha256}",
+    "tvosMinimumVersion": "${tvos_minimum}",
+    "architectures": sys.argv[2].split(),
+    "extensions": [
+        extension
+        for extension in "${php_extensions}".split(",")
+        if extension != "opcache" or "${opcache_enabled}" == "yes"
+    ],
+}
+with open(sys.argv[1], "w", encoding="utf-8") as stream:
+    json.dump(manifest, stream, indent=4)
+    stream.write("\n")
+PY
+    echo "Built verified PAM tvOS runtime ${runtime_id} at ${tv_destination}."
+fi
 if [[ ${slice_selector} == all || ${slice_selector} == ios ]]; then
     simulator=${build_root}/simulator
     mkdir -p "${simulator}/php" "${simulator}/engine"
@@ -331,7 +450,7 @@ with open("${destination}/runtime.json", "w", encoding="utf-8") as stream:
     stream.write("\n")
 PY
     echo "Built verified PAM iOS runtime ${runtime_id} at ${destination}."
-elif [[ ${slice_selector} != macos ]]; then
+elif [[ ${slice_selector} != macos && ${slice_selector} != tvos* ]]; then
     echo "Built ${slice_selector} slices. Run with 'all' to create XCFrameworks."
 else
     echo "Built verified PAM macOS runtime ${runtime_id} at ${pam_root}/runtime/macos/${runtime_id}."
