@@ -4432,7 +4432,9 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     assert!(hello.contains("#[State]"));
     assert!(hello.contains("<p-screen title=\""));
     assert!(hello.contains("<p-text-field p-model=\"$name\""));
-    assert!(hello.contains("<p-btn label=\"Native taps: {{ $count }}\" block=\"true\" @press=\"increment\" />"));
+    assert!(hello.contains(
+        "<p-btn label=\"Native taps: {{ $count }}\" block=\"true\" @press=\"increment\" />"
+    ));
     let native_manifest = fs::read_to_string(directory.join("pam-native.json")).unwrap();
     assert!(native_manifest.contains("\"defaultMode\": \"system\""));
     assert!(!hello.contains("<PamUIProvider"));
@@ -4466,8 +4468,14 @@ fn every_mobile_ui_starter_uses_the_two_x_component_contract() {
         assert!(hello.contains("<p-screen"), "starter {starter}");
         assert!(!hello.contains("<AppScreen"), "starter {starter}");
         assert!(!hello.contains("class=\"w-full"), "starter {starter}");
-        if matches!(starter, "blank" | "tabs" | "auth" | "ecommerce" | "chat" | "showcase") {
-            assert!(hello.contains("p-model=\""), "starter {starter} binds an input");
+        if matches!(
+            starter,
+            "blank" | "tabs" | "auth" | "ecommerce" | "chat" | "showcase"
+        ) {
+            assert!(
+                hello.contains("p-model=\""),
+                "starter {starter} binds an input"
+            );
         }
         assert!(!hello.contains("<PamUIProvider"), "starter {starter}");
         assert!(!hello.contains("<Heading"), "starter {starter}");

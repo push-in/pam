@@ -525,7 +525,11 @@ fn copy_native_ui_fonts(directory: &Path) -> Result<(), String> {
         let destination = target.join(name);
         if is_font && !destination.exists() {
             fs::copy(&path, &destination).map_err(|error| {
-                format!("cannot copy {} to {}: {error}", path.display(), destination.display())
+                format!(
+                    "cannot copy {} to {}: {error}",
+                    path.display(),
+                    destination.display()
+                )
             })?;
         }
     }
@@ -2809,16 +2813,16 @@ fn init_mobile(
 ) -> Result<(), String> {
     init_mobile_with_ui(
         directory,
-        if with_official_ui { UiLine::Current } else { UiLine::None },
+        if with_official_ui {
+            UiLine::Current
+        } else {
+            UiLine::None
+        },
         options,
     )
 }
 
-fn init_mobile_with_ui(
-    directory: &Path,
-    ui: UiLine,
-    options: &InitOptions,
-) -> Result<(), String> {
+fn init_mobile_with_ui(directory: &Path, ui: UiLine, options: &InitOptions) -> Result<(), String> {
     let with_official_ui = ui != UiLine::None;
     let current_ui = ui == UiLine::Current;
     let native_repository = local_native_repository();
