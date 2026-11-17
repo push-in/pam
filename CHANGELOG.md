@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.2.20 - 2026-11-17
+
+Re-release of 2.2.19 (its tag was not published: the community first-run
+gate still waited for the PAM Native UI 1.x starter text).
+
+- The `native-ui` community first-run gate waits for the PAM Native UI 2
+  starter ("Persistent PHP, native UI").
+
 ## 2.2.19 - 2026-11-17
 
 PAM Native UI 2 in `pam init --template native-ui` (PAM Native 1.51.0).

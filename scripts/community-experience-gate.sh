@@ -173,7 +173,7 @@ init_mobile() {
   if [[ "${template}" == native || "${template}" == mobile ]]; then
     expected_content='Hello from persistent PHP'
   else
-    expected_content='Persistent PHP. Native Material UI.'
+    expected_content='Persistent PHP, native UI'
   fi
   local deadline=$((SECONDS + ${PAM_COMMUNITY_GATE_TIMEOUT_SECONDS:-1200}))
   local last_ui_dump=
