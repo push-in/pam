@@ -4415,11 +4415,11 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.pam")).unwrap();
     assert!(
-        manifest_json["require"]["pushinbr/pam-native"] == "^1.0"
-            || (manifest_json["require"]["pam/native"] == "^1.0"
+        manifest_json["require"]["pushinbr/pam-native"] == "^1.51"
+            || (manifest_json["require"]["pam/native"] == "^1.51"
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
-    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^1.0\""));
+    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^2.0\""));
     assert!(
         manifest_json["repositories"]
             .as_array()
@@ -4427,13 +4427,14 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
         "a community starter should resolve the published Native packages"
     );
     assert_eq!(manifest_json["config"]["platform"]["php"], "8.5.0");
-    assert!(entry.contains("PamUI::mode(ThemeMode::System)"));
+    assert!(!entry.contains("PamUI"));
     assert!(entry.contains("App::run(App::make(Hello::class))"));
     assert!(hello.contains("#[State]"));
-    assert!(hello.contains("<AppScreen title=\""));
-    assert!(hello.contains("<p-card class=\"w-full gap-6 p-6\">"));
-    assert!(hello.contains("<p-btn block=\"true\" on:press=\"increment\">"));
-    assert!(hello.contains("<Text>Native taps: {{ $count }}</Text>"));
+    assert!(hello.contains("<p-screen title=\""));
+    assert!(hello.contains("<p-text-field p-model=\"$name\""));
+    assert!(hello.contains("<p-btn label=\"Native taps: {{ $count }}\" block=\"true\" @press=\"increment\" />"));
+    let native_manifest = fs::read_to_string(directory.join("pam-native.json")).unwrap();
+    assert!(native_manifest.contains("\"defaultMode\": \"system\""));
     assert!(!hello.contains("<PamUIProvider"));
     assert!(!hello.contains("<Heading"));
     assert!(!hello.contains("<ButtonText"));
@@ -4442,7 +4443,7 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
 }
 
 #[test]
-fn every_mobile_ui_starter_uses_the_public_one_x_component_contract() {
+fn every_mobile_ui_starter_uses_the_two_x_component_contract() {
     for starter in ["blank", "tabs", "auth", "ecommerce", "chat", "showcase"] {
         let directory = temporary_path(&format!("init-mobile-ui-{starter}"));
         let output = run_pam(&[
@@ -4462,7 +4463,12 @@ fn every_mobile_ui_starter_uses_the_public_one_x_component_contract() {
         );
 
         let hello = fs::read_to_string(directory.join("src/Hello.pam")).unwrap();
-        assert!(hello.contains("<AppScreen"), "starter {starter}");
+        assert!(hello.contains("<p-screen"), "starter {starter}");
+        assert!(!hello.contains("<AppScreen"), "starter {starter}");
+        assert!(!hello.contains("class=\"w-full"), "starter {starter}");
+        if matches!(starter, "blank" | "tabs" | "auth" | "ecommerce" | "chat" | "showcase") {
+            assert!(hello.contains("p-model=\""), "starter {starter} binds an input");
+        }
         assert!(!hello.contains("<PamUIProvider"), "starter {starter}");
         assert!(!hello.contains("<Heading"), "starter {starter}");
         assert!(!hello.contains("<ButtonText"), "starter {starter}");
