@@ -492,8 +492,45 @@ fn init_project(
         } else if directory.join("composer.json").is_file() {
             run_composer_in(executable, directory, &["install", "--no-interaction"])?;
         }
+        if template == InitTemplate::MobileUi {
+            copy_native_ui_fonts(directory)?;
+        }
         if template == InitTemplate::Desktop {
             run_desktop_init(executable, directory, options)?;
+        }
+    }
+    Ok(())
+}
+
+/// PAM Native UI renders with Instrument Sans: its `@font-face` rules read
+/// `assets/fonts/InstrumentSans-*.ttf` from the application, so a new project
+/// gets the files the installed package ships. Existing files are kept.
+fn copy_native_ui_fonts(directory: &Path) -> Result<(), String> {
+    let source = directory.join("vendor/pushinbr/pam-native-ui/resources/fonts");
+    let Ok(entries) = fs::read_dir(&source) else {
+        return Ok(());
+    };
+    let target = directory.join("assets/fonts");
+    fs::create_dir_all(&target)
+        .map_err(|error| format!("cannot create {}: {error}", target.display()))?;
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let is_font = path
+            .extension()
+            .and_then(OsStr::to_str)
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("ttf"));
+        let Some(name) = path.file_name() else {
+            continue;
+        };
+        let destination = target.join(name);
+        if is_font && !destination.exists() {
+            fs::copy(&path, &destination).map_err(|error| {
+                format!(
+                    "cannot copy {} to {}: {error}",
+                    path.display(),
+                    destination.display()
+                )
+            })?;
         }
     }
     Ok(())
@@ -1777,7 +1814,9 @@ echo "Cross-surface product contract verified.\n";
     fs::create_dir_all(&native).map_err(|error| format!("cannot create native app: {error}"))?;
     fs::create_dir_all(&desktop).map_err(|error| format!("cannot create desktop app: {error}"))?;
     init_api(&server, false)?;
-    init_mobile(&native, true, options)?;
+    // The product workspace themes the UI from its design-token contract,
+    // which needs the PAM Native UI 1.x theme API.
+    init_mobile_with_ui(&native, UiLine::Legacy, options)?;
     init_product_desktop(&desktop)?;
     add_product_contract(&server.join("composer.json"))?;
     add_product_contract(&native.join("composer.json"))?;
@@ -2757,11 +2796,35 @@ fn init_desktop(directory: &Path, application_name: Option<&str>) -> Result<(), 
     )
 }
 
+/// Which PAM Native UI line a native project starts on.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum UiLine {
+    None,
+    /// 1.x: the product workspace's runtime themes.
+    Legacy,
+    /// 2.x: `pam init --template native-ui`.
+    Current,
+}
+
 fn init_mobile(
     directory: &Path,
     with_official_ui: bool,
     options: &InitOptions,
 ) -> Result<(), String> {
+    init_mobile_with_ui(
+        directory,
+        if with_official_ui {
+            UiLine::Current
+        } else {
+            UiLine::None
+        },
+        options,
+    )
+}
+
+fn init_mobile_with_ui(directory: &Path, ui: UiLine, options: &InitOptions) -> Result<(), String> {
+    let with_official_ui = ui != UiLine::None;
+    let current_ui = ui == UiLine::Current;
     let native_repository = local_native_repository();
     let native_package = native_repository
         .as_ref()
@@ -2770,9 +2833,12 @@ fn init_mobile(
     let mut requirements = serde_json::json!({
         "php": "^8.5"
     });
-    requirements[native_package] = serde_json::json!("^1.0");
+    // PAM Native UI 2 needs component p-model and plugin component
+    // libraries, both added in PAM Native 1.51.
+    requirements[native_package] = serde_json::json!(if current_ui { "^1.51" } else { "^1.0" });
     if with_official_ui {
-        requirements["pushinbr/pam-native-ui"] = serde_json::json!("^1.0");
+        requirements["pushinbr/pam-native-ui"] =
+            serde_json::json!(if current_ui { "^2.0" } else { "^1.0" });
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
@@ -2851,6 +2917,14 @@ fn init_mobile(
         "modules": [],
         "views": []
     });
+    if current_ui {
+        // The window paints the PAM Native UI theme before the first frame.
+        native_manifest["appearance"] = serde_json::json!({
+            "defaultMode": "system",
+            "light": {"background": "#FDFDFC"},
+            "dark": {"background": "#0A0A0A"}
+        });
+    }
     if options
         .mobile_platforms
         .contains(&MobilePlatform::AndroidTv)
@@ -2876,14 +2950,11 @@ fn init_mobile(
 declare(strict_types=1);
 
 use App\Hello;
-use Pam\MobileUi\Enum\ThemeMode;
-use Pam\MobileUi\PamUI;
 use Pam\Native\App;
 
 require __DIR__.'/vendor/autoload.php';
 
 App::components(__DIR__.'/src', __DIR__.'/.pam-native/components');
-PamUI::mode(ThemeMode::System);
 App::run(App::make(Hello::class));
 "#
     } else {
@@ -2971,75 +3042,87 @@ final class Hello extends Component
     };
 
     fn mobile_ui_starter(starter: MobileStarter, application_name: &str) -> String {
-        let content = match starter {
-            MobileStarter::Blank => {
+        // PAM Native UI 2 starters: every input is bound with p-model, so
+        // what the user types is in the component's PHP state.
+        let (state, methods, content) = match starter {
+            MobileStarter::Blank => (
+                "#[State]\n    public int $count = 0;\n\n    #[State]\n    public string $name = '';",
+                "public function increment(): void\n    {\n        $this->count++;\n    }",
                 r#"
-                <AppScreen title="__APP_NAME__" subtitle="Your native PHP application is ready.">
-                    <p-card class="w-full gap-6 p-6">
-                        <Text size="xl">Persistent PHP. Native Material UI.</Text>
-                        <p-btn block="true" on:press="increment">
-                            <Text>Native taps: {{ $count }}</Text>
-                        </p-btn>
-                    </p-card>
-                </AppScreen>"#
-            }
-            MobileStarter::Tabs => {
+    <p-screen title="__APP_NAME__" subtitle="Your native PHP application is ready.">
+        <p-card title="Persistent PHP, native UI" subtitle="Type below: the greeting is rendered by PHP.">
+            <p-text-field p-model="$name" label="Your name" placeholder="Ada" clearable="true" />
+            <Text>{{ $name === '' ? 'Hello!' : 'Hello, '.$name.'!' }}</Text>
+            <p-btn label="Native taps: {{ $count }}" block="true" @press="increment" />
+        </p-card>
+    </p-screen>"#,
+            ),
+            MobileStarter::Tabs => (
+                "#[State]\n    public string $tab = 'home';",
+                "public function title(): string\n    {\n        return match ($this->tab) {\n            'search' => 'Search',\n            'profile' => 'Profile',\n            default => 'Home',\n        };\n    }",
                 r#"
-                <AppScreen title="Home" subtitle="A production-ready tabs starter.">
-                    <Row class="w-full justify-between gap-3">
-                        <p-btn class="flex-1" variant="tonal"><Text>Home</Text></p-btn>
-                        <p-btn class="flex-1" variant="text"><Text>Search</Text></p-btn>
-                        <p-btn class="flex-1" variant="text"><Text>Profile</Text></p-btn>
-                    </Row>
-                </AppScreen>"#
-            }
-            MobileStarter::Authentication => {
+    <p-screen :title="title()" subtitle="A tabs starter. Each tab is one PHP branch.">
+        <p-tabs p-model="$tab" :options="['home' => 'Home', 'search' => 'Search', 'profile' => 'Profile']" />
+        <p-empty-state p-if="$tab === 'home'" icon="info" title="Home" text="Build your home screen here." />
+        <p-empty-state p-else-if="$tab === 'search'" icon="search" title="Search" text="Results will appear here." />
+        <p-section p-else title="Profile">
+            <p-list-item title="Account" subtitle="Signed in" chevron="true" />
+            <p-list-item title="Notifications" chevron="true" :divider="false" />
+        </p-section>
+    </p-screen>"#,
+            ),
+            MobileStarter::Authentication => (
+                "#[State]\n    public string $email = '';\n\n    #[State]\n    public string $password = '';\n\n    #[State]\n    public ?string $error = null;\n\n    #[State]\n    public bool $signedIn = false;",
+                "public function submit(): void\n    {\n        $this->error = filter_var($this->email, FILTER_VALIDATE_EMAIL) === false\n            ? 'Enter a valid email address.'\n            : (strlen($this->password) < 8 ? 'Use at least 8 characters.' : null);\n        $this->signedIn = $this->error === null;\n    }",
                 r#"
-                <AppScreen title="Welcome back" subtitle="Sign in to continue.">
-                    <p-card class="w-full gap-4 p-6">
-                        <p-text-field p-model="$email" label="Email" autoComplete="email" />
-                        <p-text-field p-model="$password" label="Password" type="password" />
-                        <p-btn block="true" on:press="submit"><Text>Sign in</Text></p-btn>
-                    </p-card>
-                </AppScreen>"#
-            }
-            MobileStarter::Ecommerce => {
+    <p-screen title="Welcome back" subtitle="Sign in to continue.">
+        <p-alert p-if="$signedIn" tone="success" :text="'Signed in as '.$email" />
+        <p-form :error="$error">
+            <p-text-field p-model="$email" label="Email" type="email" required="true" />
+            <p-text-field p-model="$password" label="Password" type="password" required="true" @submit="submit" />
+        </p-form>
+        <template #footer>
+            <p-btn label="Sign in" block="true" size="lg" @press="submit" />
+        </template>
+    </p-screen>"#,
+            ),
+            MobileStarter::Ecommerce => (
+                "#[State]\n    public string $query = '';\n\n    #[State]\n    public int $cart = 0;",
+                "public function add(): void\n    {\n        $this->cart++;\n    }",
                 r#"
-                <AppScreen title="__APP_NAME__" subtitle="Native commerce starter">
-                    <p-text-field p-model="$query" label="Search products" />
-                    <p-card class="gap-3 p-5">
-                        <p-chip variant="tonal"><Text>Featured</Text></p-chip>
-                        <Text size="lg">Native commerce starter</Text>
-                        <Text class="ui-text-muted">
-                            Catalog, cart, and checkout foundations.
-                        </Text>
-                        <p-btn on:press="increment"><Text>Add to cart · {{ $count }}</Text></p-btn>
-                    </p-card>
-                </AppScreen>"#
-            }
-            MobileStarter::Chat => {
+    <p-screen title="__APP_NAME__" subtitle="Native commerce starter">
+        <p-text-field p-model="$query" placeholder="Search products" type="search" clearable="true" />
+        <p-card title="Featured" :subtitle="$query === '' ? 'Catalog, cart and checkout foundations.' : 'Searching for '.$query">
+            <p-badge label="New" />
+            <p-btn label="Add to cart · {{ $cart }}" @press="add" />
+        </p-card>
+    </p-screen>"#,
+            ),
+            MobileStarter::Chat => (
+                "#[State]\n    public string $message = '';\n\n    /** @var list<array{id: int, text: string}> */\n    #[State]\n    public array $messages = [];",
+                "public function send(): void\n    {\n        if (trim($this->message) === '') {\n            return;\n        }\n        $this->messages[] = ['id' => count($this->messages) + 1, 'text' => trim($this->message)];\n        $this->message = '';\n    }",
                 r#"
-                <AppScreen title="Team chat" subtitle="Messages stay above the keyboard.">
-                    <Row class="w-full items-center gap-3">
-                        <p-text-field class="flex-1" p-model="$message" label="Message" />
-                        <p-btn on:press="send"><Text>Send</Text></p-btn>
-                    </Row>
-                </AppScreen>"#
-            }
-            MobileStarter::Showcase => {
+    <p-screen title="Team chat" subtitle="Messages stay above the keyboard.">
+        <p-list-item p-for="$item in $messages" :key="$item['id']" :title="$item['text']" avatar="You" />
+        <p-empty-state p-if="$messages === []" icon="info" title="No messages yet" text="Say hello below." />
+        <template #footer>
+            <p-text-field p-model="$message" placeholder="Message" returnKey="send" @submit="send" />
+            <p-btn label="Send" block="true" @press="send" />
+        </template>
+    </p-screen>"#,
+            ),
+            MobileStarter::Showcase => (
+                "#[State]\n    public string $name = '';\n\n    #[State]\n    public bool $notifications = true;\n\n    #[State]\n    public ?string $plan = 'pro';\n\n    #[State]\n    public float $volume = 40;",
+                "public function summary(): string\n    {\n        return ($this->name === '' ? 'Nobody' : $this->name).' · '.$this->plan.' · '.($this->notifications ? 'notifications on' : 'notifications off').' · '.$this->volume.'%';\n    }",
                 r#"
-                <AppScreen title="Component showcase" subtitle="PAM Native UI 1.x">
-                    <ScrollView class="w-full flex-1">
-                        <Column class="gap-5">
-                            <p-chip variant="tonal"><Text>PAM Native UI</Text></p-chip>
-                            <p-card class="gap-3 p-5">
-                                <Text>State, components, accessibility, and native layout.</Text>
-                                <p-btn on:press="increment"><Text>Counter {{ $count }}</Text></p-btn>
-                            </p-card>
-                        </Column>
-                    </ScrollView>
-                </AppScreen>"#
-            }
+    <p-screen title="Component showcase" subtitle="PAM Native UI 2">
+        <p-text-field p-model="$name" label="Name" />
+        <p-switch p-model="$notifications" label="Notifications" />
+        <p-radio-group p-model="$plan" label="Plan" :options="['free' => 'Free', 'pro' => 'Pro']" />
+        <p-slider p-model="$volume" label="Volume" :step="5" showValue="true" unit="%" />
+        <p-card title="PHP state"><Text>{{ summary() }}</Text></p-card>
+    </p-screen>"#,
+            ),
         };
         r#"<?php
 
@@ -3052,31 +3135,17 @@ use Pam\Native\Component;
 
 final class Hello extends Component
 {
-    #[State]
-    public int $count = 0;
+    __STATE__
 
-    #[State]
-    public string $email = '';
-
-    #[State]
-    public string $password = '';
-
-    #[State]
-    public string $query = '';
-
-    #[State]
-    public string $message = '';
-
-    public function increment(): void { $this->count++; }
-    public function submit(): void { $this->count++; }
-    public function send(): void { $this->message = ''; }
+    __METHODS__
 }
 ?>
 
-<template>
-    __CONTENT__
+<template>__CONTENT__
 </template>
 "#
+        .replace("__STATE__", state)
+        .replace("__METHODS__", methods)
         .replace("__CONTENT__", content)
         .replace("__APP_NAME__", application_name)
     }
@@ -3379,7 +3448,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-native-ui": "1.0.0"
+                        "pushinbr/pam-native-ui": "2.0.0"
                     }
                 }
             })
