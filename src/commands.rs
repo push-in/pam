@@ -2833,12 +2833,12 @@ fn init_mobile_with_ui(directory: &Path, ui: UiLine, options: &InitOptions) -> R
     let mut requirements = serde_json::json!({
         "php": "^8.5"
     });
-    // PAM Native UI 2 needs component p-model and plugin component
-    // libraries, both added in PAM Native 1.51.
-    requirements[native_package] = serde_json::json!(if current_ui { "^1.51" } else { "^1.0" });
+    // PAM Native UI 2.1 needs the input flush, pixel-grid snapping and
+    // layout evidence of PAM Native 1.52 (component p-model came in 1.51).
+    requirements[native_package] = serde_json::json!(if current_ui { "^1.52" } else { "^1.0" });
     if with_official_ui {
         requirements["pushinbr/pam-native-ui"] =
-            serde_json::json!(if current_ui { "^2.0" } else { "^1.0" });
+            serde_json::json!(if current_ui { "^2.1" } else { "^1.0" });
     }
     let mut manifest = serde_json::json!({
         "name": if with_official_ui {
@@ -3448,7 +3448,7 @@ fn local_mobile_ui_repository() -> Option<serde_json::Value> {
                 "options": {
                     "symlink": false,
                     "versions": {
-                        "pushinbr/pam-native-ui": "2.0.0"
+                        "pushinbr/pam-native-ui": "2.1.0"
                     }
                 }
             })
