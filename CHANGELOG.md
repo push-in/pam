@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.2.21 - 2026-11-17
+
+PAM Native 1.52 and PAM Native UI 2.1 in `pam init --template native-ui`.
+
+- `pam init --template native-ui` requires `pushinbr/pam-native` `^1.52` and
+  `pushinbr/pam-native-ui` `^2.1`: typed text reaches PHP before submit and
+  presses, Back and the backdrop close sheets with their bound state, HTTP
+  survives broken IPv6 (Happy Eyeballs), every edge lands on the pixel grid,
+  and `pam mobile ios:*` uses the prebuilt, verified iOS engine of the
+  project's own pam-native version.
+
 ## 2.2.20 - 2026-11-17
 
 Re-release of 2.2.19 (its tag was not published: the community first-run
