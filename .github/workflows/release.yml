@@ -61,7 +61,7 @@ jobs:
     name: Build verified Android runtimes and engines
     needs: release-preflight
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
       id-token: write
@@ -85,7 +85,7 @@ jobs:
         run: sdkmanager "ndk;27.1.12297006"
       - uses: dtolnay/rust-toolchain@1.88.0
         with:
-          targets: aarch64-linux-android,x86_64-linux-android
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
       - uses: Swatinem/rust-cache@v2
         with:
           key: pam-android-runtime
@@ -102,6 +102,15 @@ jobs:
             cargo build --locked --release \
               --manifest-path pam-native/Cargo.toml \
               -p pam-native-engine --target x86_64-linux-android
+          # 32-bit Android (armeabi-v7a, x86): PHP keeps 64-bit integers there.
+          CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="${toolchain}/armv7a-linux-androideabi26-clang" \
+            cargo build --locked --release \
+              --manifest-path pam-native/Cargo.toml \
+              -p pam-native-engine --target armv7-linux-androideabi
+          CARGO_TARGET_I686_LINUX_ANDROID_LINKER="${toolchain}/i686-linux-android26-clang" \
+            cargo build --locked --release \
+              --manifest-path pam-native/Cargo.toml \
+              -p pam-native-engine --target i686-linux-android
       - name: Package and attest the verified runtime bundle
         run: scripts/package-android-runtime.sh pam-native dist
       - uses: actions/attest@v4

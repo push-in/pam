@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.2.21 - 2026-11-17
+
+- The Android runtime builder builds armeabi-v7a and x86 in `all`. PHP keeps
+  64-bit integers on 32-bit Android (`PHP_INT_SIZE` 8, opcache JIT off), and
+  release bundles carry the four ABIs and their PAM Native engines.
+
 ## 2.2.20 - 2026-11-17
 
 Re-release of 2.2.19 (its tag was not published: the community first-run
