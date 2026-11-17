@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.2.19 - 2026-11-17
+
+PAM Native UI 2 in `pam init --template native-ui` (PAM Native 1.51.0).
+
+- `pam init --template native-ui` requires `pushinbr/pam-native` `^1.51` and
+  `pushinbr/pam-native-ui` `^2.0`. On 1.x no input value reached PHP: the
+  `auth`, `ecommerce` and `chat` starters stopped at boot ("The model
+  attribute is only valid on Input") and the others never saw what was typed.
+  Every starter now binds its inputs with `p-model` and renders with
+  `p-screen`, the tabs starter switches real panels, `pam-native.json` paints
+  the theme colours before the first frame, and the Instrument Sans files are
+  copied to `assets/fonts/` after install.
+- The product workspace keeps PAM Native UI 1.x for its design-token themes.
+
 ## 2.2.18 - 2026-11-11
 
 - The ecosystem inventory includes `pushinbr/pam-native-web` (the Samsung and
