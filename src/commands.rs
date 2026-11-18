@@ -2834,8 +2834,9 @@ fn init_mobile_with_ui(directory: &Path, ui: UiLine, options: &InitOptions) -> R
         "php": "^8.5"
     });
     // PAM Native UI 2.1 needs the input flush, pixel-grid snapping and
-    // layout evidence of PAM Native 1.52, the 1.53.1 upload and macOS download fixes (component p-model came in 1.51).
-    requirements[native_package] = serde_json::json!(if current_ui { "^1.53.1" } else { "^1.0" });
+    // layout evidence of PAM Native 1.52 and the 1.53.2 dialog, theme,
+    // upload and macOS download fixes (component p-model came in 1.51).
+    requirements[native_package] = serde_json::json!(if current_ui { "^1.53.2" } else { "^1.0" });
     if with_official_ui {
         requirements["pushinbr/pam-native-ui"] =
             serde_json::json!(if current_ui { "^2.1" } else { "^1.0" });
