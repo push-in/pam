@@ -177,6 +177,7 @@ init_mobile() {
   fi
   local deadline=$((SECONDS + ${PAM_COMMUNITY_GATE_TIMEOUT_SECONDS:-1200}))
   local last_ui_dump=
+  local launcher_anr_dismissals=0
   while (( SECONDS < deadline )); do
     if adb shell pidof "${package}" 2>/dev/null | grep -Eq '[0-9]'; then
       sleep 3
@@ -203,13 +204,24 @@ init_mobile() {
       ui_dump=$(adb shell uiautomator dump /sdcard/pam-community-window.xml 2>/dev/null && \
         adb shell cat /sdcard/pam-community-window.xml 2>/dev/null) || true
       last_ui_dump=${ui_dump}
-      local wait_point
+      local wait_point anr_button=
+      # Waiting does not help a launcher that stays hung (a loaded CI
+      # emulator showed the dialog 141 times): after five, close it and let
+      # Android restart it.
+      if (( launcher_anr_dismissals >= 5 )); then
+        anr_button=--close
+      fi
       wait_point=$(printf '%s' "${ui_dump}" | \
-        python3 "${script_dir}/parse-system-anr-wait.py")
+        python3 "${script_dir}/parse-system-anr-wait.py" ${anr_button})
+      if [[ -z "${wait_point}" && -n "${anr_button}" ]]; then
+        wait_point=$(printf '%s' "${ui_dump}" | python3 "${script_dir}/parse-system-anr-wait.py")
+      fi
       if [[ -n "${wait_point}" ]]; then
         local wait_x wait_y
         read -r wait_x wait_y <<<"${wait_point}"
-        printf 'Community gate: dismissing launcher ANR dialog and retrying %s\n' "${package}" >&2
+        launcher_anr_dismissals=$((launcher_anr_dismissals + 1))
+        printf 'Community gate: %s launcher ANR dialog and retrying %s\n' \
+          "$([[ -n "${anr_button}" ]] && echo closing || echo dismissing)" "${package}" >&2
         adb shell input tap "${wait_x}" "${wait_y}"
         sleep 2
         continue
