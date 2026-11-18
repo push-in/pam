@@ -2,17 +2,24 @@
 
 ## 2.2.22 - 2026-11-18
 
-PAM Native 1.53.3 and PAM Native UI 2.1 in `pam init --template native-ui`.
+PAM Native 1.53.4 and PAM Native UI 2.1 in `pam init --template native-ui`; iOS on a fresh Mac with no manual step.
 
-- `pam init --template native-ui` requires `pushinbr/pam-native` `^1.53.3` and
+- `pam init --template native-ui` requires `pushinbr/pam-native` `^1.53.4` and
   `pushinbr/pam-native-ui` `^2.1`: typed text reaches PHP before submit and
   presses, Back and the backdrop close sheets with their bound state, HTTP
   survives broken IPv6 (Happy Eyeballs), every edge lands on the pixel grid,
   and `pam mobile ios:*` uses the prebuilt, verified iOS engine of the
-  project's own pam-native version. 1.53.3 also keeps the confirm dialog at
+  project's own pam-native version. 1.53.4 also keeps the confirm dialog at
   its width on Android, repaints iOS correctly after a runtime light/dark
   switch, and stops an upload cut short by a closing HTTP module from
   crashing the Android app.
+- iOS PHP runtimes are published once per runtime id (the `iOS PHP runtime`
+  workflow builds PamPhp.xcframework on GitHub's macOS runner into the
+  immutable `runtime-ios-<id>` release with its `.sha256`), and
+  `runtime/ios-runtimes.json` ships with PAM, pinning each URL and SHA-256.
+  The macOS slot stays empty; pam-native 1.53.4 downloads, verifies and
+  caches the runtime in `pam mobile ios:prepare`. The release preflight
+  checks every pinned asset.
 - macOS: PAM's PHP verifies HTTPS against `/etc/ssl/cert.pem`
   (`openssl.cafile` in `etc/php.ini`). Its static OpenSSL looked for CA
   certificates in the build directory, so `file_get_contents('https://…')`

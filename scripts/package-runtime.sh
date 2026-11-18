@@ -61,6 +61,9 @@ tar \
     -C pam-native -cf - . |
     tar -C "${package_root}/share/pam/native" -xf -
 cp runtime/catalog.json "${package_root}/share/pam/runtime/catalog.json"
+# Where pam-native downloads each verified iOS PHP runtime (URL + SHA-256);
+# the macOS slot itself stays empty.
+cp runtime/ios-runtimes.json "${package_root}/share/pam/runtime/ios-runtimes.json"
 
 copy_dependencies() {
     ldd "$1" | awk '$2 == "=>" { print $1 "|" $3 }' |

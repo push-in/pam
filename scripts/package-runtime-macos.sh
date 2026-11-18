@@ -41,6 +41,9 @@ mkdir -p \
 cp "${pam_binary}" "${package_root}/bin/pam"
 cp "${php_sdk}/lib/libphp.dylib" "${package_root}/lib/libphp.dylib"
 cp runtime/catalog.json "${package_root}/share/pam/runtime/catalog.json"
+# Where pam-native downloads each verified iOS PHP runtime (URL + SHA-256);
+# the macOS slot itself stays empty.
+cp runtime/ios-runtimes.json "${package_root}/share/pam/runtime/ios-runtimes.json"
 
 cat > "${package_root}/etc/php.ini" <<'EOF'
 expose_php=Off
