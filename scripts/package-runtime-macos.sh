@@ -48,6 +48,9 @@ display_errors=Off
 log_errors=On
 variables_order=GPCS
 zend.assertions=-1
+; The static OpenSSL looks for CA certificates in its build directory; every
+; macOS ships this bundle, so HTTPS from PHP verifies on a fresh Mac.
+openssl.cafile=/etc/ssl/cert.pem
 EOF
 
 if test -d runtime/ios; then

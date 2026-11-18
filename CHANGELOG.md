@@ -11,6 +11,10 @@ PAM Native 1.52 and PAM Native UI 2.1 in `pam init --template native-ui`.
   and `pam mobile ios:*` uses the prebuilt, verified iOS engine of the
   project's own pam-native version. 1.52.1 also stops an upload cut short by
   a closing HTTP module from crashing the Android app.
+- macOS: PAM's PHP verifies HTTPS against `/etc/ssl/cert.pem`
+  (`openssl.cafile` in `etc/php.ini`). Its static OpenSSL looked for CA
+  certificates in the build directory, so `file_get_contents('https://…')`
+  and the PAM Native launcher failed on a fresh Mac.
 
 ## 2.2.21 - 2026-11-17
 
