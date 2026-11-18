@@ -41,6 +41,9 @@ mkdir -p \
 cp "${pam_binary}" "${package_root}/bin/pam"
 cp "${php_sdk}/lib/libphp.dylib" "${package_root}/lib/libphp.dylib"
 cp runtime/catalog.json "${package_root}/share/pam/runtime/catalog.json"
+# Where pam-native downloads each verified iOS PHP runtime (URL + SHA-256);
+# the macOS slot itself stays empty.
+cp runtime/ios-runtimes.json "${package_root}/share/pam/runtime/ios-runtimes.json"
 
 cat > "${package_root}/etc/php.ini" <<'EOF'
 expose_php=Off
@@ -48,6 +51,9 @@ display_errors=Off
 log_errors=On
 variables_order=GPCS
 zend.assertions=-1
+; The static OpenSSL looks for CA certificates in its build directory; every
+; macOS ships this bundle, so HTTPS from PHP verifies on a fresh Mac.
+openssl.cafile=/etc/ssl/cert.pem
 EOF
 
 if test -d runtime/ios; then

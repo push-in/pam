@@ -1,0 +1,13 @@
+{
+    "schemaVersion": 1,
+    "runtimes": {
+        "8.4.27-r1": {
+            "url": "https://github.com/push-in/pam/releases/download/runtime-ios-8.4.27-r1/pam-ios-runtime-8.4.27-r1.tar.gz",
+            "sha256": "34eedc75a5c15763374324290287b576914af8a1f05c11830e971e9b6c020d38"
+        },
+        "8.5.12-r1": {
+            "url": "https://github.com/push-in/pam/releases/download/runtime-ios-8.5.12-r1/pam-ios-runtime-8.5.12-r1.tar.gz",
+            "sha256": "d34f7778bd090117f569ea38098b1ee069349937d582b91fffe05b3c9b7a9d49"
+        }
+    }
+}

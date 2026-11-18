@@ -49,6 +49,8 @@ jobs:
             printf '%s' "${PAM_NEXT_EVIDENCE_KEY_IDENTITY}" | grep -Eq '^[0-9a-f]{64}$'
             test "${PAM_NEXT_EVIDENCE_KEY_IDENTITY}" != "${PAM_EVIDENCE_KEY_IDENTITY}"
           fi
+      - name: Verify the published iOS PHP runtimes the release points at
+        run: python3 scripts/verify-ios-runtimes.py --require-all
 
   ecosystem-compatibility:
     name: Certify the complete PAM Native ecosystem
