@@ -2,14 +2,14 @@
 
 ## 2.2.22 - 2026-11-18
 
-PAM Native 1.52 and PAM Native UI 2.1 in `pam init --template native-ui`.
+PAM Native 1.53.1 and PAM Native UI 2.1 in `pam init --template native-ui`.
 
-- `pam init --template native-ui` requires `pushinbr/pam-native` `^1.52.1` and
+- `pam init --template native-ui` requires `pushinbr/pam-native` `^1.53.1` and
   `pushinbr/pam-native-ui` `^2.1`: typed text reaches PHP before submit and
   presses, Back and the backdrop close sheets with their bound state, HTTP
   survives broken IPv6 (Happy Eyeballs), every edge lands on the pixel grid,
   and `pam mobile ios:*` uses the prebuilt, verified iOS engine of the
-  project's own pam-native version. 1.52.1 also stops an upload cut short by
+  project's own pam-native version. 1.53.1 also stops an upload cut short by
   a closing HTTP module from crashing the Android app.
 - macOS: PAM's PHP verifies HTTPS against `/etc/ssl/cert.pem`
   (`openssl.cafile` in `etc/php.ini`). Its static OpenSSL looked for CA
