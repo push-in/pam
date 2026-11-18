@@ -1959,7 +1959,10 @@ final class ApplicationTest extends TestCase
     )?;
     write_new(&native.join("src/theme.css"), PRODUCT_THEME_CSS)?;
     use_product_theme_tokens(&native)?;
-    write_new(&native.join("tests/HelloTest.php"), PRODUCT_NATIVE_SCREEN_TEST)?;
+    write_new(
+        &native.join("tests/HelloTest.php"),
+        PRODUCT_NATIVE_SCREEN_TEST,
+    )?;
     replace_generated(
         &native.join("src/Hello.pam"),
         r#"<?php
