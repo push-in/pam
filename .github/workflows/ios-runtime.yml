@@ -1,0 +1,114 @@
+name: iOS PHP runtime
+
+# Builds PamPhp.xcframework (iOS device arm64, simulator arm64 + x86_64) once
+# per PHP runtime id (version + revision) and publishes it as an immutable
+# prerelease `runtime-ios-<id>` with a .sha256. runtime/catalog.json then
+# references that URL and checksum, and `pam mobile ios:prepare` downloads,
+# verifies and caches it, so a fresh Mac never builds PHP.
+
+on:
+  workflow_dispatch:
+    inputs:
+      runtimes:
+        description: Runtime ids from runtime/catalog.json (space separated); empty builds every release
+        required: false
+        default: ''
+  push:
+    branches: [main]
+    paths:
+      - runtime/catalog.json
+      - runtime-builder/ios/build.sh
+      - .github/workflows/ios-runtime.yml
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+
+jobs:
+  plan:
+    name: Runtimes without a published iOS asset
+    runs-on: ubuntu-24.04
+    outputs:
+      runtimes: ${{ steps.plan.outputs.runtimes }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.runtimes }}
+        run: |
+          requested=${REQUESTED:-$(python3 -c 'import json; print(" ".join(json.load(open("runtime/catalog.json"))["releases"]))')}
+          missing=()
+          for id in ${requested}; do
+            # Published once and never replaced: an existing tag is skipped.
+            if gh release view "runtime-ios-${id}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+              echo "runtime-ios-${id} is already published"
+            else
+              missing+=("${id}")
+            fi
+          done
+          printf 'runtimes=%s\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1:]))' "${missing[@]}")" >>"${GITHUB_OUTPUT}"
+
+  build:
+    name: Build and publish ${{ matrix.runtime }}
+    needs: plan
+    if: needs.plan.outputs.runtimes != '[]'
+    runs-on: macos-15
+    timeout-minutes: 150
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: ${{ fromJSON(needs.plan.outputs.runtimes) }}
+    steps:
+      - uses: actions/checkout@v5
+      # build.sh links the engine too; only PamPhp.xcframework is published
+      # (pam-native releases ship their own prebuilt engine).
+      - name: Check out PAM Native for the engine slices
+        uses: actions/checkout@v5
+        with:
+          repository: push-in/pam-native
+          ref: main
+          path: pam-native
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+        with:
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
+      - name: Build the verified PHP XCFramework
+        run: runtime-builder/ios/build.sh --php "${{ matrix.runtime }}" ios
+      - name: Package pam-ios-runtime-${{ matrix.runtime }}
+        id: package
+        run: |
+          id='${{ matrix.runtime }}'
+          source="runtime/ios/${id}"
+          test -f "${source}/PamPhp.xcframework/Info.plist"
+          test -f "${source}/runtime.json"
+          python3 - "${source}/runtime.json" "${id}" <<'PY'
+          import json, sys
+          manifest = json.load(open(sys.argv[1]))
+          assert manifest["runtimeId"] == sys.argv[2], manifest
+          PY
+          mkdir -p dist
+          asset="pam-ios-runtime-${id}.tar.gz"
+          # Stable order and timestamps: the same build packs the same bytes.
+          gtar --version >/dev/null 2>&1 || brew install gnu-tar
+          gtar --sort=name --mtime='2000-01-01 00:00:00Z' --owner=0 --group=0 --numeric-owner \
+            -C "${source}" -czf "dist/${asset}" PamPhp.xcframework runtime.json
+          (cd dist && shasum -a 256 "${asset}" >"${asset}.sha256")
+          cat "dist/${asset}.sha256"
+          printf 'asset=%s\n' "${asset}" >>"${GITHUB_OUTPUT}"
+      - name: Publish the immutable runtime release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          id='${{ matrix.runtime }}'
+          asset='${{ steps.package.outputs.asset }}'
+          # A prerelease never becomes "latest", which the PAM installer uses.
+          gh release create "runtime-ios-${id}" "dist/${asset}" "dist/${asset}.sha256" \
+            --repo "${GITHUB_REPOSITORY}" --target "${GITHUB_SHA}" --prerelease --latest=false \
+            --title "iOS PHP runtime ${id}" \
+            --notes "PamPhp.xcframework (iOS device arm64, simulator arm64 + x86_64) and runtime.json for PHP runtime ${id}, built by runtime-builder/ios/build.sh at ${GITHUB_SHA}. Referenced by runtime/catalog.json (iosRuntime) and downloaded by pam mobile ios:prepare."
