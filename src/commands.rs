@@ -1959,6 +1959,7 @@ final class ApplicationTest extends TestCase
     )?;
     write_new(&native.join("src/theme.css"), PRODUCT_THEME_CSS)?;
     use_product_theme_tokens(&native)?;
+    write_new(&native.join("tests/HelloTest.php"), PRODUCT_NATIVE_SCREEN_TEST)?;
     replace_generated(
         &native.join("src/Hello.pam"),
         r#"<?php
@@ -1978,10 +1979,14 @@ use Product\Contracts\ProductMutation;
 use Product\Contracts\ProductMutationReceipt;
 use Product\Contracts\ProductSnapshot;
 use Product\Contracts\ProductSurface;
+use Product\Contracts\ReadinessState;
 
 final class Hello extends Component
 {
     private const MAX_PENDING_MUTATIONS = 32;
+
+    #[State]
+    public string $headline = '';
 
     #[State]
     public int $refreshCount = 0;
@@ -1991,6 +1996,12 @@ final class Hello extends Component
 
     #[State]
     public string $serverHeadline = 'Server not checked yet';
+
+    #[State]
+    public string $serverLabel = 'Offline';
+
+    #[State]
+    public string $serverTone = 'danger';
 
     #[State]
     public string $syncMessage = 'Start the Server, then verify the shared contract.';
@@ -2012,6 +2023,8 @@ final class Hello extends Component
     public function boot(): void
     {
         $this->outbox = new OfflineMutationQueue;
+        // Template expressions read state, not method calls.
+        $this->headline = $this->snapshot()->headline;
     }
 
     public function mount(): void
@@ -2075,12 +2088,10 @@ final class Hello extends Component
                             throw new \UnexpectedValueException('Server returned the wrong product surface.');
                         }
 
-                        $this->serverStateCode = $snapshot->state->value;
-                        $this->serverHeadline = $snapshot->headline;
+                        $this->showServer($snapshot->state, $snapshot->headline);
                         $this->syncMessage = 'Verified contract v'.$snapshot->version->value.' from Server surface 1.';
                     } catch (\Throwable) {
-                        $this->serverStateCode = 3;
-                        $this->serverHeadline = 'Server unavailable or incompatible';
+                        $this->showServer(ReadinessState::Offline, 'Server unavailable or incompatible');
                         $this->syncMessage = 'Check PAM_PRODUCT_SERVER_URL and the Server contract version.';
                     } finally {
                         $this->syncing = false;
@@ -2090,8 +2101,7 @@ final class Hello extends Component
                 timeoutMs: 5_000,
             );
         } catch (\Throwable) {
-            $this->serverStateCode = 3;
-            $this->serverHeadline = 'Server request could not start';
+            $this->showServer(ReadinessState::Offline, 'Server request could not start');
             $this->syncMessage = 'Check PAM_PRODUCT_SERVER_URL and the Native network policy.';
             $this->syncing = false;
         }
@@ -2173,6 +2183,17 @@ final class Hello extends Component
         return $mutation->id;
     }
 
+    private function showServer(ReadinessState $state, string $headline): void
+    {
+        $this->serverStateCode = $state->value;
+        $this->serverHeadline = $headline;
+        [$this->serverLabel, $this->serverTone] = match ($state) {
+            ReadinessState::Operational => ['Operational', 'success'],
+            ReadinessState::Degraded => ['Degraded', 'warning'],
+            ReadinessState::Offline => ['Offline', 'danger'],
+        };
+    }
+
     private function persistOutbox(?\Closure $stored = null): void
     {
         Storage::set('product.outbox.v1', $this->outbox->export(), $stored);
@@ -2204,13 +2225,14 @@ final class Hello extends Component
 
 <template>
     <p-screen
-        title="{{ $this->snapshot()->headline }}"
+        title="{{ $headline }}"
         subtitle="One typed PHP contract across every PAM runtime."
     >
         <View class="contract">
-            <p-badge label="Contract v1 · Native surface 2" />
+            <p-badge label="Contract v1 · Native surface 2" tone="info" />
         </View>
         <p-card title="Server state · code {{ $serverStateCode }}" subtitle="{{ $serverHeadline }}">
+            <p-badge label="{{ $serverLabel }}" tone="{{ $serverTone }}" />
             <Text class="note" testId="product-sync">{{ $syncMessage }}</Text>
         </p-card>
         <p-btn label="Sync Server · {{ $refreshCount }}" block="true" testId="product-refresh" @press="refresh" />
@@ -2357,6 +2379,48 @@ fn replace_generated(path: &Path, contents: &str) -> Result<(), String> {
 /// Server status through the shared contract.
 /// Product design tokens as PAM Native UI 2 theme tokens (output of
 /// packages/contracts/bin/theme-css.php for the default contract).
+/// Renders the product screen on the host (`composer test`), so a template
+/// that cannot render fails before it reaches a device.
+const PRODUCT_NATIVE_SCREEN_TEST: &str = r#"<?php
+
+declare(strict_types=1);
+
+use App\Hello;
+use Pam\Native\App;
+use Pam\Native\Plugin\PluginManager;
+use Pam\Native\Testing;
+use PHPUnit\Framework\TestCase;
+
+final class HelloTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        // What index.php and App::run() do: the app's components, then the
+        // component libraries its plugins declare (PAM Native UI).
+        App::components(dirname(__DIR__).'/src', dirname(__DIR__).'/.pam-native/components');
+        PluginManager::boot(dirname(__DIR__));
+    }
+
+    protected function tearDown(): void
+    {
+        Testing\reset();
+        PluginManager::reset();
+    }
+
+    public function testTheProductScreenRendersItsContract(): void
+    {
+        $screen = Testing\mount(Hello::class);
+        $text = $screen->text();
+
+        self::assertStringContainsString('All systems ready', $text);
+        self::assertStringContainsString('Contract v1 · Native surface 2', $text);
+        self::assertStringContainsString('Offline', $text);
+        self::assertStringContainsString('Queue resilient check-in', $text);
+        $screen->unmount();
+    }
+}
+"#;
+
 const PRODUCT_THEME_CSS: &str = r#"/* Generated from packages/contracts/design-tokens.json: run `composer theme` after editing it. */
 :root {
     --p-bg: #f8fafc;

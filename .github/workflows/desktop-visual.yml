@@ -47,11 +47,24 @@ jobs:
       - name: Install pinned host and capture prerequisites
         run: |
           .github/scripts/add-ondrej-php-ppa.sh
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential clang imagemagick libclang-dev libfontconfig1-dev \
-            libphp8.5-embed php8.5-dev pkg-config xdotool xvfb x11-utils
+          # A mirror or PPA hiccup is retried; a missing package still fails.
+          for attempt in 1 2 3; do
+            sudo apt-get update \
+              && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+                build-essential clang-14 imagemagick libclang-14-dev libfontconfig1-dev \
+                libphp8.5-embed php8.5-dev pkg-config xdotool xvfb x11-utils \
+              && break
+            test "${attempt}" = 3 && exit 1
+            sleep 30
+          done
       - name: Build PAM and the real Servo host
+        env:
+          # mozangle's bindgen must load the libclang that matches the clang
+          # headers it parses. The runner image also ships newer LLVMs, whose
+          # libclang lacks the SSE2/AVX2 builtins the LLVM 14 headers use
+          # ("use of undeclared identifier '__builtin_ia32_paddsb128'").
+          LIBCLANG_PATH: /usr/lib/llvm-14/lib
+          CLANG_PATH: /usr/bin/clang-14
         run: |
           cargo build --locked
           cargo build --locked --manifest-path pam-desktop/Cargo.toml \

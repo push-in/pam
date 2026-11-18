@@ -4701,6 +4701,14 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
     assert!(native_theme.contains("    --p-bg-dark: #0b1120;"));
     assert!(native_theme.contains("    --p-touch: 48px;"));
     assert!(!native_component.contains("ProductTheme"));
+    // Template expressions read state; a method call there is a boot error.
+    assert!(!native_component.contains("{{ $this->"));
+    assert!(native_component.contains("title=\"{{ $headline }}\""));
+    assert!(native_component.contains("tone=\"{{ $serverTone }}\""));
+    let screen_test =
+        fs::read_to_string(directory.join("apps/native/tests/HelloTest.php")).unwrap();
+    assert!(screen_test.contains("Testing\\mount(Hello::class)"));
+    assert!(screen_test.contains("PluginManager::boot(dirname(__DIR__))"));
     assert!(!directory.join("apps/native/src/ProductTheme.php").exists());
     let native_manifest: serde_json::Value = serde_json::from_str(
         &fs::read_to_string(directory.join("apps/native/pam-native.json")).unwrap(),
