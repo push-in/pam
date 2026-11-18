@@ -4415,8 +4415,8 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.pam")).unwrap();
     assert!(
-        manifest_json["require"]["pushinbr/pam-native"] == "^1.53.4"
-            || (manifest_json["require"]["pam/native"] == "^1.53.4"
+        manifest_json["require"]["pushinbr/pam-native"] == "^1.53.5"
+            || (manifest_json["require"]["pam/native"] == "^1.53.5"
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
     assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^2.1\""));
