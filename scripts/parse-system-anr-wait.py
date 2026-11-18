@@ -6,7 +6,7 @@ import sys
 import xml.etree.ElementTree as ET
 
 
-def wait_point(dump: str) -> tuple[int, int] | None:
+def wait_point(dump: str, button: str = "Wait") -> tuple[int, int] | None:
     start = dump.find("<hierarchy")
     if start < 0:
         return None
@@ -29,7 +29,7 @@ def wait_point(dump: str) -> tuple[int, int] | None:
         return None
 
     for node in root.iter("node"):
-        if node.get("package") != "android" or node.get("text") != "Wait":
+        if node.get("package") != "android" or node.get("text") != button:
             continue
         match = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
         if match is None:
@@ -41,6 +41,8 @@ def wait_point(dump: str) -> tuple[int, int] | None:
 
 
 if __name__ == "__main__":
-    point = wait_point(sys.stdin.read())
+    # `--close`: the "Close app" button instead of "Wait" (restarts a launcher
+    # that stays hung on a loaded emulator).
+    point = wait_point(sys.stdin.read(), "Close app" if "--close" in sys.argv[1:] else "Wait")
     if point is not None:
         print(*point)
