@@ -1,0 +1,81 @@
+--- a/main/streams/cast.c
++++ b/main/streams/cast.c
+@@ -79,10 +79,12 @@
+ 	return php_stream_write((php_stream *)cookie, (char *)buffer, size);
+ }
+ 
+-static PHP_FPOS_T stream_cookie_seeker(void *cookie, zend_off_t position, int whence)
++/* PAM: funopen passes fpos_t, which is 32-bit on 32-bit Android while
++ * zend_off_t is 64-bit there (see zend_long.h). */
++static PHP_FPOS_T stream_cookie_seeker(void *cookie, PHP_FPOS_T position, int whence)
+ {
+ 
+-	return (PHP_FPOS_T)php_stream_seek((php_stream *)cookie, position, whence);
++	return (PHP_FPOS_T)php_stream_seek((php_stream *)cookie, (zend_off_t)position, whence);
+ }
+ 
+ static int stream_cookie_closer(void *cookie)
+--- a/Zend/zend_long.h
++++ b/Zend/zend_long.h
+@@ -25,12 +25,25 @@
+ /* This is the heart of the whole int64 enablement in zval. */
+ #if defined(__x86_64__) || defined(__LP64__) || defined(_LP64) || defined(_WIN64)
+ # define ZEND_ENABLE_ZVAL_LONG64 1
++#elif defined(__ANDROID__)
++/* PAM: 32-bit Android (armeabi-v7a, x86) keeps 64-bit PHP integers, like the
++ * x32 ABI does: PHP_INT_SIZE is 8 on every PAM Android runtime, so PHP code
++ * and the native bridge see the same integers on all ABIs. */
++# define ZEND_ENABLE_ZVAL_LONG64 1
+ #endif
+ 
+ /* Integer types. */
+ #ifdef ZEND_ENABLE_ZVAL_LONG64
++# if defined(__ANDROID__) && defined(__i386__)
++/* PAM: i386 aligns 64-bit struct members to 4 bytes. Zend needs 8, as ARMv7
++ * and x32 give: sizeof(Bucket) must stay a multiple of 8 because static and
++ * closure variables keep flags in the low 3 bits of a Bucket byte offset. */
++typedef int64_t zend_long __attribute__((aligned(8)));
++typedef uint64_t zend_ulong __attribute__((aligned(8)));
++# else
+ typedef int64_t zend_long;
+ typedef uint64_t zend_ulong;
++# endif
+ typedef int64_t zend_off_t;
+ # define ZEND_LONG_MAX INT64_MAX
+ # define ZEND_LONG_MIN INT64_MIN
+--- a/Zend/zend_multiply.h
++++ b/Zend/zend_multiply.h
+@@ -227,7 +227,7 @@
+ static zend_always_inline size_t zend_safe_address(size_t nmemb, size_t size, size_t offset, bool *overflow)
+ {
+ 	size_t res;
+-	zend_ulong m_overflow;
++	size_t m_overflow; /* PAM: zend_ulong is 64-bit on 32-bit Android */
+ 
+ 	__asm__ ("umlal %0,%1,%2,%3"
+ 		: "=r"(res), "=r"(m_overflow)
+--- a/Zend/zend_operators.h
++++ b/Zend/zend_operators.h
+@@ -544,7 +544,10 @@
+ #define ZVAL_OFFSETOF_TYPE	\
+ 	(offsetof(zval, u1.type_info) - offsetof(zval, value))
+ 
+-#if defined(HAVE_ASM_GOTO) && !__has_feature(memory_sanitizer)
++/* PAM: the i386 assembly below adds 32-bit longs; with 64-bit zend_long on
++ * 32-bit x86 (see zend_long.h) the compiler builtins are used instead. */
++#if defined(HAVE_ASM_GOTO) && !__has_feature(memory_sanitizer) \
++	&& !(defined(__i386__) && SIZEOF_ZEND_LONG == 8)
+ # define ZEND_USE_ASM_ARITHMETIC 1
+ #else
+ # define ZEND_USE_ASM_ARITHMETIC 0
+--- a/Zend/zend_string.c
++++ b/Zend/zend_string.c
+@@ -417,7 +417,7 @@
+ 	const char *ptr = ZSTR_VAL(s1);
+ 	uintptr_t delta = (uintptr_t) s2 - (uintptr_t) s1;
+ 	size_t len = ZSTR_LEN(s1);
+-	zend_ulong ret;
++	uint32_t ret; /* PAM: zend_ulong is 64-bit on 32-bit Android */
+ 
+ 	__asm__ (
+ 		"0:\n\t"

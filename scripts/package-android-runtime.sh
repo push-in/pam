@@ -21,7 +21,7 @@ for command_name in jq sha256sum tar; do
 done
 
 while IFS= read -r runtime_id; do
-    for abi in arm64-v8a x86_64; do
+    for abi in arm64-v8a armeabi-v7a x86 x86_64; do
         runtime_root="${repository_root}/runtime/android/${runtime_id}/${abi}"
         test -f "${runtime_root}/runtime.json"
         test -f "${runtime_root}/lib/libphp.a"
@@ -30,7 +30,7 @@ while IFS= read -r runtime_id; do
     done
 done < <(jq -r '.releases | keys[]' "${repository_root}/runtime/catalog.json")
 
-for target in aarch64-linux-android x86_64-linux-android; do
+for target in aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android; do
     test -f "${native_root}/target/${target}/release/libpam_native_engine.a"
 done
 
@@ -41,6 +41,8 @@ tar -czf "${archive}" \
     --transform='s,^target/,native/target/,' \
     -C "${native_root}" \
     target/aarch64-linux-android/release/libpam_native_engine.a \
+    target/armv7-linux-androideabi/release/libpam_native_engine.a \
+    target/i686-linux-android/release/libpam_native_engine.a \
     target/x86_64-linux-android/release/libpam_native_engine.a
 (
     cd "${output_directory}"

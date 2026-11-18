@@ -18,6 +18,17 @@ Available releases and their official source checksums are pinned in
 ./runtime-builder/android/build.sh --php 8.5 all
 ```
 
+`all` builds `arm64-v8a`, `armeabi-v7a`, `x86` and `x86_64`; one ABI can be
+named instead (`./runtime-builder/android/build.sh --php 8.5 armeabi-v7a`).
+
+On the 32-bit ABIs (`armeabi-v7a`, `x86`) PHP keeps 64-bit integers
+(`PHP_INT_SIZE` 8, as on the x32 ABI), so PHP code and the PAM Native bridge
+see the same integers on every device. `patches/0002-android-32-bit-php-integers.patch`
+enables 64-bit `zend_long` on 32-bit Android, keeps it 8-byte aligned on x86
+(Zend stores flags in the low bits of `Bucket` offsets), and replaces the
+32-bit i386/ARM assembly paths that assumed a 32-bit `zend_long`. The opcache
+JIT is disabled there; the bytecode cache stays on.
+
 The resulting `runtime/android/<php-version>-r<revision>/<abi>` directories are
 release inputs and stay out of Git. Release automation must archive them,
 publish a SHA-256 manifest, and sign that manifest. No unverified third-party
