@@ -1229,8 +1229,10 @@ namespace Pam\Internal {
                 $sampleLeaks = $leakSampleRate > 0
                     && count(self::$httpDispatches) === 1
                     && (self::$completedDispatches + 1) % $leakSampleRate === 0;
-                $profileRequestId = $context['requestId'] ?? null;
-                if (!is_string($profileRequestId)) {
+                $profileRequestId = isset($context['requestId']) && is_string($context['requestId'])
+                    ? $context['requestId']
+                    : null;
+                if ($profileRequestId === null) {
                     $fiberRequestId = \Pam\Async\FiberContext::get('pam.request_id', '');
                     $profileRequestId = is_string($fiberRequestId) ? $fiberRequestId : '';
                 }
