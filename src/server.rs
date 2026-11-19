@@ -3098,6 +3098,23 @@ struct PhpResponseStream {
     _request_slot: OwnedSemaphorePermit,
 }
 
+/// With HTTP served on the PHP thread (see `inline_serve`), a streamed
+/// chunk is only written when the connection task runs. PHP code that blocks
+/// between chunks (`usleep()`, a blocking query) would hold every chunk until
+/// the response ends, so the stream yields to the connection task (which
+/// writes what is queued: the head, a chunk) before PHP runs again.
+async fn inline_flush_point() {
+    if crate::inline_serve::enabled() {
+        for _ in 0..INLINE_FLUSH_YIELDS {
+            tokio::task::yield_now().await;
+        }
+    }
+}
+
+/// Scheduler turns given to the connection task: one to receive the response
+/// head or chunk, one more to finish writing it.
+const INLINE_FLUSH_YIELDS: usize = 2;
+
 impl PhpResponseStream {
     async fn drive(self) {
         let Self {
@@ -3119,6 +3136,8 @@ impl PhpResponseStream {
             .response_bytes
             .fetch_add(initial_response_bytes as u64, Ordering::Relaxed);
         let mut sent_bytes = initial_response_bytes;
+        // The head reaches the client before PHP runs again (and may block).
+        inline_flush_point().await;
         let mut envelope = match php::resume_http(&request_id, &request_body, "null")
             .and_then(|json| parse_dispatch_envelope(&json))
         {
@@ -3202,6 +3221,8 @@ impl PhpResponseStream {
                                     {
                                         return;
                                     }
+                                    // The chunk is written before PHP produces the next one.
+                                    inline_flush_point().await;
                                     "null".to_owned()
                                 }
                                 Err(error) => serde_json::json!({ "error": error }).to_string(),

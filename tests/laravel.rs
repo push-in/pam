@@ -818,6 +818,48 @@ fn streams_laravel_responses_progressively_and_preserves_binary_ranges() {
     );
     assert!(progressive.len() >= 128 * 1024);
 
+    // PHP blocking between chunks (usleep) must not hold the first one back.
+    let mut stream = TcpStream::connect(("127.0.0.1", pam.port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let started = Instant::now();
+    stream
+        .write_all(
+            b"GET /api/stream-blocking HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        )
+        .unwrap();
+    let mut blocking = Vec::new();
+    let mut first_chunk = None;
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        if read == 0 {
+            break;
+        }
+        blocking.extend_from_slice(&buffer[..read]);
+        if first_chunk.is_none()
+            && blocking
+                .windows(b"pam-blocking-first|".len())
+                .any(|window| window == b"pam-blocking-first|")
+        {
+            first_chunk = Some(started.elapsed());
+        }
+    }
+    let complete = started.elapsed();
+    let first_chunk = first_chunk.expect("the blocking stream never sent its first chunk");
+    assert!(
+        blocking
+            .windows(b"|pam-blocking-last".len())
+            .any(|window| window == b"|pam-blocking-last"),
+        "{}",
+        String::from_utf8_lossy(&blocking)
+    );
+    assert!(complete >= Duration::from_millis(650), "{complete:?}");
+    assert!(
+        first_chunk < Duration::from_millis(400),
+        "first chunk after {first_chunk:?}, complete after {complete:?}"
+    );
+
     let ranged = request(
         pam.port,
         "GET",
