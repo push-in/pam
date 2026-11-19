@@ -28,7 +28,7 @@ final readonly class Paginator
         if (method_exists($select, 'fetchPage')) {
             // Arcano 0.2.6+: the page and the count in one statement when the select allows it.
             /** @var array{list<T>, int} $fetched */
-            $fetched = $select->fetchPage($perPage, ($page - 1) * $perPage);
+            $fetched = $select->fetchPage(max(0, $perPage), max(0, ($page - 1) * $perPage));
             [$items, $total] = $fetched;
         } else {
             $total = (clone $select)->count();
@@ -71,7 +71,7 @@ final readonly class Paginator
             array_pop($items);
         }
         $next = null;
-        if ($more) {
+        if ($more && $items !== []) {
             $last = $items[array_key_last($items)];
             $value = $last->{$property} ?? null;
             if (!is_int($value) && !is_string($value)) {
@@ -88,7 +88,6 @@ final readonly class Paginator
         ]);
     }
 
-    /** @return int<1, max> */
     private static function perPage(Request $request, int $default): int
     {
         $requested = self::integer($request->query()['per_page'] ?? null) ?? $default;
