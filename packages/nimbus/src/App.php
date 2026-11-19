@@ -415,6 +415,10 @@ final class App implements ApplicationInterface
     private function registerRoute(string $method, string $path, callable|string|array $handler): PendingRoute
     {
         $this->assertMutable();
+        // `products` and `/products` are the same route.
+        if ($path !== '' && $path[0] !== '/') {
+            $path = '/' . $path;
+        }
         $route = $this->router->register($method, $path, $this->handlerResolver->resolve($handler));
         $route->sourceHandler = $handler;
         return new PendingRoute($this, $this->router, $route);

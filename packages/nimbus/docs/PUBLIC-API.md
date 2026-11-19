@@ -410,6 +410,7 @@ final readonly class Nimbus\ContainerMiddleware implements Pam\Contracts\Http\Mi
 ### Methods
 
 - `public __construct(Nimbus\Container\Container $container, string $middleware): mixed`
+- `public is(string $middleware): bool`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Container\Binding`
@@ -1510,6 +1511,8 @@ final readonly class Nimbus\PendingRoute
 ### Methods
 
 - `public __construct(Nimbus\App $app, Nimbus\Router $router, Nimbus\Route $route): mixed`
+- `public auth(): self`
+- `public can(string $ability): self`
 - `public definition(): Nimbus\Route`
 - `public delete(string $path, array|callable|string $handler): self`
 - `public get(string $path, array|callable|string $handler): self`
@@ -1766,6 +1769,8 @@ final class Nimbus\RouteRegistrar
 
 - `public __construct(Nimbus\App $app, string $prefix = ""): mixed`
 - `public apiResource(string $path, string $controller): void`
+- `public auth(): self`
+- `public can(string $ability): self`
 - `public controller(string $controller, callable $routes): void`
 - `public delete(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public get(string $path, array|callable|string $handler): Nimbus\PendingRoute`

@@ -79,6 +79,31 @@ final readonly class PendingRoute
         return $this;
     }
 
+    /** Requires an authenticated principal (the application binds `Auth\Authenticator`). */
+    public function auth(): self
+    {
+        return $this->middleware(Middleware\AuthenticateMiddleware::class);
+    }
+
+    /** Requires the authenticated principal to have the ability; implies `auth()`. */
+    public function can(string $ability): self
+    {
+        if (!$this->authenticates()) {
+            $this->auth();
+        }
+        return $this->middleware(new Middleware\AuthorizeMiddleware($this->container(), $ability));
+    }
+
+    private function authenticates(): bool
+    {
+        foreach ($this->route->middleware as $middleware) {
+            if ($middleware instanceof ContainerMiddleware && $middleware->is(Middleware\AuthenticateMiddleware::class)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private function container(): \Nimbus\Container\Container
     {
         return $this->app->container();

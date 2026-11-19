@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Nimbus\Tests;
 
 use Nimbus\App;
+use Nimbus\Auth\Authenticator;
+use Nimbus\Auth\Principal;
 use Nimbus\RouteRegistrar;
 use Pam\Contracts\Http\RequestHandlerInterface;
 use Pam\Http\Request;
@@ -86,6 +88,30 @@ final class RouteRegistrarTest extends TestCase
         }
     }
 
+    public function testAuthAndCanGuardRoutesAndGroups(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->container()->instance(Authenticator::class, new HeaderAuthenticator());
+        $ok = static fn (Request $request, Response $response): Response => $response->json(['ok' => true]);
+        $app->get('me', $ok)->auth();
+        $app->post('posts/{post}/publish', $ok)->can('publish');
+        $admin = $app->prefix('admin')->can('admin');
+        $admin->get('stats', $ok);
+
+        $status = static fn (string $method, string $path, string $user = ''): int => $app->handle(
+            new Request($method, $path, [], $user === '' ? [] : ['x-user' => [$user]], ''),
+            new Response(),
+        )->export()['status'];
+
+        self::assertSame(401, $status('GET', '/me'));
+        self::assertSame(200, $status('GET', '/me', 'ana'));
+        self::assertSame(401, $status('POST', '/posts/1/publish'));
+        self::assertSame(403, $status('POST', '/posts/1/publish', 'ana'));
+        self::assertSame(200, $status('POST', '/posts/1/publish', 'ana:publish'));
+        self::assertSame(403, $status('GET', '/admin/stats', 'ana:publish'));
+        self::assertSame(200, $status('GET', '/admin/stats', 'root:admin'));
+    }
+
     /** @return array<array-key, mixed> */
     private static function json(App $app, string $method, string $path): array
     {
@@ -127,5 +153,36 @@ final class RegistrarProductController
     public function publish(Response $response, string $product): Response
     {
         return $response->json(['action' => 'publish', 'product' => $product]);
+    }
+}
+
+final class HeaderAuthenticator implements Authenticator
+{
+    public function authenticate(Request $request): ?Principal
+    {
+        $header = $request->getHeader('x-user');
+        if ($header === null) {
+            return null;
+        }
+        $parts = explode(':', $header);
+        return new HeaderPrincipal($parts[0], array_slice($parts, 1));
+    }
+}
+
+final readonly class HeaderPrincipal implements Principal
+{
+    /** @param list<string> $abilities */
+    public function __construct(private string $id, private array $abilities)
+    {
+    }
+
+    public function identifier(): string
+    {
+        return $this->id;
+    }
+
+    public function can(string $ability): bool
+    {
+        return in_array($ability, $this->abilities, true);
     }
 }
