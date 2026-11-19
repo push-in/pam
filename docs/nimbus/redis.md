@@ -1,0 +1,87 @@
+# Redis, cache de resposta, rate limit e idempotência
+
+## Conexão
+
+`Nimbus\Redis\RedisPool` usa o cliente Redis não bloqueante do PAM. Cada comando pega uma conexão ociosa do pool, então Fibers de requisições diferentes nunca dividem um socket no meio de um comando. No máximo `maxIdle` conexões (16 por padrão) ficam abertas entre requisições.
+
+```php
+use Nimbus\Redis\RedisPool;
+
+$redis = RedisPool::fromEnvironment();   // REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, REDIS_DB
+$app->container()->instance(RedisPool::class, $redis);
+
+$redis->command(['SET', 'greeting', 'olá', 'EX', '60']);
+$value = $redis->command(['GET', 'greeting']);
+```
+
+`RedisPool` implementa `Nimbus\Redis\Connection` (`command(array $arguments): mixed`), que é o tipo aceito pelos stores Redis abaixo.
+
+Stores Redis disponíveis:
+
+| Classe | Para |
+| --- | --- |
+| `RedisRateLimitStore` | `RateLimitMiddleware` |
+| `RedisResponseCacheStore` | `ResponseCacheMiddleware` |
+| `RedisIdempotencyStore` | `IdempotencyMiddleware` |
+| `RedisSessionStore` | sessões web ([Sessão](./sessao.md)) |
+| `RedisTokenRevocationStore` | revogação de tokens ([Autenticação](./autenticacao.md)) |
+| `RedisOAuthStateStore` | estado do login social |
+| `Nimbus\Jobs\RedisJobQueue`, `Nimbus\Scheduling\RedisSchedulerLock` | [Filas e agendador](./filas.md) |
+
+Os stores em memória (`MemoryRateLimitStore`, `MemoryResponseCacheStore`, `MemoryIdempotencyStore`) têm tamanho limitado e valem só dentro de um worker: servem para desenvolvimento e testes. Com mais de um worker ou servidor, use Redis.
+
+## Rate limit
+
+`RateLimitMiddleware` aplica token bucket por chave e responde `429` em problem+json (`RateLimited`), com cabeçalhos de limite, restante e espera.
+
+```php
+use Nimbus\Middleware\RateLimitMiddleware;
+use Nimbus\Redis\RedisRateLimitStore;
+use Pam\Http\Request;
+
+$app->middleware(new RateLimitMiddleware(
+    requestsPerSecond: 20,
+    burst: 40,
+    store: new RedisRateLimitStore($redis),
+    keyResolver: static fn (Request $request): string =>
+        'token:' . $request->getHeader('authorization', 'anonymous'),
+));
+```
+
+Cada consumo é um script Lua atômico. Atrás de proxy, passe um `keyResolver` que só confie no proxy que você configurou.
+
+Em rotas de login e cadastro, um limite por rota:
+
+```php
+$throttle = new RateLimitMiddleware(requestsPerSecond: 1, burst: 10);
+$router->post('login', [LoginController::class, 'store'])->middleware($throttle);
+```
+
+## Cache de resposta
+
+`ResponseCacheMiddleware` guarda a resposta e a serve até o TTL vencer. A chave padrão é o hash de método, caminho e query string.
+
+```php
+use Nimbus\Middleware\ResponseCacheMiddleware;
+use Nimbus\Redis\RedisResponseCacheStore;
+
+$cache = new ResponseCacheMiddleware(new RedisResponseCacheStore($redis), ttlSeconds: 30);
+
+$router->get('products', [ProductController::class, 'index'])->middleware($cache);
+```
+
+O terceiro argumento, `keyResolver`, troca a chave, por exemplo para separar por usuário. Não use cache compartilhado em respostas que dependem do usuário sem incluir o usuário na chave.
+
+## Idempotência
+
+`IdempotencyMiddleware` lê o cabeçalho `Idempotency-Key`. Uma repetição com a mesma chave recebe a resposta gravada em vez de executar o handler de novo, o que protege pagamentos e pedidos contra reenvio do cliente.
+
+```php
+use Nimbus\Middleware\IdempotencyMiddleware;
+use Nimbus\Redis\RedisIdempotencyStore;
+
+$router->post('payments', [PaymentController::class, 'store'])
+    ->middleware(new IdempotencyMiddleware(new RedisIdempotencyStore($redis), ttlSeconds: 86_400));
+```
+
+Com `required: true` (padrão), a falta do cabeçalho responde `422`.
