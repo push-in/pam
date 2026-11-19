@@ -41,3 +41,9 @@ function pam_native_task_resolve(array $payloads, int $wait_ms): array {}
 function pam_native_task_dispatch(array $payloads): bool {}
 
 function pam_native_task_flush(int $timeout_ms = 5000): int {}
+
+function pam_native_reset_response(int $status_code = 200): void {}
+
+/** @param array<string, list<string>> $headers
+ * @param list<string> $chunks */
+function pam_native_encode_http_response(int $status, array $headers, string $body, array $chunks): ?string {}
