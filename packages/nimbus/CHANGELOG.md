@@ -5,6 +5,8 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-19
+
 ### Added
 
 - Admin panel over Arcano (`Nimbus\Admin`): `Admin::panel($app, '/admin')` registers a dashboard and CRUD
@@ -15,6 +17,11 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   messages, `viewAdmin` and per-entity policy checks, CSRF, `en`/`pt_BR` texts, light/dark CSS without
   JavaScript dependencies; templates can be overridden by directory.
 - CLI: `pam make:admin Product` creates `app/Admin/ProductAdmin.php`.
+
+### Changed
+
+- `ArcanoManager::select()` reuses a select prototype per role and connection (roles with scopes excluded); queries are only timed and logged while a query budget is active.
+- Development and tests use `pushinbr/arcano` `^0.2.5` (compiled hydration, `COUNT(*)`, single-statement writes without BEGIN/COMMIT, cached `fetchOne`).
 
 ## 0.4.0 - 2026-11-19
 

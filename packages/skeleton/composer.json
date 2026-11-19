@@ -16,8 +16,8 @@
     },
     "require": {
         "php": "^8.5",
-        "pushinbr/arcano": "^0.2.4",
-        "pushinbr/nimbus": "^0.3",
+        "pushinbr/arcano": "^0.2.5",
+        "pushinbr/nimbus": "^0.5",
         "pushinbr/pam-http-psr": "^1.0",
         "pushinbr/pam-socket": "^1.1"
     },
