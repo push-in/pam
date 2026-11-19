@@ -1169,8 +1169,8 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 /// The Composer manifest shared by the Nimbus starters (`api` and `web`).
 fn nimbus_composer_manifest(socket: bool, extra: &[(&str, &str)]) -> serde_json::Value {
     let local_packages = local_packages_repository();
-    let nimbus_version = "^0.4";
-    let arcano_version = "^0.2.4";
+    let nimbus_version = "^0.5";
+    let arcano_version = "^0.2.5";
     let socket_version = "^1.1";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.5")),
@@ -3715,7 +3715,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                     "symlink": false,
                     "versions": {
                         "pushinbr/pam-contracts": "1.1.0",
-                        "pushinbr/nimbus": "0.4.0",
+                        "pushinbr/nimbus": "0.5.0",
                         "pushinbr/pam-http-psr": "1.0.0",
                         "pushinbr/pam-socket": "1.1.0",
                         "pushinbr/pam-http-testing": "1.0.0"

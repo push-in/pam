@@ -29,6 +29,10 @@ pub fn run(command: &str, root: &Path, arguments: Vec<OsString>) -> Result<u8, S
         "make:seeder" => ("database/seeders", format!("{name}.php"), seeder(&name)),
         "make:job" => ("app/Jobs", format!("{name}.php"), job(&name)),
         "make:test" => ("tests", format!("{name}.php"), test(&name)),
+        "make:admin" => {
+            let model = admin_model(&name);
+            ("app/Admin", format!("{model}Admin.php"), admin(model))
+        }
         "make:migration" => {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -232,6 +236,21 @@ fn test(name: &str) -> String {
     )
 }
 
+/// `Product` and `ProductAdmin` both describe the admin resource of `App\\Models\\Product`.
+fn admin_model(name: &str) -> &str {
+    match name.strip_suffix("Admin") {
+        Some(model) if !model.is_empty() => model,
+        _ => name,
+    }
+}
+
+fn admin(model: &str) -> String {
+    format!(
+        "{}use App\\Models\\{model};\nuse Nimbus\\Admin\\AdminResource;\n\n/** Register in routes.php: Admin::panel(\u{24}app, '/admin')->resource({model}Admin::class); */\nfinal class {model}Admin extends AdminResource\n{{\n    protected string \u{24}entity = {model}::class;\n\n    public function fields(array \u{24}fields): array\n    {{\n        return \u{24}fields;\n    }}\n}}\n",
+        prelude("Admin")
+    )
+}
+
 fn migration(name: &str, timestamp: u64) -> String {
     let table = snake_case(name.trim_start_matches("Create").trim_end_matches("Table"));
     format!(
@@ -326,6 +345,17 @@ mod tests {
         assert!(seeder("DatabaseSeeder").contains("namespace Database\\Seeders;"));
         assert!(job("SendInvoice").contains("return 'send_invoice';"));
         assert!(test("OrderTest").contains("final class OrderTest extends TestCase"));
+    }
+
+    #[test]
+    fn generates_admin_resources() {
+        assert_eq!(admin_model("ProductAdmin"), "Product");
+        assert_eq!(admin_model("Admin"), "Admin");
+        let source = admin(admin_model("OrderItem"));
+        assert!(source.contains("namespace App\\Admin;"));
+        assert!(source.contains("use App\\Models\\OrderItem;"));
+        assert!(source.contains("final class OrderItemAdmin extends AdminResource"));
+        assert!(source.contains("protected string $entity = OrderItem::class;"));
     }
 
     #[test]

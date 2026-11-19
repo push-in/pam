@@ -16,6 +16,7 @@ use Arcano\ORM\RepositoryInterface;
 use Arcano\ORM\Schema;
 use Arcano\ORM\SchemaInterface;
 use Arcano\ORM\Select;
+use Arcano\ORM\Select\Repository;
 use Nimbus\Container\Container;
 use Nimbus\Transactions\TransactionManager;
 
@@ -29,6 +30,9 @@ final class ArcanoManager implements TransactionManager
     /** @var \WeakMap<DatabaseManager, ORMInterface> */
     private \WeakMap $orms;
 
+    /** @var \WeakMap<ORMInterface, array<string, Repository<object>>> Select prototypes by role. */
+    private \WeakMap $selects;
+
     private SchemaInterface $schema;
 
     /** @param SchemaInterface|array<array-key, array<int, mixed>> $schema */
@@ -38,6 +42,7 @@ final class ArcanoManager implements TransactionManager
         private readonly ?Container $container = null,
     ) {
         $this->orms = new \WeakMap();
+        $this->selects = new \WeakMap();
         $this->schema = is_array($schema) ? new Schema($schema) : $schema;
     }
 
@@ -69,7 +74,20 @@ final class ArcanoManager implements TransactionManager
      */
     public function select(string $role): Select
     {
-        return new Select($this->orm(), $role);
+        $orm = $this->orm();
+        if ($this->schema->define($this->schema->resolveAlias($role) ?? $role, SchemaInterface::SCOPE) !== null) {
+            // Scoped roles (tenants, soft deletes) build their query from scratch every time.
+            return new Select($orm, $role);
+        }
+        // Clones of one prototype per ORM share its loader until they change it and the cached
+        // statements of their query shapes, so a repeated query skips the loader build and compile.
+        $prototypes = $this->selects[$orm] ?? [];
+        if (!isset($prototypes[$role])) {
+            $prototypes[$role] = new Repository(new Select($orm, $role));
+            $this->selects[$orm] = $prototypes;
+        }
+
+        return $prototypes[$role]->select();
     }
 
     /**
@@ -114,6 +132,7 @@ final class ArcanoManager implements TransactionManager
 
         // ORMs built with the previous schema are dropped.
         $this->orms = new \WeakMap();
+        $this->selects = new \WeakMap();
     }
 
     public function releaseCurrentRequest(): void

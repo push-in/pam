@@ -11,6 +11,9 @@ final class QueryMonitor
 
     private ?QueryScope $mainScope = null;
 
+    /** Hooks the query listener on the first budget, so apps without one skip the query log. */
+    private ?\Closure $attach = null;
+
     public function __construct()
     {
         $this->fiberScopes = new \WeakMap();
@@ -19,7 +22,9 @@ final class QueryMonitor
     public static function forArcano(ArcanoDatabaseProvider $databases): self
     {
         $monitor = new self();
-        $databases->onQuery($monitor->record(...));
+        $monitor->attach = static function () use ($databases, $monitor): void {
+            $databases->onQuery($monitor->record(...));
+        };
         return $monitor;
     }
 
@@ -27,6 +32,10 @@ final class QueryMonitor
     {
         if ($this->currentScope() !== null) {
             throw new \LogicException('A query budget is already active for this request Fiber.');
+        }
+        if ($this->attach !== null) {
+            ($this->attach)();
+            $this->attach = null;
         }
         $scope = new QueryScope($budget);
         $fiber = \Fiber::getCurrent();
