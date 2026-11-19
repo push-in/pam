@@ -37,6 +37,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\ArcanoTenantScope`](#nimbusdatabasearcanotenantscope)
 - [`Nimbus\Database\DatabaseConfig`](#nimbusdatabasedatabaseconfig)
 - [`Nimbus\Database\DatabaseHealthCheck`](#nimbusdatabasedatabasehealthcheck)
+- [`Nimbus\Database\Pgsql\AsyncPostgresDriver`](#nimbusdatabasepgsqlasyncpostgresdriver)
+- [`Nimbus\Database\Pgsql\PgsqlException`](#nimbusdatabasepgsqlpgsqlexception)
 - [`Nimbus\Database\QueryBudget`](#nimbusdatabasequerybudget)
 - [`Nimbus\Database\QueryBudgetExceededException`](#nimbusdatabasequerybudgetexceededexception)
 - [`Nimbus\Database\QueryBudgetViolation`](#nimbusdatabasequerybudgetviolation)
@@ -630,6 +632,27 @@ final readonly class Nimbus\Database\DatabaseHealthCheck implements Nimbus\Healt
 
 - `public __construct(Nimbus\Database\ArcanoManager $arcano, ?string $connection = null): mixed`
 - `public check(): Nimbus\Health\HealthResult`
+
+## `Nimbus\Database\Pgsql\AsyncPostgresDriver`
+
+```php
+class Nimbus\Database\Pgsql\AsyncPostgresDriver extends Arcano\Database\Driver\Postgres\PostgresDriver implements Arcano\Database\Driver\CursorInterface, Arcano\Database\Driver\DriverInterface, Arcano\Database\NamedInterface, Psr\Log\LoggerAwareInterface
+```
+
+### Methods
+
+- `public static available(): bool`
+- `public static conninfo(string $dsn, ?string $username, ?string $password): string`
+
+## `Nimbus\Database\Pgsql\PgsqlException`
+
+```php
+final class Nimbus\Database\Pgsql\PgsqlException extends PDOException implements Stringable, Throwable
+```
+
+### Methods
+
+- `public static from(string $sqlState, string $message): self`
 
 ## `Nimbus\Database\QueryBudget`
 

@@ -18,6 +18,8 @@ use Arcano\Database\Config\SQLServer\TcpConnectionConfig as SQLServerConnection;
 use Arcano\Database\Config\SQLServerDriverConfig;
 use Arcano\Database\DatabaseInterface;
 use Arcano\Database\DatabaseManager;
+use Arcano\Database\Driver\Postgres\PostgresDriver;
+use Nimbus\Database\Pgsql\AsyncPostgresDriver;
 
 /**
  * Gives every PAM request Fiber its own Arcano connections. Released connections
@@ -204,6 +206,10 @@ final class ArcanoDatabaseProvider
             'pgsql' => new PostgresDriverConfig(
                 self::postgresConnection($connection, $database, $host, $user, $password, $options),
                 schema: self::optional($connection, 'search_path') ?? self::optional($connection, 'schema') ?? 'public',
+                // Non-blocking sessions let a worker serve other requests while Postgres works.
+                driver: self::optional($connection, 'async') !== 'false' && AsyncPostgresDriver::available()
+                    ? AsyncPostgresDriver::class
+                    : PostgresDriver::class,
             ),
             'mysql' => new MySQLDriverConfig(($socket = self::optional($connection, 'unix_socket')) !== null
                 ? new MySQLSocketConnection(

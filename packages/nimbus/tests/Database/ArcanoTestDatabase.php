@@ -35,6 +35,7 @@ final class ArcanoTestDatabase
                 'password' => getenv('ARCANO_TEST_PASSWORD') ?: '',
                 'prefix' => '',
                 'trust_server_certificate' => true,
+                'async' => getenv('ARCANO_TEST_ASYNC') ?: '',
             ];
         return new DatabaseConfig('default', ['default' => $connection]);
     }

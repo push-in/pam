@@ -41,6 +41,7 @@ final readonly class DatabaseConfig
                 'prefix' => '',
             ] + self::optionalEnvironment([
                 'sslmode' => 'DB_SSLMODE',
+                'async' => 'DB_ASYNC',
                 'unix_socket' => 'DB_SOCKET',
                 'trust_server_certificate' => 'DB_TRUST_SERVER_CERTIFICATE',
             ]),
