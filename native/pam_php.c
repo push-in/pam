@@ -1313,15 +1313,54 @@ static bool pam_header_read_bytes(pam_header_reader *reader, const char **bytes,
     return true;
 }
 
-static void pam_hash_add_string(HashTable *table, const char *key, size_t key_length, const char *value, size_t value_length)
+/*
+ * Keys of the per-request arrays ($_SERVER, the request context, header
+ * names) live for the whole process: built once, hash precomputed, flagged
+ * permanent interned like PHP's own known strings, so adding an entry no
+ * longer allocates, hashes and frees its key on every request.
+ */
+static zend_string *pam_permanent_key(const char *key, size_t key_length)
+{
+    zend_string *permanent = zend_string_init(key, key_length, 1);
+    zend_string_hash_val(permanent);
+    GC_ADD_FLAGS(permanent, IS_STR_INTERNED | IS_STR_PERMANENT);
+    return permanent;
+}
+
+static void pam_hash_add_key(HashTable *table, zend_string *key, const char *value, size_t value_length)
 {
     zval entry;
     ZVAL_STRINGL_FAST(&entry, value, value_length);
-    zend_hash_str_update(table, key, key_length, &entry);
+    zend_hash_update(table, key, &entry);
 }
 
+#define PAM_LITERAL_KEY(key) \
+    ({ \
+        static zend_string *pam_literal_key = NULL; \
+        if (UNEXPECTED(pam_literal_key == NULL)) { \
+            pam_literal_key = pam_permanent_key((key), sizeof(key) - 1); \
+        } \
+        pam_literal_key; \
+    })
+
 #define PAM_HASH_ADD_LITERAL(table, key, value, value_length) \
-    pam_hash_add_string((table), (key), sizeof(key) - 1, (value), (value_length))
+    do { \
+        static zend_string *pam_literal_key = NULL; \
+        if (UNEXPECTED(pam_literal_key == NULL)) { \
+            pam_literal_key = pam_permanent_key((key), sizeof(key) - 1); \
+        } \
+        pam_hash_add_key((table), pam_literal_key, (value), (value_length)); \
+    } while (0)
+
+/* Header names seen by this process (lowercase) and their $_SERVER names. */
+typedef struct {
+    zend_string *name;
+    zend_string *server_name;
+} pam_header_key;
+
+#define PAM_HEADER_KEY_CAPACITY 64
+static pam_header_key pam_header_keys[PAM_HEADER_KEY_CAPACITY];
+static size_t pam_header_key_count = 0;
 
 /* $_SERVER name of a lowercase header: CONTENT_TYPE, CONTENT_LENGTH or HTTP_*. */
 static zend_string *pam_server_header_name(const char *name, size_t length)
@@ -1341,6 +1380,26 @@ static zend_string *pam_server_header_name(const char *name, size_t length)
     }
     output[length + 5] = '\0';
     return server_name;
+}
+
+/* The cached keys of a header name; NULL once the cache is full. */
+static const pam_header_key *pam_header_key_find(const char *name, size_t length)
+{
+    for (size_t index = 0; index < pam_header_key_count; index++) {
+        const pam_header_key *key = &pam_header_keys[index];
+        if (ZSTR_LEN(key->name) == length && memcmp(ZSTR_VAL(key->name), name, length) == 0) {
+            return key;
+        }
+    }
+    if (pam_header_key_count == PAM_HEADER_KEY_CAPACITY || length > 128) {
+        return NULL;
+    }
+    zend_string *server_name = pam_server_header_name(name, length);
+    pam_header_key *key = &pam_header_keys[pam_header_key_count++];
+    key->name = pam_permanent_key(name, length);
+    key->server_name = pam_permanent_key(ZSTR_VAL(server_name), ZSTR_LEN(server_name));
+    zend_string_release(server_name);
+    return key;
 }
 
 /*
@@ -1409,11 +1468,16 @@ static bool pam_build_request_headers(
         } else {
             ZVAL_STR(&joined_value, smart_str_extract(&joined));
         }
-        zend_string *server_name = pam_server_header_name(name, name_length);
-        zend_hash_update(server, server_name, &joined_value);
-        zend_string_release(server_name);
-
-        zend_hash_str_update(Z_ARRVAL_P(headers), name, name_length, &values);
+        const pam_header_key *key = pam_header_key_find(name, name_length);
+        if (key != NULL) {
+            zend_hash_update(server, key->server_name, &joined_value);
+            zend_hash_update(Z_ARRVAL_P(headers), key->name, &values);
+        } else {
+            zend_string *server_name = pam_server_header_name(name, name_length);
+            zend_hash_update(server, server_name, &joined_value);
+            zend_string_release(server_name);
+            zend_hash_str_update(Z_ARRVAL_P(headers), name, name_length, &values);
+        }
     }
     return reader.cursor == reader.end;
 }
@@ -1462,7 +1526,7 @@ int pam_php_dispatch_http_native(
     {
         zval entry;
         ZVAL_STR_COPY(&entry, upper_method);
-        zend_hash_str_update(server, "REQUEST_METHOD", sizeof("REQUEST_METHOD") - 1, &entry);
+        zend_hash_update(server, PAM_LITERAL_KEY("REQUEST_METHOD"), &entry);
     }
     PAM_HASH_ADD_LITERAL(server, "REQUEST_URI", target, target_length);
 
@@ -1485,7 +1549,7 @@ int pam_php_dispatch_http_native(
     {
         zval entry;
         ZVAL_LONG(&entry, (zend_long) context->remote_port);
-        zend_hash_str_update(server, "REMOTE_PORT", sizeof("REMOTE_PORT") - 1, &entry);
+        zend_hash_update(server, PAM_LITERAL_KEY("REMOTE_PORT"), &entry);
     }
     PAM_HASH_ADD_LITERAL(server, "REQUEST_SCHEME", scheme, scheme_length);
     if (scheme_length == 5 && memcmp(scheme, "https", 5) == 0) {
@@ -1518,7 +1582,7 @@ int pam_php_dispatch_http_native(
     {
         zval entry;
         ZVAL_LONG(&entry, (zend_long) context->remote_port);
-        zend_hash_str_update(context_table, "remotePort", sizeof("remotePort") - 1, &entry);
+        zend_hash_update(context_table, PAM_LITERAL_KEY("remotePort"), &entry);
     }
     PAM_HASH_ADD_LITERAL(context_table, "scheme", scheme, scheme_length);
     PAM_HASH_ADD_LITERAL(context_table, "requestId", request_id, request_id_length);

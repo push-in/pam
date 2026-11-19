@@ -2684,6 +2684,12 @@ async fn with_hard_deadline(
     request_id: &str,
     php: impl Future<Output = (Response, usize)>,
 ) -> (Response, usize) {
+    if crate::inline_serve::enabled() {
+        // PHP runs on this thread: while it is blocked no timer here could
+        // fire (the watchdog answers instead), and every wait of a suspended
+        // request is already bounded by its remaining time.
+        return php.await;
+    }
     tokio::pin!(php);
     let mut wedged = state.drain.subscribe_wedged();
     // The execution deadline is at least a full timeout away, so a request
