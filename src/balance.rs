@@ -517,7 +517,7 @@ pub use crate::http_serve::{ConnectionTracker as HandOffTracker, HttpSettings as
 pub fn spawn_receiver(
     socket: UnixDatagram,
     balancer: Arc<Balancer>,
-    app: axum::Router,
+    app: crate::http_serve::HttpApp,
     drain: Arc<crate::http_serve::Drain>,
     http: HandOffHttp,
     tracker: HandOffTracker,
@@ -565,7 +565,7 @@ const LATE_SEND_GRACE: std::time::Duration = std::time::Duration::from_millis(50
 fn drain_inbox(
     socket: &tokio::net::UnixDatagram,
     balancer: &Arc<Balancer>,
-    app: &axum::Router,
+    app: &crate::http_serve::HttpApp,
     drain: &Arc<crate::http_serve::Drain>,
     http: HandOffHttp,
     tracker: &HandOffTracker,
@@ -599,7 +599,7 @@ fn drain_inbox(
 fn serve_handed_off(
     stream: std::net::TcpStream,
     guard: ConnectionGuard,
-    app: axum::Router,
+    app: crate::http_serve::HttpApp,
     drain: Arc<crate::http_serve::Drain>,
     http: HandOffHttp,
     active: crate::http_serve::ActiveConnection,
@@ -774,7 +774,7 @@ mod tests {
         spawn_receiver(
             inbox,
             balancer.clone(),
-            app,
+            app.into(),
             drain,
             HandOffHttp {
                 header_read_timeout: std::time::Duration::from_secs(5),

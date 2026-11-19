@@ -25,19 +25,22 @@
 //! Without a master, it sweeps every connection the kernel queued on the
 //! listener before closing it.
 
+use std::convert::Infallible;
 use std::future::Future;
 use std::io;
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
+use axum::body::HttpBody as _;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
-use http::{HeaderValue, StatusCode, Version, header};
+use http::{HeaderValue, Method, StatusCode, Version, header};
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
@@ -184,20 +187,128 @@ impl Drop for ActiveConnection {
     }
 }
 
+/// A response being produced by [`FastDispatch`].
+pub type DispatchFuture = Pin<Box<dyn Future<Output = Response> + Send>>;
+
+/// Handles a request without the router, or gives it back (`Err`) for the
+/// router to serve. Behaves like a top-level fallback route of the router:
+/// [`ConnectionService`] applies the same response rules axum's route future
+/// and [`close_when_draining`] apply.
+pub type FastDispatch =
+    Arc<dyn Fn(Request, SocketAddr) -> Result<DispatchFuture, Request> + Send + Sync>;
+
+/// The router of a worker plus an optional direct path for most requests:
+/// axum's routing clones boxed services and allocates several futures per
+/// request, which a server with one fallback for every path does not need.
+#[derive(Clone)]
+pub struct HttpApp {
+    router: Router,
+    fast: Option<FastDispatch>,
+}
+
+impl HttpApp {
+    pub fn new(router: Router, fast: Option<FastDispatch>) -> Self {
+        Self { router, fast }
+    }
+}
+
+impl From<Router> for HttpApp {
+    fn from(router: Router) -> Self {
+        Self { router, fast: None }
+    }
+}
+
+/// The hyper service of one connection.
+#[derive(Clone)]
+struct ConnectionService {
+    router: hyper_util::service::TowerToHyperService<Router>,
+    fast: Option<FastDispatch>,
+    remote: SocketAddr,
+    drain: Arc<Drain>,
+}
+
+type ServiceFuture = Pin<Box<dyn Future<Output = Result<Response, Infallible>> + Send>>;
+
+impl hyper::service::Service<http::Request<hyper::body::Incoming>> for ConnectionService {
+    type Response = Response;
+    type Error = Infallible;
+    type Future = ServiceFuture;
+
+    fn call(&self, request: http::Request<hyper::body::Incoming>) -> Self::Future {
+        let mut request = request.map(Body::new);
+        if let Some(fast) = &self.fast {
+            let method = request.method().clone();
+            let http1 = matches!(request.version(), Version::HTTP_10 | Version::HTTP_11);
+            match fast(request, self.remote) {
+                Ok(response) => {
+                    let drain = self.drain.clone();
+                    return Box::pin(async move {
+                        let mut response = response.await;
+                        finish_route_response(&method, &mut response);
+                        if http1
+                            && drain.is_draining()
+                            && response.status() != StatusCode::SWITCHING_PROTOCOLS
+                        {
+                            response
+                                .headers_mut()
+                                .insert(header::CONNECTION, HeaderValue::from_static("close"));
+                        }
+                        Ok(response)
+                    });
+                }
+                Err(returned) => request = returned,
+            }
+        }
+        request.extensions_mut().insert(ConnectInfo(self.remote));
+        Box::pin(hyper::service::Service::call(&self.router, request))
+    }
+}
+
+/// What axum's top-level route future does to a response: no body or framing
+/// headers on a successful CONNECT, `Content-Length` from an exact body size,
+/// and no body for HEAD.
+fn finish_route_response(method: &Method, response: &mut Response) {
+    if *method == Method::CONNECT && response.status().is_success() {
+        if response.headers().contains_key(header::CONTENT_LENGTH)
+            || response.headers().contains_key(header::TRANSFER_ENCODING)
+            || response.body().size_hint().lower() != 0
+        {
+            *response.body_mut() = Body::empty();
+        }
+        return;
+    }
+    if !response.headers().contains_key(header::CONTENT_LENGTH)
+        && let Some(size) = response.body().size_hint().exact()
+    {
+        let value = if size == 0 {
+            HeaderValue::from_static("0")
+        } else {
+            HeaderValue::from(size)
+        };
+        response.headers_mut().insert(header::CONTENT_LENGTH, value);
+    }
+    if *method == Method::HEAD {
+        *response.body_mut() = Body::empty();
+    }
+}
+
 /// Serves one connection until it ends, draining it as described in the
 /// module documentation.
 pub async fn serve_connection<I>(
     io: I,
     remote: SocketAddr,
-    app: Router,
+    app: HttpApp,
     drain: Arc<Drain>,
     http: HttpSettings,
 ) where
     I: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
-    let service = hyper_util::service::TowerToHyperService::new(
-        app.layer(axum::Extension(ConnectInfo(remote))),
-    );
+    let service = ConnectionService {
+        router: hyper_util::service::TowerToHyperService::new(app.router),
+        fast: app.fast,
+        remote,
+        drain: drain.clone(),
+    };
     let mut builder = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
     builder
         .http1()
@@ -239,7 +350,7 @@ pub async fn accept_loop<P, S, H, F, T>(
     listener: TcpListener,
     place: P,
     handshake: H,
-    app: Router,
+    app: HttpApp,
     drain: Arc<Drain>,
     http: HttpSettings,
     tracker: ConnectionTracker,

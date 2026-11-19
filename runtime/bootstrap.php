@@ -1155,6 +1155,7 @@ namespace Pam\Internal {
             ?array $server = null,
         ): string {
             $request = null;
+            $method = strtoupper($method);
             $response = new Response();
             $temporaryUploads = [];
             $outputLevel = ob_get_level();
@@ -1185,7 +1186,7 @@ namespace Pam\Internal {
                     is_array($multipart) ? $multipart : null,
                 );
                 self::populateSuperglobals(
-                    strtoupper($method),
+                    $method,
                     $target,
                     $query,
                     $headers,
@@ -1202,20 +1203,17 @@ namespace Pam\Internal {
                     && (self::$completedDispatches + 1) % $leakSampleRate === 0;
                 $fiberRequestId = \Pam\Async\FiberContext::get('pam.request_id', '');
                 $fiberRequestId = is_string($fiberRequestId) ? $fiberRequestId : '';
-                \Pam\Runtime\RequestScope::begin(
-                    self::contextString($context, 'requestId', $fiberRequestId),
-                    $sampleLeaks,
-                );
                 $profileRequestId = self::contextString(
                     $context,
                     'requestId',
                     $fiberRequestId,
                 );
+                \Pam\Runtime\RequestScope::begin($profileRequestId, $sampleLeaks);
                 \Pam\Diagnostics\Profiler::begin($profileRequestId);
                 if (\Pam\Diagnostics\Channel::enabled()) {
                     \Pam\Diagnostics\Channel::publish(
                         \Pam\Diagnostics\EventKind::RequestStart,
-                        ['method' => strtoupper($method), 'target' => $target],
+                        ['method' => $method, 'target' => $target],
                     );
                 }
                 $incomingSessionId = $cookies[session_name()] ?? null;
@@ -1223,13 +1221,13 @@ namespace Pam\Internal {
                     session_id($incomingSessionId);
                 }
                 $request = self::$nativeHttpHandler === null
-                    ? new Request(strtoupper($method), $path, $query, $headers, $body)
+                    ? new Request($method, $path, $query, $headers, $body)
                     : null;
-                $handler = self::$routes[strtoupper($method)][$path] ?? null;
+                $handler = self::$routes[$method][$path] ?? null;
 
                 if (self::$psrHandler !== null) {
                     $psrResponse = self::dispatchPsr(
-                        strtoupper($method),
+                        $method,
                         $target,
                         $headers,
                         $body,

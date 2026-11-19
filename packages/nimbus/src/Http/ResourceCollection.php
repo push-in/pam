@@ -29,12 +29,11 @@ final readonly class ResourceCollection implements Responsable
 
     public function toResponse(Request $request, Response $response): Response
     {
-        $payload = [
-            'data' => array_map(
-                static fn (JsonResource $resource): array => $resource->toArray($request),
-                $this->resources,
-            ),
-        ];
+        $data = [];
+        foreach ($this->resources as $key => $resource) {
+            $data[$key] = $resource->toArray($request);
+        }
+        $payload = ['data' => $data];
         if ($this->meta !== []) {
             $payload['meta'] = $this->meta;
         }

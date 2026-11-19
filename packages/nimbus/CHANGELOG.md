@@ -5,6 +5,14 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+### Changed
+
+- `Paginator::paginate()` reads the page and the total with one statement when Arcano offers
+  `Select::fetchPage()` (0.2.6+): the count is a scalar subquery column of the page query, so a
+  numbered page costs one database round trip instead of two. The total is still a real `COUNT`;
+  a page past the last row counts with its own statement.
+- `ResourceCollection` builds its `data` list without a closure per item.
+
 ## 0.5.0 - 2026-11-19
 
 ### Added

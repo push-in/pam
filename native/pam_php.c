@@ -6,6 +6,7 @@
 #endif
 #include <Zend/zend_smart_str.h>
 #include <ext/standard/url.h>
+#include <ext/date/php_date.h>
 
 #include "pam.h"
 
@@ -385,6 +386,108 @@ static PHP_FUNCTION(pam_cache_purge)
     RETURN_LONG((zend_long) result);
 }
 
+ZEND_BEGIN_ARG_WITH_RETURN_OBJ_TYPE_MASK_EX(
+    arginfo_pam_native_utc_datetime,
+    0,
+    2,
+    DateTimeImmutable,
+    MAY_BE_NULL
+)
+    ZEND_ARG_TYPE_INFO(0, value, IS_STRING, 0)
+    ZEND_ARG_OBJ_INFO(0, prototype, DateTimeImmutable, 0)
+ZEND_END_ARG_INFO()
+
+static int pam_digits(const char *text, int count)
+{
+    int value = 0;
+    for (int index = 0; index < count; index++) {
+        if (text[index] < '0' || text[index] > '9') {
+            return -1;
+        }
+        value = value * 10 + (text[index] - '0');
+    }
+    return value;
+}
+
+/* Days from 1970-01-01 to a proleptic Gregorian date (Howard Hinnant's days_from_civil). */
+static int64_t pam_days_from_civil(int64_t year, int64_t month, int64_t day)
+{
+    year -= month <= 2;
+    int64_t era = (year >= 0 ? year : year - 399) / 400;
+    int64_t year_of_era = year - era * 400;
+    int64_t day_of_year = (153 * (month + (month > 2 ? -3 : 9)) + 2) / 5 + day - 1;
+    int64_t day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    return era * 146097 + day_of_era - 719468;
+}
+
+/*
+ * new DateTimeImmutable($value, UTC) for a database timestamp
+ * "YYYY-MM-DD HH:MM:SS" (years 1-9999, a valid calendar date and time):
+ * a clone of $prototype, an object constructed from a string of that same
+ * shape in UTC, with the date, time and epoch seconds of $value. The parser
+ * gives an identical object (same fields and flags); this skips its scanner
+ * and time zone pass. Null for any other input, prototype or zone: the
+ * caller constructs the object itself.
+ */
+static PHP_FUNCTION(pam_native_utc_datetime)
+{
+    zend_string *value;
+    zval *prototype;
+    static const int month_days[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+
+    ZEND_PARSE_PARAMETERS_START(2, 2)
+        Z_PARAM_STR(value)
+        Z_PARAM_OBJECT_OF_CLASS(prototype, php_date_get_immutable_ce())
+    ZEND_PARSE_PARAMETERS_END();
+
+    zend_object *source = Z_OBJ_P(prototype);
+    const timelib_time *base = php_date_obj_from_obj(source)->time;
+    if (source->ce != php_date_get_immutable_ce() || base == NULL
+        || base->zone_type != TIMELIB_ZONETYPE_ID || base->tz_info == NULL
+        || base->tz_info->name == NULL || strcmp(base->tz_info->name, "UTC") != 0
+        || !base->is_localtime || base->have_relative || base->us != 0
+        || !base->have_time || !base->have_date
+        || ZSTR_LEN(value) != 19) {
+        RETURN_NULL();
+    }
+    const char *text = ZSTR_VAL(value);
+    if (text[4] != '-' || text[7] != '-' || text[10] != ' ' || text[13] != ':' || text[16] != ':') {
+        RETURN_NULL();
+    }
+    int year = pam_digits(text, 4);
+    int month = pam_digits(text + 5, 2);
+    int day = pam_digits(text + 8, 2);
+    int hour = pam_digits(text + 11, 2);
+    int minute = pam_digits(text + 14, 2);
+    int second = pam_digits(text + 17, 2);
+    if (year < 1 || month < 1 || month > 12 || day < 1 || hour < 0 || hour > 23
+        || minute < 0 || minute > 59 || second < 0 || second > 59) {
+        RETURN_NULL();
+    }
+    bool leap = (year % 4 == 0 && year % 100 != 0) || year % 400 == 0;
+    if (day > month_days[month - 1] + (month == 2 && leap ? 1 : 0)) {
+        RETURN_NULL();
+    }
+
+    zend_object *copy = source->handlers->clone_obj(source);
+    if (copy == NULL) {
+        RETURN_NULL();
+    }
+    timelib_time *time = php_date_obj_from_obj(copy)->time;
+    if (time == NULL) {
+        OBJ_RELEASE(copy);
+        RETURN_NULL();
+    }
+    time->y = year;
+    time->m = month;
+    time->d = day;
+    time->h = hour;
+    time->i = minute;
+    time->s = second;
+    time->sse = pam_days_from_civil(year, month, day) * 86400 + hour * 3600 + minute * 60 + second;
+    RETURN_OBJ(copy);
+}
+
 #include "pam_shared_php.inc"
 
 static const zend_function_entry pam_native_functions[] = {
@@ -394,6 +497,7 @@ static const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_native_stream_fd, arginfo_pam_native_stream_fd)
     PHP_FE(pam_native_reset_response, arginfo_pam_native_reset_response)
     PHP_FE(pam_native_encode_http_response, arginfo_pam_native_encode_http_response)
+    PHP_FE(pam_native_utc_datetime, arginfo_pam_native_utc_datetime)
     PHP_FE_END
 };
 
@@ -719,6 +823,121 @@ static int pam_copy_string_result(zval *result, char **output, size_t *output_le
     return SUCCESS;
 }
 
+/*
+ * DateTime::format() and DateTimeImmutable::format() with DATE_ATOM
+ * ("Y-m-d\TH:i:sP", also DATE_RFC3339) for a time in UTC or at a fixed
+ * offset: the bytes php_date.c's date_format() writes, without its seven
+ * snprintf() calls. Every other format, time zone or range goes to PHP's own
+ * handler. PAM_FAST_DATE_FORMAT=0 leaves the methods untouched.
+ */
+static zif_handler pam_php_date_format = NULL;
+
+static void pam_write_2(char *output, int value)
+{
+    output[0] = (char) ('0' + value / 10);
+    output[1] = (char) ('0' + value % 10);
+}
+
+static bool pam_format_atom(const timelib_time *time, char output[25])
+{
+    int offset;
+
+    if (time == NULL || !time->is_localtime) {
+        return false;
+    }
+    switch (time->zone_type) {
+        case TIMELIB_ZONETYPE_OFFSET:
+            offset = (int) time->z;
+            break;
+        case TIMELIB_ZONETYPE_ABBR:
+            offset = (int) (time->z + (time->dst * 3600));
+            break;
+        case TIMELIB_ZONETYPE_ID:
+            /* UTC has no transitions: its offset is always 0. */
+            if (time->tz_info == NULL || time->tz_info->name == NULL
+                || strcmp(time->tz_info->name, "UTC") != 0) {
+                return false;
+            }
+            offset = 0;
+            break;
+        default:
+            return false;
+    }
+    if (time->y < 0 || time->y > 9999
+        || time->m < 0 || time->m > 99 || time->d < 0 || time->d > 99
+        || time->h < 0 || time->h > 99 || time->i < 0 || time->i > 99
+        || time->s < 0 || time->s > 99) {
+        return false;
+    }
+    int hours = abs(offset / 3600);
+    int minutes = abs((offset % 3600) / 60);
+    if (hours > 99) {
+        return false;
+    }
+    int year = (int) time->y;
+    output[0] = (char) ('0' + year / 1000);
+    output[1] = (char) ('0' + year / 100 % 10);
+    output[2] = (char) ('0' + year / 10 % 10);
+    output[3] = (char) ('0' + year % 10);
+    output[4] = '-';
+    pam_write_2(output + 5, (int) time->m);
+    output[7] = '-';
+    pam_write_2(output + 8, (int) time->d);
+    output[10] = 'T';
+    pam_write_2(output + 11, (int) time->h);
+    output[13] = ':';
+    pam_write_2(output + 14, (int) time->i);
+    output[16] = ':';
+    pam_write_2(output + 17, (int) time->s);
+    output[19] = offset < 0 ? '-' : '+';
+    pam_write_2(output + 20, hours);
+    output[22] = ':';
+    pam_write_2(output + 23, minutes);
+    return true;
+}
+
+static ZEND_NAMED_FUNCTION(pam_date_format_method)
+{
+    if (ZEND_NUM_ARGS() == 1 && Z_TYPE(EX(This)) == IS_OBJECT) {
+        zval *format = ZEND_CALL_ARG(execute_data, 1);
+        if (Z_TYPE_P(format) == IS_STRING
+            && zend_string_equals_literal(Z_STR_P(format), "Y-m-d\\TH:i:sP")) {
+            php_date_obj *date = php_date_obj_from_obj(Z_OBJ(EX(This)));
+            char output[25];
+            if (pam_format_atom(date->time, output)) {
+                RETURN_STRINGL(output, sizeof(output));
+            }
+        }
+    }
+    pam_php_date_format(INTERNAL_FUNCTION_PARAM_PASSTHRU);
+}
+
+static void pam_install_date_format(void)
+{
+    const char *setting = getenv("PAM_FAST_DATE_FORMAT");
+    if (setting != NULL && strcmp(setting, "0") == 0) {
+        return;
+    }
+    zend_class_entry *classes[] = {php_date_get_date_ce(), php_date_get_immutable_ce()};
+    zend_function *methods[2];
+    for (size_t index = 0; index < 2; index++) {
+        methods[index] = classes[index] == NULL
+            ? NULL
+            : zend_hash_str_find_ptr(&classes[index]->function_table, "format", sizeof("format") - 1);
+        if (methods[index] == NULL || methods[index]->type != ZEND_INTERNAL_FUNCTION) {
+            return;
+        }
+    }
+    /* Both methods are aliases of date_format(); anything else is left alone. */
+    if (methods[0]->internal_function.handler != methods[1]->internal_function.handler
+        || methods[0]->internal_function.handler == pam_date_format_method) {
+        return;
+    }
+    pam_php_date_format = methods[0]->internal_function.handler;
+    methods[0]->internal_function.handler = pam_date_format_method;
+    methods[1]->internal_function.handler = pam_date_format_method;
+}
+
 int pam_php_init(int argc, char **argv)
 {
     zend_result status;
@@ -764,6 +983,7 @@ int pam_php_init(int argc, char **argv)
         return PAM_INITIALIZATION_FAILURE;
     }
     pam_native_functions_registered = true;
+    pam_install_date_format();
     if (pam_register_file_handles() == FAILURE) {
         pam_unregister_native_functions();
         php_embed_shutdown();

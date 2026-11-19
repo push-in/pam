@@ -47,3 +47,6 @@ function pam_native_reset_response(int $status_code = 200): void {}
 /** @param array<string, list<string>> $headers
  * @param list<string> $chunks */
 function pam_native_encode_http_response(int $status, array $headers, string $body, array $chunks): ?string {}
+
+/** A UTC database timestamp ("YYYY-MM-DD HH:MM:SS") as a clone of $prototype, or null. */
+function pam_native_utc_datetime(string $value, DateTimeImmutable $prototype): ?DateTimeImmutable {}

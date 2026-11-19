@@ -24,9 +24,16 @@ final readonly class Paginator
     {
         $perPage = self::perPage($request, $perPage);
         $page = max(1, self::integer($request->query()['page'] ?? null) ?? 1);
-        $total = (clone $select)->count();
+        if (method_exists($select, 'fetchPage')) {
+            // Arcano 0.2.6+: the page and the count in one statement when the select allows it.
+            /** @var array{list<T>, int} $fetched */
+            $fetched = $select->fetchPage($perPage, ($page - 1) * $perPage);
+            [$items, $total] = $fetched;
+        } else {
+            $total = (clone $select)->count();
+            $items = (clone $select)->limit($perPage)->offset(($page - 1) * $perPage)->fetchAll();
+        }
         $last = max(1, (int) ceil($total / $perPage));
-        $items = (clone $select)->limit($perPage)->offset(($page - 1) * $perPage)->fetchAll();
 
         return new Page($items, [
             'current_page' => $page,

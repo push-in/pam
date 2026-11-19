@@ -63,8 +63,22 @@ unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
 }
 
+/// Shared by every connection, request and the PHP executor of a worker. A
+/// clone is one reference count: requests clone it several times, and with
+/// a clone per field that was dozens of atomic updates on cache lines shared
+/// by the I/O and PHP threads.
 #[derive(Clone)]
-struct ServerState {
+struct ServerState(Arc<ServerStateInner>);
+
+impl std::ops::Deref for ServerState {
+    type Target = ServerStateInner;
+
+    fn deref(&self) -> &ServerStateInner {
+        &self.0
+    }
+}
+
+struct ServerStateInner {
     clients: Arc<RwLock<HashMap<String, ClientSender>>>,
     next_socket_id: Arc<AtomicU64>,
     next_request_id: Arc<AtomicU64>,
@@ -106,7 +120,7 @@ impl ServerState {
             .map_or_else(crate::otlp::Counters::default, |exporter| {
                 exporter.counters.clone()
             });
-        Ok(Self {
+        Ok(Self(Arc::new(ServerStateInner {
             clients: Arc::new(RwLock::new(HashMap::new())),
             next_socket_id: Arc::new(AtomicU64::new(1)),
             next_request_id: Arc::new(AtomicU64::new(1)),
@@ -140,7 +154,7 @@ impl ServerState {
             next_php_metrics_at: Arc::new(AtomicU64::new(0)),
             drain: crate::http_serve::Drain::new(),
             php,
-        })
+        })))
     }
 
     fn allocate_socket_id(&self) -> String {
@@ -1383,6 +1397,7 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
             crate::http_serve::close_when_draining,
         ))
         .with_state(state.clone());
+    let app = crate::http_serve::HttpApp::new(app, Some(fast_dispatch(state.clone())));
 
     schedule_worker_ready(state.clone());
 
@@ -1859,7 +1874,7 @@ async fn handle_http3_request(
                     &uri,
                     &target,
                     Version::HTTP_3,
-                    &headers,
+                    headers.clone(),
                     Bytes::from(body),
                     None,
                     &request_id,
@@ -1931,6 +1946,27 @@ async fn shutdown_signal(mut recycle: watch::Receiver<bool>) -> bool {
         _ = tokio::signal::ctrl_c() => true,
         _ = recycle.changed() => !php::engine_failed(),
     }
+}
+
+/// Every path but `/ws` goes to [`http_dispatch`], the router's fallback,
+/// without going through the router.
+fn fast_dispatch(state: ServerState) -> crate::http_serve::FastDispatch {
+    Arc::new(move |request: axum::extract::Request, remote: SocketAddr| {
+        if request.uri().path() == "/ws" {
+            return Err(request);
+        }
+        let state = state.clone();
+        let (parts, body) = request.into_parts();
+        Ok(Box::pin(http_dispatch(
+            State(state),
+            ConnectInfo(remote),
+            parts.method,
+            parts.uri,
+            parts.version,
+            parts.headers,
+            body,
+        )))
+    })
 }
 
 async fn http_dispatch(
@@ -2163,7 +2199,7 @@ async fn http_dispatch(
         &uri,
         target,
         version,
-        &headers,
+        headers,
         body,
         upload,
         &request_id,
@@ -2218,12 +2254,13 @@ async fn serve_through_page_cache(
     uri: &Uri,
     target: &str,
     version: Version,
-    headers: &HeaderMap,
+    request_headers: HeaderMap,
     body: Bytes,
     upload: Option<Arc<crate::upload::MultipartBody>>,
     request_id: &str,
     traceparent: &str,
 ) -> (Response, usize) {
+    let headers = &request_headers;
     let cache = &state.page_cache;
     let scheme = if state.config.tls_cert.is_some() {
         "https"
@@ -2255,7 +2292,7 @@ async fn serve_through_page_cache(
                 method,
                 target,
                 version,
-                headers,
+                request_headers,
                 body,
                 upload,
                 request_id,
@@ -2300,7 +2337,7 @@ async fn serve_through_page_cache(
                                 &Method::GET,
                                 &target,
                                 version,
-                                &request_headers,
+                                request_headers.clone(),
                                 Bytes::new(),
                                 None,
                                 &request_id,
@@ -2366,7 +2403,7 @@ async fn serve_through_page_cache(
             method,
             target,
             version,
-            php_headers,
+            php_headers.clone(),
             body,
             None,
             request_id,
@@ -2680,7 +2717,7 @@ async fn invoke_php_http(
     method: &Method,
     target: &str,
     version: Version,
-    headers: &HeaderMap,
+    headers: HeaderMap,
     body: Bytes,
     upload: Option<Arc<crate::upload::MultipartBody>>,
     request_id: &str,
@@ -2695,7 +2732,7 @@ async fn invoke_php_http(
             method: method.clone(),
             target: target.to_owned(),
             version,
-            headers: headers.clone(),
+            headers,
             body,
             upload,
             request_id: request_id.to_owned(),
@@ -2754,20 +2791,27 @@ async fn invoke_php_http_local(
     // it streamed; wait instead (bounded by the request timeout) so it is
     // served next, like a busy Octane/FrankenPHP worker queues requests.
     let slot_timeout = Duration::from_millis(state.config.request_timeout_ms);
-    let _request_slot =
-        match tokio::time::timeout(slot_timeout, state.request_slots.clone().acquire_owned()).await
-        {
-            Ok(Ok(permit)) => permit,
-            _ => {
-                return (
-                    error_response(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "worker concurrent request limit reached",
-                    ),
-                    0,
-                );
+    // A free slot is taken without arming the timeout timer.
+    let free_slot = state.request_slots.clone().try_acquire_owned().ok();
+    let _request_slot = match free_slot {
+        Some(permit) => permit,
+        None => {
+            match tokio::time::timeout(slot_timeout, state.request_slots.clone().acquire_owned())
+                .await
+            {
+                Ok(Ok(permit)) => permit,
+                _ => {
+                    return (
+                        error_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "worker concurrent request limit reached",
+                        ),
+                        0,
+                    );
+                }
             }
-        };
+        }
+    };
     let encoded_headers = encode_php_request_headers(headers);
     let multipart_json = match request.upload.as_deref() {
         Some(multipart) => match serde_json::to_string(multipart) {
