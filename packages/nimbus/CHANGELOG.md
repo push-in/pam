@@ -14,8 +14,10 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 - `auth()` and `can()` on routes and route groups.
 - `docs()` serves `openapi.json` and an API reference page.
 - Redis stores for rate limits, idempotency and response caching over a per-command pool.
-- `AsyncPostgresDriver`: with ext-pgsql, Postgres queries suspend the request Fiber instead of the
-  worker (`DB_ASYNC=false` keeps blocking PDO). Requires `pushinbr/arcano` 0.2.3.
+- `AsyncPostgresDriver` (opt-in, `DB_ASYNC=true`): with ext-pgsql, Postgres queries suspend the
+  request Fiber instead of the worker; an interrupted command closes the session instead of returning
+  it to the pool. Blocking PDO stays the default, being faster for short queries. Requires
+  `pushinbr/arcano` 0.2.3.
 - `Hash` (Argon2id) and `Crypt` (sodium secretbox with `APP_KEY`).
 - `Psr\Log\LoggerInterface` resolves to the PAM runtime structured log.
 

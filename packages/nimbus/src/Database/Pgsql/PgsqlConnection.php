@@ -27,6 +27,9 @@ final class PgsqlConnection implements PDOInterface
 
     private bool $transaction = false;
 
+    /** Set when a wait was interrupted mid-command: the session state is unknown. */
+    private bool $broken = false;
+
     /** @var array<string, string> SQL => server-side statement name */
     private array $prepared = [];
 
@@ -67,7 +70,15 @@ final class PgsqlConnection implements PDOInterface
 
     public function __destruct()
     {
-        pg_close($this->connection);
+        if (!$this->broken) {
+            pg_close($this->connection);
+        }
+    }
+
+    /** False once a command was interrupted; the driver must reconnect. */
+    public function healthy(): bool
+    {
+        return !$this->broken;
     }
 
     /**
@@ -177,6 +188,37 @@ final class PgsqlConnection implements PDOInterface
 
     /** @param \Closure(Connection): bool $send */
     private function send(\Closure $send): Result
+    {
+        if ($this->broken) {
+            throw PgsqlException::from('08006', 'The Postgres session was interrupted and must reconnect.');
+        }
+        try {
+            return $this->exchange($send);
+        } catch (PgsqlException $error) {
+            $state = (string) ($error->errorInfo[0] ?? '');
+            if (!str_starts_with($state, '08') && $state !== '57014') {
+                throw $error;
+            }
+            $this->abandon();
+            throw $error;
+        } catch (\Throwable $error) {
+            // A cancelled request Fiber leaves a command in flight: never reuse the session.
+            $this->abandon();
+            throw $error;
+        }
+    }
+
+    private function abandon(): void
+    {
+        if (!$this->broken) {
+            $this->broken = true;
+            $this->transaction = false;
+            pg_close($this->connection);
+        }
+    }
+
+    /** @param \Closure(Connection): bool $send */
+    private function exchange(\Closure $send): Result
     {
         $deadline = microtime(true) + $this->timeout;
         if (!$send($this->connection)) {

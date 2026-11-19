@@ -646,6 +646,7 @@ class Nimbus\Database\Pgsql\AsyncPostgresDriver extends Arcano\Database\Driver\P
 
 - `public static available(): bool`
 - `public static conninfo(string $dsn, ?string $username, ?string $password): string`
+- `public healthy(): bool`
 
 ## `Nimbus\Database\Pgsql\PgsqlException`
 

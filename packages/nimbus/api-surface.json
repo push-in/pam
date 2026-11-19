@@ -3313,6 +3313,14 @@
                             "hasDefault": false
                         }
                     ]
+                },
+                "healthy": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
                 }
             }
         },

@@ -13,6 +13,12 @@ use Arcano\Database\Driver\Postgres\PostgresDriver;
  */
 class AsyncPostgresDriver extends PostgresDriver
 {
+    /** False when the session was interrupted mid-command; the pool must not reuse it. */
+    public function healthy(): bool
+    {
+        return !$this->pdo instanceof PgsqlConnection || $this->pdo->healthy();
+    }
+
     public static function available(): bool
     {
         return function_exists('pg_send_prepare') && function_exists('pg_socket');

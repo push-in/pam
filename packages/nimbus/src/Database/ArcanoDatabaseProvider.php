@@ -116,6 +116,10 @@ final class ArcanoDatabaseProvider
 
         $reusable = count($this->idle) < $this->maxIdle;
         foreach ($manager->getDrivers() as $driver) {
+            if ($driver instanceof AsyncPostgresDriver && !$driver->healthy()) {
+                $reusable = false;
+                continue;
+            }
             try {
                 while ($driver->getTransactionLevel() > 0) {
                     $driver->rollbackTransaction();
@@ -207,7 +211,8 @@ final class ArcanoDatabaseProvider
                 self::postgresConnection($connection, $database, $host, $user, $password, $options),
                 schema: self::optional($connection, 'search_path') ?? self::optional($connection, 'schema') ?? 'public',
                 // Non-blocking sessions let a worker serve other requests while Postgres works.
-                driver: self::optional($connection, 'async') !== 'false' && AsyncPostgresDriver::available()
+                // Opt-in: blocking PDO is faster for short queries on a CPU-bound worker.
+                driver: self::optional($connection, 'async') === 'true' && AsyncPostgresDriver::available()
                     ? AsyncPostgresDriver::class
                     : PostgresDriver::class,
             ),
