@@ -37,6 +37,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\ArcanoTenantScope`](#nimbusdatabasearcanotenantscope)
 - [`Nimbus\Database\DatabaseConfig`](#nimbusdatabasedatabaseconfig)
 - [`Nimbus\Database\DatabaseHealthCheck`](#nimbusdatabasedatabasehealthcheck)
+- [`Nimbus\Database\Factory`](#nimbusdatabasefactory)
 - [`Nimbus\Database\Pgsql\AsyncPostgresDriver`](#nimbusdatabasepgsqlasyncpostgresdriver)
 - [`Nimbus\Database\Pgsql\PgsqlException`](#nimbusdatabasepgsqlpgsqlexception)
 - [`Nimbus\Database\QueryBudget`](#nimbusdatabasequerybudget)
@@ -44,6 +45,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\QueryBudgetViolation`](#nimbusdatabasequerybudgetviolation)
 - [`Nimbus\Database\QueryMonitor`](#nimbusdatabasequerymonitor)
 - [`Nimbus\Database\QueryReport`](#nimbusdatabasequeryreport)
+- [`Nimbus\Database\Seeder`](#nimbusdatabaseseeder)
+- [`Nimbus\Database\SeederRunner`](#nimbusdatabaseseederrunner)
 - [`Nimbus\Events\EventDispatcher`](#nimbuseventseventdispatcher)
 - [`Nimbus\Events\SyncEventDispatcher`](#nimbuseventssynceventdispatcher)
 - [`Nimbus\HandlerResolver`](#nimbushandlerresolver)
@@ -61,6 +64,11 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Idempotency\IdempotencyRecord`](#nimbusidempotencyidempotencyrecord)
 - [`Nimbus\Idempotency\IdempotencyStore`](#nimbusidempotencyidempotencystore)
 - [`Nimbus\Idempotency\MemoryIdempotencyStore`](#nimbusidempotencymemoryidempotencystore)
+- [`Nimbus\Jobs\DatabaseJobQueue`](#nimbusjobsdatabasejobqueue)
+- [`Nimbus\Jobs\ExponentialBackoff`](#nimbusjobsexponentialbackoff)
+- [`Nimbus\Jobs\FailedJob`](#nimbusjobsfailedjob)
+- [`Nimbus\Jobs\FailedJobRepository`](#nimbusjobsfailedjobrepository)
+- [`Nimbus\Jobs\InvokableJobHandler`](#nimbusjobsinvokablejobhandler)
 - [`Nimbus\Jobs\JobCodec`](#nimbusjobsjobcodec)
 - [`Nimbus\Jobs\JobDispatcher`](#nimbusjobsjobdispatcher)
 - [`Nimbus\Jobs\JobEnvelope`](#nimbusjobsjobenvelope)
@@ -71,6 +79,9 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Jobs\JobState`](#nimbusjobsjobstate)
 - [`Nimbus\Jobs\JobWorker`](#nimbusjobsjobworker)
 - [`Nimbus\Jobs\MemoryJobDispatcher`](#nimbusjobsmemoryjobdispatcher)
+- [`Nimbus\Jobs\QueueTablesMigration`](#nimbusjobsqueuetablesmigration)
+- [`Nimbus\Jobs\RedisJobQueue`](#nimbusjobsredisjobqueue)
+- [`Nimbus\Jobs\RetryPolicy`](#nimbusjobsretrypolicy)
 - [`Nimbus\Jobs\SerializableJob`](#nimbusjobsserializablejob)
 - [`Nimbus\Lifecycle\RequestLifecycleObserver`](#nimbuslifecyclerequestlifecycleobserver)
 - [`Nimbus\Middleware\ArcanoLifecycleMiddleware`](#nimbusmiddlewarearcanolifecyclemiddleware)
@@ -86,6 +97,43 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Middleware\ResponseCacheMiddleware`](#nimbusmiddlewareresponsecachemiddleware)
 - [`Nimbus\Middleware\SecurityHeadersMiddleware`](#nimbusmiddlewaresecurityheadersmiddleware)
 - [`Nimbus\Middleware\TransactionalMiddleware`](#nimbusmiddlewaretransactionalmiddleware)
+- [`Nimbus\Middleware\ValidateSignatureMiddleware`](#nimbusmiddlewarevalidatesignaturemiddleware)
+- [`Nimbus\Notifications\Database\DatabaseChannel`](#nimbusnotificationsdatabasedatabasechannel)
+- [`Nimbus\Notifications\Database\DatabaseNotification`](#nimbusnotificationsdatabasedatabasenotification)
+- [`Nimbus\Notifications\Database\DatabaseNotifications`](#nimbusnotificationsdatabasedatabasenotifications)
+- [`Nimbus\Notifications\Http\CurlHttpClient`](#nimbusnotificationshttpcurlhttpclient)
+- [`Nimbus\Notifications\Http\HttpClient`](#nimbusnotificationshttphttpclient)
+- [`Nimbus\Notifications\Http\HttpClients`](#nimbusnotificationshttphttpclients)
+- [`Nimbus\Notifications\Http\HttpRequest`](#nimbusnotificationshttphttprequest)
+- [`Nimbus\Notifications\Http\HttpResponse`](#nimbusnotificationshttphttpresponse)
+- [`Nimbus\Notifications\Http\HttpTransportException`](#nimbusnotificationshttphttptransportexception)
+- [`Nimbus\Notifications\Http\PamHttpClient`](#nimbusnotificationshttppamhttpclient)
+- [`Nimbus\Notifications\Http\Psr18HttpClient`](#nimbusnotificationshttppsr18httpclient)
+- [`Nimbus\Notifications\Mail\MailChannel`](#nimbusnotificationsmailmailchannel)
+- [`Nimbus\Notifications\Mail\MailMessage`](#nimbusnotificationsmailmailmessage)
+- [`Nimbus\Notifications\Notifiable`](#nimbusnotificationsnotifiable)
+- [`Nimbus\Notifications\Notification`](#nimbusnotificationsnotification)
+- [`Nimbus\Notifications\NotificationChannel`](#nimbusnotificationsnotificationchannel)
+- [`Nimbus\Notifications\NotificationDeliveryException`](#nimbusnotificationsnotificationdeliveryexception)
+- [`Nimbus\Notifications\NotificationDispatcher`](#nimbusnotificationsnotificationdispatcher)
+- [`Nimbus\Notifications\NotificationFake`](#nimbusnotificationsnotificationfake)
+- [`Nimbus\Notifications\NotificationSender`](#nimbusnotificationsnotificationsender)
+- [`Nimbus\Notifications\Notifier`](#nimbusnotificationsnotifier)
+- [`Nimbus\Notifications\OnDemandNotifiable`](#nimbusnotificationsondemandnotifiable)
+- [`Nimbus\Notifications\Push\ApnsProvider`](#nimbusnotificationspushapnsprovider)
+- [`Nimbus\Notifications\Push\FcmProvider`](#nimbusnotificationspushfcmprovider)
+- [`Nimbus\Notifications\Push\JsonWebToken`](#nimbusnotificationspushjsonwebtoken)
+- [`Nimbus\Notifications\Push\PushChannel`](#nimbusnotificationspushpushchannel)
+- [`Nimbus\Notifications\Push\PushMessage`](#nimbusnotificationspushpushmessage)
+- [`Nimbus\Notifications\Push\PushOutcome`](#nimbusnotificationspushpushoutcome)
+- [`Nimbus\Notifications\Push\PushPlatform`](#nimbusnotificationspushpushplatform)
+- [`Nimbus\Notifications\Push\PushProvider`](#nimbusnotificationspushpushprovider)
+- [`Nimbus\Notifications\Push\PushTarget`](#nimbusnotificationspushpushtarget)
+- [`Nimbus\Notifications\SendNotificationHandler`](#nimbusnotificationssendnotificationhandler)
+- [`Nimbus\Notifications\SendNotificationJob`](#nimbusnotificationssendnotificationjob)
+- [`Nimbus\Notifications\Webhook\WebhookChannel`](#nimbusnotificationswebhookwebhookchannel)
+- [`Nimbus\Notifications\Webhook\WebhookMessage`](#nimbusnotificationswebhookwebhookmessage)
+- [`Nimbus\Notifications\Webhook\WebhookSignature`](#nimbusnotificationswebhookwebhooksignature)
 - [`Nimbus\Observability\RequestObservation`](#nimbusobservabilityrequestobservation)
 - [`Nimbus\Observability\RequestObserver`](#nimbusobservabilityrequestobserver)
 - [`Nimbus\OpenApi\ClientGenerator`](#nimbusopenapiclientgenerator)
@@ -122,13 +170,33 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RoutingResult`](#nimbusroutingresult)
 - [`Nimbus\RoutingResultType`](#nimbusroutingresulttype)
 - [`Nimbus\Routing\RouteBindable`](#nimbusroutingroutebindable)
+- [`Nimbus\Runtime\Background`](#nimbusruntimebackground)
 - [`Nimbus\Runtime\Deadline`](#nimbusruntimedeadline)
+- [`Nimbus\Scheduling\DatabaseSchedulerLock`](#nimbusschedulingdatabaseschedulerlock)
+- [`Nimbus\Scheduling\MemorySchedulerLock`](#nimbusschedulingmemoryschedulerlock)
+- [`Nimbus\Scheduling\RedisSchedulerLock`](#nimbusschedulingredisschedulerlock)
+- [`Nimbus\Scheduling\Schedule`](#nimbusschedulingschedule)
+- [`Nimbus\Scheduling\ScheduledTask`](#nimbusschedulingscheduledtask)
+- [`Nimbus\Scheduling\Scheduler`](#nimbusschedulingscheduler)
+- [`Nimbus\Scheduling\SchedulerLock`](#nimbusschedulingschedulerlock)
 - [`Nimbus\Security\Crypt`](#nimbussecuritycrypt)
 - [`Nimbus\Security\DecryptException`](#nimbussecuritydecryptexception)
 - [`Nimbus\Security\Hash`](#nimbussecurityhash)
+- [`Nimbus\Security\UrlSignatureState`](#nimbussecurityurlsignaturestate)
+- [`Nimbus\Security\UrlSigner`](#nimbussecurityurlsigner)
+- [`Nimbus\Storage\Disk`](#nimbusstoragedisk)
+- [`Nimbus\Storage\S3UploadUrlGenerator`](#nimbusstorages3uploadurlgenerator)
+- [`Nimbus\Storage\SignedStorageUrls`](#nimbusstoragesignedstorageurls)
+- [`Nimbus\Storage\StorageConfig`](#nimbusstoragestorageconfig)
+- [`Nimbus\Storage\StorageManager`](#nimbusstoragestoragemanager)
+- [`Nimbus\Storage\StorageRoutes`](#nimbusstoragestorageroutes)
+- [`Nimbus\Storage\StorageServiceProvider`](#nimbusstoragestorageserviceprovider)
+- [`Nimbus\Storage\UploadUrlGenerator`](#nimbusstorageuploadurlgenerator)
 - [`Nimbus\Tenancy\Tenant`](#nimbustenancytenant)
 - [`Nimbus\Tenancy\TenantContext`](#nimbustenancytenantcontext)
 - [`Nimbus\Tenancy\TenantResolver`](#nimbustenancytenantresolver)
+- [`Nimbus\Testing\ActingAsAuthenticator`](#nimbustestingactingasauthenticator)
+- [`Nimbus\Testing\TestCase`](#nimbustestingtestcase)
 - [`Nimbus\Testing\TestClient`](#nimbustestingtestclient)
 - [`Nimbus\Testing\TestResponse`](#nimbustestingtestresponse)
 - [`Nimbus\Transactions\TransactionManager`](#nimbustransactionstransactionmanager)
@@ -157,6 +225,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 ### Methods
 
 - `public __construct(bool $discoverPackages = true, ?Nimbus\Container\Container $container = null): mixed`
+- `public background(): Nimbus\Runtime\Background`
 - `public boot(): self`
 - `public container(): Nimbus\Container\Container`
 - `public controller(string $controller, callable $routes): void`
@@ -181,6 +250,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public resource(string $path, string $controller, ?callable $routes = null): void`
 - `public route(string $method, string $path, array|callable|string $handler): self`
 - `public routes(string $file): self`
+- `public storage(): Nimbus\Storage\StorageManager`
 - `public transport(Pam\Contracts\Transport\TransportProviderInterface $provider): self`
 - `public transports(): array`
 
@@ -486,6 +556,7 @@ final class Nimbus\Container\Container
 - `public diagnostics(): array`
 - `public endScope(): void`
 - `public get(string $id): mixed`
+- `public has(string $id): bool`
 - `public instance(string $id, mixed $instance): self`
 - `public scoped(string $id, callable|null|string $factory = null): self`
 - `public scopedInstance(string $id, mixed $instance): self`
@@ -559,6 +630,7 @@ final class Nimbus\Database\ArcanoMigrationManager
 - `public __construct(Nimbus\Database\ArcanoDatabaseProvider $databases, string $directory, string $table = "migrations", string $namespace = "Migration", ?Nimbus\Database\ArcanoSchemaCompiler $entities = null): mixed`
 - `public generate(): array`
 - `public migrate(): array`
+- `public publish(string $name, string $class): ?string`
 - `public rollback(int $steps = 1): array`
 - `public status(): array`
 
@@ -635,6 +707,32 @@ final readonly class Nimbus\Database\DatabaseHealthCheck implements Nimbus\Healt
 
 - `public __construct(Nimbus\Database\ArcanoManager $arcano, ?string $connection = null): mixed`
 - `public check(): Nimbus\Health\HealthResult`
+
+## `Nimbus\Database\Factory`
+
+```php
+abstract class Nimbus\Database\Factory
+```
+
+### Methods
+
+- `public __construct(): mixed`
+- `public afterCreating(Closure $callback): static`
+- `public afterMaking(Closure $callback): static`
+- `public count(int $count): static`
+- `public create(array $attributes = []): array|object`
+- `public createMany(array $attributes = []): array`
+- `public createOne(array $attributes = []): object`
+- `public definition(): array`
+- `public make(array $attributes = []): array|object`
+- `public makeMany(array $attributes = []): array`
+- `public makeOne(array $attributes = []): object`
+- `public static new(): static`
+- `public raw(array $attributes = []): array`
+- `public sequence(Closure|array ...$states): static`
+- `public state(Closure|array $state): static`
+- `public static useFaker(?Faker\Generator $faker): void`
+- `public static useManager(?Nimbus\Database\ArcanoManager $manager): ?Nimbus\Database\ArcanoManager`
 
 ## `Nimbus\Database\Pgsql\AsyncPostgresDriver`
 
@@ -747,6 +845,28 @@ final readonly class Nimbus\Database\QueryReport
 
 - `public __construct(int $count, float $elapsedMilliseconds, array $duplicates, array $violations): mixed`
 - `public withinBudget(): bool`
+
+## `Nimbus\Database\Seeder`
+
+```php
+abstract class Nimbus\Database\Seeder
+```
+
+### Methods
+
+- `public call(array|string $seeders): void`
+- `public invoke(?Nimbus\Container\Container $container = null): array`
+
+## `Nimbus\Database\SeederRunner`
+
+```php
+final readonly class Nimbus\Database\SeederRunner
+```
+
+### Methods
+
+- `public __construct(Nimbus\App $app): mixed`
+- `public run(string $seeder): array`
 
 ## `Nimbus\Events\EventDispatcher`
 
@@ -903,17 +1023,23 @@ final enum Nimbus\Http\ProblemCode implements BackedEnum, UnitEnum: int
 - `Timeout = 7`
 - `InternalError = 8`
 - `MethodNotAllowed = 9`
+- `InvalidSignature = 10`
+- `PayloadTooLarge = 11`
+- `UnsupportedMediaType = 12`
 
 ### Constants
 
 - `Conflict = 5`
 - `Forbidden = 3`
 - `InternalError = 8`
+- `InvalidSignature = 10`
 - `MethodNotAllowed = 9`
 - `NotFound = 4`
+- `PayloadTooLarge = 11`
 - `RateLimited = 6`
 - `Timeout = 7`
 - `Unauthenticated = 2`
+- `UnsupportedMediaType = 12`
 - `ValidationFailed = 1`
 
 ### Properties
@@ -1005,6 +1131,78 @@ final class Nimbus\Idempotency\MemoryIdempotencyStore implements Nimbus\Idempote
 - `public __construct(int $maximumRecords = 10000): mixed`
 - `public get(string $key, int $now): ?Nimbus\Idempotency\IdempotencyRecord`
 - `public put(string $key, Nimbus\Idempotency\IdempotencyRecord $record): void`
+
+## `Nimbus\Jobs\DatabaseJobQueue`
+
+```php
+final class Nimbus\Jobs\DatabaseJobQueue implements Nimbus\Jobs\FailedJobRepository, Nimbus\Jobs\JobDispatcher, Nimbus\Jobs\JobQueue
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, Nimbus\Jobs\JobCodec $codec, string $queue = "default", ?string $connection = null, ?Closure $clock = null): mixed`
+- `public complete(Nimbus\Jobs\JobEnvelope $envelope): void`
+- `public deadLetter(Nimbus\Jobs\JobEnvelope $envelope, ?Throwable $failure = null): void`
+- `public dispatch(object $job, int $maximumAttempts = 3, int $delaySeconds = 0): Nimbus\Jobs\JobEnvelope`
+- `public failed(int $limit = 100): array`
+- `public forgetFailed(string $id): bool`
+- `public release(Nimbus\Jobs\JobEnvelope $envelope, int $availableAt, ?Throwable $failure = null): void`
+- `public reserve(int $now, int $leaseSeconds): ?Nimbus\Jobs\JobEnvelope`
+- `public retryFailed(string $id): bool`
+- `public size(): int`
+
+## `Nimbus\Jobs\ExponentialBackoff`
+
+```php
+final readonly class Nimbus\Jobs\ExponentialBackoff implements Nimbus\Jobs\RetryPolicy
+```
+
+### Methods
+
+- `public __construct(int $baseSeconds = 5, int $maximumSeconds = 3600, bool $jitter = true, ?Closure $random = null): mixed`
+- `public delaySeconds(int $attempt): int`
+
+## `Nimbus\Jobs\FailedJob`
+
+```php
+final readonly class Nimbus\Jobs\FailedJob
+```
+
+### Properties
+
+- `public readonly int $attempts`
+- `public readonly int $failedAt`
+- `public readonly ?string $failureClass`
+- `public readonly string $id`
+- `public readonly string $payload`
+- `public readonly string $queue`
+
+### Methods
+
+- `public __construct(string $id, string $queue, string $payload, int $attempts, ?string $failureClass, int $failedAt): mixed`
+
+## `Nimbus\Jobs\FailedJobRepository`
+
+```php
+abstract interface Nimbus\Jobs\FailedJobRepository
+```
+
+### Methods
+
+- `public failed(int $limit = 100): array`
+- `public forgetFailed(string $id): bool`
+- `public retryFailed(string $id): bool`
+
+## `Nimbus\Jobs\InvokableJobHandler`
+
+```php
+final readonly class Nimbus\Jobs\InvokableJobHandler implements Nimbus\Jobs\JobHandler
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Container\Container $container = null): mixed`
+- `public handle(object $job): Nimbus\Jobs\JobOutcome`
 
 ## `Nimbus\Jobs\JobCodec`
 
@@ -1173,8 +1371,9 @@ final readonly class Nimbus\Jobs\JobWorker
 
 ### Methods
 
-- `public __construct(Nimbus\Jobs\JobQueue $queue, Nimbus\Jobs\JobHandler|callable $handler, int $leaseSeconds = 30, int $retryDelaySeconds = 5): mixed`
+- `public __construct(Nimbus\Jobs\JobQueue $queue, Nimbus\Jobs\JobHandler|callable $handler, int $leaseSeconds = 30, int $retryDelaySeconds = 5, ?Nimbus\Jobs\RetryPolicy $retryPolicy = null): mixed`
 - `public runOne(?int $now = null): Nimbus\Jobs\JobRunResult`
+- `public work(int $maximumJobs = 100, float $maximumSeconds = 1, ?Closure $clock = null): int`
 
 ## `Nimbus\Jobs\MemoryJobDispatcher`
 
@@ -1192,6 +1391,46 @@ final class Nimbus\Jobs\MemoryJobDispatcher implements Nimbus\Jobs\JobDispatcher
 - `public pending(): array`
 - `public release(Nimbus\Jobs\JobEnvelope $envelope, int $availableAt, ?Throwable $failure = null): void`
 - `public reserve(int $now, int $leaseSeconds): ?Nimbus\Jobs\JobEnvelope`
+
+## `Nimbus\Jobs\QueueTablesMigration`
+
+```php
+final class Nimbus\Jobs\QueueTablesMigration extends Arcano\Migrations\Migration implements Arcano\Migrations\MigrationInterface
+```
+
+### Methods
+
+- `public down(): void`
+- `public up(): void`
+
+## `Nimbus\Jobs\RedisJobQueue`
+
+```php
+final class Nimbus\Jobs\RedisJobQueue implements Nimbus\Jobs\FailedJobRepository, Nimbus\Jobs\JobDispatcher, Nimbus\Jobs\JobQueue
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, Nimbus\Jobs\JobCodec $codec, string $queue = "default", string $prefix = "nimbus:queue:", ?Closure $clock = null): mixed`
+- `public complete(Nimbus\Jobs\JobEnvelope $envelope): void`
+- `public deadLetter(Nimbus\Jobs\JobEnvelope $envelope, ?Throwable $failure = null): void`
+- `public dispatch(object $job, int $maximumAttempts = 3, int $delaySeconds = 0): Nimbus\Jobs\JobEnvelope`
+- `public failed(int $limit = 100): array`
+- `public forgetFailed(string $id): bool`
+- `public release(Nimbus\Jobs\JobEnvelope $envelope, int $availableAt, ?Throwable $failure = null): void`
+- `public reserve(int $now, int $leaseSeconds): ?Nimbus\Jobs\JobEnvelope`
+- `public retryFailed(string $id): bool`
+- `public size(): int`
+
+## `Nimbus\Jobs\RetryPolicy`
+
+```php
+abstract interface Nimbus\Jobs\RetryPolicy
+```
+
+### Methods
+
+- `public delaySeconds(int $attempt): int`
 
 ## `Nimbus\Jobs\SerializableJob`
 
@@ -1358,6 +1597,563 @@ final readonly class Nimbus\Middleware\TransactionalMiddleware implements Pam\Co
 
 - `public __construct(Nimbus\Transactions\TransactionManager $transactions): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
+## `Nimbus\Middleware\ValidateSignatureMiddleware`
+
+```php
+final readonly class Nimbus\Middleware\ValidateSignatureMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Security\UrlSigner $signer): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
+## `Nimbus\Notifications\Database\DatabaseChannel`
+
+```php
+final readonly class Nimbus\Notifications\Database\DatabaseChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(Nimbus\Database\ArcanoDatabaseProvider $databases, string $table = "notifications", ?string $connection = null): mixed`
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Database\DatabaseNotification`
+
+```php
+final readonly class Nimbus\Notifications\Database\DatabaseNotification implements JsonSerializable
+```
+
+### Properties
+
+- `public readonly DateTimeImmutable $createdAt`
+- `public readonly array $data`
+- `public readonly string $id`
+- `public readonly ?DateTimeImmutable $readAt`
+- `public readonly string $type`
+
+### Methods
+
+- `public __construct(string $id, string $type, array $data, ?DateTimeImmutable $readAt, DateTimeImmutable $createdAt): mixed`
+- `public jsonSerialize(): array`
+- `public read(): bool`
+
+## `Nimbus\Notifications\Database\DatabaseNotifications`
+
+```php
+final readonly class Nimbus\Notifications\Database\DatabaseNotifications
+```
+
+### Methods
+
+- `public __construct(Nimbus\Database\ArcanoDatabaseProvider $databases, string $table = "notifications", ?string $connection = null): mixed`
+- `public delete(Nimbus\Notifications\Notifiable $notifiable, string $id): bool`
+- `public find(Nimbus\Notifications\Notifiable $notifiable, string $id): ?Nimbus\Notifications\Database\DatabaseNotification`
+- `public latest(Nimbus\Notifications\Notifiable $notifiable, int $limit = 50, bool $unreadOnly = false, ?string $before = null): array`
+- `public markAllAsRead(Nimbus\Notifications\Notifiable $notifiable): int`
+- `public markAsRead(Nimbus\Notifications\Notifiable $notifiable, string $id): bool`
+- `public markAsUnread(Nimbus\Notifications\Notifiable $notifiable, string $id): bool`
+- `public prune(DateTimeInterface $before): int`
+- `public unreadCount(Nimbus\Notifications\Notifiable $notifiable): int`
+
+## `Nimbus\Notifications\Http\CurlHttpClient`
+
+```php
+final class Nimbus\Notifications\Http\CurlHttpClient implements Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public __construct(): mixed`
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Http\HttpClient`
+
+```php
+abstract interface Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Http\HttpClients`
+
+```php
+final class Nimbus\Notifications\Http\HttpClients
+```
+
+### Methods
+
+- `public static detect(): Nimbus\Notifications\Http\HttpClient`
+
+## `Nimbus\Notifications\Http\HttpRequest`
+
+```php
+final readonly class Nimbus\Notifications\Http\HttpRequest
+```
+
+### Properties
+
+- `public readonly string $body`
+- `public readonly array $headers`
+- `public readonly bool $http2`
+- `public readonly string $method`
+- `public readonly float $timeout`
+- `public readonly string $url`
+
+### Methods
+
+- `public __construct(string $method, string $url, array $headers = [], string $body = "", float $timeout = 10, bool $http2 = false): mixed`
+
+## `Nimbus\Notifications\Http\HttpResponse`
+
+```php
+final readonly class Nimbus\Notifications\Http\HttpResponse
+```
+
+### Properties
+
+- `public readonly string $body`
+- `public readonly array $headers`
+- `public readonly int $status`
+
+### Methods
+
+- `public __construct(int $status, array $headers = [], string $body = ""): mixed`
+- `public header(string $name): ?string`
+- `public json(): array`
+- `public successful(): bool`
+
+## `Nimbus\Notifications\Http\HttpTransportException`
+
+```php
+final class Nimbus\Notifications\Http\HttpTransportException extends RuntimeException implements Stringable, Throwable
+```
+
+## `Nimbus\Notifications\Http\PamHttpClient`
+
+```php
+final class Nimbus\Notifications\Http\PamHttpClient implements Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Notifications\Http\HttpClient $http2 = null): mixed`
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Http\Psr18HttpClient`
+
+```php
+final readonly class Nimbus\Notifications\Http\Psr18HttpClient implements Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public __construct(Psr\Http\Client\ClientInterface $client, Psr\Http\Message\RequestFactoryInterface $requests, Psr\Http\Message\StreamFactoryInterface $streams): mixed`
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Mail\MailChannel`
+
+```php
+final readonly class Nimbus\Notifications\Mail\MailChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(Symfony\Component\Mailer\Transport\TransportInterface $transport, string $fromAddress, string $fromName = ""): mixed`
+- `public deliver(array $payload): void`
+- `public static dsn(array $environment): string`
+- `public static fromDsn(string $dsn, string $fromAddress, string $fromName = ""): self`
+- `public static fromEnvironment(?array $environment = null): self`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Mail\MailMessage`
+
+```php
+final class Nimbus\Notifications\Mail\MailMessage
+```
+
+### Methods
+
+- `public action(string $text, string $url): self`
+- `public bcc(string $address): self`
+- `public cc(string $address): self`
+- `public from(string $address, string $name = ""): self`
+- `public getSubject(): string`
+- `public greeting(string $greeting): self`
+- `public html(string $html): self`
+- `public line(string $line): self`
+- `public static make(): self`
+- `public renderHtml(): string`
+- `public renderText(): string`
+- `public replyTo(string $address): self`
+- `public salutation(string $salutation): self`
+- `public subject(string $subject): self`
+- `public text(string $text): self`
+- `public toArray(): array`
+
+## `Nimbus\Notifications\Notifiable`
+
+```php
+abstract interface Nimbus\Notifications\Notifiable
+```
+
+### Methods
+
+- `public notifiableKey(): string`
+- `public notifiableType(): string`
+- `public routeNotificationFor(string $channel, Nimbus\Notifications\Notification $notification): mixed`
+
+## `Nimbus\Notifications\Notification`
+
+```php
+abstract class Nimbus\Notifications\Notification
+```
+
+### Methods
+
+- `public delaySeconds(): int`
+- `public maximumAttempts(): int`
+- `public toDatabase(Nimbus\Notifications\Notifiable $notifiable): array`
+- `public toMail(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Mail\MailMessage`
+- `public toPush(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Push\PushMessage`
+- `public toWebhook(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Webhook\WebhookMessage|array`
+- `public type(): string`
+- `public via(Nimbus\Notifications\Notifiable $notifiable): array`
+
+## `Nimbus\Notifications\NotificationChannel`
+
+```php
+abstract interface Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\NotificationDeliveryException`
+
+```php
+final class Nimbus\Notifications\NotificationDeliveryException extends RuntimeException implements Stringable, Throwable
+```
+
+### Properties
+
+- `public readonly bool $retryable`
+
+### Methods
+
+- `public __construct(string $message, bool $retryable = true, ?Throwable $previous = null): mixed`
+- `public static permanent(string $message, ?Throwable $previous = null): self`
+
+## `Nimbus\Notifications\NotificationDispatcher`
+
+```php
+abstract interface Nimbus\Notifications\NotificationDispatcher
+```
+
+### Methods
+
+- `public send(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification): void`
+- `public sendLater(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification, ?int $delaySeconds = null): array`
+
+## `Nimbus\Notifications\NotificationFake`
+
+```php
+final class Nimbus\Notifications\NotificationFake implements Nimbus\Notifications\NotificationDispatcher
+```
+
+### Methods
+
+- `public assertNotSentTo(Nimbus\Notifications\Notifiable $notifiable, string $notification, ?callable $callback = null): void`
+- `public assertNothingSent(): void`
+- `public assertSentLaterTo(Nimbus\Notifications\Notifiable $notifiable, string $notification): void`
+- `public assertSentTimes(string $notification, int $times): void`
+- `public assertSentTo(Nimbus\Notifications\Notifiable $notifiable, string $notification, ?callable $callback = null): void`
+- `public send(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification): void`
+- `public sendLater(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification, ?int $delaySeconds = null): array`
+- `public sent(?string $notification = null): array`
+
+## `Nimbus\Notifications\NotificationSender`
+
+```php
+final class Nimbus\Notifications\NotificationSender
+```
+
+### Methods
+
+- `public __construct(array $channels = []): mixed`
+- `public channel(string $name, Nimbus\Notifications\NotificationChannel $channel): self`
+- `public deliver(string $channel, array $payload): void`
+- `public get(string $name): Nimbus\Notifications\NotificationChannel`
+- `public has(string $name): bool`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, ?string $id = null): array`
+- `public send(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification): void`
+- `public static uuid(): string`
+
+## `Nimbus\Notifications\Notifier`
+
+```php
+final readonly class Nimbus\Notifications\Notifier implements Nimbus\Notifications\NotificationDispatcher
+```
+
+### Methods
+
+- `public __construct(Nimbus\Notifications\NotificationSender $sender, ?Nimbus\Jobs\JobDispatcher $jobs = null): mixed`
+- `public static fake(): Nimbus\Notifications\NotificationFake`
+- `public send(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification): void`
+- `public sendLater(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification, ?int $delaySeconds = null): array`
+
+## `Nimbus\Notifications\OnDemandNotifiable`
+
+```php
+final class Nimbus\Notifications\OnDemandNotifiable implements Nimbus\Notifications\Notifiable
+```
+
+### Methods
+
+- `public and(string $channel, mixed $route): self`
+- `public notifiableKey(): string`
+- `public notifiableType(): string`
+- `public static route(string $channel, mixed $route): self`
+- `public routeNotificationFor(string $channel, Nimbus\Notifications\Notification $notification): mixed`
+
+## `Nimbus\Notifications\Push\ApnsProvider`
+
+```php
+final class Nimbus\Notifications\Push\ApnsProvider implements Nimbus\Notifications\Push\PushProvider
+```
+
+### Methods
+
+- `public __construct(string $teamId, string $keyId, string $privateKey, string $topic, bool $production = true, ?Nimbus\Notifications\Http\HttpClient $http = null, float $timeout = 10, ?Closure $clock = null): mixed`
+- `public static fromKeyFile(string $teamId, string $keyId, string $path, string $topic, bool $production = true, ?Nimbus\Notifications\Http\HttpClient $http = null): self`
+- `public send(Nimbus\Notifications\Push\PushMessage $message, string $token): Nimbus\Notifications\Push\PushOutcome`
+
+## `Nimbus\Notifications\Push\FcmProvider`
+
+```php
+final class Nimbus\Notifications\Push\FcmProvider implements Nimbus\Notifications\Push\PushProvider
+```
+
+### Methods
+
+- `public __construct(array $serviceAccount, ?Nimbus\Notifications\Http\HttpClient $http = null, float $timeout = 10, ?Closure $clock = null): mixed`
+- `public static fromServiceAccountFile(string $path, ?Nimbus\Notifications\Http\HttpClient $http = null): self`
+- `public static fromServiceAccountJson(string $json, ?Nimbus\Notifications\Http\HttpClient $http = null): self`
+- `public send(Nimbus\Notifications\Push\PushMessage $message, string $token): Nimbus\Notifications\Push\PushOutcome`
+
+## `Nimbus\Notifications\Push\JsonWebToken`
+
+```php
+final class Nimbus\Notifications\Push\JsonWebToken
+```
+
+### Methods
+
+- `public static base64Url(string $bytes): string`
+- `public static es256(array $claims, string $privateKeyPem, array $header = []): string`
+- `public static rs256(array $claims, string $privateKeyPem, array $header = []): string`
+
+## `Nimbus\Notifications\Push\PushChannel`
+
+```php
+final readonly class Nimbus\Notifications\Push\PushChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Notifications\Push\PushProvider $fcm = null, ?Nimbus\Notifications\Push\PushProvider $apns = null, ?Closure $onInvalidToken = null): mixed`
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Push\PushMessage`
+
+```php
+final class Nimbus\Notifications\Push\PushMessage
+```
+
+### Methods
+
+- `public badge(int $badge): self`
+- `public body(string $body): self`
+- `public collapseKey(string $key): self`
+- `public data(array $data): self`
+- `public static fromArray(array $data): self`
+- `public getCollapseKey(): ?string`
+- `public image(string $url): self`
+- `public isHighPriority(): bool`
+- `public isSilent(): bool`
+- `public static make(?string $title = null, ?string $body = null): self`
+- `public normalPriority(): self`
+- `public silent(): self`
+- `public sound(string $sound = "default"): self`
+- `public threadId(string $threadId): self`
+- `public title(string $title): self`
+- `public toApns(): array`
+- `public toArray(): array`
+- `public toFcm(): array`
+- `public ttl(int $seconds): self`
+- `public ttlSeconds(): ?int`
+
+## `Nimbus\Notifications\Push\PushOutcome`
+
+```php
+final enum Nimbus\Notifications\Push\PushOutcome implements BackedEnum, UnitEnum: int
+```
+
+### Enum cases
+
+- `Delivered = 1`
+- `InvalidToken = 2`
+
+### Constants
+
+- `Delivered = 1`
+- `InvalidToken = 2`
+
+### Properties
+
+- `public readonly string $name`
+- `public readonly int $value`
+
+### Methods
+
+- `public static cases(): array`
+- `public static from(int|string $value): static`
+- `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Notifications\Push\PushPlatform`
+
+```php
+final enum Nimbus\Notifications\Push\PushPlatform implements BackedEnum, UnitEnum: string
+```
+
+### Enum cases
+
+- `Fcm = "fcm"`
+- `Apns = "apns"`
+
+### Constants
+
+- `Apns = "apns"`
+- `Fcm = "fcm"`
+
+### Properties
+
+- `public readonly string $name`
+- `public readonly string $value`
+
+### Methods
+
+- `public static cases(): array`
+- `public static from(int|string $value): static`
+- `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Notifications\Push\PushProvider`
+
+```php
+abstract interface Nimbus\Notifications\Push\PushProvider
+```
+
+### Methods
+
+- `public send(Nimbus\Notifications\Push\PushMessage $message, string $token): Nimbus\Notifications\Push\PushOutcome`
+
+## `Nimbus\Notifications\Push\PushTarget`
+
+```php
+final readonly class Nimbus\Notifications\Push\PushTarget
+```
+
+### Properties
+
+- `public readonly Nimbus\Notifications\Push\PushPlatform $platform`
+- `public readonly string $token`
+
+### Methods
+
+- `public __construct(Nimbus\Notifications\Push\PushPlatform $platform, string $token): mixed`
+- `public static apns(string $token): self`
+- `public static fcm(string $token): self`
+- `public static parse(string $target): self`
+- `public toString(): string`
+
+## `Nimbus\Notifications\SendNotificationHandler`
+
+```php
+final readonly class Nimbus\Notifications\SendNotificationHandler implements Nimbus\Jobs\JobHandler
+```
+
+### Methods
+
+- `public __construct(Nimbus\Notifications\NotificationSender $sender): mixed`
+- `public handle(object $job): Nimbus\Jobs\JobOutcome`
+
+## `Nimbus\Notifications\SendNotificationJob`
+
+```php
+final readonly class Nimbus\Notifications\SendNotificationJob implements Nimbus\Jobs\SerializableJob
+```
+
+### Properties
+
+- `public readonly string $channel`
+- `public readonly array $payload`
+
+### Methods
+
+- `public __construct(string $channel, array $payload): mixed`
+- `public static fromJobPayload(array $payload): self`
+- `public static jobName(): string`
+- `public toJobPayload(): array`
+
+## `Nimbus\Notifications\Webhook\WebhookChannel`
+
+```php
+final readonly class Nimbus\Notifications\Webhook\WebhookChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(string $secret, ?Nimbus\Notifications\Http\HttpClient $http = null, float $timeout = 10, ?Closure $secretFor = null, ?Closure $clock = null): mixed`
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Webhook\WebhookMessage`
+
+```php
+final class Nimbus\Notifications\Webhook\WebhookMessage
+```
+
+### Methods
+
+- `public __construct(array $data = []): mixed`
+- `public data(array $data): self`
+- `public event(string $event): self`
+- `public header(string $name, string $value): self`
+- `public static make(array $data = []): self`
+- `public toArray(): array`
+
+## `Nimbus\Notifications\Webhook\WebhookSignature`
+
+```php
+final class Nimbus\Notifications\Webhook\WebhookSignature
+```
+
+### Constants
+
+- `HEADER = "Nimbus-Signature"`
+
+### Methods
+
+- `public static sign(string $secret, string $body, int $timestamp): string`
+- `public static verify(string $header, string $body, string $secret, int $toleranceSeconds = 300, ?int $now = null): bool`
 
 ## `Nimbus\Observability\RequestObservation`
 
@@ -1558,6 +2354,7 @@ final readonly class Nimbus\PendingRoute
 - `public patch(string $path, array|callable|string $handler): self`
 - `public post(string $path, array|callable|string $handler): self`
 - `public put(string $path, array|callable|string $handler): self`
+- `public signed(): self`
 - `public summary(string $summary): self`
 - `public tags(array $tags): self`
 - `public where(string $parameter, Nimbus\RouteConstraint|string $constraint): self`
@@ -1887,6 +2684,7 @@ final class Nimbus\RouteRegistrar
 - `public prefix(string $prefix): self`
 - `public put(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public resource(string $path, string $controller, ?callable $routes = null): void`
+- `public signed(): self`
 
 ## `Nimbus\Router`
 
@@ -1961,6 +2759,23 @@ abstract interface Nimbus\Routing\RouteBindable
 
 - `public static resolveRouteBinding(string $value): static`
 
+## `Nimbus\Runtime\Background`
+
+```php
+final class Nimbus\Runtime\Background
+```
+
+### Methods
+
+- `public __construct(?Closure $clock = null, ?Closure $onFailure = null): mixed`
+- `public add(string $name, callable $task): self`
+- `public answer(Pam\Http\Request $request, Pam\Http\Response $response): ?Pam\Http\Response`
+- `public queue(Nimbus\Jobs\JobWorker $worker, string $name = "queue", int $maximumJobs = 100, float $maximumSeconds = 0.8): self`
+- `public run(float $intervalSeconds = 1, ?int $maximumTicks = null): void`
+- `public scheduler(Nimbus\Scheduling\Scheduler $scheduler, string $name = "scheduler"): self`
+- `public stop(): void`
+- `public tick(): void`
+
 ## `Nimbus\Runtime\Deadline`
 
 ```php
@@ -1972,6 +2787,112 @@ final readonly class Nimbus\Runtime\Deadline
 - `public __construct(float $seconds): mixed`
 - `public expired(): bool`
 - `public throwIfExpired(): void`
+
+## `Nimbus\Scheduling\DatabaseSchedulerLock`
+
+```php
+final class Nimbus\Scheduling\DatabaseSchedulerLock implements Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, ?string $connection = null, ?Closure $clock = null): mixed`
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
+
+## `Nimbus\Scheduling\MemorySchedulerLock`
+
+```php
+final class Nimbus\Scheduling\MemorySchedulerLock implements Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public __construct(?Closure $clock = null): mixed`
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
+
+## `Nimbus\Scheduling\RedisSchedulerLock`
+
+```php
+final class Nimbus\Scheduling\RedisSchedulerLock implements Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:lock:"): mixed`
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
+
+## `Nimbus\Scheduling\Schedule`
+
+```php
+final class Nimbus\Scheduling\Schedule
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Jobs\JobDispatcher $dispatcher = null, DateTimeZone|null|string $timezone = null, ?Nimbus\Container\Container $container = null): mixed`
+- `public call(callable $callback): Nimbus\Scheduling\ScheduledTask`
+- `public dueTasks(DateTimeInterface $now): array`
+- `public job(object|string $job, int $maximumAttempts = 3): Nimbus\Scheduling\ScheduledTask`
+- `public tasks(): array`
+
+## `Nimbus\Scheduling\ScheduledTask`
+
+```php
+final class Nimbus\Scheduling\ScheduledTask
+```
+
+### Methods
+
+- `public __construct(Closure $action, string $name, ?DateTimeZone $timezone = null): mixed`
+- `public static assertCronAvailable(): void`
+- `public cron(string $expression): self`
+- `public daily(): self`
+- `public dailyAt(string $time): self`
+- `public everyFifteenMinutes(): self`
+- `public everyFiveMinutes(): self`
+- `public everyMinute(): self`
+- `public everyTenMinutes(): self`
+- `public everyThirtyMinutes(): self`
+- `public everyTwoMinutes(): self`
+- `public expression(): string`
+- `public getName(): string`
+- `public hourly(): self`
+- `public hourlyAt(int $minute): self`
+- `public isDue(DateTimeInterface $now): bool`
+- `public monthly(): self`
+- `public monthlyOn(int $day = 1, string $time = "00:00"): self`
+- `public name(string $name): self`
+- `public overlapMinutes(): ?int`
+- `public run(): void`
+- `public timezone(DateTimeZone|string $timezone): self`
+- `public weekly(): self`
+- `public weeklyOn(int $day, string $time = "00:00"): self`
+- `public withoutOverlapping(int $expiresAfterMinutes = 1440): self`
+
+## `Nimbus\Scheduling\Scheduler`
+
+```php
+final class Nimbus\Scheduling\Scheduler
+```
+
+### Methods
+
+- `public __construct(Nimbus\Scheduling\Schedule $schedule, Nimbus\Scheduling\SchedulerLock $lock = {"@object":"Nimbus\\Scheduling\\MemorySchedulerLock","properties":[]}, ?Closure $clock = null, ?Closure $onFailure = null): mixed`
+- `public runDue(?int $now = null): array`
+
+## `Nimbus\Scheduling\SchedulerLock`
+
+```php
+abstract interface Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
 
 ## `Nimbus\Security\Crypt`
 
@@ -1986,6 +2907,7 @@ final readonly class Nimbus\Security\Crypt
 - `public encrypt(string $plaintext): string`
 - `public static fromEnvironment(): self`
 - `public static generateKey(): string`
+- `public static keyFromEnvironment(): string`
 
 ## `Nimbus\Security\DecryptException`
 
@@ -2004,6 +2926,169 @@ final readonly class Nimbus\Security\Hash
 - `public static check(string $password, string $hash): bool`
 - `public static make(string $password): string`
 - `public static needsRehash(string $hash): bool`
+
+## `Nimbus\Security\UrlSignatureState`
+
+```php
+final enum Nimbus\Security\UrlSignatureState implements BackedEnum, UnitEnum: int
+```
+
+### Enum cases
+
+- `Valid = 1`
+- `Invalid = 2`
+- `Expired = 3`
+
+### Constants
+
+- `Expired = 3`
+- `Invalid = 2`
+- `Valid = 1`
+
+### Properties
+
+- `public readonly string $name`
+- `public readonly int $value`
+
+### Methods
+
+- `public static cases(): array`
+- `public static from(int|string $value): static`
+- `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Security\UrlSigner`
+
+```php
+final readonly class Nimbus\Security\UrlSigner
+```
+
+### Constants
+
+- `EXPIRES = "expires"`
+- `SIGNATURE = "signature"`
+
+### Methods
+
+- `public __construct(string $key): mixed`
+- `public check(string $path, array $query, ?int $now = null): Nimbus\Security\UrlSignatureState`
+- `public static fromEnvironment(): self`
+- `public sign(string $path, array $query = [], ?int $expiresAt = null): string`
+- `public temporary(string $path, int $ttl, array $query = []): string`
+- `public verify(string $path, array $query, ?int $now = null): bool`
+
+## `Nimbus\Storage\Disk`
+
+```php
+final readonly class Nimbus\Storage\Disk
+```
+
+### Methods
+
+- `public __construct(string $name, League\Flysystem\FilesystemOperator $filesystem, ?Nimbus\Storage\UploadUrlGenerator $uploads = null): mixed`
+- `public delete(string $path): void`
+- `public exists(string $path): bool`
+- `public filesystem(): League\Flysystem\FilesystemOperator`
+- `public get(string $path): string`
+- `public mimeType(string $path): string`
+- `public name(): string`
+- `public put(string $path, string $contents, array $config = []): void`
+- `public readStream(string $path): mixed`
+- `public size(string $path): int`
+- `public temporaryUploadUrl(string $path, int $ttl, int $maxBytes, ?string $contentType = null): string`
+- `public temporaryUrl(string $path, int $ttl): string`
+- `public url(string $path): string`
+- `public writeStream(string $path, mixed $stream, array $config = []): void`
+
+## `Nimbus\Storage\S3UploadUrlGenerator`
+
+```php
+final readonly class Nimbus\Storage\S3UploadUrlGenerator implements Nimbus\Storage\UploadUrlGenerator
+```
+
+### Methods
+
+- `public __construct(object $client, string $bucket, string $prefix = ""): mixed`
+- `public temporaryUploadUrl(string $path, DateTimeImmutable $expiresAt, int $maxBytes, ?string $contentType = null): string`
+
+## `Nimbus\Storage\SignedStorageUrls`
+
+```php
+final readonly class Nimbus\Storage\SignedStorageUrls implements League\Flysystem\UrlGeneration\TemporaryUrlGenerator, Nimbus\Storage\UploadUrlGenerator
+```
+
+### Methods
+
+- `public __construct(Nimbus\Security\UrlSigner $signer, string $disk, string $routes, string $baseUrl = ""): mixed`
+- `public temporaryUploadUrl(string $path, DateTimeImmutable $expiresAt, int $maxBytes, ?string $contentType = null): string`
+- `public temporaryUrl(string $path, DateTimeInterface $expiresAt, League\Flysystem\Config $config): string`
+
+## `Nimbus\Storage\StorageConfig`
+
+```php
+final readonly class Nimbus\Storage\StorageConfig
+```
+
+### Properties
+
+- `public readonly string $defaultDisk`
+- `public readonly array $disks`
+- `public readonly string $url`
+
+### Methods
+
+- `public __construct(string $defaultDisk, array $disks, string $url = ""): mixed`
+- `public disk(string $name): array`
+- `public static fromEnvironment(): self`
+
+## `Nimbus\Storage\StorageManager`
+
+```php
+final class Nimbus\Storage\StorageManager
+```
+
+### Methods
+
+- `public __construct(Nimbus\Storage\StorageConfig $config, ?Nimbus\Security\UrlSigner $signer = null, ?string $routes = null): mixed`
+- `public disk(?string $name = null): Nimbus\Storage\Disk`
+- `public filesystem(string $name, League\Flysystem\FilesystemOperator $filesystem): Nimbus\Storage\Disk`
+- `public register(Nimbus\Storage\Disk $disk): self`
+
+## `Nimbus\Storage\StorageRoutes`
+
+```php
+final readonly class Nimbus\Storage\StorageRoutes
+```
+
+### Methods
+
+- `public __construct(Nimbus\Storage\StorageManager $storage): mixed`
+- `public download(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public static downloadPath(string $path): string`
+- `public register(Nimbus\App $app, string $path): void`
+- `public upload(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public static uploadPath(string $path): string`
+
+## `Nimbus\Storage\StorageServiceProvider`
+
+```php
+final readonly class Nimbus\Storage\StorageServiceProvider implements Pam\Contracts\Package\ServiceProviderInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Storage\StorageConfig $config, ?string $routes = null, ?Nimbus\Security\UrlSigner $signer = null): mixed`
+- `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
+- `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
+
+## `Nimbus\Storage\UploadUrlGenerator`
+
+```php
+abstract interface Nimbus\Storage\UploadUrlGenerator
+```
+
+### Methods
+
+- `public temporaryUploadUrl(string $path, DateTimeImmutable $expiresAt, int $maxBytes, ?string $contentType = null): string`
 
 ## `Nimbus\Tenancy\Tenant`
 
@@ -2039,6 +3124,27 @@ abstract interface Nimbus\Tenancy\TenantResolver
 
 - `public resolve(Pam\Http\Request $request): ?Nimbus\Tenancy\Tenant`
 
+## `Nimbus\Testing\ActingAsAuthenticator`
+
+```php
+final readonly class Nimbus\Testing\ActingAsAuthenticator implements Nimbus\Auth\Authenticator
+```
+
+### Properties
+
+- `public readonly Nimbus\Auth\Principal $principal`
+
+### Methods
+
+- `public __construct(Nimbus\Auth\Principal $principal): mixed`
+- `public authenticate(Pam\Http\Request $request): Nimbus\Auth\Principal`
+
+## `Nimbus\Testing\TestCase`
+
+```php
+abstract class Nimbus\Testing\TestCase extends PHPUnit\Framework\TestCase implements Countable, PHPUnit\Framework\Reorderable, PHPUnit\Framework\SelfDescribing, PHPUnit\Framework\Test
+```
+
 ## `Nimbus\Testing\TestClient`
 
 ```php
@@ -2047,10 +3153,19 @@ final readonly class Nimbus\Testing\TestClient
 
 ### Methods
 
-- `public __construct(Nimbus\App $app): mixed`
+- `public __construct(Nimbus\App $app, array $headers = []): mixed`
+- `public actingAs(Nimbus\Auth\Principal $principal): self`
+- `public deleteJson(string $path, ?array $payload = null, array $headers = []): Nimbus\Testing\TestResponse`
 - `public get(string $path, array $headers = []): Nimbus\Testing\TestResponse`
-- `public postJson(string $path, array $payload, array $headers = []): Nimbus\Testing\TestResponse`
+- `public getJson(string $path, array $headers = []): Nimbus\Testing\TestResponse`
+- `public json(string $method, string $path, ?array $payload = null, array $headers = []): Nimbus\Testing\TestResponse`
+- `public patchJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
+- `public postJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
+- `public putJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
 - `public request(string $method, string $path, array $query = [], array $headers = [], string $body = ""): Nimbus\Testing\TestResponse`
+- `public withHeader(string $name, string $value): self`
+- `public withHeaders(array $headers): self`
+- `public withToken(string $token, string $type = "Bearer"): self`
 
 ## `Nimbus\Testing\TestResponse`
 
@@ -2061,14 +3176,29 @@ final readonly class Nimbus\Testing\TestResponse
 ### Methods
 
 - `public __construct(array $response): mixed`
+- `public assertCreated(): self`
+- `public assertExactJson(array $expected): self`
+- `public assertForbidden(): self`
 - `public assertHeader(string $name, ?string $expected = null): self`
+- `public assertHeaderMissing(string $name): self`
 - `public assertJson(array $expected): self`
+- `public assertJsonCount(int $count, ?string $path = null): self`
+- `public assertJsonMissingPath(string $path): self`
+- `public assertJsonMissingValidationErrors(array|null|string $fields = null): self`
 - `public assertJsonPath(string $path, mixed $expected): self`
+- `public assertJsonStructure(array $structure, ?string $path = null): self`
+- `public assertJsonValidationErrors(array|string $fields): self`
+- `public assertNoContent(): self`
+- `public assertNotFound(): self`
+- `public assertOk(): self`
 - `public assertStatus(int $expected): self`
 - `public assertSuccessful(): self`
+- `public assertUnauthorized(): self`
+- `public assertUnprocessableEntity(): self`
 - `public body(): string`
+- `public dump(): self`
 - `public header(string $name): ?string`
-- `public json(): mixed`
+- `public json(?string $path = null): mixed`
 - `public status(): int`
 
 ## `Nimbus\Transactions\TransactionManager`

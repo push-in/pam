@@ -21,6 +21,7 @@ use Nimbus\RoutingResultType;
 use Nimbus\RouteRegistrar;
 use Nimbus\OpenApi\OpenApiGenerator;
 use Nimbus\Lifecycle\RequestLifecycleObserver;
+use Nimbus\Runtime\Background;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Http\Server as HttpServer;
@@ -57,6 +58,8 @@ final class App implements ApplicationInterface
     /** @var list<RequestLifecycleObserver> */
     private array $observers = [];
 
+    private ?Background $background = null;
+
     public function __construct(bool $discoverPackages = true, ?Container $container = null)
     {
         $this->container = $container ?? new Container();
@@ -68,6 +71,11 @@ final class App implements ApplicationInterface
         if (interface_exists(\Psr\Log\LoggerInterface::class) && class_exists(\Pam\Observability\Logger::class)) {
             $this->container->singleton(\Psr\Log\LoggerInterface::class, \Pam\Observability\Logger::class);
         }
+        // Signed routes use APP_KEY unless the application binds its own signer.
+        $this->container->singleton(
+            \Nimbus\Security\UrlSigner::class,
+            static fn (): \Nimbus\Security\UrlSigner => \Nimbus\Security\UrlSigner::fromEnvironment(),
+        );
         $this->errorHandler = static function (\Throwable $error, Response $response): Response {
             \Pam\Observability\Telemetry::log('error', 'Unhandled Nimbus exception', [
                 'exception' => $error::class,
@@ -145,6 +153,19 @@ final class App implements ApplicationInterface
     public function container(): Container
     {
         return $this->container;
+    }
+
+    /** The disks registered by `Storage\StorageServiceProvider`. */
+    public function storage(): \Nimbus\Storage\StorageManager
+    {
+        try {
+            $storage = $this->container->get(\Nimbus\Storage\StorageManager::class);
+        } catch (\RuntimeException $error) {
+            throw new \LogicException('Register Nimbus\\Storage\\StorageServiceProvider to use storage().', 0, $error);
+        }
+        return $storage instanceof \Nimbus\Storage\StorageManager
+            ? $storage
+            : throw new \LogicException('Register Nimbus\\Storage\\StorageServiceProvider to use storage().');
     }
 
     /** Boot providers and freeze application configuration without serving a request. */
@@ -293,6 +314,16 @@ final class App implements ApplicationInterface
         return $this;
     }
 
+    /**
+     * Queue workers and the scheduler of this application. They run on the
+     * ticks PAM sends to task workers (`--task-workers N`), or in a dedicated
+     * process through Background::run().
+     */
+    public function background(): Background
+    {
+        return $this->background ??= new Background();
+    }
+
     /** @param array<string, mixed> $options */
     public function listen(int $port, string $host = '127.0.0.1', array $options = []): void
     {
@@ -323,6 +354,12 @@ final class App implements ApplicationInterface
             foreach ($this->observers as $observer) {
                 $observer->starting($request);
                 $startedObservers[] = $observer;
+            }
+            if ($this->background !== null) {
+                $answered = $this->background->answer($request, $response);
+                if ($answered !== null) {
+                    return $answered;
+                }
             }
             $handled = $this->pipeline?->handle($request, $response)
                 ?? throw new \LogicException('Nimbus pipeline was not compiled.');

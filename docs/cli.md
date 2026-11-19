@@ -222,7 +222,8 @@ pam console
 ```
 
 Nimbus projects have native generators for Arcano entities, controllers,
-Form Requests, Resources, migrations, services and repositories:
+typed `Input` requests, Resources, migrations, services, repositories, jobs,
+factories, seeders and API tests:
 
 ```bash
 pam make:model User
@@ -232,6 +233,10 @@ pam make:resource UserResource
 pam make:service CreateUserService
 pam make:repository UserRepository
 pam make:migration CreateUsersTable
+pam make:job SendWelcomeEmail
+pam make:factory UserFactory
+pam make:seeder DatabaseSeeder
+pam make:test UserApiTest
 ```
 
 Generators require a bounded PascalCase name, create missing application

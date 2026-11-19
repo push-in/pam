@@ -20,6 +20,7 @@ final readonly class JobWorker
         JobHandler|callable $handler,
         private int $leaseSeconds = 30,
         private int $retryDelaySeconds = 5,
+        private ?RetryPolicy $retryPolicy = null,
     ) {
         if (
             $leaseSeconds < 1
@@ -53,6 +54,29 @@ final readonly class JobWorker
         };
     }
 
+    /**
+     * Runs jobs until the queue is idle, `$maximumJobs` ran or `$maximumSeconds`
+     * passed, so a tick of a PAM task worker stays short.
+     *
+     * @param (\Closure(): int)|null $clock Seconds since the epoch; defaults to time().
+     * @return int<0, max> Jobs that ran (completed, retried or dead-lettered).
+     */
+    public function work(int $maximumJobs = 100, float $maximumSeconds = 1.0, ?\Closure $clock = null): int
+    {
+        if ($maximumJobs < 1 || $maximumSeconds <= 0.0) {
+            throw new \InvalidArgumentException('Worker limits must be positive.');
+        }
+        $deadline = microtime(true) + $maximumSeconds;
+        $ran = 0;
+        while ($ran < $maximumJobs && microtime(true) < $deadline) {
+            if ($this->runOne($clock === null ? null : $clock()) === JobRunResult::Idle) {
+                break;
+            }
+            ++$ran;
+        }
+        return $ran;
+    }
+
     private function complete(JobEnvelope $envelope): JobRunResult
     {
         $this->queue->complete($envelope);
@@ -67,7 +91,8 @@ final readonly class JobWorker
         if ($envelope->attempts >= $envelope->maximumAttempts) {
             return $this->deadLetter($envelope, $failure);
         }
-        $this->queue->release($envelope, $now + $this->retryDelaySeconds, $failure);
+        $delay = $this->retryPolicy?->delaySeconds(max(1, $envelope->attempts)) ?? $this->retryDelaySeconds;
+        $this->queue->release($envelope, $now + $delay, $failure);
         return JobRunResult::Retried;
     }
 

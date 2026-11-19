@@ -11,7 +11,7 @@
                 "symlink": true,
                 "versions": {
                     "pushinbr/pam-contracts": "1.1.0",
-                    "pushinbr/nimbus": "0.1.0",
+                    "pushinbr/nimbus": "0.2.0",
                     "pushinbr/pam-http-psr": "1.0.0",
                     "pushinbr/pam-psr": "2.0.0",
                     "pushinbr/pam-socket": "1.0.2",
@@ -38,7 +38,7 @@
         "psr/http-server-handler": "^1.0",
         "psr/http-server-middleware": "^1.0",
         "psr/log": "^3.0",
-        "pushinbr/nimbus": "^0.1",
+        "pushinbr/nimbus": "^0.2",
         "pushinbr/pam-http-psr": "^1.0",
         "pushinbr/pam-psr": "^2.0",
         "pushinbr/pam-socket": "^1.0",
@@ -48,12 +48,18 @@
         "symfony/http-kernel": "^8.0"
     },
     "require-dev": {
+        "dragonmantank/cron-expression": "^3.4",
+        "fakerphp/faker": "^1.24",
+        "league/flysystem": "^3.29",
         "pestphp/pest": "^4.7",
         "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "12.5.30",
+        "psr/http-client": "^1.0",
         "pushinbr/arcano": "^0.2.4",
         "pushinbr/pam-http-testing": "^1.0",
-        "pushinbr/pam-testing": "^2.0"
+        "pushinbr/pam-testing": "^2.0",
+        "symfony/mailer": "^7.3",
+        "symfony/mime": "^7.3"
     },
     "autoload": {
         "psr-4": {

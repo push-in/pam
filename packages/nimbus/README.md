@@ -359,6 +359,67 @@ OAuth/OIDC authorization-server duties belong to the application
 or a dedicated identity provider; they must not be simulated with long-lived
 access tokens.
 
+## File storage
+
+`Nimbus\Storage` puts named disks over [league/flysystem](https://flysystem.thephpleague.com)
+v3. Nimbus does not require it: install `league/flysystem` for local disks and
+`league/flysystem-aws-s3-v3` for S3 (also AWS-compatible stores such as MinIO and R2).
+
+```php
+$app->provider(new StorageServiceProvider(
+    StorageConfig::fromEnvironment(),
+    routes: '/files', // opt-in signed upload and download routes for local disks
+));
+
+$disk = $app->storage()->disk();           // FILESYSTEM_DISK, `local` by default
+$disk->put('avatars/42.png', $bytes);
+$disk->get('avatars/42.png');
+$disk->url('avatars/42.png');               // STORAGE_URL / AWS_URL prefix, or the S3 object URL
+$disk->temporaryUrl('invoices/7.pdf', 300); // download URL valid for 5 minutes
+```
+
+`StorageConfig::fromEnvironment()` defines `local` from `STORAGE_ROOT` (default `./storage`)
+and `STORAGE_URL`, and `s3` when `AWS_BUCKET` is set (`AWS_DEFAULT_REGION`, `AWS_ENDPOINT`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_USE_PATH_STYLE_ENDPOINT`, `AWS_URL`).
+`APP_URL` prefixes the signed routes. Pass an array of disks to the constructor for more,
+or wrap any flysystem operator with `StorageManager::filesystem($name, $operator)`. A
+`Disk` is injectable and resolves to the default disk; `Disk::filesystem()` exposes the
+flysystem operator for listing, moving and visibility.
+
+### Direct uploads
+
+`temporaryUploadUrl()` returns a URL the client sends the file to with `PUT`, so the
+upload does not pass through your handler:
+
+```php
+$app->post('/avatars', static fn (Disk $disk, Response $response): Response => $response->json([
+    'upload' => $disk->temporaryUploadUrl('avatars/42.png', ttl: 600, maxBytes: 2_000_000, contentType: 'image/png'),
+]));
+```
+
+On S3 the URL is a presigned `PutObject` from the AWS SDK; S3 binds the content type
+but cannot cap the size of a presigned PUT, so check `Disk::size()` once the client
+reports the upload. On local disks it points at `PUT {routes}/upload`, which answers
+`413` above `maxBytes`, `415` for another content type and `403` for a tampered or
+expired URL, then writes the body and answers `201` with `{disk, path, size}`. The
+runtime buffers request bodies up to the `maxBodyBytes` listen option (2 MiB by
+default); raise it for larger local uploads or use S3. `GET {routes}/download` streams
+the file behind a local `temporaryUrl()`.
+
+### Signed URLs
+
+`UrlSigner` signs a path and its query with HMAC-SHA256 under a key derived from
+`APP_KEY`; changing the path, any parameter or the expiry invalidates the signature,
+which is compared in constant time. `signed()` guards a route or a group and answers
+`403` with problem code `InvalidSignature`:
+
+```php
+$signer = $app->container()->get(UrlSigner::class);
+$link = $signer->temporary('/reports/7', ttl: 3600, query: ['format' => 'csv']);
+
+$app->get('/reports/{id}', ReportController::class)->signed();
+```
+
 ## Production building blocks
 
 Nimbus exposes small, replaceable contracts instead of choosing application
@@ -399,6 +460,197 @@ through `JobCodec`. The codec uses an explicit name-to-class allowlist, a
 versioned JSON envelope, a 64 KiB size limit and a depth limit. It never accepts
 PHP serialized objects or client-supplied class names.
 
+## Queues and the scheduler
+
+Two durable `JobQueue` drivers share the memory queue's lifecycle and add a
+failed-jobs store (`FailedJobRepository`: `failed()`, `retryFailed()`,
+`forgetFailed()`). Both accept only `SerializableJob` jobs, encoded by `JobCodec`.
+
+```php
+$codec = new JobCodec([SendInvoice::class, SendReport::class]);
+
+$queue = new RedisJobQueue(RedisPool::fromEnvironment(), $codec, queue: 'default');
+// or, with the Arcano integration:
+$queue = new DatabaseJobQueue($databases, $codec, queue: 'default');
+
+$queue->dispatch(new SendInvoice($invoiceId), maximumAttempts: 5, delaySeconds: 60);
+
+$worker = new JobWorker(
+    $queue,
+    new InvokableJobHandler($app->container()), // calls $job->handle(...) with injection
+    leaseSeconds: 60,
+    retryPolicy: new ExponentialBackoff(baseSeconds: 5, maximumSeconds: 3_600),
+);
+```
+
+- **Redis**: pending jobs are a sorted set scored by availability (delays and
+  retries need nothing else); a reservation moves the job to a lease set. Every
+  transition is one Lua script, and keys share a `{queue}` hash tag for Redis
+  Cluster.
+- **Database**: tables `jobs`, `failed_jobs` and `scheduler_locks`. Publish the
+  migration once, then migrate:
+  `$migrations->publish('create_queue_tables', QueueTablesMigration::class)`.
+  Postgres and MySQL reserve with `SELECT ... FOR UPDATE SKIP LOCKED`; SQLite
+  (and SQL Server) reserve with a compare-and-swap update.
+- A worker that dies mid-job leaves its lease to expire and the job returns to
+  the queue; a stale worker cannot complete or release a job someone else took
+  over, because every transition checks the attempt count of its reservation.
+  A job whose last attempt expired, a dead-lettered job and a payload that no
+  longer decodes all land in the failed jobs, with the exception class only.
+- `ExponentialBackoff` doubles the delay per attempt up to a ceiling, with
+  equal jitter (between half and all of the delay) by default.
+
+The scheduler needs `dragonmantank/cron-expression`
+(`composer require dragonmantank/cron-expression`):
+
+```php
+$schedule = new Schedule($queue, timezone: 'America/Sao_Paulo', container: $app->container());
+$schedule->job(SendReport::class)->cron('0 * * * *');
+$schedule->job(new PruneSessions())->dailyAt('03:00');
+$schedule->call(fn () => $cache->prune())->everyFiveMinutes()->withoutOverlapping()->name('prune-cache');
+
+$app->background()
+    ->scheduler(new Scheduler($schedule, new RedisSchedulerLock(RedisPool::fromEnvironment())))
+    ->queue($worker);
+```
+
+Frequencies: `cron()`, `everyMinute()`, `everyTwoMinutes()`, `everyFiveMinutes()`,
+`everyTenMinutes()`, `everyFifteenMinutes()`, `everyThirtyMinutes()`, `hourly()`,
+`hourlyAt()`, `daily()`, `dailyAt()`, `weekly()`, `weeklyOn()`, `monthly()`,
+`monthlyOn()`, plus `timezone()` per task. Each due task first claims its
+(task, minute) key in the `SchedulerLock`, so it runs once per minute however
+many workers or servers tick: use `RedisSchedulerLock` or `DatabaseSchedulerLock`
+whenever more than one process runs the scheduler; `MemorySchedulerLock` (the
+default) only covers one. `withoutOverlapping()` also skips a run while the
+previous one holds its lock. Task names identify them across processes; jobs are
+named after `jobName()` and callbacks after their file and line, so name
+callbacks with `name()` when that is not stable.
+
+### Running inside PAM
+
+No system cron and no extra process: start the server with task workers and
+the scheduler and queue run on them.
+
+```bash
+pam start index.php --workers 4 --task-workers 1
+```
+
+The PAM master sends one tick per second to the task-worker pool, authenticated
+by the cluster's token and never two at once. `App::handle()` answers it by
+calling `Background::tick()`, which runs the scheduler and then drains the queue
+for at most 100 jobs or 0.8 s, so the next tick is not held up. HTTP workers never
+run background work, and the tick header from public traffic is ignored.
+
+Without task workers (a plain `php` process, a separate container), run the same
+`Background` as a loop; it sleeps through `Pam\Async\delay()` under PAM and stops
+on SIGTERM or SIGINT:
+
+```php
+$background->run(intervalSeconds: 1.0);
+
+## Notifications
+
+`Nimbus\Notifications` sends one `Notification` through the channels its
+`via()` returns: `mail`, `push`, `database` and `webhook`, or channels of your
+own (`NotificationChannel`). Recipients implement `Notifiable`; the
+`RoutesNotifications` trait reads `routeNotificationFor<Channel>()` methods, an
+`email` property for mail and an `id` property for the stored key.
+
+```php
+final class InvoicePaid extends Notification
+{
+    public function __construct(private readonly Invoice $invoice) {}
+
+    public function via(Notifiable $notifiable): array
+    {
+        return ['mail', 'push', 'database', 'webhook'];
+    }
+
+    public function toMail(Notifiable $notifiable): MailMessage
+    {
+        return MailMessage::make()
+            ->subject("Invoice {$this->invoice->number} paid")
+            ->greeting('Hello')
+            ->line('We received your payment.')
+            ->action('View invoice', $this->invoice->url);
+    }
+
+    public function toPush(Notifiable $notifiable): PushMessage
+    {
+        return PushMessage::make('Invoice paid', $this->invoice->number)
+            ->data(['invoice' => $this->invoice->id])
+            ->collapseKey('invoices');
+    }
+
+    public function toDatabase(Notifiable $notifiable): array
+    {
+        return ['invoice' => $this->invoice->id, 'amount_in_cents' => $this->invoice->amountInCents];
+    }
+
+    public function toWebhook(Notifiable $notifiable): WebhookMessage
+    {
+        return WebhookMessage::make(['invoice' => $this->invoice->id])->event('invoice.paid');
+    }
+}
+
+$sender = new NotificationSender([
+    'mail' => MailChannel::fromEnvironment(),
+    'push' => new PushChannel(
+        FcmProvider::fromServiceAccountFile('/run/secrets/firebase.json'),
+        ApnsProvider::fromKeyFile('TEAMID', 'KEYID', '/run/secrets/apns.p8', 'com.example.app'),
+        onInvalidToken: static fn (PushTarget $target) => $devices->forget($target->token),
+    ),
+    'database' => new DatabaseChannel($databases),
+    'webhook' => new WebhookChannel((string) getenv('WEBHOOK_SECRET')),
+]);
+$notifier = new Notifier($sender, $queue);
+
+$notifier->send($user, new InvoicePaid($invoice));       // now
+$notifier->sendLater($users, new InvoicePaid($invoice)); // one job per user and channel
+```
+
+Register `SendNotificationJob` in your `JobCodec` and run `SendNotificationHandler`
+in a `JobWorker`. Channels render the notification when it is queued, so the job
+payload is plain JSON and the worker never reloads the notifiable. Retryable
+failures (timeouts, HTTP 408/429/5xx, SMTP errors) return `JobOutcome::Retry`;
+permanent ones (other 4xx, invalid addresses) are dead-lettered. Override
+`maximumAttempts()` and `delaySeconds()` on the notification to tune them.
+
+- **Mail** uses `symfony/mailer` (`composer require symfony/mailer`).
+  `MailChannel::fromEnvironment()` reads `MAILER_DSN`, or `MAIL_MAILER` as a DSN
+  or `smtp` with `MAIL_HOST`/`MAIL_PORT`/`MAIL_USERNAME`/`MAIL_PASSWORD`, and
+  `MAIL_FROM_ADDRESS`/`MAIL_FROM_NAME`. The route is an address, a list, or an
+  `address => name` map. `html()` and `text()` replace the generated bodies.
+- **Push** routes are `PushTarget` objects or `fcm:<token>` / `apns:<token>`
+  strings. FCM uses HTTP v1 with the service account (RS256 assertion, OAuth2
+  token cached per worker until five minutes before expiry). APNs uses token
+  authentication (ES256 JWT reused for 50 minutes) over HTTP/2. Unregistered
+  tokens are reported to `onInvalidToken` instead of failing the delivery.
+- **Database** writes to the `notifications` table of
+  `database/migrations/20261119.000000_0_create_notifications.php` (copy it into
+  your migrations directory). `DatabaseNotifications` lists, counts, marks read
+  or unread, deletes and prunes, always scoped to the notifiable.
+- **Webhook** POSTs `{"id","event","created_at","data"}` with
+  `Nimbus-Event`, `Nimbus-Delivery` (the notification id, for receiver
+  deduplication) and `Nimbus-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body">`.
+  Receivers check it with `WebhookSignature::verify($header, $body, $secret)`.
+  The secret never enters the job payload; pass `secretFor:` for per-URL secrets.
+
+Push and webhooks share the `HttpClient` interface. `HttpClients::detect()`
+uses the non-blocking PAM client inside the runtime and ext-curl otherwise (and
+for HTTP/2, which the PAM client does not speak); wrap any PSR-18 client with
+`Psr18HttpClient`.
+
+In tests, bind `Notifier::fake()` where a `NotificationDispatcher` is expected:
+
+```php
+$notifications = Notifier::fake();
+// ... exercise the code ...
+$notifications->assertSentTo($user, InvoicePaid::class);
+$notifications->assertSentLaterTo($user, InvoicePaid::class);
+$notifications->assertNothingSent();
+```
+
 ## Request lifecycle observers
 
 Register a `RequestLifecycleObserver` with `$app->observe()` to build profilers,
@@ -436,16 +688,123 @@ sequential integer codes.
 
 ## In-memory testing
 
+`Nimbus\Testing\TestCase` (PHPUnit) builds and boots a fresh application per test and sends
+requests to it in memory:
+
+```php
+use Nimbus\Testing\RefreshDatabase;
+use Nimbus\Testing\TestCase;
+
+final class ProductTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function createApplication(): App
+    {
+        $app = new App(discoverPackages: false);
+        $app->provider(new ArcanoServiceProvider($config, $entities, migrations: $migrations));
+        $app->routes(dirname(__DIR__) . '/routes.php');
+        return $app;
+    }
+
+    public function testListsProducts(): void
+    {
+        ProductFactory::new()->count(3)->sequence(['name' => 'Keyboard'], ['name' => 'Mouse'])->create();
+
+        $this->getJson('/products')
+            ->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonPath('data.0.name', 'Keyboard')
+            ->assertJsonStructure(['data' => ['*' => ['id', 'name']]]);
+
+        $this->actingAs($user)
+            ->postJson('/products', ['name' => ''])
+            ->assertUnprocessableEntity()
+            ->assertJsonValidationErrors(['name' => 'required']);
+
+        $this->assertDatabaseCount('products', 3);
+        $this->assertDatabaseHas(Product::class, ['name' => 'Mouse']);
+    }
+}
+```
+
+- Requests: `getJson`, `postJson`, `putJson`, `patchJson`, `deleteJson`, `json($method, ...)` and
+  `get`; `withHeaders()`, `withHeader()` and `withToken()` apply to the following requests.
+- `actingAs($principal)` binds an `Authenticator` returning the principal, so routes with
+  `auth()`/`can()` and `AuthenticateMiddleware` resolved through the container see it.
+- Responses: `assertOk`, `assertCreated`, `assertNoContent`, `assertStatus`, `assertNotFound`,
+  `assertUnauthorized`, `assertForbidden`, `assertUnprocessableEntity`, `assertHeader`,
+  `assertHeaderMissing`, `assertJson` (subset), `assertExactJson`, `assertJsonPath` (value or
+  closure), `assertJsonMissingPath`, `assertJsonCount`, `assertJsonStructure` (`*` for lists),
+  `assertJsonValidationErrors` and `assertJsonMissingValidationErrors` (the 422 Problem Details
+  `errors` member), `json($path)` and `dump()`. Failures are PHPUnit assertion failures.
+- `RefreshDatabase` runs the pending migrations, then opens a transaction that every request of the
+  test shares and that is rolled back when the test ends. A request that leaves its own transaction
+  open loses only its writes, as in production.
+- `assertDatabaseHas`, `assertDatabaseMissing` and `assertDatabaseCount` take a table or an entity
+  class.
+
+Without the base class, `TestClient` offers the same requests over any `App`:
+
 ```php
 (new TestClient($app))
+    ->withToken($token)
     ->postJson('/login', ['email' => 'dev@pam.dev'])
     ->assertSuccessful()
-    ->assertHeader('content-type', 'application/json')
     ->assertJsonPath('data.status', 1);
 ```
 
-Use `assertJson()` for an exact payload, `assertJsonPath()` for a focused value,
-and `assertStatus()` when the endpoint intentionally returns a specific code.
+### Factories and seeders
+
+Factories build Arcano entities with [Faker](https://fakerphp.org) (`composer require --dev
+fakerphp/faker`). Attributes named like constructor parameters go to the constructor; the rest are
+set as properties.
+
+```php
+/** @extends Factory<Product> */
+final class ProductFactory extends Factory
+{
+    protected string $model = Product::class;
+
+    public function definition(): array
+    {
+        return [
+            'name' => $this->faker->words(2, true),
+            'priceInCents' => $this->faker->numberBetween(100, 100_000),
+            'category' => CategoryFactory::new(), // made, then persisted by cascade
+        ];
+    }
+
+    public function archived(): self
+    {
+        return $this->state(['status' => ProductStatus::Archived]);
+    }
+}
+
+ProductFactory::new()->makeOne();                      // unsaved
+ProductFactory::new()->count(10)->archived()->create(); // persisted in one unit of work
+ProductFactory::new()->state(fn (array $a) => ['name' => strtoupper($a['name'])])->raw();
+```
+
+`count()`, `state()`, `sequence()`, `afterMaking()` and `afterCreating()` return copies;
+`make()`/`create()` return one entity, or a list after `count()` (`makeOne`, `makeMany`,
+`createOne`, `createMany` are typed). `create()` persists through the manager set with
+`Factory::useManager()`, which `TestCase` and `SeederRunner` set; `Factory::useFaker()` changes
+the locale or seed.
+
+Seeders define `run()`, resolved through the container, and chain others with `call()`:
+
+```php
+final class DatabaseSeeder extends Seeder
+{
+    public function run(ArcanoManager $arcano): void
+    {
+        $this->call([CategorySeeder::class, ProductSeeder::class]);
+    }
+}
+
+(new SeederRunner($app))->run(DatabaseSeeder::class); // or $this->seed(...) in a TestCase
+```
 
 Run `composer benchmark` for the standalone router benchmark. Its schema 1 JSON
 reports warmed static and constrained-dynamic throughput, p50/p95/p99 latency,

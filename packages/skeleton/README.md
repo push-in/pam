@@ -52,6 +52,10 @@ Run the in-memory application test inside Pam's Embed SAPI:
 pam composer test
 ```
 
+`tests/ApplicationTest.php` extends `Nimbus\Testing\TestCase` with `RefreshDatabase`: every test
+migrates an in-memory SQLite database and rolls back what it wrote. `ProductFactory` builds
+products with Faker; `pam composer seed` runs `database/seeders/DatabaseSeeder.php`.
+
 The generated application and this published skeleton share the same source
 files:
 
@@ -65,7 +69,7 @@ app/
 ├── Requests/
 ├── Resources/
 └── Services/
-database/migrations/
+database/{migrations,factories,seeders}/
 tests/{ApplicationTest.php,bootstrap.php}
 routes.php                      # every route, in one file
 index.php

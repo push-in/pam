@@ -97,6 +97,8 @@ The `feat/api-2-foundation` development line implements:
 - an in-memory test client with fluent response assertions;
 - a canonical structured starter embedded by `pam init` and exercised through
   a clean dependency install and Embed SAPI smoke test;
+- notifications over mail (symfony/mailer), push (FCM HTTP v1, APNs), Arcano
+  database storage and HMAC-signed webhooks, sent now or through the job queue;
 - a reproducible router benchmark.
 
 Arcano is the official ORM and is integrated with Fiber-local connections,
