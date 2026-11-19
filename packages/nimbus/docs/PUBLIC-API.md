@@ -577,7 +577,7 @@ final readonly class Nimbus\Database\ArcanoServiceProvider implements Pam\Contra
 
 ### Methods
 
-- `public __construct(Nimbus\Database\DatabaseConfig $config, Arcano\ORM\SchemaInterface|Nimbus\Database\ArcanoSchemaCompiler|array $schema, ?string $migrations = null): mixed`
+- `public __construct(Nimbus\Database\DatabaseConfig $config, Arcano\ORM\SchemaInterface|Nimbus\Database\ArcanoSchemaCompiler|array $schema, ?string $migrations = null, int $maxIdleConnections = 8): mixed`
 - `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
 - `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
 

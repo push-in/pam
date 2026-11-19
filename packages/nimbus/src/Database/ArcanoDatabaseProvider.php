@@ -20,7 +20,9 @@ use Arcano\Database\DatabaseInterface;
 use Arcano\Database\DatabaseManager;
 
 /**
- * Gives every PAM request Fiber its own Arcano connections.
+ * Gives every PAM request Fiber its own Arcano connections. Released connections
+ * return to a per-worker pool, so requests reuse open sessions instead of paying a
+ * connect and authentication round trip each time.
  *
  * @internal Applications should resolve ArcanoManager instead.
  */
@@ -38,8 +40,17 @@ final class ArcanoDatabaseProvider
 
     private ?ArcanoQueryLogger $logger = null;
 
-    public function __construct(private readonly DatabaseConfig $config)
-    {
+    /** @var list<DatabaseManager> Connected managers waiting for the next request. */
+    private array $idle = [];
+
+    /** @param int $maxIdle Connection sets kept open per worker; 0 disconnects after every request. */
+    public function __construct(
+        private readonly DatabaseConfig $config,
+        private readonly int $maxIdle = 8,
+    ) {
+        if ($maxIdle < 0) {
+            throw new \InvalidArgumentException('The idle connection limit cannot be negative.');
+        }
         $this->fiberManagers = new \WeakMap();
         $this->arcanoConfig = self::arcanoConfig($config);
     }
@@ -48,9 +59,16 @@ final class ArcanoDatabaseProvider
     {
         $fiber = \Fiber::getCurrent();
         if ($fiber === null) {
-            return $this->mainManager ??= $this->createManager();
+            return $this->mainManager ??= $this->acquire();
         }
-        return $this->fiberManagers[$fiber] ??= $this->createManager();
+        return $this->fiberManagers[$fiber] ??= $this->acquire();
+    }
+
+    /** The manager of the current Fiber, without acquiring one. */
+    public function current(): ?DatabaseManager
+    {
+        $fiber = \Fiber::getCurrent();
+        return $fiber === null ? $this->mainManager : ($this->fiberManagers[$fiber] ?? null);
     }
 
     public function database(\UnitEnum|string|null $name = null): DatabaseInterface
@@ -88,18 +106,46 @@ final class ArcanoDatabaseProvider
             return;
         }
 
-        foreach ($manager->getDrivers() as $driver) {
-            while ($driver->getTransactionLevel() > 0) {
-                $driver->rollbackTransaction();
-            }
-            $driver->disconnect();
-        }
-
         if ($fiber === null) {
             $this->mainManager = null;
+        } else {
+            unset($this->fiberManagers[$fiber]);
+        }
+
+        $reusable = count($this->idle) < $this->maxIdle;
+        foreach ($manager->getDrivers() as $driver) {
+            try {
+                while ($driver->getTransactionLevel() > 0) {
+                    $driver->rollbackTransaction();
+                }
+            } catch (\Throwable) {
+                // A session that cannot roll back is not handed to another request.
+                $reusable = false;
+            }
+        }
+        if ($reusable) {
+            $this->idle[] = $manager;
             return;
         }
-        unset($this->fiberManagers[$fiber]);
+        foreach ($manager->getDrivers() as $driver) {
+            $driver->disconnect();
+        }
+    }
+
+    /** Closes the pooled connections, e.g. before a worker exits or forks. */
+    public function disconnectIdle(): void
+    {
+        foreach ($this->idle as $manager) {
+            foreach ($manager->getDrivers() as $driver) {
+                $driver->disconnect();
+            }
+        }
+        $this->idle = [];
+    }
+
+    private function acquire(): DatabaseManager
+    {
+        return array_pop($this->idle) ?? $this->createManager();
     }
 
     private function createManager(): DatabaseManager

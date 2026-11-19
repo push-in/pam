@@ -2935,6 +2935,15 @@
                             "optional": true,
                             "default": null,
                             "hasDefault": true
+                        },
+                        {
+                            "name": "maxIdleConnections",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 8,
+                            "hasDefault": true
                         }
                     ]
                 },

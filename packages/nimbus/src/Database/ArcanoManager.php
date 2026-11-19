@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nimbus\Database;
 
 use Arcano\Database\DatabaseInterface;
+use Arcano\Database\DatabaseManager;
 use Arcano\ORM\EntityManager;
 use Arcano\ORM\EntityManagerInterface;
 use Arcano\ORM\Factory;
@@ -20,13 +21,13 @@ use Nimbus\Transactions\TransactionManager;
 
 /**
  * Arcano ORM for PAM: every request Fiber gets its own connections and identity map.
+ * The ORM follows its connection set through the worker pool; its identity map is
+ * emptied when the request ends.
  */
 final class ArcanoManager implements TransactionManager
 {
-    /** @var \WeakMap<object, ORMInterface> */
-    private \WeakMap $fiberOrms;
-
-    private ?ORMInterface $mainOrm = null;
+    /** @var \WeakMap<DatabaseManager, ORMInterface> */
+    private \WeakMap $orms;
 
     private SchemaInterface $schema;
 
@@ -36,7 +37,7 @@ final class ArcanoManager implements TransactionManager
         SchemaInterface|array $schema,
         private readonly ?Container $container = null,
     ) {
-        $this->fiberOrms = new \WeakMap();
+        $this->orms = new \WeakMap();
         $this->schema = is_array($schema) ? new Schema($schema) : $schema;
     }
 
@@ -47,11 +48,8 @@ final class ArcanoManager implements TransactionManager
 
     public function orm(): ORMInterface
     {
-        $fiber = \Fiber::getCurrent();
-        if ($fiber === null) {
-            return $this->mainOrm ??= $this->createOrm();
-        }
-        return $this->fiberOrms[$fiber] ??= $this->createOrm();
+        $manager = $this->databases->manager();
+        return $this->orms[$manager] ??= new ORM(new Factory($manager), $this->schema);
     }
 
     /**
@@ -114,24 +112,16 @@ final class ArcanoManager implements TransactionManager
         $schema[$resolved][SchemaInterface::SCOPE] = new ArcanoTenantScope($this->container, $column);
         $this->schema = new Schema($schema);
 
-        // Identity maps built with the previous schema are dropped.
-        $this->mainOrm = null;
-        $this->fiberOrms = new \WeakMap();
+        // ORMs built with the previous schema are dropped.
+        $this->orms = new \WeakMap();
     }
 
     public function releaseCurrentRequest(): void
     {
-        $fiber = \Fiber::getCurrent();
-        if ($fiber === null) {
-            $this->mainOrm = null;
-        } else {
-            unset($this->fiberOrms[$fiber]);
+        $manager = $this->databases->current();
+        if ($manager !== null && isset($this->orms[$manager])) {
+            $this->orms[$manager]->getHeap()->clean();
         }
         $this->databases->releaseCurrent();
-    }
-
-    private function createOrm(): ORMInterface
-    {
-        return new ORM(new Factory($this->databases->manager()), $this->schema);
     }
 }
