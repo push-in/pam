@@ -5,6 +5,8 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-19
+
 ### Added
 - `Storage`: named disks over league/flysystem v3 (local and S3, optional dependencies) with
   `StorageConfig::fromEnvironment()`, `StorageServiceProvider`, `App::storage()` and an
