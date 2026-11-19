@@ -195,6 +195,10 @@ namespace Pam\Http {
 }
 
 namespace Pam\Internal {
+    final class HttpRequestCancelled extends \RuntimeException
+    {
+    }
+
     final class Runtime
     {
         public static function registerPsrHandler(object $handler): void

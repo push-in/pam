@@ -329,6 +329,12 @@ final class App implements ApplicationInterface
             return $this->finalizeResponse($request, $handled);
         } catch (\Throwable $error) {
             $failure = $error;
+            // The client went away: the runtime answers 499 and nothing is logged as an error.
+            for ($cause = $error; $cause !== null; $cause = $cause->getPrevious()) {
+                if ($cause::class === 'Pam\\Internal\\HttpRequestCancelled') {
+                    throw $cause;
+                }
+            }
             if ($error instanceof HttpException) {
                 return $this->finalizeResponse($request, self::problemResponse(
                     $response,
