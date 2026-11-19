@@ -55,7 +55,6 @@
         "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "12.5.30",
         "psr/http-client": "^1.0",
-        "psr/http-factory": "^1.1",
         "pushinbr/arcano": "^0.2.4",
         "pushinbr/pam-http-testing": "^1.0",
         "pushinbr/pam-testing": "^2.0",
