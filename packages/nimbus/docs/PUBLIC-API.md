@@ -6,6 +6,11 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 
 ## Symbols
 
+- [`Nimbus\Admin\Admin`](#nimbusadminadmin)
+- [`Nimbus\Admin\AdminAction`](#nimbusadminadminaction)
+- [`Nimbus\Admin\AdminField`](#nimbusadminadminfield)
+- [`Nimbus\Admin\AdminPanel`](#nimbusadminadminpanel)
+- [`Nimbus\Admin\AdminResource`](#nimbusadminadminresource)
 - [`Nimbus\App`](#nimbusapp)
 - [`Nimbus\Auth\Abilities`](#nimbusauthabilities)
 - [`Nimbus\Auth\AccessTokenIssuer`](#nimbusauthaccesstokenissuer)
@@ -290,6 +295,143 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\View\ViewException`](#nimbusviewviewexception)
 - [`Nimbus\View\ViewFactory`](#nimbusviewviewfactory)
 - [`Nimbus\View\ViewServiceProvider`](#nimbusviewviewserviceprovider)
+
+## `Nimbus\Admin\Admin`
+
+```php
+final class Nimbus\Admin\Admin
+```
+
+### Methods
+
+- `public static panel(Nimbus\App $app, string $prefix = "/admin", ?string $loginUrl = null, string $title = "Admin", ?string $views = null): Nimbus\Admin\AdminPanel`
+
+## `Nimbus\Admin\AdminAction`
+
+```php
+final readonly class Nimbus\Admin\AdminAction
+```
+
+### Properties
+
+- `public readonly string $ability`
+- `public readonly bool $destructive`
+- `public readonly Closure $handler`
+- `public readonly string $label`
+
+### Methods
+
+- `public __construct(string $label, Closure $handler, string $ability = "update", bool $destructive = false): mixed`
+
+## `Nimbus\Admin\AdminField`
+
+```php
+final class Nimbus\Admin\AdminField
+```
+
+### Constants
+
+- `TYPES = ["id","text","email","url","password","textarea","number","decimal","boolean","date","datetime","time","select","json","belongsTo"]`
+
+### Properties
+
+- `public ?string $enum`
+- `public bool $filterable`
+- `public ?Closure $format`
+- `public string $help`
+- `public string $label`
+- `public ?int $maxLength`
+- `public readonly string $name`
+- `public bool $nullable`
+- `public bool $onForm`
+- `public bool $onList`
+- `public array $options`
+- `public bool $readonly`
+- `public bool $required`
+- `public array $rules`
+- `public bool $searchable`
+- `public bool $sortable`
+- `public ?string $target`
+- `public readonly string $type`
+
+### Methods
+
+- `public __construct(string $name, string $type = "text"): mixed`
+- `public static belongsTo(string $name, string $target): self`
+- `public static boolean(string $name): self`
+- `public static date(string $name): self`
+- `public static datetime(string $name): self`
+- `public static decimal(string $name): self`
+- `public static email(string $name): self`
+- `public filterable(bool $filterable = true): self`
+- `public format(Closure $format): self`
+- `public static headline(string $name): string`
+- `public help(string $help): self`
+- `public hidden(): self`
+- `public label(string $label): self`
+- `public maxLength(?int $length): self`
+- `public nullable(bool $nullable = true): self`
+- `public static number(string $name): self`
+- `public onForm(bool $show = true): self`
+- `public onList(bool $show = true): self`
+- `public options(array|string $options): self`
+- `public readonly(bool $readonly = true): self`
+- `public required(bool $required = true): self`
+- `public rules(Nimbus\Validation\ValidationRule ...$rules): self`
+- `public searchable(bool $searchable = true): self`
+- `public static select(string $name, array|string $options): self`
+- `public sortable(bool $sortable = true): self`
+- `public static text(string $name): self`
+- `public static textarea(string $name): self`
+
+## `Nimbus\Admin\AdminPanel`
+
+```php
+final class Nimbus\Admin\AdminPanel
+```
+
+### Properties
+
+- `public readonly string $prefix`
+
+### Methods
+
+- `public __construct(Nimbus\App $app, string $prefix = "/admin", ?string $loginUrl = null, string $title = "Admin", ?string $viewPath = null): mixed`
+- `public displayTitle(): string`
+- `public locale(string $locale): self`
+- `public login(): ?string`
+- `public loginUrl(?string $url): self`
+- `public messages(array $messages): self`
+- `public resource(Nimbus\Admin\AdminResource|string $resource): self`
+- `public resourceBySlug(string $slug): ?Nimbus\Admin\AdminResource`
+- `public resourceFor(string $class): Nimbus\Admin\AdminResource`
+- `public resources(): array`
+- `public text(string $key, array $replace = []): string`
+- `public title(string $title): self`
+- `public url(string $path = ""): string`
+- `public views(): Nimbus\View\ViewFactory`
+
+## `Nimbus\Admin\AdminResource`
+
+```php
+class Nimbus\Admin\AdminResource
+```
+
+### Methods
+
+- `public __construct(?string $entity = null): mixed`
+- `public actions(): array`
+- `public defaultSort(): ?array`
+- `public entity(): string`
+- `public fields(array $fields): array`
+- `public input(): ?string`
+- `public label(): string`
+- `public perPage(): int`
+- `public query(Arcano\ORM\Select $select, Pam\Http\Request $request): Arcano\ORM\Select`
+- `public saving(object $entity, bool $creating): void`
+- `public singularLabel(): string`
+- `public slug(): string`
+- `public title(object $entity): string`
 
 ## `Nimbus\App`
 

@@ -1,6 +1,1233 @@
 {
     "schema": 1,
     "symbols": {
+        "Nimbus\\Admin\\Admin": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "panel": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\Admin\\AdminPanel",
+                    "parameters": [
+                        {
+                            "name": "app",
+                            "type": "Nimbus\\App",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "prefix",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "/admin",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "loginUrl",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "title",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "Admin",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "views",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Admin\\AdminAction": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": {
+                "ability": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                },
+                "destructive": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "bool"
+                },
+                "handler": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "Closure"
+                },
+                "label": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "label",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "handler",
+                            "type": "Closure",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "ability",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "update",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "destructive",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": false,
+                            "hasDefault": true
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Admin\\AdminField": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": {
+                "TYPES": [
+                    "id",
+                    "text",
+                    "email",
+                    "url",
+                    "password",
+                    "textarea",
+                    "number",
+                    "decimal",
+                    "boolean",
+                    "date",
+                    "datetime",
+                    "time",
+                    "select",
+                    "json",
+                    "belongsTo"
+                ]
+            },
+            "properties": {
+                "enum": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "?string"
+                },
+                "filterable": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "format": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "?Closure"
+                },
+                "help": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "string"
+                },
+                "label": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "string"
+                },
+                "maxLength": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "?int"
+                },
+                "name": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                },
+                "nullable": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "onForm": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "onList": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "options": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "array"
+                },
+                "readonly": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "required": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "rules": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "array"
+                },
+                "searchable": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "sortable": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "bool"
+                },
+                "target": {
+                    "static": false,
+                    "readonly": false,
+                    "type": "?string"
+                },
+                "type": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "type",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "text",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "belongsTo": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "target",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "boolean": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "date": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "datetime": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "decimal": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "email": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "filterable": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "filterable",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "format": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "format",
+                            "type": "Closure",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "headline": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "help": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "help",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "hidden": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": []
+                },
+                "label": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "label",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "maxLength": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "length",
+                            "type": "?int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "nullable": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "nullable",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "number": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "onForm": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "show",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "onList": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "show",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "options": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "options",
+                            "type": "array|string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "readonly": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "readonly",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "required": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "required",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "rules": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "rules",
+                            "type": "Nimbus\\Validation\\ValidationRule",
+                            "byReference": false,
+                            "variadic": true,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "searchable": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "searchable",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "select": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "options",
+                            "type": "array|string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "sortable": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "sortable",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "text": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "textarea": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Admin\\AdminPanel": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": {
+                "prefix": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "app",
+                            "type": "Nimbus\\App",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "prefix",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "/admin",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "loginUrl",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "title",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "Admin",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "viewPath",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "displayTitle": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                },
+                "locale": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "locale",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "login": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": []
+                },
+                "loginUrl": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "url",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "messages": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "messages",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "resource": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "resource",
+                            "type": "Nimbus\\Admin\\AdminResource|string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "resourceBySlug": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?Nimbus\\Admin\\AdminResource",
+                    "parameters": [
+                        {
+                            "name": "slug",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "resourceFor": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\Admin\\AdminResource",
+                    "parameters": [
+                        {
+                            "name": "class",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "resources": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
+                },
+                "text": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "replace",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "title": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "title",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "url": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "path",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "views": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\View\\ViewFactory",
+                    "parameters": []
+                }
+            }
+        },
+        "Nimbus\\Admin\\AdminResource": {
+            "kind": "class",
+            "final": false,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "entity",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "actions": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
+                },
+                "defaultSort": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?array",
+                    "parameters": []
+                },
+                "entity": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                },
+                "fields": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": [
+                        {
+                            "name": "fields",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "input": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": []
+                },
+                "label": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                },
+                "perPage": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "int",
+                    "parameters": []
+                },
+                "query": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Arcano\\ORM\\Select",
+                    "parameters": [
+                        {
+                            "name": "select",
+                            "type": "Arcano\\ORM\\Select",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "saving": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "entity",
+                            "type": "object",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "creating",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "singularLabel": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                },
+                "slug": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                },
+                "title": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "entity",
+                            "type": "object",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\App": {
             "kind": "class",
             "final": true,
