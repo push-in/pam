@@ -21,6 +21,7 @@ use Nimbus\RoutingResultType;
 use Nimbus\RouteRegistrar;
 use Nimbus\OpenApi\OpenApiGenerator;
 use Nimbus\Lifecycle\RequestLifecycleObserver;
+use Nimbus\Runtime\Background;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Http\Server as HttpServer;
@@ -56,6 +57,8 @@ final class App implements ApplicationInterface
 
     /** @var list<RequestLifecycleObserver> */
     private array $observers = [];
+
+    private ?Background $background = null;
 
     public function __construct(bool $discoverPackages = true, ?Container $container = null)
     {
@@ -293,6 +296,16 @@ final class App implements ApplicationInterface
         return $this;
     }
 
+    /**
+     * Queue workers and the scheduler of this application. They run on the
+     * ticks PAM sends to task workers (`--task-workers N`), or in a dedicated
+     * process through Background::run().
+     */
+    public function background(): Background
+    {
+        return $this->background ??= new Background();
+    }
+
     /** @param array<string, mixed> $options */
     public function listen(int $port, string $host = '127.0.0.1', array $options = []): void
     {
@@ -323,6 +336,12 @@ final class App implements ApplicationInterface
             foreach ($this->observers as $observer) {
                 $observer->starting($request);
                 $startedObservers[] = $observer;
+            }
+            if ($this->background !== null) {
+                $answered = $this->background->answer($request, $response);
+                if ($answered !== null) {
+                    return $answered;
+                }
             }
             $handled = $this->pipeline?->handle($request, $response)
                 ?? throw new \LogicException('Nimbus pipeline was not compiled.');

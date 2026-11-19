@@ -120,6 +120,24 @@ final class ArcanoMigrationManager
         return array_values(array_diff(self::files($directory), $before));
     }
 
+    /**
+     * Copies a migration shipped by a package (QueueTablesMigration, for example)
+     * into the migration directory, once.
+     *
+     * @param class-string<MigrationInterface> $class
+     * @return string|null Path of the new file; null when it was already published.
+     */
+    public function publish(string $name, string $class): ?string
+    {
+        $repository = $this->migrator()->getRepository();
+        foreach ($repository->getMigrations() as $migration) {
+            if ($migration::class === $class) {
+                return null;
+            }
+        }
+        return $repository->registerMigration($name, $class);
+    }
+
     /** Bound to the connections of the current Fiber. */
     private function migrator(): Migrator
     {
