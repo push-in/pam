@@ -65,6 +65,10 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   `AccessTokenIssuer`.
 - `TokenPrincipal::can()` honours namespace wildcards (`orders:*`).
 - `Input` and `FormRequest` read urlencoded and multipart form bodies as well as JSON.
+- `ArcanoManager::select()` clones one prototype per role and connection set, so repeated queries share
+  the loader and Arcano's cached statement of their shape (roles with a scope still build a fresh select).
+- The query monitor hooks the Arcano query log only when the first query budget starts; apps without
+  `QueryBudgetMiddleware` no longer time and log every query.
 
 ## 0.3.0 - 2026-11-19
 
