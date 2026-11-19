@@ -97,6 +97,41 @@ final class InputTest extends TestCase
         $search = $app->handle(new Request('GET', '/search', ['q' => 'key'], [], ''), new Response())->export();
         self::assertSame('{"q":"key","sort":"recent"}', $search['body']);
     }
+
+    public function testOpenApiDescribesInputsFromTheHandlerSignature(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->post('/products', static fn (StoreProduct $input, Response $response): Response => $response->json([]));
+        $app->get('/search', static fn (SearchProducts $input, Response $response): Response => $response->json([]));
+        $app->docs();
+
+        $document = json_decode((string) $app->handle(new Request('GET', '/docs/openapi.json', [], [], ''), new Response())->export()['body'], true, 64, JSON_THROW_ON_ERROR);
+        $schema = self::at($document, 'components', 'schemas', 'StoreProduct');
+        self::assertSame(['name', 'price_in_cents'], self::at($schema, 'required'));
+        self::assertSame(['type' => 'string', 'maxLength' => 120], self::at($schema, 'properties', 'name'));
+        self::assertSame(['type' => 'integer', 'minimum' => 1], self::at($schema, 'properties', 'price_in_cents'));
+        self::assertSame(['type' => 'integer', 'enum' => [1, 2]], self::at($schema, 'properties', 'status'));
+        self::assertSame(['type' => ['string', 'null']], self::at($schema, 'properties', 'description'));
+        self::assertSame('email', self::at($schema, 'properties', 'contact', 'properties', 'email', 'format'));
+        self::assertSame('#/components/schemas/StoreProduct', self::at($document, 'paths', '/products', 'post', 'requestBody', 'content', 'application/json', 'schema', '$ref'));
+        $query = self::at($document, 'paths', '/search', 'get', 'parameters');
+        self::assertIsArray($query);
+        self::assertSame(['q', 'sort'], array_column($query, 'name'));
+        self::assertSame(['type' => 'string', 'enum' => ['recent', 'price']], self::at($query, 1, 'schema'));
+
+        $page = $app->handle(new Request('GET', '/docs', [], [], ''), new Response())->export();
+        self::assertStringContainsString('data-url="/docs/openapi.json"', $page['body']);
+    }
+
+    private static function at(mixed $value, string|int ...$keys): mixed
+    {
+        foreach ($keys as $key) {
+            self::assertIsArray($value);
+            self::assertArrayHasKey($key, $value);
+            $value = $value[$key];
+        }
+        return $value;
+    }
 }
 
 enum InputStatus: int

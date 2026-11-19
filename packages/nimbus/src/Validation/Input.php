@@ -64,6 +64,28 @@ abstract class Input
         return $input;
     }
 
+    /**
+     * The JSON Schema of the accepted fields, used by the OpenAPI document.
+     *
+     * @return array<string, mixed>
+     */
+    final public static function schema(): array
+    {
+        $properties = [];
+        $required = [];
+        foreach (self::fields(static::class) as $field) {
+            $properties[$field->key] = $field->schema();
+            if (!$field->hasDefault && !$field->nullable) {
+                $required[] = $field->key;
+            }
+        }
+        $schema = ['type' => 'object', 'properties' => $properties];
+        if ($required !== []) {
+            $schema['required'] = $required;
+        }
+        return $schema + ['additionalProperties' => false];
+    }
+
     /** @return array<string, mixed> The validated fields, keyed by property. */
     final public function toArray(): array
     {

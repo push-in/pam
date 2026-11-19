@@ -191,6 +191,28 @@ final class App implements ApplicationInterface
         return new OpenApiGenerator($this->router, $title, $version);
     }
 
+    /**
+     * Serves the OpenAPI document at `{path}/openapi.json` and an API reference page at `{path}`.
+     * The document is generated on the first request and kept for the worker's lifetime.
+     */
+    public function docs(string $path = '/docs', string $title = 'Nimbus API', string $version = '1.0.0'): self
+    {
+        $path = '/' . trim($path, '/');
+        $document = null;
+        $this->get($path . '/openapi.json', function (Request $request, Response $response) use (&$document, $title, $version): Response {
+            $document ??= $this->openApi($title, $version)->toJson();
+            return $response->header('content-type', 'application/json')->send($document);
+        });
+        $html = '<!doctype html><html><head><meta charset="utf-8"><title>' . htmlspecialchars($title) . '</title>'
+            . '<meta name="viewport" content="width=device-width, initial-scale=1"></head><body>'
+            . '<script id="api-reference" data-url="' . htmlspecialchars($path . '/openapi.json') . '"></script>'
+            . '<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script></body></html>';
+        $this->get($path, static fn (Request $request, Response $response): Response => $response
+            ->header('content-type', 'text/html; charset=utf-8')
+            ->send($html));
+        return $this;
+    }
+
     /** @param MiddlewareInterface|callable|class-string<MiddlewareInterface> $middleware */
     public function middleware(object|callable|string $middleware): self
     {

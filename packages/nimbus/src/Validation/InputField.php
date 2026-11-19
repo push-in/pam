@@ -56,6 +56,62 @@ final readonly class InputField
         );
     }
 
+    /** @return array<string, mixed> */
+    public function schema(): array
+    {
+        $schema = match ($this->type) {
+            'string' => ['type' => 'string'],
+            'int' => ['type' => 'integer'],
+            'float' => ['type' => 'number'],
+            'bool' => ['type' => 'boolean'],
+            'array' => ['type' => 'array'],
+            'date' => ['type' => 'string', 'format' => 'date-time'],
+            'enum' => $this->enumSchema(),
+            'input' => $this->inputSchema(),
+            default => [],
+        };
+        foreach ($this->rules as $rule) {
+            $schema += match (true) {
+                $rule instanceof Attributes\Min => [match ($this->type) {
+                    'string' => 'minLength',
+                    'array' => 'minItems',
+                    default => 'minimum',
+                } => $rule->value],
+                $rule instanceof Attributes\Max => [match ($this->type) {
+                    'string' => 'maxLength',
+                    'array' => 'maxItems',
+                    default => 'maximum',
+                } => $rule->value],
+                $rule instanceof Attributes\Email => ['format' => 'email'],
+                $rule instanceof Attributes\Url => ['format' => 'uri'],
+                $rule instanceof Attributes\Uuid => ['format' => 'uuid'],
+                $rule instanceof Attributes\In => ['enum' => $rule->values],
+                default => [],
+            };
+        }
+        if ($this->nullable && isset($schema['type']) && is_string($schema['type'])) {
+            $schema['type'] = [$schema['type'], 'null'];
+        }
+        return $schema;
+    }
+
+    /** @return array<string, mixed> */
+    private function enumSchema(): array
+    {
+        /** @var class-string<\BackedEnum> $enum */
+        $enum = $this->class;
+        $values = array_map(static fn (\BackedEnum $case): int|string => $case->value, $enum::cases());
+        return ['type' => is_int($values[0] ?? null) ? 'integer' : 'string', 'enum' => $values];
+    }
+
+    /** @return array<string, mixed> */
+    private function inputSchema(): array
+    {
+        /** @var class-string<Input> $class */
+        $class = $this->class;
+        return $class::schema();
+    }
+
     /** @param array<string, list<string>> $errors */
     public function cast(mixed $value, string $key, array &$errors): mixed
     {

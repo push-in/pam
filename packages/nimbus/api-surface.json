@@ -110,6 +110,42 @@
                         }
                     ]
                 },
+                "docs": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "path",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "/docs",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "title",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "Nimbus API",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "version",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "1.0.0",
+                            "hasDefault": true
+                        }
+                    ]
+                },
                 "get": {
                     "static": false,
                     "final": false,
@@ -11396,6 +11432,14 @@
                             "hasDefault": false
                         }
                     ]
+                },
+                "schema": {
+                    "static": true,
+                    "final": true,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
                 },
                 "toArray": {
                     "static": false,

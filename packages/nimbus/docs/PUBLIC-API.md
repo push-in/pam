@@ -156,6 +156,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public container(): Nimbus\Container\Container`
 - `public controller(string $controller, callable $routes): void`
 - `public delete(string $path, array|callable|string $handler): Nimbus\PendingRoute`
+- `public docs(string $path = "/docs", string $title = "Nimbus API", string $version = "1.0.0"): self`
 - `public get(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public group(callable $routes): void`
 - `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
@@ -2173,6 +2174,7 @@ abstract class Nimbus\Validation\Input
 - `public authorize(Pam\Http\Request $request): bool`
 - `public static from(array $data): static`
 - `public static nested(array $data, string $prefix, array &$errors): static`
+- `public static schema(): array`
 - `public toArray(): array`
 
 ## `Nimbus\Validation\Rule`
