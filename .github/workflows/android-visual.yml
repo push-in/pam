@@ -1,8 +1,30 @@
 name: Android Product visual evidence
 
+# The Product template from this checkout, on the released PAM toolchain and the
+# PAM Native and PAM Native UI versions it pins from Packagist, on an Android 36
+# emulator (pixel_6): light and dark captures, pixel geometry
+# (pam-native-ui tools/geometry.py) and goldens
+# (tests/golden/product/android, pam-native-ui tools/golden.py).
+
 on:
   workflow_call:
+    inputs:
+      record_goldens:
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - src/commands.rs
+      - tests/golden/product/**
+      - scripts/product-golden.py
+      - .github/scripts/product-visual-android.sh
+      - .github/workflows/android-visual.yml
   workflow_dispatch:
+    inputs:
+      record_goldens:
+        description: Record goldens instead of comparing (uploaded as an artifact)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,58 +41,60 @@ jobs:
   product-visual:
     name: Product light and dark captures on Android API 36
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
     env:
-      PAM_NATIVE_COMMIT: 2f33d0c44707b9a527cd458f12f51138934ddc44
+      # Pins the geometry and golden tools; the app gets PAM Native UI from Packagist.
+      PAM_NATIVE_UI_REF: v2.2.0
       PAM_PRODUCT_APPLICATION_ID: app.pam.productvisual
+      PAM_PRODUCT_PACKAGE: app.pam.productvisual.debug
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - name: Check out the pinned PAM Native SDK
+      - name: Check out the PAM Native UI geometry and golden tools
         uses: actions/checkout@v5
         with:
-          repository: push-in/pam-native
-          ref: ${{ env.PAM_NATIVE_COMMIT }}
-          path: pam-native
+          repository: push-in/pam-native-ui
+          ref: ${{ env.PAM_NATIVE_UI_REF }}
+          path: pam-native-ui
           persist-credentials: false
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
       - uses: android-actions/setup-android@v4
-      - uses: dtolnay/rust-toolchain@1.88.0
-        with:
-          targets: x86_64-linux-android
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
           coverage: none
-          tools: composer:v2
+      - uses: dtolnay/rust-toolchain@1.88.0
       - uses: Swatinem/rust-cache@v2
         with:
           key: android-product-visual
-      - name: Install pinned Android and PAM build prerequisites
+      - name: Install Android build dependencies
         run: |
-          .github/scripts/add-ondrej-php-ppa.sh
-          sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            libphp8.5-embed php8.5-dev
-          sdkmanager \
-            'platforms;android-36' \
-            'ndk;27.1.12297006' \
-            'cmake;3.22.1'
-      - name: Build the verified x86_64 runtime, engine, and PAM CLI
+          # Retries a corrupt or truncated SDK download instead of failing the job.
+          for attempt in 1 2 3; do
+            sdkmanager 'platforms;android-36' 'ndk;27.1.12297006' 'cmake;3.22.1' && break
+            test "${attempt}" = 3 && exit 1
+            sleep 20
+          done
+      - name: Install the released PAM toolchain
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          runtime-builder/android/build.sh --php 8.5 x86_64
-          toolchain="${ANDROID_HOME}/ndk/27.1.12297006/toolchains/llvm/prebuilt/linux-x86_64/bin"
-          CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="${toolchain}/x86_64-linux-android26-clang" \
-            cargo build --locked --release \
-              --manifest-path pam-native/Cargo.toml \
-              -p pam-native-engine --target x86_64-linux-android
-          cargo build --locked
-      - name: Generate and install a clean Product workspace
+          # github.com release downloads answer 403 now and then on hosted runners,
+          # and the anonymous GitHub API is rate limited: resolve the tag with the
+          # job token and retry the download.
+          curl -fsSL --retry 6 --retry-all-errors --retry-delay 15 -o /tmp/pam-install.sh \
+            https://github.com/push-in/pam/releases/latest/download/install.sh
+          PAM_VERSION=$(gh release view -R push-in/pam --json tagName -q .tagName)
+          export PAM_VERSION
+          for attempt in 1 2 3; do sh /tmp/pam-install.sh && break; test "${attempt}" = 3 && exit 1; sleep 30; done
+          echo "${HOME}/.local/bin" >>"${GITHUB_PATH}"
+      - name: Build the PAM CLI from this checkout (the Product template under test)
+        run: cargo build --locked
+      - name: Generate the Product workspace and build its debug app
         run: |
           fixture=${RUNNER_TEMP}/pam-product-visual
           target/debug/pam init "${fixture}" \
@@ -78,30 +102,40 @@ jobs:
             --name 'PAM Product Visual' \
             --application-id "${PAM_PRODUCT_APPLICATION_ID}" \
             --no-install --no-interaction
-          composer config --working-dir="${fixture}/apps/native" \
-            repositories.pam-native \
-            "{\"type\":\"path\",\"url\":\"${GITHUB_WORKSPACE}/pam-native/packages/native\",\"options\":{\"symlink\":false}}"
-          composer install --working-dir="${fixture}/apps/native" \
-            --no-dev --no-interaction --prefer-dist --dry-run
-          composer install --working-dir="${fixture}/apps/native" \
-            --no-dev --no-interaction --prefer-dist
-          mkdir -p "${fixture}/artifacts"
-          (
-            cd "${fixture}/apps/native"
-            "${GITHUB_WORKSPACE}/target/debug/pam" audit . --json \
-              >"${fixture}/artifacts/android-release-audit.json"
-          )
+          cd "${fixture}/apps/native"
+          # Resolve first: a template pin that Packagist cannot satisfy fails here.
+          for attempt in 1 2 3; do
+            pam composer install --no-interaction --no-progress --prefer-dist --dry-run && break
+            test "${attempt}" = 3 && exit 1
+            sleep 20
+          done
+          for attempt in 1 2 3; do
+            pam composer install --no-interaction --no-progress --prefer-dist && break
+            test "${attempt}" = 3 && exit 1
+            sleep 20
+          done
+          # The screen renders on the host before it reaches a device.
+          pam composer test
+          # The theme file is the one the token contract generates.
+          php ../../packages/contracts/bin/theme-css.php | cmp - src/theme.css
+          mkdir -p "${fixture}/artifacts" artifacts/screenshots
+          timeout 300 pam audit . --json >"${fixture}/artifacts/android-release-audit.json"
           test "$(jq -r '.resultCode' "${fixture}/artifacts/android-release-audit.json")" = 1
-          printf 'PAM_PRODUCT_FIXTURE=%s\n' "${fixture}" >>"${GITHUB_ENV}"
+          pam mobile build . --abi x86_64
+          apk=$(find dist -name '*.apk' | head -n 1)
+          test -s "${apk}"
+          printf 'PAM_PRODUCT_FIXTURE=%s\nPAM_PRODUCT_APK=%s\n' "${fixture}" "${fixture}/apps/native/${apk}" >>"${GITHUB_ENV}"
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
             | sudo tee /etc/udev/rules.d/99-kvm4all.rules
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
-      - name: Launch and capture the real Product app
+      - name: Capture, measure and compare the real Product app
         # v2.38.0, pinned to the verified release commit.
         uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        env:
+          RECORD_GOLDENS: ${{ inputs.record_goldens && '1' || '' }}
         with:
           api-level: 36
           arch: x86_64
@@ -110,31 +144,17 @@ jobs:
           disable-animations: true
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
-            adb shell cmd uimode night no
-            cd "${PAM_PRODUCT_FIXTURE}/apps/native"
-            "${GITHUB_WORKSPACE}/target/debug/pam" run . --abi x86_64
-            sleep 5
-            test -n "$(adb shell pidof "${PAM_PRODUCT_APPLICATION_ID}")"
-            "${GITHUB_WORKSPACE}/target/debug/pam" screenshot . \
-              --output artifacts/screenshots/product-native-light.png
-            adb shell cmd uimode night yes
-            adb shell am force-stop "${PAM_PRODUCT_APPLICATION_ID}"
-            adb shell monkey -p "${PAM_PRODUCT_APPLICATION_ID}" \
-              -c android.intent.category.LAUNCHER 1
-            sleep 5
-            test -n "$(adb shell pidof "${PAM_PRODUCT_APPLICATION_ID}")"
-            "${GITHUB_WORKSPACE}/target/debug/pam" screenshot . \
-              --output artifacts/screenshots/product-native-dark.png
-            sha256sum \
-              "${PAM_PRODUCT_FIXTURE}/apps/native/artifacts/screenshots/"*.png \
-              >"${PAM_PRODUCT_FIXTURE}/artifacts/android-captures.sha256"
-      - name: Capture bounded Android logs
+            bash .github/scripts/product-visual-android.sh
+      - name: Keep the bounded Android logs
         if: always()
         run: |
           fixture=${PAM_PRODUCT_FIXTURE:-${RUNNER_TEMP}/pam-product-visual}
           mkdir -p "${fixture}/artifacts"
-          adb logcat -d -t 2000 2>/dev/null \
-            >"${fixture}/artifacts/android-logcat.txt" || true
+          # The capture script saved the logs while the emulator ran; the
+          # emulator is gone now, so adb must not wait for it.
+          if ! test -s "${fixture}/artifacts/android-logcat.txt"; then
+            echo 'no emulator log was captured' >"${fixture}/artifacts/android-logcat.txt"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -145,6 +165,8 @@ jobs:
             ${{ runner.temp }}/pam-product-visual/artifacts/android-captures.sha256
             ${{ runner.temp }}/pam-product-visual/artifacts/android-release-audit.json
             ${{ runner.temp }}/pam-product-visual/artifacts/android-logcat.txt
+            ${{ runner.temp }}/pam-product-visual/artifacts/geometry-*.json
+            ${{ runner.temp }}/pam-product-visual/artifacts/golden-*.png
             ${{ runner.temp }}/pam-product-visual/packages/contracts/design-tokens.json
           if-no-files-found: error
           retention-days: 30

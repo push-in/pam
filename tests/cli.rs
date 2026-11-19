@@ -4415,11 +4415,11 @@ fn initializes_mobile_with_the_official_ui_and_single_file_components() {
     let entry = fs::read_to_string(directory.join("index.php")).unwrap();
     let hello = fs::read_to_string(directory.join("src/Hello.pam")).unwrap();
     assert!(
-        manifest_json["require"]["pushinbr/pam-native"] == "^1.53.5"
-            || (manifest_json["require"]["pam/native"] == "^1.53.5"
+        manifest_json["require"]["pushinbr/pam-native"] == "^1.53.9"
+            || (manifest_json["require"]["pam/native"] == "^1.53.9"
                 && manifest_json["replace"]["pushinbr/pam-native"] == env!("CARGO_PKG_VERSION"))
     );
-    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^2.1\""));
+    assert!(manifest.contains("\"pushinbr/pam-native-ui\": \"^2.2\""));
     assert!(
         manifest_json["repositories"]
             .as_array()
@@ -4693,28 +4693,49 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
             .contains("ProductSurface::Native")
     );
     let native_component = fs::read_to_string(directory.join("apps/native/src/Hello.pam")).unwrap();
-    let native_theme =
-        fs::read_to_string(directory.join("apps/native/src/ProductTheme.php")).unwrap();
-    assert!(native_component.contains("ProductTheme::install();"));
-    assert!(native_theme.contains("final class ProductTheme"));
-    assert!(native_theme.contains("dirname(__DIR__, 3).'/packages/contracts/design-tokens.json'"));
-    assert!(native_theme.contains("file_get_contents($path, false, null, 0, 32_769)"));
-    assert!(native_theme.contains("array_keys($document) !== ['schemaVersion', 'themes', 'spacing', 'radii', 'motionMs', 'minimumTouchTarget']"));
-    assert!(native_theme.contains("$payload['modeCode'] !== $modeCode"));
-    assert!(native_theme.contains("PamUI::theme($light, $dark);"));
-    assert!(native_theme.contains("Themes::light()"));
-    assert!(native_theme.contains("Themes::dark()"));
-    assert!(native_theme.contains("ColorToken::Primary->value"));
-    assert!(native_theme.contains("ColorToken::Focus->value"));
-    assert!(native_theme.contains("Product color must use canonical lowercase hex."));
-    let native_theme_syntax = run_pam(&[directory
-        .join("apps/native/src/ProductTheme.php")
+    // PAM Native UI 2: the contract's design tokens are the app's compile-time theme.
+    let native_theme = fs::read_to_string(directory.join("apps/native/src/theme.css")).unwrap();
+    assert!(native_theme.starts_with("/* Generated from packages/contracts/design-tokens.json"));
+    assert!(native_theme.contains("    --p-accent: #166534;"));
+    assert!(native_theme.contains("    --p-accent-dark: #4ade80;"));
+    assert!(native_theme.contains("    --p-bg-dark: #0b1120;"));
+    assert!(native_theme.contains("    --p-touch: 48px;"));
+    assert!(!native_component.contains("ProductTheme"));
+    // Template expressions read state; a method call there is a boot error.
+    assert!(!native_component.contains("{{ $this->"));
+    assert!(native_component.contains("title=\"{{ $headline }}\""));
+    assert!(native_component.contains("tone=\"{{ $serverTone }}\""));
+    let screen_test =
+        fs::read_to_string(directory.join("apps/native/tests/HelloTest.php")).unwrap();
+    assert!(screen_test.contains("Testing\\mount(Hello::class)"));
+    assert!(screen_test.contains("PluginManager::boot(dirname(__DIR__))"));
+    assert!(!directory.join("apps/native/src/ProductTheme.php").exists());
+    let native_manifest: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(directory.join("apps/native/pam-native.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(native_manifest["theme"]["tokens"], "src/theme.css");
+    let native_composer: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(directory.join("apps/native/composer.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(native_composer["require"]["pushinbr/pam-native-ui"], "^2.2");
+    assert_eq!(
+        native_composer["scripts"]["theme"],
+        "php ../../packages/contracts/bin/theme-css.php > src/theme.css"
+    );
+    let generated_theme = run_pam(&[directory
+        .join("packages/contracts/bin/theme-css.php")
         .to_str()
         .unwrap()]);
     assert!(
-        native_theme_syntax.status.success(),
+        generated_theme.status.success(),
         "{}",
-        String::from_utf8_lossy(&native_theme_syntax.stderr)
+        String::from_utf8_lossy(&generated_theme.stderr)
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&generated_theme.stdout),
+        native_theme
     );
     assert!(native_component.contains("use Pam\\Native\\Http\\Http;"));
     assert!(native_component.contains("PAM_PRODUCT_SERVER_URL"));
@@ -4732,7 +4753,7 @@ fn initializes_a_bounded_cross_surface_product_workspace() {
     assert!(native_component.contains("ProductMutation::checkIn($key)"));
     assert!(native_component.contains("$this->outbox->retry"));
     assert!(native_component.contains("$this->outbox->prune()"));
-    assert!(native_component.contains("<AppScreen"));
+    assert!(native_component.contains("<p-screen"));
     assert!(native_component.contains("<p-card"));
     assert!(native_component.contains("<p-btn"));
     assert!(!native_component.contains("<PamUIProvider"));

@@ -29,22 +29,39 @@ class VisualWorkflowContractTest(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/android-visual.yml").read_text(
             encoding="utf-8"
         )
+        script = (ROOT / ".github/scripts/product-visual-android.sh").read_text(
+            encoding="utf-8"
+        )
 
         self.assertIn("--template product", workflow)
-        self.assertIn("--no-dev --no-interaction --prefer-dist --dry-run", workflow)
+        dry_run = "pam composer install --no-interaction --no-progress --prefer-dist --dry-run"
+        self.assertIn(dry_run, workflow)
         self.assertLess(
-            workflow.index("--no-dev --no-interaction --prefer-dist --dry-run"),
-            workflow.index("--no-dev --no-interaction --prefer-dist\n"),
+            workflow.index(dry_run),
+            workflow.index("pam composer install --no-interaction --no-progress --prefer-dist &&"),
         )
+        # The screen renders on the host before it reaches a device.
+        self.assertIn("pam composer test", workflow)
         self.assertIn(
             "reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d",
             workflow,
         )
         self.assertIn("api-level: 36", workflow)
-        self.assertIn('target/debug/pam" run .', workflow)
+        self.assertIn("profile: pixel_6", workflow)
+        self.assertIn("bash .github/scripts/product-visual-android.sh", workflow)
+        self.assertIn("PAM_NATIVE_UI_REF: v", workflow)
+        self.assertIn("pull_request:", workflow)
+        self.assertIn("record_goldens", workflow)
+        # Light and dark: a capture, pixel geometry and the golden comparison.
+        self.assertIn("for mode in light dark", script)
+        self.assertIn("product-native-${mode}.png", script)
+        self.assertIn('"${tools}/geometry.py"', script)
+        self.assertIn("scripts/product-golden.py", script)
+        self.assertIn("tests/golden/product/android", script)
+        for mode in ("light", "dark"):
+            self.assertTrue((ROOT / f"tests/golden/product/android/product-native-{mode}.png").is_file())
         self.assertIn("product-native-light.png", workflow)
         self.assertIn("product-native-dark.png", workflow)
-        self.assertEqual(workflow.count('target/debug/pam" screenshot .'), 2)
         self.assertIn("if-no-files-found: error", workflow)
         self.assertIn("retention-days: 30", workflow)
         self.assertIn("workflow_call:", workflow)
