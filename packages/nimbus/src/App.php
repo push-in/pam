@@ -64,6 +64,10 @@ final class App implements ApplicationInterface
         $this->handlerResolver = new HandlerResolver($this->container);
         $this->container->instance(self::class, $this);
         $this->container->instance(Container::class, $this->container);
+        // PSR-3 logging goes to the runtime's structured log unless the application binds its own.
+        if (interface_exists(\Psr\Log\LoggerInterface::class) && class_exists(\Pam\Observability\Logger::class)) {
+            $this->container->singleton(\Psr\Log\LoggerInterface::class, \Pam\Observability\Logger::class);
+        }
         $this->errorHandler = static function (\Throwable $error, Response $response): Response {
             \Pam\Observability\Telemetry::log('error', 'Unhandled Nimbus exception', [
                 'exception' => $error::class,
