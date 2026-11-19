@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Nimbus\Http;
 
+use Nimbus\Pagination\Page;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
@@ -26,13 +27,19 @@ abstract readonly class JsonResource implements Responsable
         return $response->json(['data' => $this->toArray($request)], $this->status);
     }
 
-    /** @param iterable<mixed> $resources */
-    public static function collection(iterable $resources): ResourceCollection
+    /**
+     * A `Page` adds its `meta` and `links` to the response.
+     *
+     * @param iterable<mixed>|Page<mixed> $resources
+     */
+    public static function collection(iterable|Page $resources): ResourceCollection
     {
         $items = [];
-        foreach ($resources as $resource) {
+        foreach ($resources instanceof Page ? $resources->items : $resources as $resource) {
             $items[] = new static($resource);
         }
-        return new ResourceCollection($items);
+        return $resources instanceof Page
+            ? new ResourceCollection($items, $resources->meta, $resources->links)
+            : new ResourceCollection($items);
     }
 }

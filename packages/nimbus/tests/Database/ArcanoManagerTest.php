@@ -18,6 +18,10 @@ use Nimbus\Database\QueryBudget;
 use Nimbus\Database\QueryBudgetViolation;
 use Nimbus\Database\QueryMonitor;
 use Nimbus\Health\HealthState;
+use Nimbus\Http\JsonResource;
+use Nimbus\Pagination\Paginator;
+use Pam\Http\Request;
+use Pam\Http\Response;
 use Nimbus\Tenancy\TenantContext;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +32,7 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(ArcanoTenantMapper::class)]
 #[CoversClass(ArcanoTenantScope::class)]
 #[CoversClass(QueryMonitor::class)]
+#[CoversClass(Paginator::class)]
 final class ArcanoManagerTest extends TestCase
 {
     private static ?string $path = null;
@@ -68,6 +73,45 @@ final class ArcanoManagerTest extends TestCase
         $reloaded = $manager->repository('arcano_user')->findOne(['email' => 'dev@pam.dev']);
         self::assertInstanceOf(ArcanoUser::class, $reloaded);
         self::assertNotSame($user, $reloaded);
+    }
+
+    public function testItPaginatesByPageAndByCursor(): void
+    {
+        [$manager] = self::environment();
+        for ($i = 1; $i <= 45; ++$i) {
+            $manager->database()->execute('INSERT INTO arcano_users (email) VALUES (?)', ["user{$i}@pam.dev"]);
+        }
+        $request = static fn (array $query): Request => new Request('GET', '/users', $query, [], '');
+
+        $page = Paginator::paginate($manager->select(ArcanoUser::class), $request(['page' => '3']));
+        self::assertCount(5, $page->items);
+        self::assertSame(['current_page' => 3, 'per_page' => 20, 'last_page' => 3, 'total' => 45], $page->meta);
+        self::assertSame('/users?page=2', $page->links['prev']);
+        self::assertNull($page->links['next']);
+
+        $ids = [];
+        $cursor = null;
+        do {
+            $page = Paginator::cursor($manager->select(ArcanoUser::class), $request(
+                ['per_page' => '20'] + ($cursor === null ? [] : ['cursor' => $cursor]),
+            ));
+            foreach ($page->items as $user) {
+                self::assertInstanceOf(ArcanoUser::class, $user);
+                $ids[] = $user->id;
+            }
+            $cursor = $page->meta['next_cursor'];
+        } while (is_string($cursor));
+        self::assertSame(range(1, 45), $ids);
+
+        $body = PaginatedUser::collection(Paginator::paginate($manager->select(ArcanoUser::class), $request(['per_page' => '2'])))
+            ->toResponse($request([]), new Response())->export()['body'];
+        $json = json_decode((string) $body, true, 512, JSON_THROW_ON_ERROR);
+        self::assertIsArray($json);
+        self::assertIsArray($json['meta']);
+        self::assertIsArray($json['links']);
+        self::assertSame([['email' => 'user1@pam.dev'], ['email' => 'user2@pam.dev']], $json['data']);
+        self::assertSame(23, $json['meta']['last_page']);
+        self::assertSame('/users?per_page=2&page=2', $json['links']['next']);
     }
 
     public function testReleasingARequestRollsBackItsOpenTransaction(): void
@@ -312,5 +356,15 @@ final readonly class ArcanoTestTenant implements \Nimbus\Tenancy\Tenant
     public function identifier(): string
     {
         return $this->id;
+    }
+}
+
+final readonly class PaginatedUser extends JsonResource
+{
+    public function toArray(Request $request): array
+    {
+        $user = $this->resource;
+        \assert($user instanceof ArcanoUser);
+        return ['email' => $user->email];
     }
 }
