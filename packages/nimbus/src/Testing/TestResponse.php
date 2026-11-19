@@ -45,6 +45,35 @@ final readonly class TestResponse
         return $values === null ? null : implode(', ', $values);
     }
 
+    /**
+     * The values of the cookies set by the response (deleted cookies are left out).
+     *
+     * @return array<string, string>
+     */
+    public function cookies(): array
+    {
+        $cookies = [];
+        foreach ($this->response['headers']['set-cookie'] ?? [] as $header) {
+            $pair = explode(';', $header, 2)[0];
+            $separator = strpos($pair, '=');
+            if ($separator === false) {
+                continue;
+            }
+            $name = substr($pair, 0, $separator);
+            if (preg_match('/;\s*max-age=0\b/i', $header) === 1) {
+                unset($cookies[$name]);
+                continue;
+            }
+            $cookies[$name] = rawurldecode(substr($pair, $separator + 1));
+        }
+        return $cookies;
+    }
+
+    public function cookie(string $name): ?string
+    {
+        return $this->cookies()[$name] ?? null;
+    }
+
     /** Writes the status, headers and body to STDERR; returns the response for chaining. */
     public function dump(): self
     {
@@ -68,6 +97,31 @@ final readonly class TestResponse
     {
         $status = $this->status();
         self::check($status === $expected, "Expected status {$expected}; received {$status}." . $this->excerpt());
+        return $this;
+    }
+
+    /** The body contains the text (HTML-escaped unless `$escape` is false). */
+    public function assertSee(string $text, bool $escape = true): self
+    {
+        $needle = $escape ? htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : $text;
+        self::check(str_contains($this->body(), $needle), "Expected the response to contain \"{$needle}\".");
+        return $this;
+    }
+
+    public function assertDontSee(string $text, bool $escape = true): self
+    {
+        $needle = $escape ? htmlspecialchars($text, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : $text;
+        self::check(!str_contains($this->body(), $needle), "Expected the response not to contain \"{$needle}\".");
+        return $this;
+    }
+
+    public function assertRedirect(?string $location = null): self
+    {
+        $status = $this->status();
+        self::check($status >= 300 && $status < 400, "Expected a redirect, got status {$status}.");
+        if ($location !== null) {
+            self::check($this->header('location') === $location, "Expected a redirect to {$location}, got " . ($this->header('location') ?? 'none') . '.');
+        }
         return $this;
     }
 

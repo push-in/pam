@@ -66,6 +66,41 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   route groups authorizes the bound entity, and abilities without rules fall back to token abilities.
 - `AuthTablesMigration`, `Abilities` (wildcards such as `products:*`), `Container::resolveRouteBinding()`.
 
+- Web sessions (`Nimbus\Session`): `Session` (get/put/forget/pull, `flash()`, `now()`, `reflash()`,
+  `flashInput()`/`old()`, `flashErrors()`/`errors()` as an `ErrorBag`, CSRF `token()`, `regenerate()`,
+  `invalidate()`) on `MemorySessionStore`, `FileSessionStore`, `DatabaseSessionStore`
+  (`SessionTablesMigration`) and `Nimbus\Redis\RedisSessionStore`; JSON payloads only, never
+  `unserialize()`. `StartSessionMiddleware` keeps the session in the request scope (and
+  `Session::current()` per fiber), writes it only when it existed or changed, prunes by lottery and turns
+  a `ValidationException` on an HTML request into a redirect back with errors and old input.
+- `VerifyCsrfTokenMiddleware`: 419 (`ProblemCode::CsrfTokenMismatch`) unless `_token`, `X-CSRF-TOKEN` or
+  `X-XSRF-TOKEN` matches the session token; skips GET/HEAD/OPTIONS, bearer requests and `except` paths;
+  sends the `XSRF-TOKEN` cookie.
+- Cookies: `Cookie` (Set-Cookie with secure, HttpOnly and SameSite=Lax defaults), `RequestCookies`,
+  the scoped `CookieJar`, `CookieCodec` (encrypt with `Crypt` or HMAC-sign, bound to the cookie name)
+  and `EncryptCookiesMiddleware`.
+- `SessionServiceProvider` (store, method override, cookies, session and CSRF middleware in order),
+  `SessionAuthenticator` (web login that regenerates the session id, logout that invalidates it),
+  `MethodOverrideMiddleware` (`_method` / `X-HTTP-Method-Override`), `Redirect` (`to()`, same-origin
+  `back()`) and `FormData` (urlencoded, multipart text fields, JSON).
+- `Nimbus\View`: a Blade-style template engine of its own for `*.nim.php` (`{{ }}` escaped, `{!! !!}`,
+  `@if/@elseif/@else`, `@unless`, `@isset`, `@empty`, `@foreach` with `$loop`, `@forelse`, `@for`,
+  `@while`, `@continue`/`@break`, `@auth`/`@guest`, `@can`/`@cannot`, `@csrf`, `@method`, `@error`,
+  `@include`/`@includeIf`/`@includeWhen`, `@push`/`@prepend`/`@stack`, `@php`, `@extends`/`@section`/
+  `@yield`/`@show`/`@parent`, `@props`, `@json`, `@class`, `@checked`/`@selected`/`@disabled`,
+  `@lang`, `@verbatim`). Anonymous components in `components/` with `$attributes->merge()`, default and
+  named slots (`<x-slot:footer>`), class components (`Component`, `App\Views` by default). Templates
+  compile once per worker into closures that append to a string (no output buffering, fiber-safe), keep
+  their source lines, and errors are `ViewException` with file and line.
+- `ViewFactory`, `View` (a `Responsable`), `ViewServiceProvider`, `ViewChecker` and the
+  `vendor/bin/nimbus-views check` command for CI; `view()` helper.
+- Translation on `symfony/translation` (optional): `Translator` over `lang/{locale}/*.php` and
+  `lang/{locale}.json` (`LangDirectoryLoader`), `:name`/`{name}`/`%name%` placeholders, plurals,
+  fallback locales, `Accept-Language` negotiation; `LocaleMiddleware` sets the request's `Locale` from
+  `?lang=`, the session or `Accept-Language`; `TranslationServiceProvider`; `__()`, `trans()`,
+  `trans_choice()`, `old()` and `csrf_token()` helpers.
+- `TestClient::post()`/`form()` (HTML forms), `withCookies()`, `withCookiesFrom()`;
+  `TestResponse::cookies()`, `cookie()`, `assertSee()`, `assertDontSee()`, `assertRedirect()`.
 ### Changed
 - `BearerTokenAuthenticator` accepts any `AccessTokenVerifier`; `HmacTokenCodec` implements it and
   `AccessTokenIssuer`.
@@ -75,6 +110,7 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 - `TestResponse` failures are PHPUnit assertion failures when PHPUnit is loaded (they were
   `RuntimeException`, which remains the fallback).
 - `TestClient::postJson()` payload is optional and sends `accept: application/json`.
+- `Input` and `FormRequest` read urlencoded and multipart form bodies as well as JSON.
 - Notifications (`Nimbus\Notifications`): `Notification`, `Notifiable` with the `RoutesNotifications`
   trait, on-demand recipients, the `NotificationSender` channel registry and `Notifier::send()` /
   `sendLater()`, which queues one `SendNotificationJob` per recipient and channel through the

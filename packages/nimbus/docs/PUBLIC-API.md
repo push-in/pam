@@ -44,6 +44,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Auth\RefreshTokenReusedException`](#nimbusauthrefreshtokenreusedexception)
 - [`Nimbus\Auth\RefreshTokens`](#nimbusauthrefreshtokens)
 - [`Nimbus\Auth\ResetPasswordNotification`](#nimbusauthresetpasswordnotification)
+- [`Nimbus\Auth\SessionAuthenticator`](#nimbusauthsessionauthenticator)
 - [`Nimbus\Auth\TokenPair`](#nimbusauthtokenpair)
 - [`Nimbus\Auth\TokenPairIssuer`](#nimbusauthtokenpairissuer)
 - [`Nimbus\Auth\TokenPrincipal`](#nimbusauthtokenprincipal)
@@ -89,9 +90,15 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Health\HealthResult`](#nimbushealthhealthresult)
 - [`Nimbus\Health\HealthState`](#nimbushealthhealthstate)
 - [`Nimbus\Http\ClientIpResolver`](#nimbushttpclientipresolver)
+- [`Nimbus\Http\Cookie`](#nimbushttpcookie)
+- [`Nimbus\Http\CookieCodec`](#nimbushttpcookiecodec)
+- [`Nimbus\Http\CookieJar`](#nimbushttpcookiejar)
+- [`Nimbus\Http\FormData`](#nimbushttpformdata)
 - [`Nimbus\Http\HttpException`](#nimbushttphttpexception)
 - [`Nimbus\Http\JsonResource`](#nimbushttpjsonresource)
 - [`Nimbus\Http\ProblemCode`](#nimbushttpproblemcode)
+- [`Nimbus\Http\Redirect`](#nimbushttpredirect)
+- [`Nimbus\Http\RequestCookies`](#nimbushttprequestcookies)
 - [`Nimbus\Http\ResourceCollection`](#nimbushttpresourcecollection)
 - [`Nimbus\Http\Responsable`](#nimbushttpresponsable)
 - [`Nimbus\Http\ResponseSnapshot`](#nimbushttpresponsesnapshot)
@@ -123,15 +130,19 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Middleware\AuthorizeMiddleware`](#nimbusmiddlewareauthorizemiddleware)
 - [`Nimbus\Middleware\CorsMiddleware`](#nimbusmiddlewarecorsmiddleware)
 - [`Nimbus\Middleware\DeadlineMiddleware`](#nimbusmiddlewaredeadlinemiddleware)
+- [`Nimbus\Middleware\EncryptCookiesMiddleware`](#nimbusmiddlewareencryptcookiesmiddleware)
 - [`Nimbus\Middleware\IdempotencyMiddleware`](#nimbusmiddlewareidempotencymiddleware)
+- [`Nimbus\Middleware\MethodOverrideMiddleware`](#nimbusmiddlewaremethodoverridemiddleware)
 - [`Nimbus\Middleware\ObserveRequestMiddleware`](#nimbusmiddlewareobserverequestmiddleware)
 - [`Nimbus\Middleware\QueryBudgetMiddleware`](#nimbusmiddlewarequerybudgetmiddleware)
 - [`Nimbus\Middleware\RateLimitMiddleware`](#nimbusmiddlewareratelimitmiddleware)
 - [`Nimbus\Middleware\ResolveTenantMiddleware`](#nimbusmiddlewareresolvetenantmiddleware)
 - [`Nimbus\Middleware\ResponseCacheMiddleware`](#nimbusmiddlewareresponsecachemiddleware)
 - [`Nimbus\Middleware\SecurityHeadersMiddleware`](#nimbusmiddlewaresecurityheadersmiddleware)
+- [`Nimbus\Middleware\StartSessionMiddleware`](#nimbusmiddlewarestartsessionmiddleware)
 - [`Nimbus\Middleware\TransactionalMiddleware`](#nimbusmiddlewaretransactionalmiddleware)
 - [`Nimbus\Middleware\ValidateSignatureMiddleware`](#nimbusmiddlewarevalidatesignaturemiddleware)
+- [`Nimbus\Middleware\VerifyCsrfTokenMiddleware`](#nimbusmiddlewareverifycsrftokenmiddleware)
 - [`Nimbus\Notifications\Database\DatabaseChannel`](#nimbusnotificationsdatabasedatabasechannel)
 - [`Nimbus\Notifications\Database\DatabaseNotification`](#nimbusnotificationsdatabasedatabasenotification)
 - [`Nimbus\Notifications\Database\DatabaseNotifications`](#nimbusnotificationsdatabasedatabasenotifications)
@@ -194,6 +205,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Redis\RedisPool`](#nimbusredisredispool)
 - [`Nimbus\Redis\RedisRateLimitStore`](#nimbusredisredisratelimitstore)
 - [`Nimbus\Redis\RedisResponseCacheStore`](#nimbusredisredisresponsecachestore)
+- [`Nimbus\Redis\RedisSessionStore`](#nimbusredisredissessionstore)
 - [`Nimbus\Redis\RedisTokenRevocationStore`](#nimbusredisredistokenrevocationstore)
 - [`Nimbus\Resilience\CircuitBreaker`](#nimbusresiliencecircuitbreaker)
 - [`Nimbus\Resilience\CircuitOpenException`](#nimbusresiliencecircuitopenexception)
@@ -220,6 +232,15 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Security\Hash`](#nimbussecurityhash)
 - [`Nimbus\Security\UrlSignatureState`](#nimbussecurityurlsignaturestate)
 - [`Nimbus\Security\UrlSigner`](#nimbussecurityurlsigner)
+- [`Nimbus\Session\DatabaseSessionStore`](#nimbussessiondatabasesessionstore)
+- [`Nimbus\Session\ErrorBag`](#nimbussessionerrorbag)
+- [`Nimbus\Session\FileSessionStore`](#nimbussessionfilesessionstore)
+- [`Nimbus\Session\MemorySessionStore`](#nimbussessionmemorysessionstore)
+- [`Nimbus\Session\Session`](#nimbussessionsession)
+- [`Nimbus\Session\SessionConfig`](#nimbussessionsessionconfig)
+- [`Nimbus\Session\SessionServiceProvider`](#nimbussessionsessionserviceprovider)
+- [`Nimbus\Session\SessionStore`](#nimbussessionsessionstore)
+- [`Nimbus\Session\SessionTablesMigration`](#nimbussessionsessiontablesmigration)
 - [`Nimbus\Storage\Disk`](#nimbusstoragedisk)
 - [`Nimbus\Storage\S3UploadUrlGenerator`](#nimbusstorages3uploadurlgenerator)
 - [`Nimbus\Storage\SignedStorageUrls`](#nimbusstoragesignedstorageurls)
@@ -236,6 +257,11 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Testing\TestClient`](#nimbustestingtestclient)
 - [`Nimbus\Testing\TestResponse`](#nimbustestingtestresponse)
 - [`Nimbus\Transactions\TransactionManager`](#nimbustransactionstransactionmanager)
+- [`Nimbus\Translation\LangDirectoryLoader`](#nimbustranslationlangdirectoryloader)
+- [`Nimbus\Translation\Locale`](#nimbustranslationlocale)
+- [`Nimbus\Translation\LocaleMiddleware`](#nimbustranslationlocalemiddleware)
+- [`Nimbus\Translation\TranslationServiceProvider`](#nimbustranslationtranslationserviceprovider)
+- [`Nimbus\Translation\Translator`](#nimbustranslationtranslator)
 - [`Nimbus\Validation\Attributes\Email`](#nimbusvalidationattributesemail)
 - [`Nimbus\Validation\Attributes\Field`](#nimbusvalidationattributesfield)
 - [`Nimbus\Validation\Attributes\In`](#nimbusvalidationattributesin)
@@ -251,6 +277,19 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Validation\Rule`](#nimbusvalidationrule)
 - [`Nimbus\Validation\ValidationException`](#nimbusvalidationvalidationexception)
 - [`Nimbus\Validation\ValidationRule`](#nimbusvalidationvalidationrule)
+- [`Nimbus\View\AttributeBag`](#nimbusviewattributebag)
+- [`Nimbus\View\CompiledTemplate`](#nimbusviewcompiledtemplate)
+- [`Nimbus\View\Compiler`](#nimbusviewcompiler)
+- [`Nimbus\View\Component`](#nimbusviewcomponent)
+- [`Nimbus\View\HtmlString`](#nimbusviewhtmlstring)
+- [`Nimbus\View\Htmlable`](#nimbusviewhtmlable)
+- [`Nimbus\View\Loop`](#nimbusviewloop)
+- [`Nimbus\View\Slot`](#nimbusviewslot)
+- [`Nimbus\View\View`](#nimbusviewview)
+- [`Nimbus\View\ViewChecker`](#nimbusviewviewchecker)
+- [`Nimbus\View\ViewException`](#nimbusviewviewexception)
+- [`Nimbus\View\ViewFactory`](#nimbusviewviewfactory)
+- [`Nimbus\View\ViewServiceProvider`](#nimbusviewviewserviceprovider)
 
 ## `Nimbus\App`
 
@@ -801,6 +840,19 @@ final class Nimbus\Auth\ResetPasswordNotification extends Nimbus\Notifications\N
 - `public __construct(string $url, int $expiresInMinutes): mixed`
 - `public toMail(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Mail\MailMessage`
 - `public via(Nimbus\Notifications\Notifiable $notifiable): array`
+
+## `Nimbus\Auth\SessionAuthenticator`
+
+```php
+final readonly class Nimbus\Auth\SessionAuthenticator implements Nimbus\Auth\Authenticator
+```
+
+### Methods
+
+- `public __construct(Nimbus\Container\Container $container, Closure $resolver): mixed`
+- `public authenticate(Pam\Http\Request $request): ?Nimbus\Auth\Principal`
+- `public login(Nimbus\Auth\Principal $principal): void`
+- `public logout(): void`
 
 ## `Nimbus\Auth\TokenPair`
 
@@ -1506,6 +1558,69 @@ final readonly class Nimbus\Http\ClientIpResolver
 - `public __construct(array $trustedProxies = []): mixed`
 - `public resolve(Pam\Http\Request $request): string`
 
+## `Nimbus\Http\Cookie`
+
+```php
+final readonly class Nimbus\Http\Cookie
+```
+
+### Properties
+
+- `public readonly ?string $domain`
+- `public readonly bool $httpOnly`
+- `public readonly int $maxAge`
+- `public readonly string $name`
+- `public readonly string $path`
+- `public readonly string $sameSite`
+- `public readonly bool $secure`
+- `public readonly string $value`
+
+### Methods
+
+- `public __construct(string $name, string $value, int $maxAge = 0, string $path = "/", ?string $domain = null, bool $secure = true, bool $httpOnly = true, string $sameSite = "Lax"): mixed`
+- `public static forget(string $name, string $path = "/", ?string $domain = null): self`
+- `public toHeader(?int $now = null): string`
+- `public withValue(string $value): self`
+
+## `Nimbus\Http\CookieCodec`
+
+```php
+final readonly class Nimbus\Http\CookieCodec
+```
+
+### Methods
+
+- `public __construct(Nimbus\Security\Crypt $crypt, string $key): mixed`
+- `public decrypt(string $name, string $payload): ?string`
+- `public encrypt(string $name, string $value): string`
+- `public static fromEnvironment(): self`
+- `public sign(string $name, string $value): string`
+- `public verify(string $name, string $payload): ?string`
+
+## `Nimbus\Http\CookieJar`
+
+```php
+final class Nimbus\Http\CookieJar
+```
+
+### Methods
+
+- `public forget(string $name, string $path = "/", ?string $domain = null): self`
+- `public make(string $name, string $value, int $maxAge = 0): self`
+- `public queue(Nimbus\Http\Cookie $cookie): self`
+- `public queued(): array`
+
+## `Nimbus\Http\FormData`
+
+```php
+final class Nimbus\Http\FormData
+```
+
+### Methods
+
+- `public static field(Pam\Http\Request $request, string $name): ?string`
+- `public static parse(Pam\Http\Request $request): array`
+
 ## `Nimbus\Http\HttpException`
 
 ```php
@@ -1555,10 +1670,12 @@ final enum Nimbus\Http\ProblemCode implements BackedEnum, UnitEnum: int
 - `InvalidSignature = 10`
 - `PayloadTooLarge = 11`
 - `UnsupportedMediaType = 12`
+- `CsrfTokenMismatch = 13`
 
 ### Constants
 
 - `Conflict = 5`
+- `CsrfTokenMismatch = 13`
 - `Forbidden = 3`
 - `InternalError = 8`
 - `InvalidSignature = 10`
@@ -1581,6 +1698,39 @@ final enum Nimbus\Http\ProblemCode implements BackedEnum, UnitEnum: int
 - `public static cases(): array`
 - `public static from(int|string $value): static`
 - `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Http\Redirect`
+
+```php
+final readonly class Nimbus\Http\Redirect implements Nimbus\Http\Responsable
+```
+
+### Properties
+
+- `public readonly string $location`
+- `public readonly int $status`
+
+### Methods
+
+- `public __construct(string $location, int $status = 302): mixed`
+- `public static back(Pam\Http\Request $request, string $fallback = "/", int $status = 302): self`
+- `public static to(string $location, int $status = 302): self`
+- `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+
+## `Nimbus\Http\RequestCookies`
+
+```php
+final readonly class Nimbus\Http\RequestCookies
+```
+
+### Methods
+
+- `public __construct(array $cookies = []): mixed`
+- `public all(): array`
+- `public static fromRequest(Pam\Http\Request $request): self`
+- `public get(string $name, ?string $default = null): ?string`
+- `public has(string $name): bool`
+- `public static parse(string $header): array`
 
 ## `Nimbus\Http\ResourceCollection`
 
@@ -2039,6 +2189,17 @@ final readonly class Nimbus\Middleware\DeadlineMiddleware implements Pam\Contrac
 - `public __construct(Nimbus\Container\Container $container, float $seconds): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
+## `Nimbus\Middleware\EncryptCookiesMiddleware`
+
+```php
+final readonly class Nimbus\Middleware\EncryptCookiesMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Container\Container $container, Nimbus\Http\CookieCodec $codec, array $except = ["nimbus_session","XSRF-TOKEN"], array $signed = []): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
 ## `Nimbus\Middleware\IdempotencyMiddleware`
 
 ```php
@@ -2048,6 +2209,16 @@ final readonly class Nimbus\Middleware\IdempotencyMiddleware implements Pam\Cont
 ### Methods
 
 - `public __construct(Nimbus\Idempotency\IdempotencyStore $store, int $ttlSeconds = 86400, bool $required = true): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
+## `Nimbus\Middleware\MethodOverrideMiddleware`
+
+```php
+final readonly class Nimbus\Middleware\MethodOverrideMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Middleware\ObserveRequestMiddleware`
@@ -2116,6 +2287,17 @@ final readonly class Nimbus\Middleware\SecurityHeadersMiddleware implements Pam\
 - `public __construct(bool $hsts = true): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
+## `Nimbus\Middleware\StartSessionMiddleware`
+
+```php
+final readonly class Nimbus\Middleware\StartSessionMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Container\Container $container, Nimbus\Session\SessionStore $store, Nimbus\Session\SessionConfig $config = {"@object":"Nimbus\\Session\\SessionConfig","properties":{"cookie":"nimbus_session","domain":null,"expireOnClose":false,"lifetime":7200,"lottery":[2,100],"path":"/","sameSite":"Lax","secure":true}}, bool $redirectValidationErrors = true): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
 ## `Nimbus\Middleware\TransactionalMiddleware`
 
 ```php
@@ -2136,6 +2318,17 @@ final readonly class Nimbus\Middleware\ValidateSignatureMiddleware implements Pa
 ### Methods
 
 - `public __construct(Nimbus\Security\UrlSigner $signer): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
+## `Nimbus\Middleware\VerifyCsrfTokenMiddleware`
+
+```php
+final readonly class Nimbus\Middleware\VerifyCsrfTokenMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Container\Container $container, array $except = [], bool $xsrfCookie = true, bool $secureCookie = true): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Notifications\Database\DatabaseChannel`
@@ -3081,6 +3274,20 @@ final readonly class Nimbus\Redis\RedisResponseCacheStore implements Nimbus\Cach
 - `public get(string $key, int $now): ?Nimbus\Cache\CacheRecord`
 - `public put(string $key, Nimbus\Cache\CacheRecord $record): void`
 
+## `Nimbus\Redis\RedisSessionStore`
+
+```php
+final readonly class Nimbus\Redis\RedisSessionStore implements Nimbus\Session\SessionStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:session:"): mixed`
+- `public destroy(string $id): void`
+- `public gc(): int`
+- `public read(string $id): ?array`
+- `public write(string $id, array $data, int $lifetimeSeconds): void`
+
 ## `Nimbus\Redis\RedisTokenRevocationStore`
 
 ```php
@@ -3529,6 +3736,159 @@ final readonly class Nimbus\Security\UrlSigner
 - `public temporary(string $path, int $ttl, array $query = []): string`
 - `public verify(string $path, array $query, ?int $now = null): bool`
 
+## `Nimbus\Session\DatabaseSessionStore`
+
+```php
+final readonly class Nimbus\Session\DatabaseSessionStore implements Nimbus\Session\SessionStore
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, string $table = "sessions", ?string $connection = null, ?Closure $clock = null): mixed`
+- `public destroy(string $id): void`
+- `public gc(): int`
+- `public read(string $id): ?array`
+- `public write(string $id, array $data, int $lifetimeSeconds): void`
+
+## `Nimbus\Session\ErrorBag`
+
+```php
+final readonly class Nimbus\Session\ErrorBag implements Countable
+```
+
+### Methods
+
+- `public __construct(array $messages = []): mixed`
+- `public all(): array`
+- `public any(): bool`
+- `public count(): int`
+- `public first(?string $field = null, ?string $default = null): ?string`
+- `public get(string $field): array`
+- `public has(string $field): bool`
+- `public isEmpty(): bool`
+- `public toArray(): array`
+
+## `Nimbus\Session\FileSessionStore`
+
+```php
+final readonly class Nimbus\Session\FileSessionStore implements Nimbus\Session\SessionStore
+```
+
+### Methods
+
+- `public __construct(string $directory, ?Closure $clock = null): mixed`
+- `public destroy(string $id): void`
+- `public gc(): int`
+- `public read(string $id): ?array`
+- `public write(string $id, array $data, int $lifetimeSeconds): void`
+
+## `Nimbus\Session\MemorySessionStore`
+
+```php
+final class Nimbus\Session\MemorySessionStore implements Nimbus\Session\SessionStore
+```
+
+### Methods
+
+- `public __construct(?Closure $clock = null): mixed`
+- `public destroy(string $id): void`
+- `public gc(): int`
+- `public read(string $id): ?array`
+- `public write(string $id, array $data, int $lifetimeSeconds): void`
+
+## `Nimbus\Session\Session`
+
+```php
+final class Nimbus\Session\Session
+```
+
+### Methods
+
+- `public __construct(string $id, array $attributes = [], bool $existed = false): mixed`
+- `public ageFlashData(): void`
+- `public all(): array`
+- `public static current(): ?self`
+- `public static enter(?self $session): void`
+- `public errors(): Nimbus\Session\ErrorBag`
+- `public existed(): bool`
+- `public flash(string $key, mixed $value = true): self`
+- `public flashErrors(array $errors): self`
+- `public flashInput(array $input): self`
+- `public flush(): self`
+- `public forget(string ...$keys): self`
+- `public get(string $key, mixed $default = null): mixed`
+- `public has(string $key): bool`
+- `public id(): string`
+- `public invalidate(): self`
+- `public isDirty(): bool`
+- `public static newId(): string`
+- `public now(string $key, mixed $value): self`
+- `public old(?string $key = null, mixed $default = null): mixed`
+- `public previousId(): ?string`
+- `public pull(string $key, mixed $default = null): mixed`
+- `public put(array|string $key, mixed $value = null): self`
+- `public reflash(string ...$keys): self`
+- `public regenerate(): self`
+- `public regenerateToken(): string`
+- `public token(): string`
+
+## `Nimbus\Session\SessionConfig`
+
+```php
+final readonly class Nimbus\Session\SessionConfig
+```
+
+### Properties
+
+- `public readonly string $cookie`
+- `public readonly ?string $domain`
+- `public readonly bool $expireOnClose`
+- `public readonly int $lifetime`
+- `public readonly array $lottery`
+- `public readonly string $path`
+- `public readonly string $sameSite`
+- `public readonly bool $secure`
+
+### Methods
+
+- `public __construct(string $cookie = "nimbus_session", int $lifetime = 7200, bool $expireOnClose = false, string $path = "/", ?string $domain = null, bool $secure = true, string $sameSite = "Lax", array $lottery = [2,100]): mixed`
+
+## `Nimbus\Session\SessionServiceProvider`
+
+```php
+final readonly class Nimbus\Session\SessionServiceProvider implements Pam\Contracts\Package\ServiceProviderInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Session\SessionStore $store, Nimbus\Session\SessionConfig $config = {"@object":"Nimbus\\Session\\SessionConfig","properties":{"cookie":"nimbus_session","domain":null,"expireOnClose":false,"lifetime":7200,"lottery":[2,100],"path":"/","sameSite":"Lax","secure":true}}, ?Nimbus\Http\CookieCodec $cookies = null, bool $middleware = true, array $csrfExcept = []): mixed`
+- `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
+- `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
+
+## `Nimbus\Session\SessionStore`
+
+```php
+abstract interface Nimbus\Session\SessionStore
+```
+
+### Methods
+
+- `public destroy(string $id): void`
+- `public gc(): int`
+- `public read(string $id): ?array`
+- `public write(string $id, array $data, int $lifetimeSeconds): void`
+
+## `Nimbus\Session\SessionTablesMigration`
+
+```php
+final class Nimbus\Session\SessionTablesMigration extends Arcano\Migrations\Migration implements Arcano\Migrations\MigrationInterface
+```
+
+### Methods
+
+- `public down(): void`
+- `public up(): void`
+
 ## `Nimbus\Storage\Disk`
 
 ```php
@@ -3709,13 +4069,17 @@ final readonly class Nimbus\Testing\TestClient
 - `public __construct(Nimbus\App $app, array $headers = []): mixed`
 - `public actingAs(Nimbus\Auth\Principal $principal): self`
 - `public deleteJson(string $path, ?array $payload = null, array $headers = []): Nimbus\Testing\TestResponse`
+- `public form(string $method, string $path, array $form = [], array $headers = []): Nimbus\Testing\TestResponse`
 - `public get(string $path, array $headers = []): Nimbus\Testing\TestResponse`
 - `public getJson(string $path, array $headers = []): Nimbus\Testing\TestResponse`
 - `public json(string $method, string $path, ?array $payload = null, array $headers = []): Nimbus\Testing\TestResponse`
 - `public patchJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
+- `public post(string $path, array $form = [], array $headers = []): Nimbus\Testing\TestResponse`
 - `public postJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
 - `public putJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
 - `public request(string $method, string $path, array $query = [], array $headers = [], string $body = ""): Nimbus\Testing\TestResponse`
+- `public withCookies(array $cookies): self`
+- `public withCookiesFrom(Nimbus\Testing\TestResponse $response): self`
 - `public withHeader(string $name, string $value): self`
 - `public withHeaders(array $headers): self`
 - `public withToken(string $token, string $type = "Bearer"): self`
@@ -3730,6 +4094,7 @@ final readonly class Nimbus\Testing\TestResponse
 
 - `public __construct(array $response): mixed`
 - `public assertCreated(): self`
+- `public assertDontSee(string $text, bool $escape = true): self`
 - `public assertExactJson(array $expected): self`
 - `public assertForbidden(): self`
 - `public assertHeader(string $name, ?string $expected = null): self`
@@ -3744,11 +4109,15 @@ final readonly class Nimbus\Testing\TestResponse
 - `public assertNoContent(): self`
 - `public assertNotFound(): self`
 - `public assertOk(): self`
+- `public assertRedirect(?string $location = null): self`
+- `public assertSee(string $text, bool $escape = true): self`
 - `public assertStatus(int $expected): self`
 - `public assertSuccessful(): self`
 - `public assertUnauthorized(): self`
 - `public assertUnprocessableEntity(): self`
 - `public body(): string`
+- `public cookie(string $name): ?string`
+- `public cookies(): array`
 - `public dump(): self`
 - `public header(string $name): ?string`
 - `public json(?string $path = null): mixed`
@@ -3763,6 +4132,75 @@ abstract interface Nimbus\Transactions\TransactionManager
 ### Methods
 
 - `public transaction(callable $operation): mixed`
+
+## `Nimbus\Translation\LangDirectoryLoader`
+
+```php
+final readonly class Nimbus\Translation\LangDirectoryLoader implements Symfony\Component\Translation\Loader\LoaderInterface
+```
+
+### Methods
+
+- `public load(mixed $resource, string $locale, string $domain = "messages"): Symfony\Component\Translation\MessageCatalogue`
+- `public static locales(string $directory): array`
+
+## `Nimbus\Translation\Locale`
+
+```php
+final readonly class Nimbus\Translation\Locale
+```
+
+### Properties
+
+- `public readonly string $code`
+
+### Methods
+
+- `public __construct(string $code): mixed`
+- `public static normalize(string $code): string`
+
+## `Nimbus\Translation\LocaleMiddleware`
+
+```php
+final readonly class Nimbus\Translation\LocaleMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Translation\Translator $translator, Nimbus\Container\Container $container, ?string $queryParameter = "lang", string $sessionKey = "locale"): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
+## `Nimbus\Translation\TranslationServiceProvider`
+
+```php
+final readonly class Nimbus\Translation\TranslationServiceProvider implements Pam\Contracts\Package\ServiceProviderInterface
+```
+
+### Methods
+
+- `public __construct(string $directory, string $defaultLocale = "en", array $fallbackLocales = [], ?array $supportedLocales = null, bool $middleware = true): mixed`
+- `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
+- `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
+
+## `Nimbus\Translation\Translator`
+
+```php
+final class Nimbus\Translation\Translator
+```
+
+### Methods
+
+- `public __construct(string $directory, string $defaultLocale = "en", array $fallbackLocales = [], ?Nimbus\Container\Container $container = null, ?array $supportedLocales = null): mixed`
+- `public choice(string $key, float|int $count, array $replace = [], ?string $locale = null): string`
+- `public static default(): ?self`
+- `public directory(): string`
+- `public get(string $key, array $replace = [], ?string $locale = null): string`
+- `public has(string $key, ?string $locale = null): bool`
+- `public locale(): string`
+- `public negotiate(?string $acceptLanguage): ?string`
+- `public supportedLocales(): array`
+- `public supports(string $locale): bool`
+- `public useAsDefault(): self`
 
 ## `Nimbus\Validation\Attributes\Email`
 
@@ -3952,3 +4390,223 @@ abstract interface Nimbus\Validation\ValidationRule
 ### Methods
 
 - `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\View\AttributeBag`
+
+```php
+final readonly class Nimbus\View\AttributeBag implements Countable, IteratorAggregate, Nimbus\View\Htmlable, Stringable, Traversable
+```
+
+### Methods
+
+- `public __construct(array $attributes = []): mixed`
+- `public __toString(): string`
+- `public class(array $classes): self`
+- `public static classList(array $classes): string`
+- `public count(): int`
+- `public except(array|string $names): self`
+- `public get(string $name, mixed $default = null): mixed`
+- `public getAttributes(): array`
+- `public getIterator(): ArrayIterator`
+- `public has(string $name): bool`
+- `public isEmpty(): bool`
+- `public merge(array $defaults): self`
+- `public only(array|string $names): self`
+- `public toHtml(): string`
+- `public whereStartsWith(string $prefix): self`
+
+## `Nimbus\View\CompiledTemplate`
+
+```php
+final readonly class Nimbus\View\CompiledTemplate
+```
+
+### Properties
+
+- `public readonly string $code`
+- `public readonly array $references`
+
+### Methods
+
+- `public __construct(string $code, array $references = []): mixed`
+
+## `Nimbus\View\Compiler`
+
+```php
+final class Nimbus\View\Compiler
+```
+
+### Methods
+
+- `public static compile(string $source, string $template = "inline"): Nimbus\View\CompiledTemplate`
+
+## `Nimbus\View\Component`
+
+```php
+abstract class Nimbus\View\Component
+```
+
+### Properties
+
+- `public Nimbus\View\AttributeBag $attributes`
+
+### Methods
+
+- `public render(): Nimbus\View\Htmlable|Nimbus\View\View|string`
+- `public shouldRender(): bool`
+- `public withAttributes(Nimbus\View\AttributeBag $attributes): static`
+
+## `Nimbus\View\HtmlString`
+
+```php
+readonly class Nimbus\View\HtmlString implements Nimbus\View\Htmlable, Stringable
+```
+
+### Methods
+
+- `public __construct(string $html = ""): mixed`
+- `public __toString(): string`
+- `public isEmpty(): bool`
+- `public isNotEmpty(): bool`
+- `public toHtml(): string`
+
+## `Nimbus\View\Htmlable`
+
+```php
+abstract interface Nimbus\View\Htmlable
+```
+
+### Methods
+
+- `public toHtml(): string`
+
+## `Nimbus\View\Loop`
+
+```php
+final class Nimbus\View\Loop
+```
+
+### Properties
+
+- `public readonly ?int $count`
+- `public readonly int $depth`
+- `public bool $even`
+- `public bool $first`
+- `public int $index`
+- `public int $iteration`
+- `public bool $last`
+- `public bool $odd`
+- `public readonly ?Nimbus\View\Loop $parent`
+- `public ?int $remaining`
+
+### Methods
+
+- `public __construct(?int $count, int $depth, ?Nimbus\View\Loop $parent): mixed`
+- `public advance(): void`
+
+## `Nimbus\View\Slot`
+
+```php
+final readonly class Nimbus\View\Slot extends Nimbus\View\HtmlString implements Nimbus\View\Htmlable, Stringable
+```
+
+### Properties
+
+- `public readonly Nimbus\View\AttributeBag $attributes`
+
+### Methods
+
+- `public __construct(string $html = "", ?Nimbus\View\AttributeBag $attributes = null): mixed`
+
+## `Nimbus\View\View`
+
+```php
+final readonly class Nimbus\View\View implements Nimbus\Http\Responsable, Nimbus\View\Htmlable, Stringable
+```
+
+### Properties
+
+- `public readonly array $data`
+- `public readonly string $name`
+- `public readonly int $status`
+
+### Methods
+
+- `public __construct(Nimbus\View\ViewFactory $factory, string $name, array $data = [], int $status = 200): mixed`
+- `public __toString(): string`
+- `public render(): string`
+- `public toHtml(): string`
+- `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public with(array|string $key, mixed $value = null): self`
+- `public withStatus(int $status): self`
+
+## `Nimbus\View\ViewChecker`
+
+```php
+final readonly class Nimbus\View\ViewChecker
+```
+
+### Methods
+
+- `public __construct(Nimbus\View\ViewFactory $factory): mixed`
+- `public check(): array`
+
+## `Nimbus\View\ViewException`
+
+```php
+final class Nimbus\View\ViewException extends RuntimeException implements Stringable, Throwable
+```
+
+### Properties
+
+- `public readonly string $template`
+- `public readonly int $templateLine`
+
+### Methods
+
+- `public __construct(string $message, string $template, int $templateLine, ?Throwable $previous = null): mixed`
+- `public reason(): string`
+
+## `Nimbus\View\ViewFactory`
+
+```php
+final class Nimbus\View\ViewFactory
+```
+
+### Constants
+
+- `EXTENSION = ".nim.php"`
+
+### Methods
+
+- `public __construct(array|string $paths, ?Nimbus\Container\Container $container = null, string $componentNamespace = "App\\Views", bool $reload = false, ?Nimbus\Translation\Translator $translator = null): mixed`
+- `public addNamespace(string $namespace, array|string $paths): self`
+- `public compiled(string $view): array`
+- `public component(string $name): array`
+- `public container(): ?Nimbus\Container\Container`
+- `public static default(): self`
+- `public static evaluate(string $code, string $template): Closure`
+- `public exists(string $view): bool`
+- `public make(string $view, array $data = []): Nimbus\View\View`
+- `public path(string $view): string`
+- `public render(string $view, array $data = []): string`
+- `public renderComponent(Nimbus\View\Renderer $renderer, string $name, array $attributes, array $slots): string`
+- `public renderString(string $source, array $data = []): string`
+- `public setTranslator(?Nimbus\Translation\Translator $translator): self`
+- `public share(string $key, mixed $value): self`
+- `public shared(): array`
+- `public templates(): array`
+- `public translator(): ?Nimbus\Translation\Translator`
+- `public useAsDefault(): self`
+
+## `Nimbus\View\ViewServiceProvider`
+
+```php
+final readonly class Nimbus\View\ViewServiceProvider implements Pam\Contracts\Package\ServiceProviderInterface
+```
+
+### Methods
+
+- `public __construct(array|string $paths, string $componentNamespace = "App\\Views", bool $reload = false): mixed`
+- `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
+- `public register(Pam\Contracts\Http\ApplicationInterface $application): void`

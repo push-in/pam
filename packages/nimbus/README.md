@@ -680,6 +680,55 @@ on SIGTERM or SIGINT:
 ```php
 $background->run(intervalSeconds: 1.0);
 
+## Web: sessions, CSRF, views and translation (optional)
+
+API apps need none of this. For server-rendered pages, register the providers:
+
+```php
+use Nimbus\Http\CookieCodec;
+use Nimbus\Redis\RedisSessionStore;
+use Nimbus\Session\SessionServiceProvider;
+use Nimbus\Translation\TranslationServiceProvider;
+use Nimbus\View\ViewServiceProvider;
+
+$app->provider(new SessionServiceProvider(new RedisSessionStore($redis), cookies: CookieCodec::fromEnvironment()));
+$app->provider(new TranslationServiceProvider(__DIR__ . '/lang', 'pt_BR'));
+$app->provider(new ViewServiceProvider(__DIR__ . '/resources/views'));
+```
+
+`SessionServiceProvider` adds, in order, method override (`_method`), encrypted cookies, the session
+and CSRF checks. Sessions are stored as JSON in Redis, the database (`SessionTablesMigration`), files
+or memory, and are only written when the request used them. Inject `Session` (flash data, old input,
+errors, `regenerate()`), `CookieJar` and `RequestCookies`; `SessionAuthenticator::login()` regenerates
+the session id. CSRF accepts `_token`, `X-CSRF-TOKEN` or `X-XSRF-TOKEN` and skips bearer requests.
+
+Templates live in `resources/views/**/*.nim.php` and are compiled once per worker:
+
+```blade
+<x-layout title="Products">
+    @foreach ($products as $product)
+        <x-card :product="$product" class="mb-4">
+            <x-slot:footer>{{ __('products.price', ['value' => $product->price]) }}</x-slot>
+        </x-card>
+    @endforeach
+    <form method="POST" action="/products">@csrf
+        <input name="name" value="{{ old('name') }}"> @error('name') {{ $message }} @enderror
+    </form>
+</x-layout>
+```
+
+```php
+// resources/views/components/card.nim.php
+@props(['product'])
+<div {{ $attributes->merge(['class' => 'card']) }}>{{ $product->name }} {{ $footer ?? '' }}</div>
+```
+
+Return `view('products.index', ['products' => $products])` (or `$views->make()` from an injected
+`ViewFactory`) from a route. Class components extend `Nimbus\View\Component` in `app/Views/`.
+`vendor/bin/nimbus-views check` compiles every template and fails with `file:line: message`.
+Translations come from `lang/{locale}/*.php` and `lang/{locale}.json` (`__('messages.welcome', ['name'
+=> $name])`, `trans_choice()`); the locale is per request (`?lang=`, session, `Accept-Language`).
+
 ## Notifications
 
 `Nimbus\Notifications` sends one `Notification` through the channels its

@@ -130,7 +130,7 @@ function declaredSymbols(string $file): array
             continue;
         }
         $previous = previousSignificantToken($tokens, $index);
-        if (is_array($previous) && in_array($previous[0], [T_NEW, T_DOUBLE_COLON], true)) {
+        if (is_array($previous) && in_array($previous[0], [T_NEW, T_DOUBLE_COLON, T_FUNCTION, T_OBJECT_OPERATOR, T_NULLSAFE_OBJECT_OPERATOR], true)) {
             continue;
         }
         for (++$index; $index < $count; ++$index) {

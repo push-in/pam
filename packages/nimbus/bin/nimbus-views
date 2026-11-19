@@ -1,0 +1,57 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Usage: nimbus-views check [views directory] [component namespace]
+// Compiles every *.nim.php template and lists problems as file:line: message.
+
+$root = getcwd() ?: '.';
+$autoloaders = [
+    $GLOBALS['_composer_autoload_path'] ?? null,
+    $root . '/vendor/autoload.php',
+    dirname(__DIR__) . '/vendor/autoload.php',
+    dirname(__DIR__, 3) . '/autoload.php',
+];
+foreach ($autoloaders as $autoloader) {
+    if (is_string($autoloader) && is_file($autoloader)) {
+        require $autoloader;
+        break;
+    }
+}
+if (!class_exists(\Nimbus\View\ViewChecker::class)) {
+    fwrite(STDERR, "Composer dependencies are missing; run composer install.\n");
+    exit(2);
+}
+// Class components of applications that do not autoload App\ through Composer.
+spl_autoload_register(static function (string $class) use ($root): void {
+    if (str_starts_with($class, 'App\\')) {
+        $path = $root . '/app/' . str_replace('\\', '/', substr($class, 4)) . '.php';
+        if (is_file($path)) {
+            require $path;
+        }
+    }
+});
+
+$arguments = array_values(array_filter(is_array($argv ?? null) ? $argv : [], is_string(...)));
+$command = $arguments[1] ?? 'check';
+if ($command !== 'check') {
+    fwrite(STDERR, "Usage: nimbus-views check [views directory] [component namespace]\n");
+    exit(2);
+}
+$directory = $arguments[2] ?? $root . '/resources/views';
+if (!is_dir($directory)) {
+    fwrite(STDERR, "No views directory at {$directory}.\n");
+    exit(2);
+}
+$factory = new \Nimbus\View\ViewFactory($directory, componentNamespace: $arguments[3] ?? 'App\\Views');
+$templates = count($factory->templates());
+$problems = (new \Nimbus\View\ViewChecker($factory))->check();
+foreach ($problems as $problem) {
+    fwrite(STDERR, "{$problem->template}:{$problem->templateLine}: {$problem->reason()}\n");
+}
+if ($problems !== []) {
+    fwrite(STDERR, count($problems) . " problem(s) in {$templates} template(s).\n");
+    exit(1);
+}
+fwrite(STDOUT, "{$templates} template(s) OK.\n");

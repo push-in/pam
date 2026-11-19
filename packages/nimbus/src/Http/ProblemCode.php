@@ -18,4 +18,5 @@ enum ProblemCode: int
     case InvalidSignature = 10;
     case PayloadTooLarge = 11;
     case UnsupportedMediaType = 12;
+    case CsrfTokenMismatch = 13;
 }

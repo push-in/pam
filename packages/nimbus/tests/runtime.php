@@ -130,6 +130,12 @@ namespace Pam\Http {
             return $this->query;
         }
 
+        /** @return array<string, list<string>> */
+        public function headers(): array
+        {
+            return $this->headers;
+        }
+
         public function body(): string
         {
             return $this->body;
