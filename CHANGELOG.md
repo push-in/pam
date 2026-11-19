@@ -23,8 +23,9 @@ PAM Native 1.53.9 and PAM Native UI 2.2: app theme tokens, and the Product templ
 - Android Product visual check: it runs on pull requests that touch the
   template. It uses the released toolchain and this checkout's template, with
   pixel geometry (PAM Native UI tools) and goldens
-  (`tests/golden/product/android`) in light and dark. Building the runtime
-  from source timed out every week since 2026-10-21. Desktop Product visual
+  (`tests/golden/product/android`) in light and dark. The weekly run had
+  timed out since 2026-10-21: after the emulator shut down, `adb logcat`
+  waited forever for it. The logs are now read while the emulator runs. Desktop Product visual
   check: bindgen loads the libclang that matches its LLVM 14 headers, and apt
   retries.
 

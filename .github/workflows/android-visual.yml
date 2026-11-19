@@ -145,13 +145,16 @@ jobs:
           emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           script: |
             bash .github/scripts/product-visual-android.sh
-      - name: Capture bounded Android logs
+      - name: Keep the bounded Android logs
         if: always()
         run: |
           fixture=${PAM_PRODUCT_FIXTURE:-${RUNNER_TEMP}/pam-product-visual}
           mkdir -p "${fixture}/artifacts"
-          adb logcat -d -t 2000 2>/dev/null \
-            >"${fixture}/artifacts/android-logcat.txt" || true
+          # The capture script saved the logs while the emulator ran; the
+          # emulator is gone now, so adb must not wait for it.
+          if ! test -s "${fixture}/artifacts/android-logcat.txt"; then
+            echo 'no emulator log was captured' >"${fixture}/artifacts/android-logcat.txt"
+          fi
       - uses: actions/upload-artifact@v4
         if: always()
         with:

@@ -27,6 +27,10 @@ python3 -c 'import PIL' 2>/dev/null \
 
 dev() { adb -s "${serial}" "$@"; }
 
+# Logs are read while the emulator is still up (afterwards adb would wait for
+# a device that is gone), on success and on failure.
+trap 'timeout 60 adb -s "${serial}" logcat -d -t 2000 >"${artifacts}/android-logcat.txt" 2>/dev/null || true' EXIT
+
 dev install -r "${apk}"
 
 # The screen is ready when the offline outbox has loaded from native storage.
