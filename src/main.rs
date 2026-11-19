@@ -51,6 +51,7 @@ mod project;
 mod prometheus;
 mod protocol;
 mod quality;
+mod remote_deploy;
 mod resource_monitor;
 mod self_update;
 mod server;
@@ -64,6 +65,7 @@ mod terminal;
 mod timeline;
 mod traffic;
 mod upload;
+mod web_starter;
 mod worker_state;
 
 const EX_NOINPUT: u8 = 66;
@@ -744,6 +746,25 @@ fn run() -> Result<u8, CliError> {
         };
     }
 
+    if (script_arg == "views:check" || script_arg == "deploy:remote")
+        && raw_args
+            .peek()
+            .is_some_and(|argument| argument == "--help" || argument == "-h")
+    {
+        terminal::print_command_help(&executable, &script_arg.to_string_lossy());
+        return Ok(0);
+    }
+
+    if script_arg == "views:check" {
+        let arguments = raw_args.collect::<Vec<_>>();
+        return commands::views_check(&executable, Path::new("."), arguments)
+            .map_err(CliError::Commands);
+    }
+
+    if script_arg == "deploy:remote" {
+        return remote_deploy::run(raw_args.collect()).map_err(CliError::Commands);
+    }
+
     if script_arg == "test" {
         let mut arguments = raw_args.collect::<Vec<_>>();
         if let Some(context) = current_project()
@@ -880,7 +901,7 @@ fn run() -> Result<u8, CliError> {
                 "--template" => {
                     let value = raw_args.next().ok_or_else(|| {
                         CliError::Commands(
-                            "--template requires raw, http, laravel, desktop, native, native-ui, or product"
+                            "--template requires raw, api, web, laravel, desktop, native, native-ui, or product"
                                 .to_owned(),
                         )
                     })?;

@@ -41,6 +41,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 
 - `pam deploy` — Activate a readiness-gated release.
 - `pam deploy:history` — Inspect bounded deployment history.
+- `pam deploy:remote` — Ship the app to a server over ssh and activate it.
 - `pam rollback` — Restore a previous healthy release.
 - `pam traffic:start` — Start a weighted release ingress.
 - `pam traffic:set` — Change candidate traffic atomically.
@@ -69,6 +70,7 @@ This file is generated from the CLI command catalog. Do not edit it manually.
 - `pam format` — Format project source.
 - `pam lint` — Run formatting and static-analysis gates.
 - `pam test` — Run Pest or PHPUnit inside PAM.
+- `pam views:check` — Compile every Nimbus view and report file:line errors.
 - `pam benchmark` — Run the contextual benchmark.
 - `pam profile` — Capture contextual performance data.
 ## Ship

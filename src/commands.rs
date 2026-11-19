@@ -286,10 +286,41 @@ pub fn test(executable: &OsStr, target: &Path, arguments: Vec<OsString>) -> Resu
     Ok(status)
 }
 
+/// `pam views:check`: compiles every `resources/views/**/*.nim.php` with the
+/// project's `nimbus-views` and returns its exit code (1 when a template fails).
+pub fn views_check(
+    executable: &OsStr,
+    target: &Path,
+    arguments: Vec<OsString>,
+) -> Result<u8, String> {
+    let project = composer::discover(target)?
+        .ok_or_else(|| format!("no composer.json found from {}", target.display()))?;
+    let checker = project
+        .vendor_directory
+        .join("pushinbr/nimbus/bin/nimbus-views");
+    if !checker.is_file() {
+        return Err(format!(
+            "{} is missing; views:check needs pushinbr/nimbus 0.3 or newer installed with `pam composer install`",
+            checker.display()
+        ));
+    }
+    std::env::set_current_dir(&project.root).map_err(|error| {
+        format!(
+            "cannot enter Composer project {}: {error}",
+            project.root.display()
+        )
+    })?;
+    let mut checker_arguments = vec![OsString::from("check")];
+    checker_arguments.extend(arguments);
+    let mut runtime = PhpRuntime::initialize(executable, &checker, &checker_arguments)?;
+    runtime.execute_file(&checker)
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InitTemplate {
     Raw,
     Api,
+    Web,
     Laravel,
     Desktop,
     Mobile,
@@ -302,13 +333,14 @@ impl InitTemplate {
         match value {
             "raw" | "pure" => Ok(Self::Raw),
             "http" | "api" => Ok(Self::Api),
+            "web" => Ok(Self::Web),
             "laravel" => Ok(Self::Laravel),
             "desktop" => Ok(Self::Desktop),
             "native" | "mobile" | "android" | "mobile-pure" => Ok(Self::Mobile),
             "native-ui" | "mobile-ui" | "android-ui" | "mobile+ui" => Ok(Self::MobileUi),
             "product" | "fullstack" | "flagship" => Ok(Self::Product),
             _ => Err(format!(
-                "unknown init template {value:?}; expected raw, http, laravel, desktop, native, native-ui, or product"
+                "unknown init template {value:?}; expected raw, api, web, laravel, desktop, native, native-ui, or product"
             )),
         }
     }
@@ -434,6 +466,12 @@ pub fn init(executable: &OsStr, mut options: InitOptions) -> Result<u8, String> 
             "the desktop and mobile presets do not use --socket; they expose their own native event systems".to_owned(),
         );
     }
+    if template == InitTemplate::Web && socket {
+        return Err(
+            "the web preset does not use --socket; add pushinbr/pam-socket to it with Composer"
+                .to_owned(),
+        );
+    }
     if template == InitTemplate::Laravel {
         return init_laravel(executable, &options);
     }
@@ -475,6 +513,8 @@ fn init_project(
         init_product(directory, options)?;
     } else if matches!(template, InitTemplate::Mobile | InitTemplate::MobileUi) {
         init_mobile(directory, template == InitTemplate::MobileUi, options)?;
+    } else if template == InitTemplate::Web {
+        init_web(directory)?;
     } else {
         init_api(directory, socket)?;
     }
@@ -682,7 +722,7 @@ fn write_pam_manifest(
     options: &InitOptions,
 ) -> Result<(), String> {
     let kind = match template {
-        InitTemplate::Api => ProjectKind::Api,
+        InitTemplate::Api | InitTemplate::Web => ProjectKind::Api,
         InitTemplate::Mobile | InitTemplate::MobileUi => ProjectKind::Native,
         InitTemplate::Laravel => ProjectKind::Laravel,
         InitTemplate::Desktop => ProjectKind::Desktop,
@@ -1063,6 +1103,12 @@ fn choose_template(
         ui.heading(format!("{:<25}", "Product workspace")),
         ui.muted("Server + Native + Desktop + shared PHP contracts")
     );
+    println!(
+        "  {}  {} {}",
+        ui.accent("10"),
+        ui.heading(format!("{:<25}", "Web")),
+        ui.muted("Server-rendered pages with login, sessions and CSRF")
+    );
     print!("\n{} ", ui.command("Choose a preset [02] ›"));
     std::io::stdout()
         .flush()
@@ -1081,6 +1127,7 @@ fn choose_template(
         "7" => Ok((InitTemplate::Mobile, false)),
         "8" => Ok((InitTemplate::MobileUi, false)),
         "9" => Ok((InitTemplate::Product, false)),
+        "10" => Ok((InitTemplate::Web, false)),
         value => Err(format!("invalid init preset {value:?}")),
     }
 }
@@ -1119,7 +1166,8 @@ Server::create(static fn (Request $request, Response $response): Response => mat
     Ok(())
 }
 
-fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
+/// The Composer manifest shared by the Nimbus starters (`api` and `web`).
+fn nimbus_composer_manifest(socket: bool, extra: &[(&str, &str)]) -> serde_json::Value {
     let local_packages = local_packages_repository();
     let nimbus_version = "^0.3";
     let arcano_version = "^0.2.4";
@@ -1165,9 +1213,90 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
             "test": "pam test . --phpunit -c phpunit.xml"
         }
     });
+    for (package, constraint) in extra {
+        manifest["require"][*package] = serde_json::json!(constraint);
+    }
     if let Some(repository) = local_packages {
         manifest["repositories"] = serde_json::json!([repository]);
     }
+    manifest
+}
+
+/// The web starter: sessions, CSRF, `*.nim.php` views, login, registration and password
+/// reset over Arcano, pt_BR and en translations, and feature tests on SQLite.
+fn init_web(directory: &Path) -> Result<(), String> {
+    let mut manifest = nimbus_composer_manifest(
+        false,
+        &[("symfony/mailer", "^7.3"), ("symfony/translation", "^7.3")],
+    );
+    manifest["description"] =
+        serde_json::json!("A web application powered by Nimbus and the PAM runtime.");
+    manifest["scripts"]["migrate"] = serde_json::json!("pam exec bin/migrate");
+    manifest["scripts"]["views:check"] = serde_json::json!("pam views:check");
+    write_new(
+        &directory.join("composer.json"),
+        &(serde_json::to_string_pretty(&manifest)
+            .map_err(|error| format!("cannot serialize Composer manifest: {error}"))?
+            + "\n"),
+    )?;
+    let migration = format!(
+        "database/migrations/{}_0_0_default_create_users.php",
+        crate::api_generator::migration_date(
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|_| "system clock is before the Unix epoch".to_owned())?
+                .as_secs()
+        )
+    );
+    for (path, contents) in crate::web_starter::FILES {
+        let path = if *path == "database/migrations/create_users.php" {
+            migration.as_str()
+        } else {
+            path
+        };
+        let target = directory.join(path);
+        if let Some(parent) = target.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+        }
+        write_new(&target, contents)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            directory.join("bin/migrate"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .map_err(|error| format!("cannot make bin/migrate executable: {error}"))?;
+    }
+    fs::create_dir_all(directory.join("storage"))
+        .map_err(|error| format!("cannot create storage: {error}"))?;
+    let example = crate::web_starter::FILES
+        .iter()
+        .find(|(path, _)| *path == ".env.example")
+        .map(|(_, contents)| *contents)
+        .unwrap_or_default();
+    write_new(
+        &directory.join(".env"),
+        &example.replace("APP_KEY=\n", &format!("APP_KEY={}\n", app_key()?)),
+    )
+}
+
+/// `base64:` and 32 random bytes, the `APP_KEY` format Nimbus reads.
+fn app_key() -> Result<String, String> {
+    let mut bytes = [0_u8; 32];
+    fs::File::open("/dev/urandom")
+        .and_then(|mut source| source.read_exact(&mut bytes))
+        .map_err(|error| format!("cannot generate APP_KEY: {error}"))?;
+    Ok(format!(
+        "base64:{}",
+        base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
+    ))
+}
+
+fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
+    let manifest = nimbus_composer_manifest(socket, &[]);
     for path in [
         "app/Controllers",
         "database/factories",
@@ -3695,6 +3824,8 @@ fn print_init_success(directory: &Path, template: InitTemplate, socket: bool, in
         (InitTemplate::Raw, true) => "raw + Socket",
         (InitTemplate::Api, false) => "API",
         (InitTemplate::Api, true) => "API + Socket",
+        (InitTemplate::Web, false) => "Web · login",
+        (InitTemplate::Web, true) => unreachable!("web does not support --socket"),
         (InitTemplate::Laravel, false) => "Laravel",
         (InitTemplate::Laravel, true) => "Laravel + Socket",
         (InitTemplate::Desktop, false) => "Desktop",

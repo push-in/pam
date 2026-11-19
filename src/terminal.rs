@@ -508,7 +508,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             &[
                 (
                     "--template PRESET",
-                    "raw, http, laravel, desktop, native, native-ui, or product",
+                    "raw, api, web, laravel, desktop, native, native-ui, or product",
                 ),
                 ("--socket", "Add Pam Socket support"),
                 ("--name NAME", "Human-readable mobile application name"),
@@ -529,6 +529,7 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
             ],
             &[
                 "init my-api --template http",
+                "init my-app --template web",
                 "init my-app --template laravel --socket",
                 "init native-app --template native --no-install",
                 "init ui-app --template native-ui --no-install",
@@ -558,6 +559,43 @@ pub fn print_command_help(executable: &OsStr, command: &str) -> bool {
                 ("--phpunit", "Force the PHPUnit runner"),
             ],
             &["test", "test . --pest --filter RuntimeTest"],
+        ),
+        "views:check" => (
+            "Compile every Nimbus *.nim.php view; exits 1 and prints file:line on errors.",
+            "views:check [views directory] [component namespace]",
+            &[],
+            &["views:check", "views:check resources/views 'App\\Views'"],
+        ),
+        "deploy:remote" => (
+            "Ship the app over ssh/rsync, install, migrate and activate it with pam deploy.",
+            "deploy:remote [user@host] [options]",
+            &[
+                (
+                    "--init",
+                    "Create shared/.env and install pam-<name>.service",
+                ),
+                (
+                    "--path DIR",
+                    "Release root on the server (default pam-apps/<name>)",
+                ),
+                (
+                    "--name NAME",
+                    "Process-manager name (default: pam.json name)",
+                ),
+                ("--workers N", "Workers of the first pam up"),
+                (
+                    "--health-check-url URL",
+                    "Readiness URL of the first pam up",
+                ),
+                ("--keep N", "Releases kept on the server (default 5)"),
+                ("--pam PATH", "The pam executable on the server"),
+                ("--dry-run", "Print the ssh and rsync commands only"),
+            ],
+            &[
+                "deploy:remote deploy@app.example.com --init",
+                "deploy:remote deploy@app.example.com --workers 4",
+                "deploy:remote --dry-run",
+            ],
         ),
         "doctor" => (
             "Audit and optionally repair the active project toolchain.",

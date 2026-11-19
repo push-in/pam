@@ -1,0 +1,4 @@
+/vendor/
+/.pam/
+/.env
+/storage/

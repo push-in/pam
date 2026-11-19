@@ -111,6 +111,7 @@ Or choose a preset explicitly:
 
 ```bash
 pam init my-api --template http
+pam init my-web-app --template web
 pam init my-laravel-app --template laravel
 pam init my-native-app --template native
 pam init my-desktop-app --template desktop

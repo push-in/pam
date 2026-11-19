@@ -242,6 +242,96 @@ pam make:test UserApiTest
 Generators require a bounded PascalCase name, create missing application
 directories and refuse to overwrite existing files. Generated controllers use
 named methods, ready for `[UserController::class, 'index']` route handlers.
+`pam make:view orders.index` creates `resources/views/orders/index.nim.php`,
+inside `<x-layout>` when the application has that component.
+
+## Nimbus starter kits
+
+```bash
+pam init my-api --template api   # JSON API (the default)
+pam init my-app --template web   # server-rendered pages with login
+```
+
+The web starter is a Nimbus application with sessions (files in
+`storage/sessions`), CSRF on every form, `resources/views/**/*.nim.php` views
+with the layout as the `<x-layout>` component, login, registration, logout,
+password reset by e-mail (`PasswordResets`, `MAILER_DSN`) and a dashboard that
+only signed-in users reach. Users are an Arcano entity (`app/Models/User.php`)
+hashed with `Nimbus\Security\Hash`; texts come from `lang/pt_BR` and `lang/en`
+(`/locale/en` switches the session). `bootstrap/app.php` builds the application
+for `index.php`, `bin/migrate` and the tests, and reads `.env`, which `pam init`
+creates with a random `APP_KEY`. No JavaScript is required.
+
+```bash
+cd my-app
+pam composer install
+pam exec bin/migrate          # SQLite in storage/database.sqlite by default
+pam test                      # feature tests on in-memory SQLite
+pam dev index.php
+```
+
+## Checking views
+
+`pam views:check` compiles every `resources/views/**/*.nim.php` template of the
+project with the installed `vendor/pushinbr/nimbus/bin/nimbus-views` and
+prints each problem as `file:line: message`. It exits with `0` when every
+template compiles and `1` otherwise, so it can gate CI:
+
+```bash
+pam views:check
+pam views:check resources/admin-views 'App\Admin\Views'
+```
+
+The optional arguments are the views directory and the namespace of class
+components (default `App\Views`).
+
+## Deploying to your own server
+
+`pam deploy:remote` ships a Composer application to a Linux server that has
+`pam`, `rsync` and an SSH key for the user, using the local `ssh` and `rsync`:
+
+```bash
+pam deploy:remote deploy@app.example.com --init   # first time
+pam deploy:remote deploy@app.example.com          # every release
+pam deploy:remote deploy@app.example.com --dry-run
+```
+
+Each run copies the project into `ROOT/releases/<UTC timestamp>` (without
+`vendor/`, `.git/`, `node_modules/`, `.pam/`, `.env` and `storage/`), links
+`ROOT/shared/.env` and `ROOT/shared/storage` into it, runs
+`pam composer install --no-dev --optimize-autoloader`, runs `bin/migrate` when
+the application has one, and activates the release. The first release is
+started with `pam up`; the next ones go through the readiness-gated
+`pam deploy`, which keeps the previous release online when the new one fails
+to start. `ROOT/current` points to the active release, the last five releases
+are kept, and `pam rollback NAME` (with `PAM_MANAGER_STATE_DIR=ROOT/state` and
+`PAM_MANAGER_RUNTIME_DIR=ROOT/state/run`) returns to an earlier one.
+
+`--init` also creates `ROOT/shared/.env` from `.env.example` when the server
+has none (a new `APP_KEY`, `SESSION_SECURE_COOKIE=true`, `PAM_ENV=production`),
+and installs and starts `~/.config/systemd/user/pam-<name>.service`. The unit
+runs the application's own `pamd` with its state in `ROOT/state`, which brings
+the saved application back after a reboot; `loginctl enable-linger` keeps it
+running without a login session.
+
+Options: `--path` (`ROOT`, absolute or relative to the remote home; default
+`pam-apps/<name>`), `--name` (default: `name` in `pam.json`), `--workers`,
+`--health-check-url`, `--keep`, `--pam` (the executable on the server) and
+`--dry-run`, which prints the commands. Defaults can live in `pam.json`:
+
+```json
+{
+    "deploy": {
+        "host": "deploy@app.example.com",
+        "path": "/srv/shop",
+        "workers": 4,
+        "healthCheckUrl": "http://127.0.0.1:3000/login"
+    }
+}
+```
+
+The server resolves Composer packages itself, so path repositories that only
+exist on the development machine must be published or removed first.
 
 See the generated [complete command catalog](cli-reference.md) and
 [CLI extension contract](extending-cli.md).
