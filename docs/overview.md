@@ -193,7 +193,7 @@ Product features ship as Composer packages. You install them with `pam composer 
 
 | Core package | Responsibility |
 | --- | --- |
-| [`pushinbr/pam-http`](../packages/http) | Express-like routing, middleware, controllers, validation and resources |
+| [`pushinbr/nimbus`](../packages/nimbus) | Express-like routing, middleware, controllers, validation and resources |
 | [`pushinbr/pam-socket`](../packages/socket) | WebSocket events and rooms |
 | [`pushinbr/pam-http-psr`](../packages/http-psr) | PSR-7, PSR-15 and PSR-17 interoperability |
 | [`pushinbr/pam-octane`](../packages/octane) | Laravel Octane bridge |

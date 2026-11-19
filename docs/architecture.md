@@ -51,7 +51,7 @@ O Rust valida novamente status/headers antes de construir a resposta de rede.
 ## Núcleo e pacotes
 
 O binário não contém roteador de aplicação. `Pam\Http\Server` é a primitiva HTTP
-de baixo nível; `pushinbr/pam-http` fornece `Pam\App`, rotas, middleware, error boundary e
+de baixo nível; `pushinbr/nimbus` fornece `Nimbus\App`, rotas, middleware, error boundary e
 descoberta de providers. `pushinbr/pam-socket` fornece a API de eventos/rooms sobre o
 transporte WebSocket nativo. A integração PSR e o cliente de testes também vivem
 em `pushinbr/pam-http-psr` e `pushinbr/pam-http-testing`.

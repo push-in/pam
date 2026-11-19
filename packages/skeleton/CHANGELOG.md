@@ -1,30 +1,15 @@
 # Changelog
 
-All notable changes to PAM Skeleton are documented in this file.
+All notable changes to the Nimbus skeleton are documented in this file.
 
-## 2.1.0 - 2026-11-18
+## Unreleased
 
-- Persist products with the Arcano ORM (`pushinbr/arcano`): `Product` is an
-  `#[Entity]`, `ArcanoProductRepository` replaces the Eloquent repository and
-  `bin/migrate` runs, generates, reverts and lists Arcano migrations and builds
-  the schema cache.
-- Require `pushinbr/pam-http` 2.1 for the Arcano integration.
+## 0.1.0 - 2026-11-19
 
-## 2.0.1 - 2026-08-22
+`pushinbr/pam-skeleton` is now `pushinbr/nimbus-skeleton`.
 
-- Require the permanent `pushinbr/pam-http-psr` interoperability package.
-- Require `pushinbr/pam-http-testing` for the generated in-process test suite.
-- Preserve PHP 8.5 as the generated application's default runtime.
+### Changed
+- Requires `pushinbr/nimbus` instead of `pushinbr/pam-http`.
+- Application code lives in `app/` (`App\Controllers`, `App\Requests`, `App\Resources`,
+  `App\Models`, `App\Data`, ...) and every route in `routes.php`.
 
-## 2.0.0 - 2026-08-21
-
-- Make PHP 8.5 the default application runtime.
-- Replace `pushinbr/pam-api` with `pushinbr/pam-http` 2.x.
-- Replace `pushinbr/pam-psr-bridge` with `pushinbr/pam-psr`.
-- Require canonical PAM Socket and PAM Testing releases without legacy
-  dependencies.
-- Standardize the PAM-first Composer installation guide.
-
-## 1.0.2 - 2026-08-20
-
-- Preserve the original starter before the Composer ecosystem migration.

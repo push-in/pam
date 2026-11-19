@@ -1121,14 +1121,14 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let http_version = "^2.0";
+    let nimbus_version = "^0.1";
     let testing_version = "^1.0";
     let socket_version = "^1.1";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.5")),
         (
-            "pushinbr/pam-http".to_owned(),
-            serde_json::json!(http_version),
+            "pushinbr/nimbus".to_owned(),
+            serde_json::json!(nimbus_version),
         ),
     ]);
     if socket {
@@ -1148,7 +1148,7 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
             "pushinbr/pam-http-testing": testing_version,
             "phpunit/phpunit": "^12.5"
         },
-        "autoload": {"psr-4": {"App\\": "src/"}},
+        "autoload": {"psr-4": {"App\\": "app/"}},
         "config": {"platform": {"php": "8.5.0"}, "platform-check": true, "sort-packages": true},
         "scripts": {
             "dev": "pam dev index.php",
@@ -1183,7 +1183,7 @@ $socket->on('connection', static function (\Pam\WS\Socket $client): void {
 
 declare(strict_types=1);
 
-use Pam\App;
+use Nimbus\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
@@ -1218,7 +1218,7 @@ $app->listen((int) (getenv('PAM_PORT') ?: 3000));
 
 declare(strict_types=1);
 
-use Pam\App;
+use Nimbus\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Testing\TestClient;
@@ -1831,7 +1831,7 @@ echo "Cross-surface product contract verified.\n";
 
 declare(strict_types=1);
 
-use Pam\App;
+use Nimbus\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Product\Contracts\ProductMutation;
@@ -1875,7 +1875,7 @@ $app->listen((int) (getenv('PAM_PORT') ?: 3000));
 
 declare(strict_types=1);
 
-use Pam\App;
+use Nimbus\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Testing\TestClient;
@@ -3360,7 +3360,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
     }
     let packages = Path::new(env!("CARGO_MANIFEST_DIR")).join("packages/*");
     Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("packages/http/composer.json")
+        .join("packages/nimbus/composer.json")
         .is_file()
         .then(|| {
             serde_json::json!({
@@ -3370,7 +3370,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                     "symlink": false,
                     "versions": {
                         "pushinbr/pam-contracts": "1.1.0",
-                        "pushinbr/pam-http": "2.0.0",
+                        "pushinbr/nimbus": "0.1.0",
                         "pushinbr/pam-http-psr": "1.0.0",
                         "pushinbr/pam-socket": "1.1.0",
                         "pushinbr/pam-http-testing": "1.0.0"

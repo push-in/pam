@@ -49,9 +49,9 @@ jobs:
           # the expected abandonment is reported here.
           audit_with_retry --working-dir=compat/composer-smoke --locked --abandoned=report
           audit_with_retry --working-dir=compat/laravel-smoke --locked
-          composer install --working-dir=packages/http --no-interaction --prefer-dist --dry-run
-          composer install --working-dir=packages/http --no-interaction --prefer-dist
-          audit_with_retry --working-dir=packages/http --locked
+          composer install --working-dir=packages/nimbus --no-interaction --prefer-dist --dry-run
+          composer install --working-dir=packages/nimbus --no-interaction --prefer-dist
+          audit_with_retry --working-dir=packages/nimbus --locked
           composer install --working-dir=packages/octane --no-interaction --prefer-dist --dry-run
           composer install --working-dir=packages/octane --no-interaction --prefer-dist
           audit_with_retry --working-dir=packages/octane

@@ -117,8 +117,8 @@ pam init my-desktop-app --template desktop
 pam init my-product --template product
 ```
 
-The API preset targets PAM API 2.0 and generates the same source files shipped
-by `pushinbr/pam-skeleton`: a named `PingController::show` action, a readiness
+The API preset targets Nimbus and generates the same source files shipped
+by `pushinbr/nimbus-skeleton`: a named `PingController::show` action, a readiness
 service and readonly snapshot, an integer-backed readiness enum, a JSON
 Resource, typed port configuration, security headers and an executable
 in-memory test. It also includes a complete Arcano product flow with named

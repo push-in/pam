@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../../compat/composer-smoke/vendor/autoload.php';
 
-use Pam\App;
+use Nimbus\App;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Socket\Server as SocketServer;

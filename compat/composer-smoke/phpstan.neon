@@ -8,7 +8,7 @@ parameters:
     paths:
         - ../../runtime
         - ../../packages/contracts/src
-        - ../../packages/http/src
+        - ../../packages/nimbus/src
         - ../../packages/socket/src
         - ../../packages/http-psr/src
         - ../../packages/http-testing/src

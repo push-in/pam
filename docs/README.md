@@ -28,7 +28,7 @@ The report contract is embedded and available offline with
 
 | Product | Build | Start |
 | --- | --- | --- |
-| PAM HTTP | Composer framework for HTTP and realtime services | `pam init app --template http` |
+| Nimbus | API-first PHP framework for HTTP and realtime services | `pam init app --template http` |
 | PAM Laravel | Laravel hosted by the persistent runtime | [`laravel.md`](laravel.md) |
 | PAM Octane | Laravel Octane on the PAM transport | [`../packages/octane/README.md`](../packages/octane/README.md) |
 | PAM Native | Android and iOS applications in PHP | [`../pam-native/README.md`](../pam-native/README.md) |

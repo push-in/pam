@@ -19,8 +19,8 @@ cd my-app
 pam composer require pushinbr/pam-http-psr
 ```
 
-Pass a PSR-15 handler and middleware to `Pam\App::handler()` and
-`Pam\App::middleware()`; Pam converts native requests and responses at the runtime
+Pass a PSR-15 handler and middleware to `Nimbus\App::handler()` and
+`Nimbus\App::middleware()`; Pam converts native requests and responses at the runtime
 boundary.
 
 ## License

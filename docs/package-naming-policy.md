@@ -7,7 +7,8 @@ suffix, so `push-in/pam-http-auth` publishes `pushinbr/pam-http-auth`.
 
 - `pam` is only the runtime and process manager.
 - `pam-contracts` contains genuinely cross-product runtime contracts.
-- `pam-http` is the HTTP kernel; extensions use `pam-http-*`.
+- `nimbus` is the PHP framework (`Nimbus\` namespace); its extensions use `nimbus-*`.
+- `pam-http-*` packages are runtime-level HTTP interoperability (PSR adapters, in-memory testing).
 - `pam-native` is the native application kernel; extensions use `pam-native-*`.
 - Future product kernels such as `pam-desktop` own their `pam-desktop-*` extensions.
 - A short `pam-*` capability name is allowed only when it is independent from every product kernel.
@@ -25,4 +26,5 @@ kept for one major migration window when existing application source would other
 New templates and documentation switch to the replacement immediately. CI installs both the new
 name and its bridge until the migration window closes.
 
-`pam-api` is not a current product name. The product is **PAM HTTP**.
+`pam-api` and `pam-http` are not current product names. The framework is **Nimbus**
+(`pushinbr/nimbus`); `pushinbr/pam-http` is frozen at 2.2.x and abandoned in favour of it.

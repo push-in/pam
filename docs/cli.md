@@ -221,7 +221,7 @@ pam make:model Post --migration
 pam console
 ```
 
-PAM API projects have native generators for Arcano entities, controllers,
+Nimbus projects have native generators for Arcano entities, controllers,
 Form Requests, Resources, migrations, services and repositories:
 
 ```bash

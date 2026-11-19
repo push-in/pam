@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Pam\Compatibility\Tests;
 
-use Pam\App;
+use Nimbus\App;
 use Pam\Contracts\Http\ApplicationInterface;
 use Pam\Contracts\Package\ServiceProviderInterface;
 use Pam\Contracts\Transport\MessageDisposition;
@@ -16,11 +16,11 @@ use Pam\Contracts\Transport\TransportKind;
 use Pam\Contracts\Transport\TransportMessage;
 use Pam\Contracts\Transport\TransportProviderInterface;
 use Pam\Contracts\Transport\TransportWorker;
-use Pam\Api\Middleware\SecurityHeadersMiddleware;
-use Pam\Api\Middleware\RateLimitMiddleware;
-use Pam\Api\PackageDiscovery;
-use Pam\Api\Router;
-use Pam\Api\RoutingResultType;
+use Nimbus\Middleware\SecurityHeadersMiddleware;
+use Nimbus\Middleware\RateLimitMiddleware;
+use Nimbus\PackageDiscovery;
+use Nimbus\Router;
+use Nimbus\RoutingResultType;
 use Pam\Http\Request;
 use Pam\Http\Response;
 use Pam\Testing\TestClient;

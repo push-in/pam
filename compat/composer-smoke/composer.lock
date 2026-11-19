@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "5ad9207974676a024b5200b6f859989b",
+    "content-hash": "c1507c8f4d18e2e17de991467f3ce316",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2720,49 +2720,12 @@
             "time": "2021-10-29T13:26:27+00:00"
         },
         {
-            "name": "pushinbr/pam-contracts",
-            "version": "1.1.0",
+            "name": "pushinbr/nimbus",
+            "version": "0.1.0",
             "dist": {
                 "type": "path",
-                "url": "../../packages/contracts",
-                "reference": "f6c4bc407517a9aae1dc3947e11e650155bb7fb7"
-            },
-            "require": {
-                "php": "^8.4"
-            },
-            "type": "library",
-            "autoload": {
-                "psr-4": {
-                    "Pam\\Contracts\\": "src/"
-                }
-            },
-            "license": [
-                "Apache-2.0"
-            ],
-            "description": "Stable PHP contracts for the Pam persistent runtime.",
-            "homepage": "https://github.com/push-in/pam",
-            "keywords": [
-                "contracts",
-                "pam",
-                "php",
-                "runtime"
-            ],
-            "support": {
-                "issues": "https://github.com/push-in/pam/issues",
-                "source": "https://github.com/push-in/pam-contracts"
-            },
-            "transport-options": {
-                "symlink": true,
-                "relative": true
-            }
-        },
-        {
-            "name": "pushinbr/pam-http",
-            "version": "2.0.0",
-            "dist": {
-                "type": "path",
-                "url": "../../packages/http",
-                "reference": "352bb48ff2a1b196190f2ae2316912b1bdf935d0"
+                "url": "../../packages/nimbus",
+                "reference": "af6b2b1093306f20cbd3a46d0073cbfdd35e5a2b"
             },
             "require": {
                 "php": "^8.4",
@@ -2780,16 +2743,13 @@
             },
             "type": "library",
             "autoload": {
-                "classmap": [
-                    "src/App.php"
-                ],
                 "psr-4": {
-                    "Pam\\Api\\": "src/"
+                    "Nimbus\\": "src/"
                 }
             },
             "autoload-dev": {
                 "psr-4": {
-                    "Pam\\Api\\Tests\\": "tests/"
+                    "Nimbus\\Tests\\": "tests/"
                 },
                 "files": [
                     "tests/bootstrap.php"
@@ -2828,13 +2788,15 @@
             "license": [
                 "Apache-2.0"
             ],
-            "description": "Elegant HTTP routing and middleware for the Pam runtime.",
-            "homepage": "https://github.com/push-in/pam-http",
+            "description": "Nimbus: the API-first PHP framework for the PAM runtime.",
+            "homepage": "https://github.com/push-in/nimbus",
             "keywords": [
                 "api",
                 "dependency-injection",
+                "framework",
                 "http",
                 "middleware",
+                "nimbus",
                 "openapi",
                 "pam",
                 "php",
@@ -2842,9 +2804,46 @@
                 "validation"
             ],
             "support": {
-                "docs": "https://push-in.github.io/pam-docs/packages/http/",
-                "issues": "https://github.com/push-in/pam-http/issues",
-                "source": "https://github.com/push-in/pam-http"
+                "docs": "https://github.com/push-in/nimbus#readme",
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/nimbus"
+            },
+            "transport-options": {
+                "symlink": true,
+                "relative": true
+            }
+        },
+        {
+            "name": "pushinbr/pam-contracts",
+            "version": "1.1.0",
+            "dist": {
+                "type": "path",
+                "url": "../../packages/contracts",
+                "reference": "d1e50e0ac28339628c4f8f318bfcf05b00eb24ce"
+            },
+            "require": {
+                "php": "^8.4"
+            },
+            "type": "library",
+            "autoload": {
+                "psr-4": {
+                    "Pam\\Contracts\\": "src/"
+                }
+            },
+            "license": [
+                "Apache-2.0"
+            ],
+            "description": "Stable PHP contracts for the Pam persistent runtime.",
+            "homepage": "https://github.com/push-in/pam",
+            "keywords": [
+                "contracts",
+                "pam",
+                "php",
+                "runtime"
+            ],
+            "support": {
+                "issues": "https://github.com/push-in/pam/issues",
+                "source": "https://github.com/push-in/pam-contracts"
             },
             "transport-options": {
                 "symlink": true,
@@ -2857,7 +2856,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-psr",
-                "reference": "4fecce4352b3f422b0cb0361ae87827c234b9604"
+                "reference": "9688914541de758bb6e017d476b52a4ecef8c3a9"
             },
             "require": {
                 "php": "^8.4",
@@ -2905,7 +2904,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/psr",
-                "reference": "60ec945abb6b831fad04df2cc563714b6be9a504"
+                "reference": "72ee921c65616114dca455f836f224330d6517a8"
             },
             "require": {
                 "php": "^8.4",
@@ -2939,7 +2938,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/socket",
-                "reference": "4d9dcf9ea7f13e5d98103354e47f1cdda280959e"
+                "reference": "9c3ca4ea511764285d7d6cd7a33b83b5558248d0"
             },
             "require": {
                 "php": "^8.4",
@@ -7360,7 +7359,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-testing",
-                "reference": "e1e2efa1cb9acbc462d0130aebcfd7acc75a9c67"
+                "reference": "04c41d71e2668bea6a34ce5c14e67028aba29194"
             },
             "require": {
                 "php": "^8.4",
@@ -7408,7 +7407,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/testing",
-                "reference": "bec24f362ad95cc3c91422a6d40c4b739c48318d"
+                "reference": "4162a9046059403b7d31fec70ad9385fd0d79a3c"
             },
             "require": {
                 "php": "^8.4",

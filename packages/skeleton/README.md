@@ -1,7 +1,7 @@
-# Pam application
+# Nimbus application
 
-> This branch targets PAM API 2.0. Use the published `1.x` skeleton until the
-> PAM API 2.0 prerelease is available on Packagist.
+The starter API application for [Nimbus](https://github.com/push-in/nimbus) on
+the PAM runtime.
 
 ## Start here
 
@@ -25,7 +25,7 @@ pam composer dev
 
 The API starts at `http://127.0.0.1:3000`.
 
-The starter intentionally demonstrates the structured PAM API path: a named
+The starter demonstrates the structured Nimbus path: a named
 controller method orchestrates a service and returns a JSON Resource. Closures
 remain available for small endpoints, but application rules should live in
 services and persistence should live in repositories.
@@ -44,7 +44,7 @@ typed DTO, `ProductService` owns the use case, `ProductRepository` isolates
 Arcano persistence, and `ProductResource` owns the response contract. Product
 statuses are sequential integer-backed enum values (`1` active, `2` archived).
 Creation returns `201 Created`; resources may select any valid HTTP status while
-retaining PAM API's consistent `data` envelope.
+retaining Nimbus' consistent `data` envelope.
 
 Run the in-memory application test inside Pam's Embed SAPI:
 
@@ -56,21 +56,35 @@ The generated application and this published skeleton share the same source
 files:
 
 ```text
-index.php
-src/
-├── Domain/Products/
-├── Http/{Controllers,Requests,Resources}/
+app/
+├── Controllers/
+├── Data/                       # typed DTOs
 ├── Models/Product.php          # #[Entity] mapped by Arcano
 ├── Providers/AppServiceProvider.php
 ├── Repositories/
+├── Requests/
+├── Resources/
 └── Services/
 database/migrations/
 tests/{ApplicationTest.php,bootstrap.php}
+routes.php                      # every route, in one file
+index.php
+```
+
+`routes.php` receives the router as `$router`:
+
+```php
+$router->get('api/ping', [PingController::class, 'show']);
+
+$router->controller(ProductController::class, function (RouteRegistrar $router): void {
+    $router->get('api/products', 'index');
+    $router->post('api/products', 'store');
+});
 ```
 
 `index.php` validates typed configuration before listening, installs secure
 response headers, and boots Arcano from environment configuration (`DB_*`).
-The entities in `src/Models` are compiled into `var/cache/arcano-schema.php`;
+The entities in `app/Models` are compiled into `var/cache/arcano-schema.php`;
 the cache is rebuilt when an entity changes, except with `PAM_ENV=production`.
 
 Migrations are explicit so concurrent production workers never race schema
@@ -86,7 +100,7 @@ pam composer migrate cache        # rebuild the schema cache during deploy
 
 ## License
 
-The PAM skeleton is open source under the
+The Nimbus skeleton is open source under the
 [Apache License 2.0](LICENSE). Application files copied from this
 skeleton and code emitted by PAM generators may be used, modified, sublicensed,
 and distributed under terms of your choice, as stated in the Additional Use

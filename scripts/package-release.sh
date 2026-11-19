@@ -37,10 +37,10 @@ validate_map() {
         and ([.packages[].deploySecret] | length == (unique | length))
         and all(
             .packages[];
-            (.name | test("^pushinbr/pam-[a-z0-9-]+$"))
+            (.name | test("^pushinbr/(pam|nimbus)(-[a-z0-9-]+)?$"))
             and (.path | test("^packages/[a-z0-9-]+$"))
-            and (.repository | test("^pam-[a-z0-9-]+$"))
-            and (.deploySecret | test("^PAM_[A-Z0-9_]+_DEPLOY_KEY$"))
+            and (.repository | test("^(pam|nimbus)(-[a-z0-9-]+)?$"))
+            and (.deploySecret | test("^(PAM|NIMBUS)_([A-Z0-9_]+_)?DEPLOY_KEY$"))
             and (.description | length > 0)
         )
     ' "${package_map}" >/dev/null || fail "packages/packages.json is invalid"

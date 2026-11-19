@@ -1,0 +1,71 @@
+{
+    "name": "pushinbr/nimbus",
+    "description": "Nimbus: the API-first PHP framework for the PAM runtime.",
+    "type": "library",
+    "license": "Apache-2.0",
+    "keywords": [
+        "api",
+        "dependency-injection",
+        "framework",
+        "http",
+        "middleware",
+        "nimbus",
+        "openapi",
+        "pam",
+        "php",
+        "router",
+        "validation"
+    ],
+    "homepage": "https://github.com/push-in/nimbus",
+    "support": {
+        "docs": "https://github.com/push-in/nimbus#readme",
+        "issues": "https://github.com/push-in/pam/issues",
+        "source": "https://github.com/push-in/nimbus"
+    },
+    "require": {
+        "php": "^8.4",
+        "pushinbr/pam-contracts": "^1.1"
+    },
+    "suggest": {
+        "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
+        "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
+        "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
+    },
+    "autoload": {
+        "psr-4": {
+            "Nimbus\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Nimbus\\Tests\\": "tests/"
+        },
+        "files": [
+            "tests/bootstrap.php"
+        ]
+    },
+    "scripts": {
+        "analyse": "phpstan analyse --configuration=phpstan.neon --memory-limit=1G",
+        "api:compat": "bin/api-compat check",
+        "docs:check": "bin/api-reference --check",
+        "docs:generate": "bin/api-reference --write",
+        "benchmark": "php benchmarks/router.php",
+        "benchmark:check": "php benchmarks/router.php --assert",
+        "test": "phpunit --configuration=phpunit.xml",
+        "verify": [
+            "@analyse",
+            "@api:compat",
+            "@docs:check",
+            "@benchmark:check",
+            "@test"
+        ]
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "require-dev": {
+        "phpstan/phpstan": "^2.1",
+        "phpunit/phpunit": "^11.5",
+        "pushinbr/arcano": "^0.2.2"
+    }
+}
