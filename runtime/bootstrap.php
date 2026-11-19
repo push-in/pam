@@ -1000,7 +1000,7 @@ namespace Pam\Internal {
          *
          * @param string|array<string, list<string>> $headers
          * @param string|array<string, mixed> $context
-         * @param array<string, mixed>|null $server prebuilt $_SERVER (native dispatch)
+         * @param array<string, scalar|null>|null $server prebuilt $_SERVER (native dispatch)
          */
         public static function beginHttpDispatch(
             string $method,
@@ -1144,7 +1144,7 @@ namespace Pam\Internal {
         /**
          * @param string|array<string, list<string>> $headers
          * @param string|array<string, mixed> $context
-         * @param array<string, mixed>|null $server
+         * @param array<string, scalar|null>|null $server
          */
         private static function executeHttp(
             string $method,
@@ -1559,7 +1559,7 @@ namespace Pam\Internal {
             $body = $response['body'];
             $chunks = $response['chunks'] ?? [];
             self::$nativeEncoder ??= function_exists('pam_native_encode_http_response');
-            if (self::$nativeEncoder && is_int($status) && is_string($body) && is_array($chunks)) {
+            if (self::$nativeEncoder) {
                 // Same bytes as below; null when a limit or value needs the
                 // PHP path (and its exceptions).
                 $encoded = \pam_native_encode_http_response($status, $headers, $body, $chunks);
@@ -1998,6 +1998,7 @@ namespace Pam\Internal {
          * @param array<array-key, mixed>|null $parsedBody
          * @param array<string, array<string, int|string>> $files
          * @param array<string, mixed> $context
+         * @param array<string, scalar|null>|null $server
          */
         private static function populateSuperglobals(
             string $method,
