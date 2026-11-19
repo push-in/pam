@@ -24,6 +24,7 @@ final readonly class Paginator
     {
         $perPage = self::perPage($request, $perPage);
         $page = max(1, self::integer($request->query()['page'] ?? null) ?? 1);
+        // @phpstan-ignore function.alreadyNarrowedType (apps may still run Arcano 0.2.5)
         if (method_exists($select, 'fetchPage')) {
             // Arcano 0.2.6+: the page and the count in one statement when the select allows it.
             /** @var array{list<T>, int} $fetched */
@@ -70,7 +71,7 @@ final readonly class Paginator
             array_pop($items);
         }
         $next = null;
-        if ($more && $items !== []) {
+        if ($more) {
             $last = $items[array_key_last($items)];
             $value = $last->{$property} ?? null;
             if (!is_int($value) && !is_string($value)) {
@@ -87,6 +88,7 @@ final readonly class Paginator
         ]);
     }
 
+    /** @return int<1, max> */
     private static function perPage(Request $request, int $default): int
     {
         $requested = self::integer($request->query()['per_page'] ?? null) ?? $default;
