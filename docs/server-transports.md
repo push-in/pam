@@ -63,7 +63,7 @@ payloads, IDs, headers, or exception messages.
 
 ## Application registration
 
-`Pam\App` implements the additive `TransportApplicationInterface`. A package
+`Nimbus\App` implements the additive `TransportApplicationInterface`. A package
 service provider can register an adapter without breaking alternative HTTP-only
 implementations:
 

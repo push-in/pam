@@ -67,7 +67,7 @@ final class Probe
             'illuminateEvents' => self::probeIlluminateEvents(),
             'illuminatePipeline' => self::probeIlluminatePipeline(),
             'monolog' => $handler->hasInfoRecords(),
-            'pamApi' => class_exists(\Pam\App::class),
+            'pamApi' => class_exists(\Nimbus\App::class),
             'pamPsrBridge' => class_exists(\Pam\Http\Psr7\Factory::class),
             'pamSocket' => class_exists(\Pam\Socket\Server::class),
             'pamTesting' => class_exists(\Pam\Testing\TestClient::class),

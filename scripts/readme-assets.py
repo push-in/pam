@@ -167,7 +167,7 @@ def architecture(mode: str) -> str:
     o.append(f'<text x="610" y="290" font-size="11" text-anchor="middle" fill="{c["accent"]}">resume with result</text>')
 
     # Composer packages
-    chips = [("pushinbr/pam-http", 40), ("pam-laravel · pam-octane", 250), ("pushinbr/pam-native", 490), ("pushinbr/pam-desktop", 710)]
+    chips = [("pushinbr/nimbus", 40), ("pam-laravel · pam-octane", 250), ("pushinbr/pam-native", 490), ("pushinbr/pam-desktop", 710)]
     for label, x in chips:
         o.append(f'<rect x="{x}" y="400" width="{200 if x < 700 else 210}" height="36" rx="8" fill="{c["box"]}" stroke="{c["stroke"]}" stroke-width="1.2"/>')
         o.append(f'<text x="{x + (100 if x < 700 else 105)}" y="423" font-size="12" text-anchor="middle" fill="{c["text"]}">{label}</text>')

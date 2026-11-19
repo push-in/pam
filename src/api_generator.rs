@@ -7,16 +7,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub fn run(command: &str, root: &Path, arguments: Vec<OsString>) -> Result<u8, String> {
     let name = parse_name(arguments)?;
     let (directory, file_name, source) = match command {
-        "make:model" => ("src/Models", format!("{name}.php"), model(&name)),
-        "make:controller" => (
-            "src/Http/Controllers",
-            format!("{name}.php"),
-            controller(&name),
-        ),
-        "make:request" => ("src/Http/Requests", format!("{name}.php"), request(&name)),
-        "make:resource" => ("src/Http/Resources", format!("{name}.php"), resource(&name)),
-        "make:service" => ("src/Services", format!("{name}.php"), service(&name)),
-        "make:repository" => ("src/Repositories", format!("{name}.php"), repository(&name)),
+        "make:model" => ("app/Models", format!("{name}.php"), model(&name)),
+        "make:controller" => ("app/Controllers", format!("{name}.php"), controller(&name)),
+        "make:request" => ("app/Requests", format!("{name}.php"), request(&name)),
+        "make:resource" => ("app/Resources", format!("{name}.php"), resource(&name)),
+        "make:service" => ("app/Services", format!("{name}.php"), service(&name)),
+        "make:repository" => ("app/Repositories", format!("{name}.php"), repository(&name)),
         "make:migration" => {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -103,21 +99,21 @@ fn model(name: &str) -> String {
 fn controller(name: &str) -> String {
     format!(
         "{}use Pam\\Http\\Request;\nuse Pam\\Http\\Response;\n\nfinal readonly class {name}\n{{\n    public function index(Request \u{24}request, Response \u{24}response): Response\n    {{\n        return \u{24}response->json(['data' => []]);\n    }}\n}}\n",
-        prelude("Http\\Controllers")
+        prelude("Controllers")
     )
 }
 
 fn request(name: &str) -> String {
     format!(
-        "{}use Pam\\Api\\Validation\\FormRequest;\n\nfinal class {name} extends FormRequest\n{{\n    public function rules(): array\n    {{\n        return [];\n    }}\n}}\n",
-        prelude("Http\\Requests")
+        "{}use Nimbus\\Validation\\FormRequest;\n\nfinal class {name} extends FormRequest\n{{\n    public function rules(): array\n    {{\n        return [];\n    }}\n}}\n",
+        prelude("Requests")
     )
 }
 
 fn resource(name: &str) -> String {
     format!(
-        "{}use Pam\\Api\\Http\\JsonResource;\nuse Pam\\Http\\Request;\n\nfinal readonly class {name} extends JsonResource\n{{\n    public function toArray(Request \u{24}request): array\n    {{\n        return [];\n    }}\n}}\n",
-        prelude("Http\\Resources")
+        "{}use Nimbus\\Http\\JsonResource;\nuse Pam\\Http\\Request;\n\nfinal readonly class {name} extends JsonResource\n{{\n    public function toArray(Request \u{24}request): array\n    {{\n        return [];\n    }}\n}}\n",
+        prelude("Resources")
     )
 }
 
@@ -195,7 +191,7 @@ mod tests {
             vec![OsString::from("LoginController")],
         )
         .unwrap();
-        let path = root.join("src/Http/Controllers/LoginController.php");
+        let path = root.join("app/Controllers/LoginController.php");
         let source = fs::read_to_string(&path).unwrap();
         assert!(source.contains("final readonly class LoginController"));
         assert!(

@@ -2,17 +2,13 @@
 
 declare(strict_types=1);
 
-use Pam\App;
-use App\Http\Controllers\PingController;
-use App\Http\Controllers\ProductController;
+use Nimbus\App;
 use App\Providers\AppServiceProvider;
-use Pam\Http\Request;
-use Pam\Http\Response;
-use Pam\Api\Database\ArcanoMigrationManager;
-use Pam\Api\Database\ArcanoSchemaCompiler;
-use Pam\Api\Database\ArcanoServiceProvider;
-use Pam\Api\Database\DatabaseConfig;
-use Pam\Api\Testing\TestClient;
+use Nimbus\Database\ArcanoMigrationManager;
+use Nimbus\Database\ArcanoSchemaCompiler;
+use Nimbus\Database\ArcanoServiceProvider;
+use Nimbus\Database\DatabaseConfig;
+use Nimbus\Testing\TestClient;
 use PHPUnit\Framework\TestCase;
 
 final class ApplicationTest extends TestCase
@@ -21,7 +17,7 @@ final class ApplicationTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->database = sys_get_temp_dir() . '/pam-skeleton-' . bin2hex(random_bytes(8)) . '.sqlite';
+        $this->database = sys_get_temp_dir() . '/nimbus-skeleton-' . bin2hex(random_bytes(8)) . '.sqlite';
         touch($this->database);
     }
 
@@ -35,7 +31,7 @@ final class ApplicationTest extends TestCase
     public function testPingEndpoint(): void
     {
         $app = new App(discoverPackages: false);
-        $app->get('/api/ping', [PingController::class, 'show']);
+        $app->routes(dirname(__DIR__) . '/routes.php');
 
         (new TestClient($app))
             ->get('/api/ping', ['x-request-id' => 'starter-test'])
@@ -75,12 +71,11 @@ final class ApplicationTest extends TestCase
             new DatabaseConfig('default', [
                 'default' => ['driver' => 'sqlite', 'database' => $this->database, 'prefix' => ''],
             ]),
-            new ArcanoSchemaCompiler(dirname(__DIR__) . '/src/Models'),
+            new ArcanoSchemaCompiler(dirname(__DIR__) . '/app/Models'),
             migrations: dirname(__DIR__) . '/database/migrations',
         ));
         $app->provider(new AppServiceProvider());
-        $app->get('/api/products', [ProductController::class, 'index']);
-        $app->post('/api/products', [ProductController::class, 'store']);
+        $app->routes(dirname(__DIR__) . '/routes.php');
         $app->boot();
         $migrations = $app->container()->get(ArcanoMigrationManager::class);
         if (!$migrations instanceof ArcanoMigrationManager) {

@@ -4,11 +4,11 @@
 declare(strict_types=1);
 
 use App\Providers\AppServiceProvider;
-use Pam\Api\Database\ArcanoMigrationManager;
-use Pam\Api\Database\ArcanoSchemaCompiler;
-use Pam\Api\Database\ArcanoServiceProvider;
-use Pam\Api\Database\DatabaseConfig;
-use Pam\App;
+use Nimbus\Database\ArcanoMigrationManager;
+use Nimbus\Database\ArcanoSchemaCompiler;
+use Nimbus\Database\ArcanoServiceProvider;
+use Nimbus\Database\DatabaseConfig;
+use Nimbus\App;
 
 $root = dirname(__DIR__);
 $autoloaders = [
@@ -32,14 +32,14 @@ spl_autoload_register(static function (string $class) use ($root): void {
     if (!str_starts_with($class, $prefix)) {
         return;
     }
-    $path = $root . '/src/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+    $path = $root . '/app/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
     if (is_file($path)) {
         require $path;
     }
 });
 
 $command = $argv[1] ?? 'migrate';
-$entities = new ArcanoSchemaCompiler($root . '/src/Models', $root . '/var/cache/arcano-schema.php');
+$entities = new ArcanoSchemaCompiler($root . '/app/Models', $root . '/var/cache/arcano-schema.php');
 if ($command === 'cache') {
     // Rebuilds the schema cache that production reads without rescanning the entities.
     $entities->clear();

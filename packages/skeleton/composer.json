@@ -1,6 +1,6 @@
 {
-    "name": "pushinbr/pam-skeleton",
-    "description": "Production-ready starter application for the Pam runtime.",
+    "name": "pushinbr/nimbus-skeleton",
+    "description": "Starter API application for Nimbus on the PAM runtime.",
     "type": "project",
     "license": "Apache-2.0",
     "keywords": [
@@ -12,12 +12,12 @@
     "homepage": "https://github.com/push-in/pam",
     "support": {
         "issues": "https://github.com/push-in/pam/issues",
-        "source": "https://github.com/push-in/pam-skeleton"
+        "source": "https://github.com/push-in/nimbus-skeleton"
     },
     "require": {
         "php": "^8.5",
         "pushinbr/arcano": "^0.2.2",
-        "pushinbr/pam-http": "^2.2",
+        "pushinbr/nimbus": "^0.1",
         "pushinbr/pam-http-psr": "^1.0",
         "pushinbr/pam-socket": "^1.1"
     },
@@ -28,7 +28,7 @@
     },
     "autoload": {
         "psr-4": {
-            "App\\": "src/"
+            "App\\": "app/"
         }
     },
     "config": {

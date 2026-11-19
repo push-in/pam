@@ -40,7 +40,7 @@ namespace, `pushinbr/pam-*`:
 | Package | Responsibility |
 | --- | --- |
 | `pushinbr/pam-contracts` | Stable extension contracts |
-| `pushinbr/pam-http` | Routing, middleware, controllers, validation and resources |
+| `pushinbr/nimbus` | Routing, middleware, controllers, validation and resources |
 | `pushinbr/pam-socket` | High-level WebSocket events and rooms |
 | `pushinbr/pam-http-psr` | PSR-7, PSR-15 and PSR-17 HTTP interoperability |
 | `pushinbr/pam-http-testing` | HTTP application testing utilities |
@@ -125,7 +125,7 @@ replacement. They contain no duplicate implementation:
 
 | Compatibility name | Canonical package |
 | --- | --- |
-| `pushinbr/pam-api` | `pushinbr/pam-http` |
+| `pushinbr/pam-api` | `pushinbr/nimbus` |
 | `pushinbr/pam-core-api` | `pushinbr/pam-contracts` |
 | `pushinbr/pam-psr-bridge` | `pushinbr/pam-http-psr` |
 | `pushinbr/pam-psr` | `pushinbr/pam-http-psr` |

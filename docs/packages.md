@@ -9,11 +9,11 @@ lifecycle and diagnostics. Composer owns every optional application feature.
 | Package | Responsibility |
 | --- | --- |
 | `pushinbr/pam-contracts` | Stable contracts and runtime capability checks for package authors |
-| `pushinbr/pam-http` | HTTP router, middleware pipeline, error boundary and provider discovery |
+| `pushinbr/nimbus` | HTTP router, middleware pipeline, error boundary and provider discovery |
 | `pushinbr/pam-socket` | Event-oriented WebSocket API, rooms, broadcasts and distributed adapters |
 | `pushinbr/pam-http-psr` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
 | `pushinbr/pam-http-testing` | In-memory HTTP client and fluent response assertions |
-| `pushinbr/pam-skeleton` | Minimal production-oriented project template |
+| `pushinbr/nimbus-skeleton` | Starter API application for Nimbus |
 
 Applications should depend on packages directly. There is no hidden dependency
 lockfile or alternative package format. The optional signed PAM catalog
@@ -21,7 +21,7 @@ authenticates official compatibility metadata and bytes; Composer and
 `composer.lock` still own dependency resolution.
 
 ```bash
-pam composer require pushinbr/pam-http
+pam composer require pushinbr/nimbus
 pam composer require pushinbr/pam-socket
 pam composer require --dev pushinbr/pam-http-testing
 ```
@@ -90,11 +90,11 @@ distribution mirrors place each package's `composer.json` at the repository root
 | Package | Distribution mirror |
 | --- | --- |
 | `pushinbr/pam-contracts` | `push-in/pam-core-api` |
-| `pushinbr/pam-http` | `push-in/pam-http` |
+| `pushinbr/nimbus` | `push-in/nimbus` |
 | `pushinbr/pam-socket` | `push-in/pam-socket` |
 | `pushinbr/pam-http-psr` | `push-in/pam-http-psr` |
 | `pushinbr/pam-http-testing` | `push-in/pam-http-testing` |
-| `pushinbr/pam-skeleton` | `push-in/pam-skeleton` |
+| `pushinbr/nimbus-skeleton` | `push-in/nimbus-skeleton` |
 
 Do not commit directly to a mirror. Package changes, issues and pull requests
 belong in `push-in/pam`.
@@ -125,8 +125,8 @@ inside the Pam Embed SAPI. Run the package-specific validation locally with:
 ```bash
 scripts/package-release.sh validate
 scripts/package-release.sh validate-tag v1.0.2
-scripts/package-release.sh validate-package-tag pushinbr/pam-http v2.0.0
-scripts/package-release.sh package-matrix pushinbr/pam-http
+scripts/package-release.sh validate-package-tag pushinbr/nimbus v2.0.0
+scripts/package-release.sh package-matrix pushinbr/nimbus
 ```
 
 Independent releases are deliberately single-package operations. Release

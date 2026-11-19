@@ -168,7 +168,7 @@ cd my-api && pam dev
 | Identity and commerce | [auth](https://github.com/push-in/pam-native-auth) · [payments](https://github.com/push-in/pam-native-payments) · [subscriptions](https://github.com/push-in/pam-native-subscriptions) |
 | Operations and quality | [observability](https://github.com/push-in/pam-native-observability) · [analytics](https://github.com/push-in/pam-native-analytics) · [firebase](https://github.com/push-in/pam-native-firebase) · [feature-flags](https://github.com/push-in/pam-native-feature-flags) · [devtools](https://github.com/push-in/pam-native-devtools) · [testing](https://github.com/push-in/pam-native-testing) · [plugin-kit](https://github.com/push-in/pam-native-plugin-kit) · [web (Samsung/LG TVs)](https://github.com/push-in/pam-native-web) |
 
-<sub>Hosts and frameworks: [pam-desktop](https://github.com/push-in/pam-desktop) · [pam-native](https://github.com/push-in/pam-native) · [pam-laravel](https://github.com/push-in/pam-laravel) · [pam-http](packages/http) · [pam-socket](packages/socket) · [pam-octane](packages/octane). Full contract in [docs/ecosystem.md](docs/ecosystem.md).</sub>
+<sub>Hosts and frameworks: [pam-desktop](https://github.com/push-in/pam-desktop) · [pam-native](https://github.com/push-in/pam-native) · [pam-laravel](https://github.com/push-in/pam-laravel) · [nimbus](packages/nimbus) · [pam-socket](packages/socket) · [pam-octane](packages/octane). Full contract in [docs/ecosystem.md](docs/ecosystem.md).</sub>
 
 <a id="community"></a>
 ## <picture><img src=".github/assets/icons/heart.svg" width="22" height="22" alt=""></picture> Community

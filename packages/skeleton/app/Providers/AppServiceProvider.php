@@ -1,0 +1,30 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Providers;
+
+use App\Repositories\ArcanoProductRepository;
+use App\Repositories\ProductRepository;
+use Nimbus\App;
+use Pam\Contracts\Http\ApplicationInterface;
+use Pam\Contracts\Package\ServiceProviderInterface;
+
+final readonly class AppServiceProvider implements ServiceProviderInterface
+{
+    public function register(ApplicationInterface $application): void
+    {
+        if (!$application instanceof App) {
+            throw new \InvalidArgumentException('AppServiceProvider requires Nimbus\\App.');
+        }
+
+        $application->container()->bind(ProductRepository::class, ArcanoProductRepository::class);
+    }
+
+    public function boot(ApplicationInterface $application): void
+    {
+        if (!$application instanceof App) {
+            throw new \InvalidArgumentException('AppServiceProvider requires Nimbus\\App.');
+        }
+    }
+}

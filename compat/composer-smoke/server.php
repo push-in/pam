@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-use Pam\App;
+use Nimbus\App;
 use Pam\Http\Psr7\Factory;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;

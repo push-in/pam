@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       package_name:
-        description: Composer package name, for example pushinbr/pam-http
+        description: Composer package name, for example pushinbr/nimbus
         required: true
         type: string
       package_tag:

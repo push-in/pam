@@ -9,7 +9,7 @@ outro diretório.
 | Categoria | Situação |
 | --- | --- |
 | Pacotes pure PHP e PSR-4 | Compatíveis pelo autoloader normal |
-| `pushinbr/pam-http` | Rotas e middleware opcionais instalados pelo Composer |
+| `pushinbr/nimbus` | Rotas e middleware opcionais instalados pelo Composer |
 | `pushinbr/pam-socket` | Eventos e rooms opcionais sobre o transporte WebSocket nativo |
 | PSR-7, PSR-15 e PSR-17 | Fornecidos por `pushinbr/pam-http-psr` com as interfaces oficiais |
 | PSR-3 | Consumido quando `psr/log` está instalado |

@@ -1,6 +1,6 @@
 # PAM HTTP Testing
 
-Fast in-memory tests for applications built with `pushinbr/pam-http`.
+Fast in-memory tests for applications built with `pushinbr/nimbus`.
 
 ## Start here
 

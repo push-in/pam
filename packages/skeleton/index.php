@@ -2,17 +2,15 @@
 
 declare(strict_types=1);
 
-use App\Http\Controllers\PingController;
-use App\Http\Controllers\ProductController;
 use App\Providers\AppServiceProvider;
-use Pam\Api\Config\ConfigDefinition;
-use Pam\Api\Config\Configuration;
-use Pam\Api\Config\ConfigType;
-use Pam\Api\Middleware\SecurityHeadersMiddleware;
-use Pam\Api\Database\ArcanoSchemaCompiler;
-use Pam\Api\Database\ArcanoServiceProvider;
-use Pam\Api\Database\DatabaseConfig;
-use Pam\App;
+use Nimbus\Config\ConfigDefinition;
+use Nimbus\Config\Configuration;
+use Nimbus\Config\ConfigType;
+use Nimbus\Middleware\SecurityHeadersMiddleware;
+use Nimbus\Database\ArcanoSchemaCompiler;
+use Nimbus\Database\ArcanoServiceProvider;
+use Nimbus\Database\DatabaseConfig;
+use Nimbus\App;
 
 $config = Configuration::fromEnvironment([
     new ConfigDefinition(
@@ -27,12 +25,10 @@ $app = new App();
 $app->provider(new ArcanoServiceProvider(
     DatabaseConfig::fromEnvironment(),
     // Production builds the schema cache on deploy (bin/migrate cache) and never rescans.
-    new ArcanoSchemaCompiler(__DIR__ . '/src/Models', __DIR__ . '/var/cache/arcano-schema.php', refresh: getenv('PAM_ENV') !== 'production'),
+    new ArcanoSchemaCompiler(__DIR__ . '/app/Models', __DIR__ . '/var/cache/arcano-schema.php', refresh: getenv('PAM_ENV') !== 'production'),
     migrations: __DIR__ . '/database/migrations',
 ));
 $app->provider(new AppServiceProvider());
 $app->middleware(new SecurityHeadersMiddleware());
-$app->get('/api/ping', [PingController::class, 'show']);
-$app->get('/api/products', [ProductController::class, 'index']);
-$app->post('/api/products', [ProductController::class, 'store']);
+$app->routes(__DIR__ . '/routes.php');
 $app->listen($config->integer('app.port'));

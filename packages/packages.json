@@ -9,11 +9,11 @@
             "description": "Stable PHP contracts for packages that extend the PAM runtime."
         },
         {
-            "name": "pushinbr/pam-http",
-            "path": "packages/http",
-            "repository": "pam-http",
-            "deploySecret": "PAM_API_DEPLOY_KEY",
-            "description": "Elegant HTTP routing and middleware for the PAM runtime."
+            "name": "pushinbr/nimbus",
+            "path": "packages/nimbus",
+            "repository": "nimbus",
+            "deploySecret": "NIMBUS_DEPLOY_KEY",
+            "description": "Nimbus: the API-first PHP framework for the PAM runtime."
         },
         {
             "name": "pushinbr/pam-socket",
@@ -51,11 +51,11 @@
             "description": "Compatibility package for pushinbr/pam-http-testing."
         },
         {
-            "name": "pushinbr/pam-skeleton",
+            "name": "pushinbr/nimbus-skeleton",
             "path": "packages/skeleton",
-            "repository": "pam-skeleton",
-            "deploySecret": "PAM_SKELETON_DEPLOY_KEY",
-            "description": "Production-ready starter application for the PAM runtime."
+            "repository": "nimbus-skeleton",
+            "deploySecret": "NIMBUS_SKELETON_DEPLOY_KEY",
+            "description": "Starter API application for Nimbus on the PAM runtime."
         }
     ]
 }
