@@ -3,7 +3,7 @@
 All notable changes to Nimbus are documented here. Nimbus follows Semantic
 Versioning; the 0.x line may still adjust public API between minor versions.
 
-## Unreleased
+## 0.2.0 - 2026-11-19
 
 ### Added
 - `Input`: typed requests validated from public properties and attributes (`Min`, `Max`, `Email`,
