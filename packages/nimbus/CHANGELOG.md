@@ -5,6 +5,12 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.5.2 - 2026-11-19
+
+### Changed
+
+- Each route builds its middleware pipeline once per worker instead of on every request.
+
 ## 0.5.1 - 2026-11-19
 
 ### Changed
