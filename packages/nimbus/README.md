@@ -354,10 +354,142 @@ and intended for development/tests, while clustered applications should back
 the contract with an atomic shared store.
 
 Signing secrets must contain at least 32 bytes and must not be stored in source
-control. Access tokens are capped at 24 hours. Refresh-token rotation,
-OAuth/OIDC authorization-server duties belong to the application
-or a dedicated identity provider; they must not be simulated with long-lived
-access tokens.
+control. Access tokens are capped at 24 hours; renew them with the rotating
+refresh tokens below rather than issuing long-lived access tokens.
+
+## API authentication
+
+Publish the tables once (`personal_access_tokens`, `refresh_tokens`,
+`auth_tokens`, `revoked_tokens`, `oauth_states`):
+
+```php
+$migrations->publish('create_auth_tables', \Nimbus\Auth\AuthTablesMigration::class);
+```
+
+Every stored token is the SHA-256 of a 256-bit random secret, compared in
+constant time; plain tokens exist only in the response that hands them out.
+
+### Personal access tokens
+
+```php
+$tokens = new PersonalAccessTokens($databases);           // ArcanoDatabaseProvider
+$new = $tokens->create('user:42', 'CLI', ['products:read', 'products:write']);
+return $response->json($new->toArray(), 201);              // shows the plain token once
+
+$app->container()->instance(Authenticator::class, new PersonalAccessTokenAuthenticator($tokens));
+$app->post('/products', CreateProduct::class)->can('products:write');
+```
+
+Tokens read `nbp_{id}.{secret}`, may expire (`expiresAt`), record
+`last_used_at` (at most once a minute) and are revoked with `revoke($id)` or
+`revokeAll($subject)`. Abilities accept `*` and namespace wildcards
+(`products:*`, `orders.*`). `ChainAuthenticator` combines authenticators, e.g.
+JWT access tokens first and personal tokens next.
+
+### Access and refresh tokens
+
+```php
+$pairs = new TokenPairIssuer($codec, new RefreshTokens($databases), accessTtlSeconds: 900);
+$pair = $pairs->issue('user:42', ['orders:read']);   // after checking the password with Hash::check()
+return $response->json($pair->toArray());            // token_type, access_token, expires_in, refresh_token, scope
+```
+
+`$codec` is an `HmacTokenCodec` or a `JwtCodec`. `refresh()` spends the refresh
+token and returns a new pair of the same family; a spent token presented again
+revokes the whole family (reuse detection) and answers 401.
+`RefreshTokens::revokeAll($subject)` logs a user out everywhere. Revoke a
+stateless access token by its `jti` (`TokenPrincipal::$tokenIdentifier`) in a
+shared `TokenRevocationStore`: `DatabaseTokenRevocationStore` or
+`Nimbus\Redis\RedisTokenRevocationStore` (the memory store is per worker).
+
+### JWT
+
+`JwtCodec` wraps `firebase/php-jwt` (`composer require firebase/php-jwt`):
+
+```php
+$jwt = JwtCodec::hmac($secret, 'https://api.example.com', 'orders-api');               // HS256/384/512
+$jwt = JwtCodec::asymmetric($publicPem, $privatePem, $issuer, $audience, 'ES256');     // RS256, ES256, EdDSA
+$jwt = JwtCodec::fromJwks($jwksDocument, 'https://idp.example.com', 'orders-api');     // verify only
+$app->container()->instance(Authenticator::class, new JwtAuthenticator($jwt, $revocations));
+```
+
+Keys are bound to their algorithm and tokens must carry `kid`, `iss`, `aud`,
+`sub` and `exp`. Abilities travel in the `scope` claim (`scp` and `abilities`
+arrays are accepted). `JwtCodec::fromKeySet(new CachedKeySet(...))` verifies
+against a remote JWKS cached through PSR-18/PSR-6.
+
+### Social login
+
+`SocialLogin` runs the authorization-code flow of any `league/oauth2-client`
+provider for API clients: `GET /auth/oauth/{provider}` returns
+`authorization_url` and `state`, the state and PKCE verifier stay on the
+server, and `POST /auth/oauth/{provider}/callback` (`code`, `state`) exchanges
+the code and returns a Nimbus token.
+
+```php
+$social = new SocialLogin(
+    ['google' => new Google([...]), 'github' => fn () => new Github([...])],
+    new DatabaseOAuthStateStore($databases),   // or Nimbus\Redis\RedisOAuthStateStore
+    $app->container()->get(SocialUsers::class), // your SocialUserResolver: find or create the user
+    $pairs,                                     // any LoginTokenIssuer
+    abilities: ['*'],
+);
+```
+
+### Password reset and e-mail verification
+
+Implement `AuthUser` on the user and `AuthUserProvider` on its repository, then
+register the routes:
+
+```php
+$oneTime = new OneTimeTokens($databases);
+(new AuthRoutes(
+    passwords: new PasswordResets($users, $oneTime, $notifier, 'https://app.example.com/reset?token={token}',
+        afterReset: fn (AuthUser $user) => $refreshTokens->revokeAll($user->authIdentifier())),
+    verification: new EmailVerification($users, $oneTime, $notifier, 'https://app.example.com/verify?token={token}'),
+    tokens: $pairs,
+    social: $social,
+    throttleStore: new RedisRateLimitStore($redis),
+))->register($app, '/auth');
+```
+
+| Route | Body | Answer |
+| --- | --- | --- |
+| `POST /auth/password/forgot` | `email` | 202, the same for unknown addresses |
+| `POST /auth/password/reset` | `token`, `password` | 204 or 422 |
+| `POST /auth/email/verify` | `token` | 204 or 422 |
+| `POST /auth/email/resend` | authenticated | 202 |
+| `POST /auth/token/refresh` | `refresh_token` | token pair or 401 |
+| `POST /auth/token/revoke` | `refresh_token` | 204 |
+
+Reset and verification tokens are single-use, expire (one hour and one day by
+default) and replace the user's previous token. Links go out through the
+Notifications module with `send()`, never queued, so tokens stay out of job
+payloads; pass `notification:` to customise the `MailMessage`. Each user gets
+at most one e-mail a minute and every route is rate limited per client IP.
+New passwords are stored with `Nimbus\Security\Hash`.
+
+### Gates and policies
+
+```php
+$gate = $app->gate();
+$gate->before(fn (Principal $user, string $ability) => $user->identifier() === 'user:1' ? true : null);
+$gate->define('reports:export', fn (Principal $user) => $user->can('reports:*'));
+$gate->policy(Product::class, ProductPolicy::class);   // update(Principal $user, Product $product): bool
+
+$app->put('/products/{product}', UpdateProduct::class)->can('update', 'product');
+$app->get('/products', ListProducts::class)->can('view-any', Product::class);
+$app->post('/products', CreateProduct::class)->can('products:write');
+```
+
+`can($ability, 'product')` resolves the route parameter through `bindRoute()`
+or `RouteBindable` and asks the policy method named after the ability
+(`view-any` calls `viewAny`); policies are built by the container and may have
+their own `before()`. Abilities without a policy or definition fall back to
+the principal's `can()`, i.e. the token's abilities, so a policy can also
+demand a scope (`$user->can('products:write')`). In handlers,
+`$gate->authorize('update', $product)` throws 403 problem details
+(401 without a principal); `allows()` and `denies()` return booleans.
 
 ## File storage
 

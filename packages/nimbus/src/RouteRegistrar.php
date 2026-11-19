@@ -52,10 +52,10 @@ final class RouteRegistrar
         return $this->authenticated ? $this : $this->withAuthentication();
     }
 
-    /** Routes registered through the returned registrar require the ability; implies `auth()`. */
-    public function can(string $ability): self
+    /** Routes registered through the returned registrar require the ability (see `PendingRoute::can()`); implies `auth()`. */
+    public function can(string $ability, ?string $subject = null): self
     {
-        return $this->auth()->middleware(new Middleware\AuthorizeMiddleware($this->app->container(), $ability));
+        return $this->auth()->middleware(new Middleware\AuthorizeMiddleware($this->app->container(), $ability, $subject));
     }
 
     /** Routes registered through the returned registrar require a valid URL signature. */

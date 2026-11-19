@@ -49,8 +49,27 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 - `Nimbus\Database\Factory` (Faker-backed entity factories with `count`, `state`, `sequence`,
   `make`, `create`, `raw` and callbacks), `Seeder` and `SeederRunner`. `fakerphp/faker` is suggested.
 - `Container::has()`.
+- API authentication (`Nimbus\Auth`): `PersonalAccessTokens` (hashed, scoped, expiring, `last_used_at`,
+  revoke one or all) with `PersonalAccessTokenAuthenticator`; rotating `RefreshTokens` with reuse detection
+  that revokes the family, and `TokenPairIssuer` / `TokenPair` (OAuth 2 token response); `ChainAuthenticator`.
+- `DatabaseTokenRevocationStore` and `Nimbus\Redis\RedisTokenRevocationStore` beside the memory store.
+- `JwtCodec` and `JwtAuthenticator` on `firebase/php-jwt` (optional): HS256/384/512, RS256, ES256, EdDSA,
+  JWKS and `CachedKeySet` key sets, abilities in the `scope` claim.
+- Social login (`Nimbus\Auth\OAuth\SocialLogin`) on `league/oauth2-client` (optional): authorization URL
+  with server-side state and PKCE, code exchange, an application `SocialUserResolver` and any
+  `LoginTokenIssuer`; `MemoryOAuthStateStore`, `DatabaseOAuthStateStore`, `Nimbus\Redis\RedisOAuthStateStore`.
+- Password reset and e-mail verification by API (`PasswordResets`, `EmailVerification`, `OneTimeTokens`,
+  `AuthUser`, `AuthUserProvider`) with single-use hashed tokens mailed through Notifications, and
+  `AuthRoutes` registering the reset, verification, refresh and social routes with per-IP throttling.
+- `Gate` (`App::gate()`): `define()`, `policy()` resolved through the container, `before()` hooks,
+  `allows()`, `denies()`, `authorize()` (401/403 problems); `can('update', 'product')` on routes and
+  route groups authorizes the bound entity, and abilities without rules fall back to token abilities.
+- `AuthTablesMigration`, `Abilities` (wildcards such as `products:*`), `Container::resolveRouteBinding()`.
 
 ### Changed
+- `BearerTokenAuthenticator` accepts any `AccessTokenVerifier`; `HmacTokenCodec` implements it and
+  `AccessTokenIssuer`.
+- `TokenPrincipal::can()` honours namespace wildcards (`orders:*`).
 - `TestResponse::assertJson()` checks a subset of the payload; use `assertExactJson()` for the
   previous exact match.
 - `TestResponse` failures are PHPUnit assertion failures when PHPUnit is loaded (they were

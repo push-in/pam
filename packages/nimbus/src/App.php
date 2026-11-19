@@ -71,6 +71,8 @@ final class App implements ApplicationInterface
         if (interface_exists(\Psr\Log\LoggerInterface::class) && class_exists(\Pam\Observability\Logger::class)) {
             $this->container->singleton(\Psr\Log\LoggerInterface::class, \Pam\Observability\Logger::class);
         }
+        // One authorization gate per application, used by can() routes.
+        $this->container->singleton(\Nimbus\Auth\Gate::class);
         // Signed routes use APP_KEY unless the application binds its own signer.
         $this->container->singleton(
             \Nimbus\Security\UrlSigner::class,
@@ -166,6 +168,13 @@ final class App implements ApplicationInterface
         return $storage instanceof \Nimbus\Storage\StorageManager
             ? $storage
             : throw new \LogicException('Register Nimbus\\Storage\\StorageServiceProvider to use storage().');
+    }
+
+    /** The authorization gate: abilities, policies and before() hooks checked by `can()` routes. */
+    public function gate(): \Nimbus\Auth\Gate
+    {
+        $gate = $this->container->get(\Nimbus\Auth\Gate::class);
+        return $gate instanceof \Nimbus\Auth\Gate ? $gate : throw new \LogicException('The container binds another Gate.');
     }
 
     /** Boot providers and freeze application configuration without serving a request. */

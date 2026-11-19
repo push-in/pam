@@ -46,6 +46,19 @@ final class Container
         return $this;
     }
 
+    /**
+     * Resolves a route parameter value into an instance of the class through `bindRoute()` or
+     * `RouteBindable`, as handlers receive it; used by `can($ability, 'product')` routes.
+     *
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    public function resolveRouteBinding(string $class, string $value): object
+    {
+        return $this->bindRouteValue($class, $value, $class);
+    }
+
     /** @param class-string|string $id */
     public function bind(string $id, callable|string|null $factory = null): self
     {
@@ -221,20 +234,7 @@ final class Container
                 $value = $named[$parameter->name];
                 $class = $parameter->class;
                 if ($class !== null) {
-                    $resolver = $this->routeBindings[$class] ?? null;
-                    if ($resolver !== null) {
-                        $resolved = $resolver(self::routeValue($value), $this);
-                    } elseif (is_a($class, RouteBindable::class, true)) {
-                        $resolved = $class::resolveRouteBinding(self::routeValue($value));
-                    } else {
-                        throw new \RuntimeException(
-                            "Route parameter {$parameter->name} cannot resolve {$class}; register bindRoute() or implement RouteBindable.",
-                        );
-                    }
-                    if (!$resolved instanceof $class) {
-                        throw new \UnexpectedValueException("Route binding for {$class} returned another type.");
-                    }
-                    $arguments[] = $resolved;
+                    $arguments[] = $this->bindRouteValue($class, $value, $parameter->name);
                 } else {
                     $arguments[] = $value;
                 }
@@ -309,6 +309,29 @@ final class Container
             return;
         }
         $this->fiberScopes[$fiber] = $scope;
+    }
+
+    /**
+     * @template T of object
+     * @param class-string<T> $class
+     * @return T
+     */
+    private function bindRouteValue(string $class, mixed $value, string $parameter): object
+    {
+        $resolver = $this->routeBindings[$class] ?? null;
+        if ($resolver !== null) {
+            $resolved = $resolver(self::routeValue($value), $this);
+        } elseif (is_a($class, RouteBindable::class, true)) {
+            $resolved = $class::resolveRouteBinding(self::routeValue($value));
+        } else {
+            throw new \RuntimeException(
+                "Route parameter {$parameter} cannot resolve {$class}; register bindRoute() or implement RouteBindable.",
+            );
+        }
+        if (!$resolved instanceof $class) {
+            throw new \UnexpectedValueException("Route binding for {$class} returned another type.");
+        }
+        return $resolved;
     }
 
     private static function routeValue(mixed $value): string

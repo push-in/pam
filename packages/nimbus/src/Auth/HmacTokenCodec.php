@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace Nimbus\Auth;
 
-final readonly class HmacTokenCodec
+final readonly class HmacTokenCodec implements AccessTokenIssuer, AccessTokenVerifier
 {
     private \Closure $clock;
 
