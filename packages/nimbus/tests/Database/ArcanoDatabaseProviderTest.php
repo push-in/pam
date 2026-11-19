@@ -24,6 +24,38 @@ final class ArcanoDatabaseProviderTest extends TestCase
         }
     }
 
+    public function testReleasedConnectionsReturnToTheWorkerPool(): void
+    {
+        $path = tempnam(sys_get_temp_dir(), 'arcano-pool');
+        self::assertIsString($path);
+        try {
+            $databases = new ArcanoDatabaseProvider(ArcanoTestDatabase::config($path), maxIdle: 1);
+            $first = $databases->manager();
+            $driver = $first->database()->getDriver();
+            $driver->connect();
+            $first->database()->begin();
+            $databases->releaseCurrent();
+
+            self::assertNull($databases->current());
+            self::assertSame(0, $driver->getTransactionLevel(), 'An open transaction is rolled back.');
+            self::assertTrue($driver->isConnected(), 'The session stays open for the next request.');
+
+            $fiber = new \Fiber(static function () use ($databases, $first): void {
+                self::assertSame($first, $databases->manager(), 'The next request reuses the idle set.');
+                $other = new \Fiber(static fn (): bool => $databases->manager() !== $first);
+                $other->start();
+                self::assertTrue($other->getReturn(), 'A concurrent request gets its own set.');
+                $databases->releaseCurrent();
+            });
+            $fiber->start();
+
+            $databases->disconnectIdle();
+            self::assertFalse($driver->isConnected(), 'Idle sets close before a worker forks or exits.');
+        } finally {
+            @unlink($path);
+        }
+    }
+
     public function testPostgresConnectionsKeepSslModeAndSchema(): void
     {
         $config = self::driverConfig([

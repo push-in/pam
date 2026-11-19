@@ -49,6 +49,26 @@ namespace Pam\Observability {
     }
 }
 
+namespace Pam\Redis {
+    final class Client
+    {
+        public function __construct(
+            public readonly string $host = '127.0.0.1',
+            public readonly int $port = 6379,
+            public readonly float $timeout = 5.0,
+            public readonly ?string $password = null,
+            public readonly int $database = 0,
+        ) {
+        }
+
+        /** @param list<string|int|float> $arguments */
+        public function command(array $arguments): mixed
+        {
+            throw new \LogicException('Redis is provided by the PAM runtime.');
+        }
+    }
+}
+
 namespace Pam\Http {
     final class Request
     {
@@ -175,6 +195,10 @@ namespace Pam\Http {
 }
 
 namespace Pam\Internal {
+    final class HttpRequestCancelled extends \RuntimeException
+    {
+    }
+
     final class Runtime
     {
         public static function registerPsrHandler(object $handler): void

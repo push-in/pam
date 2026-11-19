@@ -22,6 +22,12 @@ final readonly class ContainerMiddleware implements MiddlewareInterface
         }
     }
 
+    /** @param class-string $middleware */
+    public function is(string $middleware): bool
+    {
+        return $this->middleware === $middleware;
+    }
+
     public function process(Request $request, Response $response, RequestHandlerInterface $next): Response
     {
         $middleware = $this->container->get($this->middleware);

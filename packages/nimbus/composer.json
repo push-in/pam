@@ -27,9 +27,13 @@
         "pushinbr/pam-contracts": "^1.1"
     },
     "suggest": {
+        "psr/log": "PSR-3 logging; LoggerInterface resolves to the PAM runtime structured log.",
         "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
         "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
         "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
+    },
+    "conflict": {
+        "pushinbr/arcano": "<0.2.3"
     },
     "autoload": {
         "psr-4": {
@@ -66,6 +70,6 @@
     "require-dev": {
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",
-        "pushinbr/arcano": "^0.2.2"
+        "pushinbr/arcano": "^0.2.4"
     }
 }

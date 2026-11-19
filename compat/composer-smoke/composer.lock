@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "c1507c8f4d18e2e17de991467f3ce316",
+    "content-hash": "9ad5a76efaa6b2993dac04327f49483b",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2725,18 +2725,22 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/nimbus",
-                "reference": "af6b2b1093306f20cbd3a46d0073cbfdd35e5a2b"
+                "reference": "bb0e3a0374baf1ddc8f02838930fcc66d35553ef"
             },
             "require": {
                 "php": "^8.4",
                 "pushinbr/pam-contracts": "^1.1"
             },
+            "conflict": {
+                "pushinbr/arcano": "<0.2.3"
+            },
             "require-dev": {
                 "phpstan/phpstan": "^2.1",
                 "phpunit/phpunit": "^11.5",
-                "pushinbr/arcano": "^0.2.2"
+                "pushinbr/arcano": "^0.2.4"
             },
             "suggest": {
+                "psr/log": "PSR-3 logging; LoggerInterface resolves to the PAM runtime structured log.",
                 "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
                 "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
                 "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
@@ -7288,16 +7292,16 @@
         },
         {
             "name": "pushinbr/arcano",
-            "version": "v0.2.2",
+            "version": "v0.2.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/arcano.git",
-                "reference": "f5e129cb3dd13df3d53589fa3fc1e40c649dc37f"
+                "reference": "fb4ee69b078a170c720aa6ed9d24423468884522"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/arcano/zipball/f5e129cb3dd13df3d53589fa3fc1e40c649dc37f",
-                "reference": "f5e129cb3dd13df3d53589fa3fc1e40c649dc37f",
+                "url": "https://api.github.com/repos/push-in/arcano/zipball/fb4ee69b078a170c720aa6ed9d24423468884522",
+                "reference": "fb4ee69b078a170c720aa6ed9d24423468884522",
                 "shasum": ""
             },
             "require": {
@@ -7349,9 +7353,9 @@
             "description": "Arcano: a fast data mapper ORM for PHP and the PAM runtime, with attribute entities, schema builder and migrations. Derived from Cycle ORM.",
             "support": {
                 "issues": "https://github.com/push-in/arcano/issues",
-                "source": "https://github.com/push-in/arcano/tree/v0.2.2"
+                "source": "https://github.com/push-in/arcano/tree/v0.2.4"
             },
-            "time": "2026-11-12T19:15:13+00:00"
+            "time": "2026-11-19T05:33:03+00:00"
         },
         {
             "name": "pushinbr/pam-http-testing",

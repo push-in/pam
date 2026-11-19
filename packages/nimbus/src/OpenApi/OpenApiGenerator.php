@@ -6,6 +6,7 @@ namespace Nimbus\OpenApi;
 
 use Nimbus\Route;
 use Nimbus\Router;
+use Nimbus\Validation\Input;
 
 final readonly class OpenApiGenerator
 {
@@ -22,13 +23,13 @@ final readonly class OpenApiGenerator
         $paths = [];
         $schemas = [];
         foreach ($this->router->routes() as $route) {
+            $route->input ??= self::inputParameter($route);
             $paths[$route->path][strtolower($route->method)] = $this->operation($route);
             foreach ([$route->input, $route->output] as $class) {
                 if ($class !== null) {
-                    $schemas[self::shortName($class)] = [
-                        'type' => 'object',
-                        'x-pam-class' => $class,
-                    ];
+                    $schemas[self::shortName($class)] = is_a($class, Input::class, true)
+                        ? $class::schema()
+                        : ['type' => 'object', 'x-pam-class' => $class];
                 }
             }
         }
@@ -86,7 +87,19 @@ final readonly class OpenApiGenerator
                 $route->parameterNames,
             );
         }
-        if ($route->input !== null) {
+        if ($route->input !== null && is_a($route->input, Input::class, true) && in_array($route->method, ['GET', 'HEAD', 'DELETE'], true)) {
+            $schema = $route->input::schema();
+            $required = is_array($schema['required'] ?? null) ? $schema['required'] : [];
+            $properties = is_array($schema['properties'] ?? null) ? $schema['properties'] : [];
+            foreach ($properties as $name => $property) {
+                $operation['parameters'][] = [
+                    'name' => $name,
+                    'in' => 'query',
+                    'required' => in_array($name, $required, true),
+                    'schema' => $property,
+                ];
+            }
+        } elseif ($route->input !== null) {
             $operation['requestBody'] = [
                 'required' => true,
                 'content' => [
@@ -104,6 +117,36 @@ final readonly class OpenApiGenerator
             $operation['responses']['200']['x-pam-class'] = $route->output;
         }
         return $operation;
+    }
+
+    /**
+     * The Input a handler receives, if any; read once when the document is generated.
+     *
+     * @return ?class-string<Input>
+     */
+    private static function inputParameter(Route $route): ?string
+    {
+        $handler = $route->sourceHandler;
+        try {
+            $function = match (true) {
+                is_array($handler) && is_string($handler[0]) => new \ReflectionMethod($handler[0], $handler[1]),
+                is_string($handler) && method_exists($handler, '__invoke') => new \ReflectionMethod($handler, '__invoke'),
+                $handler instanceof \Closure => new \ReflectionFunction($handler),
+                default => null,
+            };
+        } catch (\ReflectionException) {
+            return null;
+        }
+        foreach ($function?->getParameters() ?? [] as $parameter) {
+            $type = $parameter->getType();
+            if ($type instanceof \ReflectionNamedType) {
+                $class = $type->getName();
+                if (is_a($class, Input::class, true)) {
+                    return $class;
+                }
+            }
+        }
+        return null;
     }
 
     /** @param class-string $class */

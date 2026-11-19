@@ -64,6 +64,10 @@ final class App implements ApplicationInterface
         $this->handlerResolver = new HandlerResolver($this->container);
         $this->container->instance(self::class, $this);
         $this->container->instance(Container::class, $this->container);
+        // PSR-3 logging goes to the runtime's structured log unless the application binds its own.
+        if (interface_exists(\Psr\Log\LoggerInterface::class) && class_exists(\Pam\Observability\Logger::class)) {
+            $this->container->singleton(\Psr\Log\LoggerInterface::class, \Pam\Observability\Logger::class);
+        }
         $this->errorHandler = static function (\Throwable $error, Response $response): Response {
             \Pam\Observability\Telemetry::log('error', 'Unhandled Nimbus exception', [
                 'exception' => $error::class,
@@ -191,6 +195,28 @@ final class App implements ApplicationInterface
         return new OpenApiGenerator($this->router, $title, $version);
     }
 
+    /**
+     * Serves the OpenAPI document at `{path}/openapi.json` and an API reference page at `{path}`.
+     * The document is generated on the first request and kept for the worker's lifetime.
+     */
+    public function docs(string $path = '/docs', string $title = 'Nimbus API', string $version = '1.0.0'): self
+    {
+        $path = '/' . trim($path, '/');
+        $document = null;
+        $this->get($path . '/openapi.json', function (Request $request, Response $response) use (&$document, $title, $version): Response {
+            $document ??= $this->openApi($title, $version)->toJson();
+            return $response->header('content-type', 'application/json')->send($document);
+        });
+        $html = '<!doctype html><html><head><meta charset="utf-8"><title>' . htmlspecialchars($title) . '</title>'
+            . '<meta name="viewport" content="width=device-width, initial-scale=1"></head><body>'
+            . '<script id="api-reference" data-url="' . htmlspecialchars($path . '/openapi.json') . '"></script>'
+            . '<script src="https://cdn.jsdelivr.net/npm/@scalar/api-reference"></script></body></html>';
+        $this->get($path, static fn (Request $request, Response $response): Response => $response
+            ->header('content-type', 'text/html; charset=utf-8')
+            ->send($html));
+        return $this;
+    }
+
     /** @param MiddlewareInterface|callable|class-string<MiddlewareInterface> $middleware */
     public function middleware(object|callable|string $middleware): self
     {
@@ -303,6 +329,12 @@ final class App implements ApplicationInterface
             return $this->finalizeResponse($request, $handled);
         } catch (\Throwable $error) {
             $failure = $error;
+            // The client went away: the runtime answers 499 and nothing is logged as an error.
+            for ($cause = $error; $cause !== null; $cause = $cause->getPrevious()) {
+                if ($cause::class === 'Pam\\Internal\\HttpRequestCancelled') {
+                    throw $cause;
+                }
+            }
             if ($error instanceof HttpException) {
                 return $this->finalizeResponse($request, self::problemResponse(
                     $response,
@@ -415,6 +447,10 @@ final class App implements ApplicationInterface
     private function registerRoute(string $method, string $path, callable|string|array $handler): PendingRoute
     {
         $this->assertMutable();
+        // `products` and `/products` are the same route.
+        if ($path !== '' && $path[0] !== '/') {
+            $path = '/' . $path;
+        }
         $route = $this->router->register($method, $path, $this->handlerResolver->resolve($handler));
         $route->sourceHandler = $handler;
         return new PendingRoute($this, $this->router, $route);

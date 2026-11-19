@@ -15,6 +15,8 @@ final class RouteRegistrar
     /** @var ?class-string */
     private ?string $controller = null;
 
+    private bool $authenticated = false;
+
     public function __construct(
         private readonly App $app,
         private string $prefix = '',
@@ -41,6 +43,25 @@ final class RouteRegistrar
             }
             $clone->middleware[] = $layer;
         }
+        return $clone;
+    }
+
+    /** Routes registered through the returned registrar require authentication. */
+    public function auth(): self
+    {
+        return $this->authenticated ? $this : $this->withAuthentication();
+    }
+
+    /** Routes registered through the returned registrar require the ability; implies `auth()`. */
+    public function can(string $ability): self
+    {
+        return $this->auth()->middleware(new Middleware\AuthorizeMiddleware($this->app->container(), $ability));
+    }
+
+    private function withAuthentication(): self
+    {
+        $clone = $this->middleware(Middleware\AuthenticateMiddleware::class);
+        $clone->authenticated = true;
         return $clone;
     }
 

@@ -37,6 +37,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\ArcanoTenantScope`](#nimbusdatabasearcanotenantscope)
 - [`Nimbus\Database\DatabaseConfig`](#nimbusdatabasedatabaseconfig)
 - [`Nimbus\Database\DatabaseHealthCheck`](#nimbusdatabasedatabasehealthcheck)
+- [`Nimbus\Database\Pgsql\AsyncPostgresDriver`](#nimbusdatabasepgsqlasyncpostgresdriver)
+- [`Nimbus\Database\Pgsql\PgsqlException`](#nimbusdatabasepgsqlpgsqlexception)
 - [`Nimbus\Database\QueryBudget`](#nimbusdatabasequerybudget)
 - [`Nimbus\Database\QueryBudgetExceededException`](#nimbusdatabasequerybudgetexceededexception)
 - [`Nimbus\Database\QueryBudgetViolation`](#nimbusdatabasequerybudgetviolation)
@@ -93,6 +95,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\OpenApi\CompatibilityChecker`](#nimbusopenapicompatibilitychecker)
 - [`Nimbus\OpenApi\OpenApiGenerator`](#nimbusopenapiopenapigenerator)
 - [`Nimbus\PackageDiscovery`](#nimbuspackagediscovery)
+- [`Nimbus\Pagination\Page`](#nimbuspaginationpage)
+- [`Nimbus\Pagination\Paginator`](#nimbuspaginationpaginator)
 - [`Nimbus\PendingRoute`](#nimbuspendingroute)
 - [`Nimbus\Pipeline`](#nimbuspipeline)
 - [`Nimbus\Profiler\MemoryProfiler`](#nimbusprofilermemoryprofiler)
@@ -101,6 +105,12 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RateLimit\MemoryRateLimitStore`](#nimbusratelimitmemoryratelimitstore)
 - [`Nimbus\RateLimit\RateLimitDecision`](#nimbusratelimitratelimitdecision)
 - [`Nimbus\RateLimit\RateLimitStore`](#nimbusratelimitratelimitstore)
+- [`Nimbus\Redis\Connection`](#nimbusredisconnection)
+- [`Nimbus\Redis\PamConnection`](#nimbusredispamconnection)
+- [`Nimbus\Redis\RedisIdempotencyStore`](#nimbusredisredisidempotencystore)
+- [`Nimbus\Redis\RedisPool`](#nimbusredisredispool)
+- [`Nimbus\Redis\RedisRateLimitStore`](#nimbusredisredisratelimitstore)
+- [`Nimbus\Redis\RedisResponseCacheStore`](#nimbusredisredisresponsecachestore)
 - [`Nimbus\Resilience\CircuitBreaker`](#nimbusresiliencecircuitbreaker)
 - [`Nimbus\Resilience\CircuitOpenException`](#nimbusresiliencecircuitopenexception)
 - [`Nimbus\Resilience\CircuitState`](#nimbusresiliencecircuitstate)
@@ -113,15 +123,27 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RoutingResultType`](#nimbusroutingresulttype)
 - [`Nimbus\Routing\RouteBindable`](#nimbusroutingroutebindable)
 - [`Nimbus\Runtime\Deadline`](#nimbusruntimedeadline)
+- [`Nimbus\Security\Crypt`](#nimbussecuritycrypt)
+- [`Nimbus\Security\DecryptException`](#nimbussecuritydecryptexception)
+- [`Nimbus\Security\Hash`](#nimbussecurityhash)
 - [`Nimbus\Tenancy\Tenant`](#nimbustenancytenant)
 - [`Nimbus\Tenancy\TenantContext`](#nimbustenancytenantcontext)
 - [`Nimbus\Tenancy\TenantResolver`](#nimbustenancytenantresolver)
 - [`Nimbus\Testing\TestClient`](#nimbustestingtestclient)
 - [`Nimbus\Testing\TestResponse`](#nimbustestingtestresponse)
 - [`Nimbus\Transactions\TransactionManager`](#nimbustransactionstransactionmanager)
+- [`Nimbus\Validation\Attributes\Email`](#nimbusvalidationattributesemail)
+- [`Nimbus\Validation\Attributes\Field`](#nimbusvalidationattributesfield)
+- [`Nimbus\Validation\Attributes\In`](#nimbusvalidationattributesin)
+- [`Nimbus\Validation\Attributes\Max`](#nimbusvalidationattributesmax)
+- [`Nimbus\Validation\Attributes\Min`](#nimbusvalidationattributesmin)
+- [`Nimbus\Validation\Attributes\Regex`](#nimbusvalidationattributesregex)
+- [`Nimbus\Validation\Attributes\Url`](#nimbusvalidationattributesurl)
+- [`Nimbus\Validation\Attributes\Uuid`](#nimbusvalidationattributesuuid)
 - [`Nimbus\Validation\DtoHydrator`](#nimbusvalidationdtohydrator)
 - [`Nimbus\Validation\EnumRule`](#nimbusvalidationenumrule)
 - [`Nimbus\Validation\FormRequest`](#nimbusvalidationformrequest)
+- [`Nimbus\Validation\Input`](#nimbusvalidationinput)
 - [`Nimbus\Validation\Rule`](#nimbusvalidationrule)
 - [`Nimbus\Validation\ValidationException`](#nimbusvalidationvalidationexception)
 - [`Nimbus\Validation\ValidationRule`](#nimbusvalidationvalidationrule)
@@ -139,6 +161,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public container(): Nimbus\Container\Container`
 - `public controller(string $controller, callable $routes): void`
 - `public delete(string $path, array|callable|string $handler): Nimbus\PendingRoute`
+- `public docs(string $path = "/docs", string $title = "Nimbus API", string $version = "1.0.0"): self`
 - `public get(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public group(callable $routes): void`
 - `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
@@ -399,6 +422,7 @@ final readonly class Nimbus\ContainerMiddleware implements Pam\Contracts\Http\Mi
 ### Methods
 
 - `public __construct(Nimbus\Container\Container $container, string $middleware): mixed`
+- `public is(string $middleware): bool`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Container\Binding`
@@ -458,6 +482,7 @@ final class Nimbus\Container\Container
 - `public bind(string $id, callable|null|string $factory = null): self`
 - `public bindRoute(string $class, callable $resolver): self`
 - `public call(array $callable, array $named = [], array $provided = []): mixed`
+- `public callFunction(Closure $function, array $named = [], array $provided = []): mixed`
 - `public diagnostics(): array`
 - `public endScope(): void`
 - `public get(string $id): mixed`
@@ -558,7 +583,7 @@ final readonly class Nimbus\Database\ArcanoServiceProvider implements Pam\Contra
 
 ### Methods
 
-- `public __construct(Nimbus\Database\DatabaseConfig $config, Arcano\ORM\SchemaInterface|Nimbus\Database\ArcanoSchemaCompiler|array $schema, ?string $migrations = null): mixed`
+- `public __construct(Nimbus\Database\DatabaseConfig $config, Arcano\ORM\SchemaInterface|Nimbus\Database\ArcanoSchemaCompiler|array $schema, ?string $migrations = null, int $maxIdleConnections = 8): mixed`
 - `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
 - `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
 
@@ -610,6 +635,28 @@ final readonly class Nimbus\Database\DatabaseHealthCheck implements Nimbus\Healt
 
 - `public __construct(Nimbus\Database\ArcanoManager $arcano, ?string $connection = null): mixed`
 - `public check(): Nimbus\Health\HealthResult`
+
+## `Nimbus\Database\Pgsql\AsyncPostgresDriver`
+
+```php
+class Nimbus\Database\Pgsql\AsyncPostgresDriver extends Arcano\Database\Driver\Postgres\PostgresDriver implements Arcano\Database\Driver\CursorInterface, Arcano\Database\Driver\DriverInterface, Arcano\Database\NamedInterface, Psr\Log\LoggerAwareInterface
+```
+
+### Methods
+
+- `public static available(): bool`
+- `public static conninfo(string $dsn, ?string $username, ?string $password): string`
+- `public healthy(): bool`
+
+## `Nimbus\Database\Pgsql\PgsqlException`
+
+```php
+final class Nimbus\Database\Pgsql\PgsqlException extends PDOException implements Stringable, Throwable
+```
+
+### Methods
+
+- `public static from(string $sqlState, string $message): self`
 
 ## `Nimbus\Database\QueryBudget`
 
@@ -835,7 +882,7 @@ abstract readonly class Nimbus\Http\JsonResource implements Nimbus\Http\Responsa
 ### Methods
 
 - `public __construct(mixed $resource, int $status = 200): mixed`
-- `public static collection(iterable $resources): Nimbus\Http\ResourceCollection`
+- `public static collection(Nimbus\Pagination\Page|Traversable|array $resources): Nimbus\Http\ResourceCollection`
 - `public toArray(Pam\Http\Request $request): array`
 - `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 
@@ -888,7 +935,7 @@ final readonly class Nimbus\Http\ResourceCollection implements Nimbus\Http\Respo
 
 ### Methods
 
-- `public __construct(array $resources, array $meta = []): mixed`
+- `public __construct(array $resources, array $meta = [], array $links = []): mixed`
 - `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 - `public withMeta(array $meta): self`
 
@@ -1458,6 +1505,37 @@ final class Nimbus\PackageDiscovery
 
 - `public static providers(string $projectRoot): array`
 
+## `Nimbus\Pagination\Page`
+
+```php
+final readonly class Nimbus\Pagination\Page
+```
+
+### Properties
+
+- `public readonly array $items`
+- `public readonly array $links`
+- `public readonly array $meta`
+
+### Methods
+
+- `public __construct(array $items, array $meta, array $links): mixed`
+
+## `Nimbus\Pagination\Paginator`
+
+```php
+final readonly class Nimbus\Pagination\Paginator
+```
+
+### Constants
+
+- `MAX_PER_PAGE = 100`
+
+### Methods
+
+- `public static cursor(Arcano\ORM\Select $select, Pam\Http\Request $request, int $perPage = 20, string $column = "id", string $property = "id"): Nimbus\Pagination\Page`
+- `public static paginate(Arcano\ORM\Select $select, Pam\Http\Request $request, int $perPage = 20): Nimbus\Pagination\Page`
+
 ## `Nimbus\PendingRoute`
 
 ```php
@@ -1467,6 +1545,8 @@ final readonly class Nimbus\PendingRoute
 ### Methods
 
 - `public __construct(Nimbus\App $app, Nimbus\Router $router, Nimbus\Route $route): mixed`
+- `public auth(): self`
+- `public can(string $ability): self`
 - `public definition(): Nimbus\Route`
 - `public delete(string $path, array|callable|string $handler): self`
 - `public get(string $path, array|callable|string $handler): self`
@@ -1593,6 +1673,75 @@ abstract interface Nimbus\RateLimit\RateLimitStore
 ### Methods
 
 - `public consume(string $key, int $requestsPerSecond, int $capacity, float $now): Nimbus\RateLimit\RateLimitDecision`
+
+## `Nimbus\Redis\Connection`
+
+```php
+abstract interface Nimbus\Redis\Connection
+```
+
+### Methods
+
+- `public command(array $arguments): mixed`
+
+## `Nimbus\Redis\PamConnection`
+
+```php
+final readonly class Nimbus\Redis\PamConnection implements Nimbus\Redis\Connection
+```
+
+### Methods
+
+- `public __construct(Pam\Redis\Client $client): mixed`
+- `public command(array $arguments): mixed`
+
+## `Nimbus\Redis\RedisIdempotencyStore`
+
+```php
+final readonly class Nimbus\Redis\RedisIdempotencyStore implements Nimbus\Idempotency\IdempotencyStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:idempotency:"): mixed`
+- `public get(string $key, int $now): ?Nimbus\Idempotency\IdempotencyRecord`
+- `public put(string $key, Nimbus\Idempotency\IdempotencyRecord $record): void`
+
+## `Nimbus\Redis\RedisPool`
+
+```php
+final class Nimbus\Redis\RedisPool implements Nimbus\Redis\Connection
+```
+
+### Methods
+
+- `public __construct(Closure $connect, int $maxIdle = 16): mixed`
+- `public command(array $arguments): mixed`
+- `public static fromEnvironment(int $maxIdle = 16): self`
+
+## `Nimbus\Redis\RedisRateLimitStore`
+
+```php
+final readonly class Nimbus\Redis\RedisRateLimitStore implements Nimbus\RateLimit\RateLimitStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:rate:"): mixed`
+- `public consume(string $key, int $requestsPerSecond, int $capacity, float $now): Nimbus\RateLimit\RateLimitDecision`
+
+## `Nimbus\Redis\RedisResponseCacheStore`
+
+```php
+final readonly class Nimbus\Redis\RedisResponseCacheStore implements Nimbus\Cache\ResponseCacheStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:response:"): mixed`
+- `public forget(string $key): void`
+- `public get(string $key, int $now): ?Nimbus\Cache\CacheRecord`
+- `public put(string $key, Nimbus\Cache\CacheRecord $record): void`
 
 ## `Nimbus\Resilience\CircuitBreaker`
 
@@ -1723,6 +1872,8 @@ final class Nimbus\RouteRegistrar
 
 - `public __construct(Nimbus\App $app, string $prefix = ""): mixed`
 - `public apiResource(string $path, string $controller): void`
+- `public auth(): self`
+- `public can(string $ability): self`
 - `public controller(string $controller, callable $routes): void`
 - `public delete(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public get(string $path, array|callable|string $handler): Nimbus\PendingRoute`
@@ -1822,6 +1973,38 @@ final readonly class Nimbus\Runtime\Deadline
 - `public expired(): bool`
 - `public throwIfExpired(): void`
 
+## `Nimbus\Security\Crypt`
+
+```php
+final readonly class Nimbus\Security\Crypt
+```
+
+### Methods
+
+- `public __construct(string $key): mixed`
+- `public decrypt(string $payload): string`
+- `public encrypt(string $plaintext): string`
+- `public static fromEnvironment(): self`
+- `public static generateKey(): string`
+
+## `Nimbus\Security\DecryptException`
+
+```php
+final class Nimbus\Security\DecryptException extends RuntimeException implements Stringable, Throwable
+```
+
+## `Nimbus\Security\Hash`
+
+```php
+final readonly class Nimbus\Security\Hash
+```
+
+### Methods
+
+- `public static check(string $password, string $hash): bool`
+- `public static make(string $password): string`
+- `public static needsRehash(string $hash): bool`
+
 ## `Nimbus\Tenancy\Tenant`
 
 ```php
@@ -1898,6 +2081,110 @@ abstract interface Nimbus\Transactions\TransactionManager
 
 - `public transaction(callable $operation): mixed`
 
+## `Nimbus\Validation\Attributes\Email`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Email implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Field`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Field
+```
+
+### Properties
+
+- `public readonly string $name`
+
+### Methods
+
+- `public __construct(string $name): mixed`
+
+## `Nimbus\Validation\Attributes\In`
+
+```php
+final readonly class Nimbus\Validation\Attributes\In implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly array $values`
+
+### Methods
+
+- `public __construct(bool|float|int|string ...$values): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Max`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Max implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly float|int $value`
+
+### Methods
+
+- `public __construct(float|int $value): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Min`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Min implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly float|int $value`
+
+### Methods
+
+- `public __construct(float|int $value): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Regex`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Regex implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly string $pattern`
+
+### Methods
+
+- `public __construct(string $pattern): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Url`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Url implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Uuid`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Uuid implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public validate(string $field, mixed $value): ?string`
+
 ## `Nimbus\Validation\DtoHydrator`
 
 ```php
@@ -1933,6 +2220,21 @@ abstract class Nimbus\Validation\FormRequest
 - `public input(string $key, mixed $default = null): mixed`
 - `public rules(): array`
 - `public validated(): array`
+
+## `Nimbus\Validation\Input`
+
+```php
+abstract class Nimbus\Validation\Input
+```
+
+### Methods
+
+- `public __construct(Pam\Http\Request $request): mixed`
+- `public authorize(Pam\Http\Request $request): bool`
+- `public static from(array $data): static`
+- `public static nested(array $data, string $prefix, array &$errors): static`
+- `public static schema(): array`
+- `public toArray(): array`
 
 ## `Nimbus\Validation\Rule`
 

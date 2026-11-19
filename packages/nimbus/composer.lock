@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "314e0829007ace0a6d4f3bbc84518c35",
+    "content-hash": "9bcf46297310ba9cdf73a6bec8a7be3e",
     "packages": [
         {
             "name": "pushinbr/pam-contracts",
@@ -1365,16 +1365,16 @@
         },
         {
             "name": "pushinbr/arcano",
-            "version": "v0.2.2",
+            "version": "v0.2.4",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/arcano.git",
-                "reference": "f5e129cb3dd13df3d53589fa3fc1e40c649dc37f"
+                "reference": "fb4ee69b078a170c720aa6ed9d24423468884522"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/arcano/zipball/f5e129cb3dd13df3d53589fa3fc1e40c649dc37f",
-                "reference": "f5e129cb3dd13df3d53589fa3fc1e40c649dc37f",
+                "url": "https://api.github.com/repos/push-in/arcano/zipball/fb4ee69b078a170c720aa6ed9d24423468884522",
+                "reference": "fb4ee69b078a170c720aa6ed9d24423468884522",
                 "shasum": ""
             },
             "require": {
@@ -1426,9 +1426,9 @@
             "description": "Arcano: a fast data mapper ORM for PHP and the PAM runtime, with attribute entities, schema builder and migrations. Derived from Cycle ORM.",
             "support": {
                 "issues": "https://github.com/push-in/arcano/issues",
-                "source": "https://github.com/push-in/arcano/tree/v0.2.2"
+                "source": "https://github.com/push-in/arcano/tree/v0.2.4"
             },
-            "time": "2026-11-12T19:15:13+00:00"
+            "time": "2026-11-19T05:33:03+00:00"
         },
         {
             "name": "sebastian/cli-parser",

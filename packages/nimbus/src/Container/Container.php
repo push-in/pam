@@ -23,9 +23,20 @@ final class Container
     /** @var array<class-string, \Closure(string, Container): object> */
     private array $routeBindings = [];
 
+    /**
+     * Parameter plans compiled once per worker: reflection never runs on the request path.
+     *
+     * @var array<string, list<ParameterPlan>>
+     */
+    private array $plans = [];
+
+    /** @var \WeakMap<\Closure, list<ParameterPlan>> */
+    private \WeakMap $closurePlans;
+
     public function __construct()
     {
         $this->fiberScopes = new \WeakMap();
+        $this->closurePlans = new \WeakMap();
     }
 
     /** @param class-string $class @param callable(string, Container): object $resolver */
@@ -143,29 +154,51 @@ final class Container
      */
     public function call(array $callable, array $named = [], array $provided = []): mixed
     {
-        $reflection = new \ReflectionMethod($callable[0], $callable[1]);
-        $arguments = $this->resolveParameters($reflection->getParameters(), $named, $provided);
-        return $reflection->invokeArgs($callable[0], $arguments);
+        [$object, $method] = $callable;
+        $key = $object::class . '::' . $method;
+        $plan = $this->plans[$key] ??= ParameterPlan::compile(
+            (new \ReflectionMethod($object, $method))->getParameters(),
+        );
+        return $object->{$method}(...$this->resolveParameters($plan, $named, $provided));
+    }
+
+    /**
+     * Calls a closure, injecting route parameters by name, the provided objects by type
+     * and everything else from the container.
+     *
+     * @param array<string, mixed> $named
+     * @param list<mixed> $provided
+     */
+    public function callFunction(\Closure $function, array $named = [], array $provided = []): mixed
+    {
+        $plan = $this->closurePlans[$function] ??= ParameterPlan::compile(
+            (new \ReflectionFunction($function))->getParameters(),
+        );
+        return $function(...$this->resolveParameters($plan, $named, $provided));
     }
 
     /** @param class-string $class */
     private function build(string $class): object
     {
+        $plan = $this->plans[$class] ??= self::constructorPlan($class);
+        return $plan === [] ? new $class() : new $class(...$this->resolveParameters($plan));
+    }
+
+    /**
+     * @param class-string $class
+     * @return list<ParameterPlan>
+     */
+    private static function constructorPlan(string $class): array
+    {
         $reflection = new \ReflectionClass($class);
         if (!$reflection->isInstantiable()) {
             throw new \RuntimeException("Container entry {$class} is not instantiable.");
         }
-        $constructor = $reflection->getConstructor();
-        if ($constructor === null) {
-            return $reflection->newInstance();
-        }
-        return $reflection->newInstanceArgs(
-            $this->resolveParameters($constructor->getParameters()),
-        );
+        return ParameterPlan::compile($reflection->getConstructor()?->getParameters() ?? []);
     }
 
     /**
-     * @param list<\ReflectionParameter> $parameters
+     * @param list<ParameterPlan> $parameters
      * @param array<string, mixed> $named
      * @param list<mixed> $provided
      * @return list<mixed>
@@ -174,11 +207,10 @@ final class Container
     {
         $arguments = [];
         foreach ($parameters as $parameter) {
-            $type = $parameter->getType();
-            if (array_key_exists($parameter->getName(), $named)) {
-                $value = $named[$parameter->getName()];
-                if ($type instanceof \ReflectionNamedType && !$type->isBuiltin()) {
-                    $class = $type->getName();
+            if (array_key_exists($parameter->name, $named)) {
+                $value = $named[$parameter->name];
+                $class = $parameter->class;
+                if ($class !== null) {
                     $resolver = $this->routeBindings[$class] ?? null;
                     if ($resolver !== null) {
                         $resolved = $resolver(self::routeValue($value), $this);
@@ -186,7 +218,7 @@ final class Container
                         $resolved = $class::resolveRouteBinding(self::routeValue($value));
                     } else {
                         throw new \RuntimeException(
-                            "Route parameter {$parameter->getName()} cannot resolve {$class}; register bindRoute() or implement RouteBindable.",
+                            "Route parameter {$parameter->name} cannot resolve {$class}; register bindRoute() or implement RouteBindable.",
                         );
                     }
                     if (!$resolved instanceof $class) {
@@ -198,8 +230,8 @@ final class Container
                 }
                 continue;
             }
-            if ($type instanceof \ReflectionNamedType && !$type->isBuiltin()) {
-                $class = $type->getName();
+            if ($parameter->class !== null) {
+                $class = $parameter->class;
                 $matched = null;
                 foreach ($provided as $candidate) {
                     if ($candidate instanceof $class) {
@@ -210,17 +242,15 @@ final class Container
                 $arguments[] = $matched ?? $this->get($class);
                 continue;
             }
-            if ($parameter->isDefaultValueAvailable()) {
-                $arguments[] = $parameter->getDefaultValue();
+            if ($parameter->hasDefault) {
+                $arguments[] = $parameter->defaultValue();
                 continue;
             }
-            if ($parameter->allowsNull()) {
+            if ($parameter->nullable) {
                 $arguments[] = null;
                 continue;
             }
-            throw new \RuntimeException(
-                "Unable to resolve parameter \${$parameter->getName()} for {$parameter->getDeclaringFunction()->getName()}().",
-            );
+            throw new \RuntimeException("Unable to resolve parameter \${$parameter->name} for {$parameter->function}().");
         }
         return $arguments;
     }

@@ -110,6 +110,42 @@
                         }
                     ]
                 },
+                "docs": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "path",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "/docs",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "title",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "Nimbus API",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "version",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "1.0.0",
+                            "hasDefault": true
+                        }
+                    ]
+                },
                 "get": {
                     "static": false,
                     "final": false,
@@ -1855,6 +1891,24 @@
                         }
                     ]
                 },
+                "is": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "middleware",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
                 "process": {
                     "static": false,
                     "final": false,
@@ -2113,6 +2167,42 @@
                         {
                             "name": "callable",
                             "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "named",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "provided",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "callFunction": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "mixed",
+                    "parameters": [
+                        {
+                            "name": "function",
+                            "type": "Closure",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -2881,6 +2971,15 @@
                             "optional": true,
                             "default": null,
                             "hasDefault": true
+                        },
+                        {
+                            "name": "maxIdleConnections",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 8,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -3153,6 +3252,117 @@
                     "returnsReference": false,
                     "return": "Nimbus\\Health\\HealthResult",
                     "parameters": []
+                }
+            }
+        },
+        "Nimbus\\Database\\Pgsql\\AsyncPostgresDriver": {
+            "kind": "class",
+            "final": false,
+            "readonly": false,
+            "abstract": false,
+            "parent": "Arcano\\Database\\Driver\\Postgres\\PostgresDriver",
+            "interfaces": [
+                "Arcano\\Database\\Driver\\CursorInterface",
+                "Arcano\\Database\\Driver\\DriverInterface",
+                "Arcano\\Database\\NamedInterface",
+                "Psr\\Log\\LoggerAwareInterface"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "available": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
+                },
+                "conninfo": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "dsn",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "username",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "password",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "healthy": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
+                }
+            }
+        },
+        "Nimbus\\Database\\Pgsql\\PgsqlException": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": "PDOException",
+            "interfaces": [
+                "Stringable",
+                "Throwable"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "from": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "sqlState",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "message",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
                 }
             }
         },
@@ -4022,7 +4232,7 @@
                     "parameters": [
                         {
                             "name": "resources",
-                            "type": "iterable",
+                            "type": "Nimbus\\Pagination\\Page|Traversable|array",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -4200,6 +4410,15 @@
                         },
                         {
                             "name": "meta",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "links",
                             "type": "array",
                             "byReference": false,
                             "variadic": false,
@@ -7236,6 +7455,174 @@
                 }
             }
         },
+        "Nimbus\\Pagination\\Page": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": {
+                "items": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "array"
+                },
+                "links": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "array"
+                },
+                "meta": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "array"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "items",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "meta",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "links",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Pagination\\Paginator": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": {
+                "MAX_PER_PAGE": 100
+            },
+            "properties": [],
+            "methods": {
+                "cursor": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\Pagination\\Page",
+                    "parameters": [
+                        {
+                            "name": "select",
+                            "type": "Arcano\\ORM\\Select",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "perPage",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 20,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "column",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "id",
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "property",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "id",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "paginate": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\Pagination\\Page",
+                    "parameters": [
+                        {
+                            "name": "select",
+                            "type": "Arcano\\ORM\\Select",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "perPage",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 20,
+                            "hasDefault": true
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\PendingRoute": {
             "kind": "class",
             "final": true,
@@ -7274,6 +7661,32 @@
                         {
                             "name": "route",
                             "type": "Nimbus\\Route",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "auth": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": []
+                },
+                "can": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "ability",
+                            "type": "string",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -8218,6 +8631,457 @@
                 }
             }
         },
+        "Nimbus\\Redis\\Connection": {
+            "kind": "interface",
+            "final": false,
+            "readonly": false,
+            "abstract": true,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "command": {
+                    "static": false,
+                    "final": false,
+                    "abstract": true,
+                    "returnsReference": false,
+                    "return": "mixed",
+                    "parameters": [
+                        {
+                            "name": "arguments",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Redis\\PamConnection": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Redis\\Connection"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "client",
+                            "type": "Pam\\Redis\\Client",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "command": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "mixed",
+                    "parameters": [
+                        {
+                            "name": "arguments",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Redis\\RedisIdempotencyStore": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Idempotency\\IdempotencyStore"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "redis",
+                            "type": "Nimbus\\Redis\\Connection",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "prefix",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "nimbus:idempotency:",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "get": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?Nimbus\\Idempotency\\IdempotencyRecord",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "now",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "put": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "record",
+                            "type": "Nimbus\\Idempotency\\IdempotencyRecord",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Redis\\RedisPool": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Redis\\Connection"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "connect",
+                            "type": "Closure",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "maxIdle",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 16,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "command": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "mixed",
+                    "parameters": [
+                        {
+                            "name": "arguments",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "fromEnvironment": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "maxIdle",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 16,
+                            "hasDefault": true
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Redis\\RedisRateLimitStore": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\RateLimit\\RateLimitStore"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "redis",
+                            "type": "Nimbus\\Redis\\Connection",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "prefix",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "nimbus:rate:",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "consume": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\RateLimit\\RateLimitDecision",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "requestsPerSecond",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "capacity",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "now",
+                            "type": "float",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Redis\\RedisResponseCacheStore": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Cache\\ResponseCacheStore"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "redis",
+                            "type": "Nimbus\\Redis\\Connection",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "prefix",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "nimbus:response:",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "forget": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "get": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?Nimbus\\Cache\\CacheRecord",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "now",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "put": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "record",
+                            "type": "Nimbus\\Cache\\CacheRecord",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\Resilience\\CircuitBreaker": {
             "kind": "class",
             "final": true,
@@ -8719,6 +9583,32 @@
                         },
                         {
                             "name": "controller",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "auth": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": []
+                },
+                "can": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "ability",
                             "type": "string",
                             "byReference": false,
                             "variadic": false,
@@ -9505,6 +10395,177 @@
                 }
             }
         },
+        "Nimbus\\Security\\Crypt": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "decrypt": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "payload",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "encrypt": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "plaintext",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "fromEnvironment": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": []
+                },
+                "generateKey": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                }
+            }
+        },
+        "Nimbus\\Security\\DecryptException": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": "RuntimeException",
+            "interfaces": [
+                "Stringable",
+                "Throwable"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": []
+        },
+        "Nimbus\\Security\\Hash": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "check": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "password",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "hash",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "make": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "password",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "needsRehash": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "hash",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\Tenancy\\Tenant": {
             "kind": "interface",
             "final": false,
@@ -9938,6 +10999,425 @@
                 }
             }
         },
+        "Nimbus\\Validation\\Attributes\\Email": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Validation\\ValidationRule"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "validate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "field",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Validation\\Attributes\\Field": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": {
+                "name": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Validation\\Attributes\\In": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Validation\\ValidationRule"
+            ],
+            "constants": [],
+            "properties": {
+                "values": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "array"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "values",
+                            "type": "bool|float|int|string",
+                            "byReference": false,
+                            "variadic": true,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "validate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "field",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Validation\\Attributes\\Max": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Validation\\ValidationRule"
+            ],
+            "constants": [],
+            "properties": {
+                "value": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "float|int"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "value",
+                            "type": "float|int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "validate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "field",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Validation\\Attributes\\Min": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Validation\\ValidationRule"
+            ],
+            "constants": [],
+            "properties": {
+                "value": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "float|int"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "value",
+                            "type": "float|int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "validate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "field",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Validation\\Attributes\\Regex": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Validation\\ValidationRule"
+            ],
+            "constants": [],
+            "properties": {
+                "pattern": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "pattern",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "validate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "field",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Validation\\Attributes\\Url": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Validation\\ValidationRule"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "validate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "field",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Validation\\Attributes\\Uuid": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Validation\\ValidationRule"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "validate": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "field",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "value",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\Validation\\DtoHydrator": {
             "kind": "class",
             "final": true,
@@ -10126,6 +11606,124 @@
                     "parameters": []
                 },
                 "validated": {
+                    "static": false,
+                    "final": true,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
+                }
+            }
+        },
+        "Nimbus\\Validation\\Input": {
+            "kind": "class",
+            "final": false,
+            "readonly": false,
+            "abstract": true,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": true,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "authorize": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "from": {
+                    "static": true,
+                    "final": true,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "static",
+                    "parameters": [
+                        {
+                            "name": "data",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "nested": {
+                    "static": true,
+                    "final": true,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "static",
+                    "parameters": [
+                        {
+                            "name": "data",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "prefix",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "errors",
+                            "type": "array",
+                            "byReference": true,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "schema": {
+                    "static": true,
+                    "final": true,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
+                },
+                "toArray": {
                     "static": false,
                     "final": true,
                     "abstract": false,
