@@ -24,7 +24,11 @@ pub fn run(command: &str, root: &Path, arguments: Vec<OsString>) -> Result<u8, S
                 .as_secs();
             (
                 "database/migrations",
-                format!("{}_0_0_default_{}.php", migration_date(timestamp), snake_case(&name)),
+                format!(
+                    "{}_0_0_default_{}.php",
+                    migration_date(timestamp),
+                    snake_case(&name)
+                ),
                 migration(&name, timestamp),
             )
         }
