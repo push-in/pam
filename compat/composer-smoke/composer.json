@@ -61,7 +61,8 @@
         "pushinbr/pam-http-testing": "^1.0",
         "pushinbr/pam-testing": "^2.0",
         "symfony/mailer": "^7.3",
-        "symfony/mime": "^7.3"
+        "symfony/mime": "^7.3",
+        "symfony/translation": "^8.1"
     },
     "autoload": {
         "psr-4": {

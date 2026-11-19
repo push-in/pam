@@ -55,7 +55,13 @@ abstract class FormRequest
                 'This action is not authorized.',
             );
         }
-        $decoded = $this->request->body() === '' ? [] : $this->request->json();
+        $type = strtolower($this->request->getHeader('content-type') ?? '');
+        $decoded = match (true) {
+            $this->request->body() === '' => [],
+            str_starts_with($type, 'application/x-www-form-urlencoded'),
+            str_starts_with($type, 'multipart/form-data') => \Nimbus\Http\FormData::parse($this->request),
+            default => $this->request->json(),
+        };
         if (!is_array($decoded)) {
             throw new ValidationException(['body' => ['The request body must be a JSON object.']]);
         }

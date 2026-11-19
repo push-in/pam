@@ -147,6 +147,10 @@ abstract class Input
         if ($request->body() === '') {
             return [];
         }
+        $type = strtolower($request->getHeader('content-type') ?? '');
+        if (str_starts_with($type, 'application/x-www-form-urlencoded') || str_starts_with($type, 'multipart/form-data')) {
+            return \Nimbus\Http\FormData::parse($request);
+        }
         try {
             $decoded = $request->json();
         } catch (\JsonException) {

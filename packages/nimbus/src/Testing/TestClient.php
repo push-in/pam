@@ -34,6 +34,27 @@ final readonly class TestClient
         return $this->withHeaders([$name => $value]);
     }
 
+    /**
+     * Sends the cookies with every request (merged into one `Cookie` header).
+     *
+     * @param array<string, string> $cookies
+     */
+    public function withCookies(array $cookies): self
+    {
+        $existing = \Nimbus\Http\RequestCookies::parse($this->headers['cookie'] ?? '');
+        $pairs = [];
+        foreach (array_replace($existing, $cookies) as $name => $value) {
+            $pairs[] = $name . '=' . rawurlencode($value);
+        }
+        return $this->withHeader('cookie', implode('; ', $pairs));
+    }
+
+    /** Sends the cookies a response set (a session cookie, for instance) with the next requests. */
+    public function withCookiesFrom(TestResponse $response): self
+    {
+        return $this->withCookies($response->cookies());
+    }
+
     public function withToken(string $token, string $type = 'Bearer'): self
     {
         return $this->withHeader('authorization', "{$type} {$token}");
@@ -92,6 +113,27 @@ final readonly class TestClient
             $body = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
         return $this->request($method, $path, headers: $headers, body: $body);
+    }
+
+    /**
+     * An HTML form submission: the fields are urlencoded in the body.
+     *
+     * @param array<string, mixed> $form
+     * @param array<string, string> $headers
+     */
+    public function post(string $path, array $form = [], array $headers = []): TestResponse
+    {
+        return $this->form('POST', $path, $form, $headers);
+    }
+
+    /**
+     * @param array<string, mixed> $form
+     * @param array<string, string> $headers
+     */
+    public function form(string $method, string $path, array $form = [], array $headers = []): TestResponse
+    {
+        $headers = self::normalize($headers) + ['content-type' => 'application/x-www-form-urlencoded', 'accept' => 'text/html'];
+        return $this->request($method, $path, headers: $headers, body: http_build_query($form));
     }
 
     /** @param array<string, string> $headers */

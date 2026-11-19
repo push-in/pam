@@ -4,6 +4,7 @@ parameters:
         - benchmarks/router.php
         - bin/api-compat
         - bin/api-reference
+        - bin/nimbus-views
         - src
         - tests
     tmpDir: .build/phpstan
