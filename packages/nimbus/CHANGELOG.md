@@ -16,6 +16,24 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   `signed()` on routes and route groups.
 - Problem codes `InvalidSignature`, `PayloadTooLarge` and `UnsupportedMediaType`.
 - `Crypt::keyFromEnvironment()`.
+- `RedisJobQueue`: a durable queue over `Nimbus\Redis\Connection`, with delayed jobs in a sorted set,
+  lease-based reservations that return to the queue when a worker dies, and every transition in one
+  Lua script; keys share a `{queue}` hash tag for Redis Cluster.
+- `DatabaseJobQueue` over Arcano (`jobs` and `failed_jobs`, from `QueueTablesMigration`): reservations use
+  `FOR UPDATE SKIP LOCKED` on Postgres and MySQL and a compare-and-swap update elsewhere.
+- Failed-jobs store on both drivers (`FailedJobRepository`: `failed()`, `retryFailed()`, `forgetFailed()`);
+  exhausted, dead-lettered and undecodable jobs land there with the exception class only.
+- `RetryPolicy` and `ExponentialBackoff` (doubling delays with equal jitter); `JobWorker` takes one through
+  `retryPolicy` and drains a bounded batch with `work()`. `InvokableJobHandler` runs a job's `handle()` with
+  container injection.
+- Scheduler (`Schedule`, `ScheduledTask`, `Scheduler`) on `dragonmantank/cron-expression`: `job()`, `call()`,
+  `cron()`, `everyMinute()` to `monthlyOn()`, `dailyAt()`, `timezone()`, `withoutOverlapping()`. Each due
+  minute is claimed through a `SchedulerLock` (`MemorySchedulerLock`, `RedisSchedulerLock`,
+  `DatabaseSchedulerLock`), so a task runs once across workers and servers.
+- `App::background()` (`Nimbus\Runtime\Background`): the scheduler and queue workers run on the ticks PAM
+  sends to task workers (`--task-workers N`), without a system cron; `Background::run()` is the loop for a
+  dedicated process.
+- `ArcanoMigrationManager::publish()` copies a package migration into the application's migrations.
 
 ## 0.2.0 - 2026-11-19
 

@@ -27,6 +27,7 @@
         "pushinbr/pam-contracts": "^1.1"
     },
     "suggest": {
+        "dragonmantank/cron-expression": "Required by the scheduler (Nimbus\\Scheduling).",
         "league/flysystem": "Required by Nimbus\\Storage (StorageManager, Disk, local disks).",
         "league/flysystem-aws-s3-v3": "S3 disks and presigned uploads in Nimbus\\Storage.",
         "psr/log": "PSR-3 logging; LoggerInterface resolves to the PAM runtime structured log.",
@@ -70,6 +71,7 @@
         "sort-packages": true
     },
     "require-dev": {
+        "dragonmantank/cron-expression": "^3.4",
         "league/flysystem": "^3.29",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",

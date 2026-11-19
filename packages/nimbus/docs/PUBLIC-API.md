@@ -61,6 +61,11 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Idempotency\IdempotencyRecord`](#nimbusidempotencyidempotencyrecord)
 - [`Nimbus\Idempotency\IdempotencyStore`](#nimbusidempotencyidempotencystore)
 - [`Nimbus\Idempotency\MemoryIdempotencyStore`](#nimbusidempotencymemoryidempotencystore)
+- [`Nimbus\Jobs\DatabaseJobQueue`](#nimbusjobsdatabasejobqueue)
+- [`Nimbus\Jobs\ExponentialBackoff`](#nimbusjobsexponentialbackoff)
+- [`Nimbus\Jobs\FailedJob`](#nimbusjobsfailedjob)
+- [`Nimbus\Jobs\FailedJobRepository`](#nimbusjobsfailedjobrepository)
+- [`Nimbus\Jobs\InvokableJobHandler`](#nimbusjobsinvokablejobhandler)
 - [`Nimbus\Jobs\JobCodec`](#nimbusjobsjobcodec)
 - [`Nimbus\Jobs\JobDispatcher`](#nimbusjobsjobdispatcher)
 - [`Nimbus\Jobs\JobEnvelope`](#nimbusjobsjobenvelope)
@@ -71,6 +76,9 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Jobs\JobState`](#nimbusjobsjobstate)
 - [`Nimbus\Jobs\JobWorker`](#nimbusjobsjobworker)
 - [`Nimbus\Jobs\MemoryJobDispatcher`](#nimbusjobsmemoryjobdispatcher)
+- [`Nimbus\Jobs\QueueTablesMigration`](#nimbusjobsqueuetablesmigration)
+- [`Nimbus\Jobs\RedisJobQueue`](#nimbusjobsredisjobqueue)
+- [`Nimbus\Jobs\RetryPolicy`](#nimbusjobsretrypolicy)
 - [`Nimbus\Jobs\SerializableJob`](#nimbusjobsserializablejob)
 - [`Nimbus\Lifecycle\RequestLifecycleObserver`](#nimbuslifecyclerequestlifecycleobserver)
 - [`Nimbus\Middleware\ArcanoLifecycleMiddleware`](#nimbusmiddlewarearcanolifecyclemiddleware)
@@ -123,7 +131,15 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RoutingResult`](#nimbusroutingresult)
 - [`Nimbus\RoutingResultType`](#nimbusroutingresulttype)
 - [`Nimbus\Routing\RouteBindable`](#nimbusroutingroutebindable)
+- [`Nimbus\Runtime\Background`](#nimbusruntimebackground)
 - [`Nimbus\Runtime\Deadline`](#nimbusruntimedeadline)
+- [`Nimbus\Scheduling\DatabaseSchedulerLock`](#nimbusschedulingdatabaseschedulerlock)
+- [`Nimbus\Scheduling\MemorySchedulerLock`](#nimbusschedulingmemoryschedulerlock)
+- [`Nimbus\Scheduling\RedisSchedulerLock`](#nimbusschedulingredisschedulerlock)
+- [`Nimbus\Scheduling\Schedule`](#nimbusschedulingschedule)
+- [`Nimbus\Scheduling\ScheduledTask`](#nimbusschedulingscheduledtask)
+- [`Nimbus\Scheduling\Scheduler`](#nimbusschedulingscheduler)
+- [`Nimbus\Scheduling\SchedulerLock`](#nimbusschedulingschedulerlock)
 - [`Nimbus\Security\Crypt`](#nimbussecuritycrypt)
 - [`Nimbus\Security\DecryptException`](#nimbussecuritydecryptexception)
 - [`Nimbus\Security\Hash`](#nimbussecurityhash)
@@ -168,6 +184,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 ### Methods
 
 - `public __construct(bool $discoverPackages = true, ?Nimbus\Container\Container $container = null): mixed`
+- `public background(): Nimbus\Runtime\Background`
 - `public boot(): self`
 - `public container(): Nimbus\Container\Container`
 - `public controller(string $controller, callable $routes): void`
@@ -571,6 +588,7 @@ final class Nimbus\Database\ArcanoMigrationManager
 - `public __construct(Nimbus\Database\ArcanoDatabaseProvider $databases, string $directory, string $table = "migrations", string $namespace = "Migration", ?Nimbus\Database\ArcanoSchemaCompiler $entities = null): mixed`
 - `public generate(): array`
 - `public migrate(): array`
+- `public publish(string $name, string $class): ?string`
 - `public rollback(int $steps = 1): array`
 - `public status(): array`
 
@@ -1024,6 +1042,78 @@ final class Nimbus\Idempotency\MemoryIdempotencyStore implements Nimbus\Idempote
 - `public get(string $key, int $now): ?Nimbus\Idempotency\IdempotencyRecord`
 - `public put(string $key, Nimbus\Idempotency\IdempotencyRecord $record): void`
 
+## `Nimbus\Jobs\DatabaseJobQueue`
+
+```php
+final class Nimbus\Jobs\DatabaseJobQueue implements Nimbus\Jobs\FailedJobRepository, Nimbus\Jobs\JobDispatcher, Nimbus\Jobs\JobQueue
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, Nimbus\Jobs\JobCodec $codec, string $queue = "default", ?string $connection = null, ?Closure $clock = null): mixed`
+- `public complete(Nimbus\Jobs\JobEnvelope $envelope): void`
+- `public deadLetter(Nimbus\Jobs\JobEnvelope $envelope, ?Throwable $failure = null): void`
+- `public dispatch(object $job, int $maximumAttempts = 3, int $delaySeconds = 0): Nimbus\Jobs\JobEnvelope`
+- `public failed(int $limit = 100): array`
+- `public forgetFailed(string $id): bool`
+- `public release(Nimbus\Jobs\JobEnvelope $envelope, int $availableAt, ?Throwable $failure = null): void`
+- `public reserve(int $now, int $leaseSeconds): ?Nimbus\Jobs\JobEnvelope`
+- `public retryFailed(string $id): bool`
+- `public size(): int`
+
+## `Nimbus\Jobs\ExponentialBackoff`
+
+```php
+final readonly class Nimbus\Jobs\ExponentialBackoff implements Nimbus\Jobs\RetryPolicy
+```
+
+### Methods
+
+- `public __construct(int $baseSeconds = 5, int $maximumSeconds = 3600, bool $jitter = true, ?Closure $random = null): mixed`
+- `public delaySeconds(int $attempt): int`
+
+## `Nimbus\Jobs\FailedJob`
+
+```php
+final readonly class Nimbus\Jobs\FailedJob
+```
+
+### Properties
+
+- `public readonly int $attempts`
+- `public readonly int $failedAt`
+- `public readonly ?string $failureClass`
+- `public readonly string $id`
+- `public readonly string $payload`
+- `public readonly string $queue`
+
+### Methods
+
+- `public __construct(string $id, string $queue, string $payload, int $attempts, ?string $failureClass, int $failedAt): mixed`
+
+## `Nimbus\Jobs\FailedJobRepository`
+
+```php
+abstract interface Nimbus\Jobs\FailedJobRepository
+```
+
+### Methods
+
+- `public failed(int $limit = 100): array`
+- `public forgetFailed(string $id): bool`
+- `public retryFailed(string $id): bool`
+
+## `Nimbus\Jobs\InvokableJobHandler`
+
+```php
+final readonly class Nimbus\Jobs\InvokableJobHandler implements Nimbus\Jobs\JobHandler
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Container\Container $container = null): mixed`
+- `public handle(object $job): Nimbus\Jobs\JobOutcome`
+
 ## `Nimbus\Jobs\JobCodec`
 
 ```php
@@ -1191,8 +1281,9 @@ final readonly class Nimbus\Jobs\JobWorker
 
 ### Methods
 
-- `public __construct(Nimbus\Jobs\JobQueue $queue, Nimbus\Jobs\JobHandler|callable $handler, int $leaseSeconds = 30, int $retryDelaySeconds = 5): mixed`
+- `public __construct(Nimbus\Jobs\JobQueue $queue, Nimbus\Jobs\JobHandler|callable $handler, int $leaseSeconds = 30, int $retryDelaySeconds = 5, ?Nimbus\Jobs\RetryPolicy $retryPolicy = null): mixed`
 - `public runOne(?int $now = null): Nimbus\Jobs\JobRunResult`
+- `public work(int $maximumJobs = 100, float $maximumSeconds = 1, ?Closure $clock = null): int`
 
 ## `Nimbus\Jobs\MemoryJobDispatcher`
 
@@ -1210,6 +1301,46 @@ final class Nimbus\Jobs\MemoryJobDispatcher implements Nimbus\Jobs\JobDispatcher
 - `public pending(): array`
 - `public release(Nimbus\Jobs\JobEnvelope $envelope, int $availableAt, ?Throwable $failure = null): void`
 - `public reserve(int $now, int $leaseSeconds): ?Nimbus\Jobs\JobEnvelope`
+
+## `Nimbus\Jobs\QueueTablesMigration`
+
+```php
+final class Nimbus\Jobs\QueueTablesMigration extends Arcano\Migrations\Migration implements Arcano\Migrations\MigrationInterface
+```
+
+### Methods
+
+- `public down(): void`
+- `public up(): void`
+
+## `Nimbus\Jobs\RedisJobQueue`
+
+```php
+final class Nimbus\Jobs\RedisJobQueue implements Nimbus\Jobs\FailedJobRepository, Nimbus\Jobs\JobDispatcher, Nimbus\Jobs\JobQueue
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, Nimbus\Jobs\JobCodec $codec, string $queue = "default", string $prefix = "nimbus:queue:", ?Closure $clock = null): mixed`
+- `public complete(Nimbus\Jobs\JobEnvelope $envelope): void`
+- `public deadLetter(Nimbus\Jobs\JobEnvelope $envelope, ?Throwable $failure = null): void`
+- `public dispatch(object $job, int $maximumAttempts = 3, int $delaySeconds = 0): Nimbus\Jobs\JobEnvelope`
+- `public failed(int $limit = 100): array`
+- `public forgetFailed(string $id): bool`
+- `public release(Nimbus\Jobs\JobEnvelope $envelope, int $availableAt, ?Throwable $failure = null): void`
+- `public reserve(int $now, int $leaseSeconds): ?Nimbus\Jobs\JobEnvelope`
+- `public retryFailed(string $id): bool`
+- `public size(): int`
+
+## `Nimbus\Jobs\RetryPolicy`
+
+```php
+abstract interface Nimbus\Jobs\RetryPolicy
+```
+
+### Methods
+
+- `public delaySeconds(int $attempt): int`
 
 ## `Nimbus\Jobs\SerializableJob`
 
@@ -1992,6 +2123,23 @@ abstract interface Nimbus\Routing\RouteBindable
 
 - `public static resolveRouteBinding(string $value): static`
 
+## `Nimbus\Runtime\Background`
+
+```php
+final class Nimbus\Runtime\Background
+```
+
+### Methods
+
+- `public __construct(?Closure $clock = null, ?Closure $onFailure = null): mixed`
+- `public add(string $name, callable $task): self`
+- `public answer(Pam\Http\Request $request, Pam\Http\Response $response): ?Pam\Http\Response`
+- `public queue(Nimbus\Jobs\JobWorker $worker, string $name = "queue", int $maximumJobs = 100, float $maximumSeconds = 0.8): self`
+- `public run(float $intervalSeconds = 1, ?int $maximumTicks = null): void`
+- `public scheduler(Nimbus\Scheduling\Scheduler $scheduler, string $name = "scheduler"): self`
+- `public stop(): void`
+- `public tick(): void`
+
 ## `Nimbus\Runtime\Deadline`
 
 ```php
@@ -2003,6 +2151,112 @@ final readonly class Nimbus\Runtime\Deadline
 - `public __construct(float $seconds): mixed`
 - `public expired(): bool`
 - `public throwIfExpired(): void`
+
+## `Nimbus\Scheduling\DatabaseSchedulerLock`
+
+```php
+final class Nimbus\Scheduling\DatabaseSchedulerLock implements Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, ?string $connection = null, ?Closure $clock = null): mixed`
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
+
+## `Nimbus\Scheduling\MemorySchedulerLock`
+
+```php
+final class Nimbus\Scheduling\MemorySchedulerLock implements Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public __construct(?Closure $clock = null): mixed`
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
+
+## `Nimbus\Scheduling\RedisSchedulerLock`
+
+```php
+final class Nimbus\Scheduling\RedisSchedulerLock implements Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:lock:"): mixed`
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
+
+## `Nimbus\Scheduling\Schedule`
+
+```php
+final class Nimbus\Scheduling\Schedule
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Jobs\JobDispatcher $dispatcher = null, DateTimeZone|null|string $timezone = null, ?Nimbus\Container\Container $container = null): mixed`
+- `public call(callable $callback): Nimbus\Scheduling\ScheduledTask`
+- `public dueTasks(DateTimeInterface $now): array`
+- `public job(object|string $job, int $maximumAttempts = 3): Nimbus\Scheduling\ScheduledTask`
+- `public tasks(): array`
+
+## `Nimbus\Scheduling\ScheduledTask`
+
+```php
+final class Nimbus\Scheduling\ScheduledTask
+```
+
+### Methods
+
+- `public __construct(Closure $action, string $name, ?DateTimeZone $timezone = null): mixed`
+- `public static assertCronAvailable(): void`
+- `public cron(string $expression): self`
+- `public daily(): self`
+- `public dailyAt(string $time): self`
+- `public everyFifteenMinutes(): self`
+- `public everyFiveMinutes(): self`
+- `public everyMinute(): self`
+- `public everyTenMinutes(): self`
+- `public everyThirtyMinutes(): self`
+- `public everyTwoMinutes(): self`
+- `public expression(): string`
+- `public getName(): string`
+- `public hourly(): self`
+- `public hourlyAt(int $minute): self`
+- `public isDue(DateTimeInterface $now): bool`
+- `public monthly(): self`
+- `public monthlyOn(int $day = 1, string $time = "00:00"): self`
+- `public name(string $name): self`
+- `public overlapMinutes(): ?int`
+- `public run(): void`
+- `public timezone(DateTimeZone|string $timezone): self`
+- `public weekly(): self`
+- `public weeklyOn(int $day, string $time = "00:00"): self`
+- `public withoutOverlapping(int $expiresAfterMinutes = 1440): self`
+
+## `Nimbus\Scheduling\Scheduler`
+
+```php
+final class Nimbus\Scheduling\Scheduler
+```
+
+### Methods
+
+- `public __construct(Nimbus\Scheduling\Schedule $schedule, Nimbus\Scheduling\SchedulerLock $lock = {"@object":"Nimbus\\Scheduling\\MemorySchedulerLock","properties":[]}, ?Closure $clock = null, ?Closure $onFailure = null): mixed`
+- `public runDue(?int $now = null): array`
+
+## `Nimbus\Scheduling\SchedulerLock`
+
+```php
+abstract interface Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
 
 ## `Nimbus\Security\Crypt`
 

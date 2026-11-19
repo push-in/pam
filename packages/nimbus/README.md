@@ -460,6 +460,95 @@ through `JobCodec`. The codec uses an explicit name-to-class allowlist, a
 versioned JSON envelope, a 64 KiB size limit and a depth limit. It never accepts
 PHP serialized objects or client-supplied class names.
 
+## Queues and the scheduler
+
+Two durable `JobQueue` drivers share the memory queue's lifecycle and add a
+failed-jobs store (`FailedJobRepository`: `failed()`, `retryFailed()`,
+`forgetFailed()`). Both accept only `SerializableJob` jobs, encoded by `JobCodec`.
+
+```php
+$codec = new JobCodec([SendInvoice::class, SendReport::class]);
+
+$queue = new RedisJobQueue(RedisPool::fromEnvironment(), $codec, queue: 'default');
+// or, with the Arcano integration:
+$queue = new DatabaseJobQueue($databases, $codec, queue: 'default');
+
+$queue->dispatch(new SendInvoice($invoiceId), maximumAttempts: 5, delaySeconds: 60);
+
+$worker = new JobWorker(
+    $queue,
+    new InvokableJobHandler($app->container()), // calls $job->handle(...) with injection
+    leaseSeconds: 60,
+    retryPolicy: new ExponentialBackoff(baseSeconds: 5, maximumSeconds: 3_600),
+);
+```
+
+- **Redis**: pending jobs are a sorted set scored by availability (delays and
+  retries need nothing else); a reservation moves the job to a lease set. Every
+  transition is one Lua script, and keys share a `{queue}` hash tag for Redis
+  Cluster.
+- **Database**: tables `jobs`, `failed_jobs` and `scheduler_locks`. Publish the
+  migration once, then migrate:
+  `$migrations->publish('create_queue_tables', QueueTablesMigration::class)`.
+  Postgres and MySQL reserve with `SELECT ... FOR UPDATE SKIP LOCKED`; SQLite
+  (and SQL Server) reserve with a compare-and-swap update.
+- A worker that dies mid-job leaves its lease to expire and the job returns to
+  the queue; a stale worker cannot complete or release a job someone else took
+  over, because every transition checks the attempt count of its reservation.
+  A job whose last attempt expired, a dead-lettered job and a payload that no
+  longer decodes all land in the failed jobs, with the exception class only.
+- `ExponentialBackoff` doubles the delay per attempt up to a ceiling, with
+  equal jitter (between half and all of the delay) by default.
+
+The scheduler needs `dragonmantank/cron-expression`
+(`composer require dragonmantank/cron-expression`):
+
+```php
+$schedule = new Schedule($queue, timezone: 'America/Sao_Paulo', container: $app->container());
+$schedule->job(SendReport::class)->cron('0 * * * *');
+$schedule->job(new PruneSessions())->dailyAt('03:00');
+$schedule->call(fn () => $cache->prune())->everyFiveMinutes()->withoutOverlapping()->name('prune-cache');
+
+$app->background()
+    ->scheduler(new Scheduler($schedule, new RedisSchedulerLock(RedisPool::fromEnvironment())))
+    ->queue($worker);
+```
+
+Frequencies: `cron()`, `everyMinute()`, `everyTwoMinutes()`, `everyFiveMinutes()`,
+`everyTenMinutes()`, `everyFifteenMinutes()`, `everyThirtyMinutes()`, `hourly()`,
+`hourlyAt()`, `daily()`, `dailyAt()`, `weekly()`, `weeklyOn()`, `monthly()`,
+`monthlyOn()`, plus `timezone()` per task. Each due task first claims its
+(task, minute) key in the `SchedulerLock`, so it runs once per minute however
+many workers or servers tick: use `RedisSchedulerLock` or `DatabaseSchedulerLock`
+whenever more than one process runs the scheduler; `MemorySchedulerLock` (the
+default) only covers one. `withoutOverlapping()` also skips a run while the
+previous one holds its lock. Task names identify them across processes; jobs are
+named after `jobName()` and callbacks after their file and line, so name
+callbacks with `name()` when that is not stable.
+
+### Running inside PAM
+
+No system cron and no extra process: start the server with task workers and
+the scheduler and queue run on them.
+
+```bash
+pam start index.php --workers 4 --task-workers 1
+```
+
+The PAM master sends one tick per second to the task-worker pool, authenticated
+by the cluster's token and never two at once. `App::handle()` answers it by
+calling `Background::tick()`, which runs the scheduler and then drains the queue
+for at most 100 jobs or 0.8 s, so the next tick is not held up. HTTP workers never
+run background work, and the tick header from public traffic is ignored.
+
+Without task workers (a plain `php` process, a separate container), run the same
+`Background` as a loop; it sleeps through `Pam\Async\delay()` under PAM and stops
+on SIGTERM or SIGINT:
+
+```php
+$background->run(intervalSeconds: 1.0);
+```
+
 ## Request lifecycle observers
 
 Register a `RequestLifecycleObserver` with `$app->observe()` to build profilers,
