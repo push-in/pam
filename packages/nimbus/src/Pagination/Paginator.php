@@ -24,10 +24,11 @@ final readonly class Paginator
     {
         $perPage = self::perPage($request, $perPage);
         $page = max(1, self::integer($request->query()['page'] ?? null) ?? 1);
+        // @phpstan-ignore function.alreadyNarrowedType (apps may still run Arcano 0.2.5)
         if (method_exists($select, 'fetchPage')) {
             // Arcano 0.2.6+: the page and the count in one statement when the select allows it.
             /** @var array{list<T>, int} $fetched */
-            $fetched = $select->fetchPage($perPage, ($page - 1) * $perPage);
+            $fetched = $select->fetchPage(max(0, $perPage), max(0, ($page - 1) * $perPage));
             [$items, $total] = $fetched;
         } else {
             $total = (clone $select)->count();
