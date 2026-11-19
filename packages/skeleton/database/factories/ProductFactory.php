@@ -16,7 +16,7 @@ final class ProductFactory extends Factory
     public function definition(): array
     {
         return [
-            'name' => ucfirst($this->faker->words(2, true)),
+            'name' => ucfirst($this->faker->word() . ' ' . $this->faker->word()),
             'priceInCents' => $this->faker->numberBetween(100, 100_000),
         ];
     }

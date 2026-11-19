@@ -77,7 +77,7 @@ jobs:
       - name: Verify the generated Arcano starter
         run: |
           vendor/bin/phpstan analyse --configuration=phpstan.neon --level=9 \
-            ../skeleton/app ../skeleton/routes.php ../skeleton/tests ../skeleton/database/migrations \
+            ../skeleton/app ../skeleton/routes.php ../skeleton/tests ../skeleton/database \
             ../skeleton/bin ../skeleton/index.php --memory-limit=1G
           vendor/bin/phpunit --configuration=../skeleton/phpunit.xml
       - name: Remove regenerable build artifacts

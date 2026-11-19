@@ -1,5 +1,8 @@
 parameters:
     level: 9
+    ignoreErrors:
+        -
+            identifier: trait.unused
     scanFiles:
         - native-shared-stubs.php
     excludePaths:

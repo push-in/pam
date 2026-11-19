@@ -64,8 +64,9 @@ final readonly class TestClient
         $queryString = parse_url($path, PHP_URL_QUERY);
         if (is_string($queryString)) {
             parse_str($queryString, $parsed);
-            /** @var array<string, mixed> $parsed */
-            $query = array_replace($parsed, $query);
+            foreach ($parsed as $key => $value) {
+                $query += [(string) $key => $value];
+            }
             $path = substr($path, 0, (int) strpos($path, '?'));
         }
         $normalized = [];
