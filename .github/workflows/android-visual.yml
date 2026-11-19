@@ -103,8 +103,14 @@ jobs:
             --application-id "${PAM_PRODUCT_APPLICATION_ID}" \
             --no-install --no-interaction
           cd "${fixture}/apps/native"
+          # Resolve first: a template pin that Packagist cannot satisfy fails here.
           for attempt in 1 2 3; do
-            pam composer install --no-interaction --no-progress && break
+            pam composer install --no-interaction --no-progress --prefer-dist --dry-run && break
+            test "${attempt}" = 3 && exit 1
+            sleep 20
+          done
+          for attempt in 1 2 3; do
+            pam composer install --no-interaction --no-progress --prefer-dist && break
             test "${attempt}" = 3 && exit 1
             sleep 20
           done
