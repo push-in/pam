@@ -70,6 +70,6 @@
     "require-dev": {
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",
-        "pushinbr/arcano": "^0.2.3"
+        "pushinbr/arcano": "^0.2.4"
     }
 }
