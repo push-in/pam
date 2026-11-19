@@ -132,54 +132,21 @@ migration to have run, so the database reflects them.
 ### Transactions, budgets and tenants
 
 `ArcanoManager` is the `TransactionManager` of the application, and
-`DatabaseHealthCheck` and `QueryMonitor` budgets work with it as with Eloquent.
+`DatabaseHealthCheck` and `QueryMonitor` budgets read its connections.
 Tenant-owned roles are protected once during boot with
 `$arcano->protectTenant(Order::class)`: selects are limited to the current
 tenant, new entities get its key, and both fail closed without a `TenantContext`.
 
-## Eloquent ORM (optional, deprecated)
-
-Install Eloquent only when the application needs the legacy built-in
-integration:
-
-```bash
-pam composer require illuminate/database illuminate/events illuminate/filesystem illuminate/pagination
-```
-
-The integration
-keeps a separate connection manager per request Fiber, so connections,
-transactions and mutable database state cannot leak between persistent-worker
-requests.
-
-```php
-use Pam\Api\Database\DatabaseConfig;
-use Pam\Api\Database\EloquentServiceProvider;
-
-$app->provider(new EloquentServiceProvider(DatabaseConfig::fromEnvironment()));
-```
+### Connections, health and query budgets
 
 Configure `DB_CONNECTION` (`pgsql`, `mysql`, `sqlite` or `sqlsrv`) and the
 usual `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME` and `DB_PASSWORD`
-variables. PostgreSQL is the production default; SQLite is convenient for
-tests. Models are ordinary `Illuminate\Database\Eloquent\Model` classes.
-
-```php
-final class User extends \Illuminate\Database\Eloquent\Model
-{
-    protected $fillable = ['name', 'email'];
-}
-```
-
-Resolve `EloquentManager` when a service needs an explicit connection, schema
-builder or transaction. Request cleanup automatically rolls back unfinished
-transactions and disconnects every configured connection. Register
-`DatabaseHealthCheck` in a `HealthRegistry` for readiness checks; its result
-reports latency and failure class without exposing credentials.
-
-Laravel-compatible anonymous-class migrations work through
-`MigrationManager::migrate()` and `rollback()`. The manager creates the
-migration repository on first use and supports dry-run execution, named
-connections and bounded step rollbacks.
+variables, read by `DatabaseConfig::fromEnvironment()`. PostgreSQL is the
+production default; SQLite is convenient for tests. Each request Fiber gets its
+own connections; request cleanup rolls back unfinished transactions and
+releases them. Register `DatabaseHealthCheck` in a `HealthRegistry` for
+readiness checks; its result reports latency and failure class without exposing
+credentials.
 
 Use `QueryBudgetMiddleware` during development and in performance-sensitive
 routes to cap query count, accumulated database time and repeated SQL patterns:
@@ -198,18 +165,6 @@ $app->middleware(new QueryBudgetMiddleware(
 
 Budgets are Fiber-local. Violations use the sequential integer-backed
 `QueryBudgetViolation` enum, making them stable for CI reports and telemetry.
-
-Tenant-owned models can be protected once during application boot:
-
-```php
-$tenancy = $app->container()->get(TenantModelGuard::class);
-$tenancy->protect(Order::class); // defaults to tenant_id
-```
-
-The guard adds an Eloquent global scope and assigns the tenant key on create.
-It fails closed when no request-scoped `TenantContext` exists and rejects a
-model explicitly assigned to another tenant. Use an unguarded administrative
-model only for deliberate cross-tenant operations.
 
 ## Route groups
 

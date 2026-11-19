@@ -36,16 +36,11 @@ Every symbol below is protected by the PAM API Semantic Versioning gate.
 - [`Pam\Api\Database\ArcanoTenantScope`](#pamapidatabasearcanotenantscope)
 - [`Pam\Api\Database\DatabaseConfig`](#pamapidatabasedatabaseconfig)
 - [`Pam\Api\Database\DatabaseHealthCheck`](#pamapidatabasedatabasehealthcheck)
-- [`Pam\Api\Database\EloquentManager`](#pamapidatabaseeloquentmanager)
-- [`Pam\Api\Database\EloquentServiceProvider`](#pamapidatabaseeloquentserviceprovider)
-- [`Pam\Api\Database\MigrationManager`](#pamapidatabasemigrationmanager)
 - [`Pam\Api\Database\QueryBudget`](#pamapidatabasequerybudget)
 - [`Pam\Api\Database\QueryBudgetExceededException`](#pamapidatabasequerybudgetexceededexception)
 - [`Pam\Api\Database\QueryBudgetViolation`](#pamapidatabasequerybudgetviolation)
 - [`Pam\Api\Database\QueryMonitor`](#pamapidatabasequerymonitor)
 - [`Pam\Api\Database\QueryReport`](#pamapidatabasequeryreport)
-- [`Pam\Api\Database\TenantModelGuard`](#pamapidatabasetenantmodelguard)
-- [`Pam\Api\Database\TenantScope`](#pamapidatabasetenantscope)
 - [`Pam\Api\Events\EventDispatcher`](#pamapieventseventdispatcher)
 - [`Pam\Api\Events\SyncEventDispatcher`](#pamapieventssynceventdispatcher)
 - [`Pam\Api\HandlerResolver`](#pamapihandlerresolver)
@@ -80,7 +75,6 @@ Every symbol below is protected by the PAM API Semantic Versioning gate.
 - [`Pam\Api\Middleware\AuthorizeMiddleware`](#pamapimiddlewareauthorizemiddleware)
 - [`Pam\Api\Middleware\CorsMiddleware`](#pamapimiddlewarecorsmiddleware)
 - [`Pam\Api\Middleware\DeadlineMiddleware`](#pamapimiddlewaredeadlinemiddleware)
-- [`Pam\Api\Middleware\EloquentLifecycleMiddleware`](#pamapimiddlewareeloquentlifecyclemiddleware)
 - [`Pam\Api\Middleware\IdempotencyMiddleware`](#pamapimiddlewareidempotencymiddleware)
 - [`Pam\Api\Middleware\ObserveRequestMiddleware`](#pamapimiddlewareobserverequestmiddleware)
 - [`Pam\Api\Middleware\QueryBudgetMiddleware`](#pamapimiddlewarequerybudgetmiddleware)
@@ -579,48 +573,8 @@ final readonly class Pam\Api\Database\DatabaseHealthCheck implements Pam\Api\Hea
 
 ### Methods
 
-- `public __construct(Pam\Api\Database\ArcanoManager|Pam\Api\Database\EloquentManager $eloquent, ?string $connection = null): mixed`
+- `public __construct(Pam\Api\Database\ArcanoManager $arcano, ?string $connection = null): mixed`
 - `public check(): Pam\Api\Health\HealthResult`
-
-## `Pam\Api\Database\EloquentManager`
-
-```php
-final readonly class Pam\Api\Database\EloquentManager implements Pam\Api\Transactions\TransactionManager
-```
-
-### Methods
-
-- `public __construct(Pam\Api\Database\FiberConnectionResolver $connections): mixed`
-- `public boot(): void`
-- `public connection(?string $name = null): Illuminate\Database\Connection`
-- `public events(): Illuminate\Events\Dispatcher`
-- `public releaseCurrentRequest(): void`
-- `public schema(?string $name = null): Illuminate\Database\Schema\Builder`
-- `public transaction(callable $operation): mixed`
-
-## `Pam\Api\Database\EloquentServiceProvider`
-
-```php
-final readonly class Pam\Api\Database\EloquentServiceProvider implements Pam\Contracts\Package\ServiceProviderInterface
-```
-
-### Methods
-
-- `public __construct(Pam\Api\Database\DatabaseConfig $config): mixed`
-- `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
-- `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
-
-## `Pam\Api\Database\MigrationManager`
-
-```php
-final readonly class Pam\Api\Database\MigrationManager
-```
-
-### Methods
-
-- `public __construct(Pam\Api\Database\FiberConnectionResolver $connections, ?string $connection = null, string $table = "migrations"): mixed`
-- `public migrate(array|string $paths, bool $pretend = false): array`
-- `public rollback(array|string $paths, int $steps = 0, bool $pretend = false): array`
 
 ## `Pam\Api\Database\QueryBudget`
 
@@ -689,7 +643,7 @@ final class Pam\Api\Database\QueryMonitor
 
 ### Methods
 
-- `public __construct(?Pam\Api\Database\FiberConnectionResolver $connections = null): mixed`
+- `public __construct(): mixed`
 - `public begin(Pam\Api\Database\QueryBudget $budget): void`
 - `public finish(): Pam\Api\Database\QueryReport`
 - `public static forArcano(Pam\Api\Database\ArcanoDatabaseProvider $databases): self`
@@ -711,29 +665,6 @@ final readonly class Pam\Api\Database\QueryReport
 
 - `public __construct(int $count, float $elapsedMilliseconds, array $duplicates, array $violations): mixed`
 - `public withinBudget(): bool`
-
-## `Pam\Api\Database\TenantModelGuard`
-
-```php
-final readonly class Pam\Api\Database\TenantModelGuard
-```
-
-### Methods
-
-- `public __construct(Pam\Api\Container\Container $container): mixed`
-- `public protect(string $model, string $column = "tenant_id"): void`
-
-## `Pam\Api\Database\TenantScope`
-
-```php
-final readonly class Pam\Api\Database\TenantScope implements Illuminate\Database\Eloquent\Scope
-```
-
-### Methods
-
-- `public __construct(Pam\Api\Container\Container $container, string $column = "tenant_id"): mixed`
-- `public apply(Illuminate\Database\Eloquent\Builder $builder, Illuminate\Database\Eloquent\Model $model): void`
-- `public assign(Illuminate\Database\Eloquent\Model $model): void`
 
 ## `Pam\Api\Events\EventDispatcher`
 
@@ -1256,17 +1187,6 @@ final readonly class Pam\Api\Middleware\DeadlineMiddleware implements Pam\Contra
 ### Methods
 
 - `public __construct(Pam\Api\Container\Container $container, float $seconds): mixed`
-- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
-
-## `Pam\Api\Middleware\EloquentLifecycleMiddleware`
-
-```php
-final readonly class Pam\Api\Middleware\EloquentLifecycleMiddleware implements Pam\Contracts\Http\MiddlewareInterface
-```
-
-### Methods
-
-- `public __construct(Pam\Api\Database\EloquentManager $eloquent): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Pam\Api\Middleware\IdempotencyMiddleware`

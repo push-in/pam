@@ -67,6 +67,6 @@
 <text x="825" y="456" font-size="11" text-anchor="start" fill="#59636e">renders</text>
 <rect x="40" y="470" width="410" height="74" rx="10" fill="#f6f8fa" stroke="#d1d9e0" stroke-width="1.2"/>
 <text x="54" y="492" font-size="13" font-weight="600" fill="#1f2328">Your PHP stays PHP</text>
-<text x="54" y="512" font-size="11.5" fill="#59636e">PSR-7/15/17 · Laravel 12/13 · Pest · PHPUnit · Eloquent</text>
+<text x="54" y="512" font-size="11.5" fill="#59636e">PSR-7/15/17 · Laravel 12/13 · Pest · PHPUnit · Arcano</text>
 <text x="54" y="529" font-size="11.5" fill="#59636e">no fork, no new language, no second package manager</text>
 </svg>

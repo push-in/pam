@@ -99,10 +99,10 @@ The `feat/api-2-foundation` development line implements:
   a clean dependency install and Embed SAPI smoke test;
 - a reproducible router benchmark.
 
-Eloquent is the official ORM and is integrated with Fiber-local connection
-managers, events, transactions, deterministic request cleanup and per-request
-query budgets with duplicate-query detection. Tenant model guards apply
-fail-closed global scopes and prevent cross-tenant assignment. Redis,
+Arcano is the official ORM and is integrated with Fiber-local connections,
+transactions, deterministic request cleanup and per-request query budgets with
+duplicate-query detection. Tenant-protected entities apply fail-closed scopes
+and prevent cross-tenant assignment. Redis,
 broker, JWT and OpenTelemetry integrations remain contract-backed ecosystem
 adapters until their production implementations complete the certification
 suite.

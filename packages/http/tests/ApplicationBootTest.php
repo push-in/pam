@@ -17,8 +17,8 @@ final class ApplicationBootTest extends TestCase
         $app = new App(discoverPackages: false);
         $app->provider($provider);
 
-        self::assertSame($app, $app->boot());
-        self::assertSame($app, $app->boot());
+        $app->boot();
+        $app->boot();
         self::assertSame(1, $provider->registrations);
         self::assertSame(1, $provider->boots);
 

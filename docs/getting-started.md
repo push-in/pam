@@ -121,7 +121,7 @@ The API preset targets PAM API 2.0 and generates the same source files shipped
 by `pushinbr/pam-skeleton`: a named `PingController::show` action, a readiness
 service and readonly snapshot, an integer-backed readiness enum, a JSON
 Resource, typed port configuration, security headers and an executable
-in-memory test. It also includes a complete Eloquent product flow with named
+in-memory test. It also includes a complete Arcano product flow with named
 `index`/`store` controller methods, Form Request validation, typed DTO, service,
 repository, migration, JSON Resource, `201 Created`, and a sequential
 integer-backed product-status enum. Run `pam composer migrate` and then

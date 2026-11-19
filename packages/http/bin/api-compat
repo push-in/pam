@@ -505,6 +505,7 @@ function namedMapField(array $value, string $field): array
         if (!is_array($item)) {
             throw new RuntimeException("Public API {$field}.{$name} must be an object.");
         }
+        /** @var array<string, mixed> $item */
         $result[$name] = $item;
     }
     return $result;
@@ -525,6 +526,7 @@ function parameterListField(array $method): array
         if (!is_array($parameter)) {
             throw new RuntimeException('Public API method parameter must be an object.');
         }
+        /** @var array<string, mixed> $parameter */
         $result[] = $parameter;
     }
     return $result;

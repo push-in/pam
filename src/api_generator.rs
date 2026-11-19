@@ -24,8 +24,8 @@ pub fn run(command: &str, root: &Path, arguments: Vec<OsString>) -> Result<u8, S
                 .as_secs();
             (
                 "database/migrations",
-                format!("{timestamp}_{}.php", snake_case(&name)),
-                migration(&name),
+                format!("{}_0_0_default_{}.php", migration_date(timestamp), snake_case(&name)),
+                migration(&name, timestamp),
             )
         }
         _ => return Err(format!("unsupported PAM API generator {command}")),
@@ -88,9 +88,11 @@ fn prelude(namespace: &str) -> String {
 }
 
 fn model(name: &str) -> String {
+    let table = format!("{}s", snake_case(name));
     format!(
-        "{}use Illuminate\\Database\\Eloquent\\Model;\n\nfinal class {name} extends Model\n{{\n    /** @var list<string> */\n    protected \u{24}fillable = [];\n}}\n",
-        prelude("Models")
+        "{}use Arcano\\Annotated\\Annotation\\Column;\nuse Arcano\\Annotated\\Annotation\\Entity;\n\n#[Entity(role: '{role}', table: '{table}')]\nclass {name}\n{{\n    #[Column(type: 'primary')]\n    public ?int \u{24}id = null;\n}}\n",
+        prelude("Models"),
+        role = snake_case(name),
     )
 }
 
@@ -129,10 +131,32 @@ fn repository(name: &str) -> String {
     )
 }
 
-fn migration(name: &str) -> String {
+fn migration(name: &str, timestamp: u64) -> String {
     let table = snake_case(name.trim_start_matches("Create").trim_end_matches("Table"));
     format!(
-        "<?php\n\ndeclare(strict_types=1);\n\nuse Illuminate\\Database\\Migrations\\Migration;\nuse Illuminate\\Database\\Schema\\Blueprint;\nuse Illuminate\\Support\\Facades\\Schema;\n\nreturn new class extends Migration\n{{\n    public function up(): void\n    {{\n        Schema::create('{table}', static function (Blueprint \u{24}table): void {{\n            \u{24}table->id();\n            \u{24}table->timestamps();\n        }});\n    }}\n\n    public function down(): void\n    {{\n        Schema::dropIfExists('{table}');\n    }}\n}};\n"
+        "<?php\n\ndeclare(strict_types=1);\n\nnamespace Migration;\n\nuse Arcano\\Migrations\\Migration;\n\nclass {name}{timestamp} extends Migration\n{{\n    protected const DATABASE = 'default';\n\n    public function up(): void\n    {{\n        \u{24}this->table('{table}')\n            ->addColumn('id', 'primary')\n            ->addColumn('created_at', 'datetime')\n            ->addColumn('updated_at', 'datetime')\n            ->setPrimaryKeys(['id'])\n            ->create();\n    }}\n\n    public function down(): void\n    {{\n        \u{24}this->table('{table}')->drop();\n    }}\n}}\n"
+    )
+}
+
+/// `YYYYMMDD.HHMMSS` in UTC, the prefix Arcano migrations are ordered by.
+fn migration_date(timestamp: u64) -> String {
+    let days = (timestamp / 86_400) as i64;
+    let seconds = timestamp % 86_400;
+    // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!(
+        "{year:04}{month:02}{day:02}.{:02}{:02}{:02}",
+        seconds / 3_600,
+        seconds % 3_600 / 60,
+        seconds % 60
     )
 }
 
@@ -179,6 +203,17 @@ mod tests {
             .is_err()
         );
         fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn generates_arcano_models_and_migrations() {
+        let model = model("OrderItem");
+        assert!(model.contains("#[Entity(role: 'order_item', table: 'order_items')]"));
+        assert!(model.contains("use Arcano\\Annotated\\Annotation\\Column;"));
+        let migration = migration("CreateOrderItemsTable", 1_763_510_400);
+        assert!(migration.contains("extends Migration"));
+        assert!(migration.contains("$this->table('order_items')"));
+        assert_eq!(migration_date(1_763_510_400), "20251119.000000");
     }
 
     #[test]

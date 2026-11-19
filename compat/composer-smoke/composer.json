@@ -26,7 +26,6 @@
         "amphp/amp": "^3.1",
         "guzzlehttp/guzzle": "^8.0",
         "illuminate/container": "^13.0",
-        "illuminate/database": "^13.0",
         "illuminate/events": "^13.0",
         "illuminate/filesystem": "^13.0",
         "illuminate/pipeline": "^13.0",
