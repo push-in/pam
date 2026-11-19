@@ -1,5 +1,22 @@
 # Changelog
 
+## 2.2.24 - 2026-11-19
+
+Lower fixed cost per HTTP request. Nimbus on PAM, 16 workers against Postgres: `/ping` 76k to 139k
+req/s, `/products/{id}` 41k to 59k, `/me` 42k to 62k, `POST /products` 31k to 46k, a numbered page
+20k to 28k; 10.6x to 19x Laravel with FrankenPHP except the page (9.5x, bound by Postgres).
+
+- The extension builds `$_SERVER`, headers and the request context in C instead of a JSON envelope
+  (the JSON entry is still accepted), and encodes the HTTP response in C with the same bytes.
+- Fiber C stacks are pooled (up to 8 per worker, memory only, no Fiber or PHP state is reused); set
+  `PAM_FIBER_STACK_POOL=0` to turn it off. One I/O thread per worker by default (`PAM_IO_THREADS`).
+- Every route except `/ws` skips the axum router; server state is shared in one `Arc`.
+- `DateTimeInterface::format(DATE_ATOM)` runs in C (`PAM_FAST_DATE_FORMAT=0` turns it off) and
+  `pam_native_utc_datetime()` builds a UTC date from a database value without the parser.
+- `pam init` requires `pushinbr/arcano` `^0.2.6` (page and count in one statement).
+- Fixed: `function_exists()` or `is_callable()` with a literal `pam_native_*` name in an app file
+  crashed the worker with SIGSEGV at compile time.
+
 ## 2.2.23 - 2026-11-18
 
 PAM Native 1.53.9 and PAM Native UI 2.2: app theme tokens, and the Product template on UI 2.
