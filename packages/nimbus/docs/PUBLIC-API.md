@@ -123,6 +123,9 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RoutingResultType`](#nimbusroutingresulttype)
 - [`Nimbus\Routing\RouteBindable`](#nimbusroutingroutebindable)
 - [`Nimbus\Runtime\Deadline`](#nimbusruntimedeadline)
+- [`Nimbus\Security\Crypt`](#nimbussecuritycrypt)
+- [`Nimbus\Security\DecryptException`](#nimbussecuritydecryptexception)
+- [`Nimbus\Security\Hash`](#nimbussecurityhash)
 - [`Nimbus\Tenancy\Tenant`](#nimbustenancytenant)
 - [`Nimbus\Tenancy\TenantContext`](#nimbustenancytenantcontext)
 - [`Nimbus\Tenancy\TenantResolver`](#nimbustenancytenantresolver)
@@ -1968,6 +1971,38 @@ final readonly class Nimbus\Runtime\Deadline
 - `public __construct(float $seconds): mixed`
 - `public expired(): bool`
 - `public throwIfExpired(): void`
+
+## `Nimbus\Security\Crypt`
+
+```php
+final readonly class Nimbus\Security\Crypt
+```
+
+### Methods
+
+- `public __construct(string $key): mixed`
+- `public decrypt(string $payload): string`
+- `public encrypt(string $plaintext): string`
+- `public static fromEnvironment(): self`
+- `public static generateKey(): string`
+
+## `Nimbus\Security\DecryptException`
+
+```php
+final class Nimbus\Security\DecryptException extends RuntimeException implements Stringable, Throwable
+```
+
+## `Nimbus\Security\Hash`
+
+```php
+final readonly class Nimbus\Security\Hash
+```
+
+### Methods
+
+- `public static check(string $password, string $hash): bool`
+- `public static make(string $password): string`
+- `public static needsRehash(string $hash): bool`
 
 ## `Nimbus\Tenancy\Tenant`
 

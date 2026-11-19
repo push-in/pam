@@ -10387,6 +10387,177 @@
                 }
             }
         },
+        "Nimbus\\Security\\Crypt": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "decrypt": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "payload",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "encrypt": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "plaintext",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "fromEnvironment": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": []
+                },
+                "generateKey": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                }
+            }
+        },
+        "Nimbus\\Security\\DecryptException": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": "RuntimeException",
+            "interfaces": [
+                "Stringable",
+                "Throwable"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": []
+        },
+        "Nimbus\\Security\\Hash": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "check": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "password",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "hash",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "make": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": [
+                        {
+                            "name": "password",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "needsRehash": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "hash",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\Tenancy\\Tenant": {
             "kind": "interface",
             "final": false,
