@@ -1,5 +1,33 @@
 # Changelog
 
+## 2.2.23 - 2026-11-18
+
+PAM Native 1.53.9 and PAM Native UI 2.2: app theme tokens, and the Product template on UI 2.
+
+- `pam init --template native-ui` and `--template product` require
+  `pushinbr/pam-native` `^1.53.9` and `pushinbr/pam-native-ui` `^2.2`. 1.53.9
+  compiles an app's theme tokens (`pam-native.json` `"theme": {"tokens":
+  "src/theme.css"}`) into every component library at build time, in light and
+  dark. `pam dev` on Android no longer takes the adb server down: every adb
+  call names the device, the reverse mapping is never rebound or taken from
+  another session, and when the session ends the app stops before its own
+  mapping is removed. adb 37 aborts on a connection to a removed mapping and
+  drops every device, including phones on wireless debugging.
+- Product template: the native app uses PAM Native UI 2. The contract's
+  `design-tokens.json` generates `apps/native/src/theme.css` (`composer
+  theme`), and the contract test fails if the file drifts. The screen called
+  a method in a template expression (`{{ $this->snapshot()->headline }}`),
+  which is a boot error, so the Product app never opened. The headline is now
+  state, the server's readiness shows as a toned badge, and
+  `apps/native/tests/HelloTest.php` renders the screen on the host.
+- Android Product visual check: it runs on pull requests that touch the
+  template. It uses the released toolchain and this checkout's template, with
+  pixel geometry (PAM Native UI tools) and goldens
+  (`tests/golden/product/android`) in light and dark. Building the runtime
+  from source timed out every week since 2026-10-21. Desktop Product visual
+  check: bindgen loads the libclang that matches its LLVM 14 headers, and apt
+  retries.
+
 ## 2.2.22 - 2026-11-18
 
 PAM Native 1.53.5 and PAM Native UI 2.1 in `pam init --template native-ui`; iOS on a fresh Mac with no manual step.
