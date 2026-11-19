@@ -304,6 +304,18 @@ não há reset de handshake, com ou sem `net.ipv4.tcp_migrate_req`. O master só
 fecha um listener quando nenhuma geração usa mais aquele endereço, quando o
 worker cai e vai esperar backoff antes de reiniciar, e no shutdown.
 
+### Threads e pilhas por worker
+
+- Cada worker tem uma thread PHP e `PAM_IO_THREADS` threads de I/O (padrão 1,
+  máximo 16) que aceitam conexões, leem e escrevem HTTP. Uma thread basta para
+  vários workers por CPU; aumente só com um worker e muito TLS ou compressão.
+- Toda requisição roda numa Fiber. No Linux o Pam guarda até
+  `PAM_FIBER_STACK_POOL_CAPACITY` (padrão 8) pilhas C de Fiber liberadas e as
+  devolve à próxima Fiber do mesmo tamanho, já com guard page: sem `mmap`,
+  `mprotect`, `madvise`, `prctl`, `munmap` nem page faults por requisição. Só a
+  memória da pilha é reaproveitada (nenhum objeto Fiber ou estado PHP).
+  `PAM_FIBER_STACK_POOL=0` desliga. Detalhes em `native/fiber_stack_pool.c`.
+
 ### Timeout de requisição
 
 `requestTimeoutMs` é um limite rígido. Uma requisição que o excede recebe

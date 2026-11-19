@@ -5,6 +5,7 @@
 #include <ext/random/php_random.h>
 #endif
 #include <Zend/zend_smart_str.h>
+#include <ext/standard/url.h>
 
 #include "pam.h"
 
@@ -12,6 +13,11 @@
 #include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef PAM_FIBER_STACK_POOL
+/* native/fiber_stack_pool.c: Fiber C stack reuse (Linux). */
+unsigned long pam_fiber_stack_pool_reuses(void);
+#endif
 
 enum pam_exit_code {
     PAM_SUCCESS = 0,
@@ -67,6 +73,141 @@ static PHP_FUNCTION(pam_native_abi_version)
 {
     ZEND_PARSE_PARAMETERS_NONE();
     RETURN_LONG((zend_long) PAM_NATIVE_ABI_VERSION);
+}
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(
+    arginfo_pam_native_fiber_stack_reuses,
+    0,
+    0,
+    IS_LONG,
+    0
+)
+ZEND_END_ARG_INFO()
+
+/* Fiber C stacks served from the per-process pool (0 where there is none). */
+static PHP_FUNCTION(pam_native_fiber_stack_reuses)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+#ifdef PAM_FIBER_STACK_POOL
+    RETURN_LONG((zend_long) pam_fiber_stack_pool_reuses());
+#else
+    RETURN_LONG(0);
+#endif
+}
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(
+    arginfo_pam_native_encode_http_response,
+    0,
+    4,
+    MAY_BE_STRING | MAY_BE_NULL
+)
+    ZEND_ARG_TYPE_INFO(0, status, IS_LONG, 0)
+    ZEND_ARG_TYPE_INFO(0, headers, IS_ARRAY, 0)
+    ZEND_ARG_TYPE_INFO(0, body, IS_STRING, 0)
+    ZEND_ARG_TYPE_INFO(0, chunks, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
+
+static void pam_append_u16(smart_str *output, uint32_t value)
+{
+    char bytes[2] = {(char) ((value >> 8) & 0xff), (char) (value & 0xff)};
+    smart_str_appendl(output, bytes, 2);
+}
+
+static void pam_append_u32(smart_str *output, size_t value)
+{
+    char bytes[4] = {
+        (char) ((value >> 24) & 0xff),
+        (char) ((value >> 16) & 0xff),
+        (char) ((value >> 8) & 0xff),
+        (char) (value & 0xff),
+    };
+    smart_str_appendl(output, bytes, 4);
+}
+
+/*
+ * Runtime::encodeHttpResponse() in C: same bytes as its pack('n'/'N')
+ * encoding. Returns null (the caller falls back to the PHP encoder, which
+ * raises the precise error) when a limit is exceeded or a value is not a
+ * plain string/int.
+ */
+static PHP_FUNCTION(pam_native_encode_http_response)
+{
+    zend_long status;
+    HashTable *headers;
+    zend_string *body;
+    HashTable *chunks;
+    smart_str output = {0};
+    zend_string *name;
+    zend_ulong index;
+    zval *values;
+    zval *value;
+
+    ZEND_PARSE_PARAMETERS_START(4, 4)
+        Z_PARAM_LONG(status)
+        Z_PARAM_ARRAY_HT(headers)
+        Z_PARAM_STR(body)
+        Z_PARAM_ARRAY_HT(chunks)
+    ZEND_PARSE_PARAMETERS_END();
+
+    if (status < 100 || status > 999 || zend_hash_num_elements(headers) > 65535
+        || ZSTR_LEN(body) > UINT32_MAX) {
+        RETURN_NULL();
+    }
+    smart_str_alloc(&output, 64 + ZSTR_LEN(body), 0);
+    pam_append_u16(&output, (uint32_t) status);
+    pam_append_u16(&output, zend_hash_num_elements(headers));
+    ZEND_HASH_FOREACH_KEY_VAL(headers, index, name, values) {
+        char numeric[MAX_LENGTH_OF_LONG + 1];
+        const char *name_value;
+        size_t name_length;
+        ZVAL_DEREF(values);
+        if (name != NULL) {
+            name_value = ZSTR_VAL(name);
+            name_length = ZSTR_LEN(name);
+        } else {
+            char *end = zend_print_ulong_to_buf(numeric + sizeof(numeric) - 1, index);
+            numeric[sizeof(numeric) - 1] = '\0';
+            name_value = end;
+            name_length = (size_t) (numeric + sizeof(numeric) - 1 - end);
+        }
+        if (Z_TYPE_P(values) != IS_ARRAY || name_length > 65535
+            || zend_hash_num_elements(Z_ARRVAL_P(values)) > 65535) {
+            smart_str_free(&output);
+            RETURN_NULL();
+        }
+        pam_append_u16(&output, (uint32_t) name_length);
+        smart_str_appendl(&output, name_value, name_length);
+        pam_append_u16(&output, zend_hash_num_elements(Z_ARRVAL_P(values)));
+        ZEND_HASH_FOREACH_VAL(Z_ARRVAL_P(values), value) {
+            ZVAL_DEREF(value);
+            if (Z_TYPE_P(value) == IS_STRING && Z_STRLEN_P(value) <= UINT32_MAX) {
+                pam_append_u32(&output, Z_STRLEN_P(value));
+                smart_str_appendl(&output, Z_STRVAL_P(value), Z_STRLEN_P(value));
+            } else if (Z_TYPE_P(value) == IS_LONG) {
+                char buffer[MAX_LENGTH_OF_LONG + 1];
+                int length = snprintf(buffer, sizeof(buffer), ZEND_LONG_FMT, Z_LVAL_P(value));
+                pam_append_u32(&output, (size_t) length);
+                smart_str_appendl(&output, buffer, (size_t) length);
+            } else {
+                smart_str_free(&output);
+                RETURN_NULL();
+            }
+        } ZEND_HASH_FOREACH_END();
+    } ZEND_HASH_FOREACH_END();
+    pam_append_u32(&output, ZSTR_LEN(body));
+    smart_str_append(&output, body);
+    pam_append_u32(&output, zend_hash_num_elements(chunks));
+    ZEND_HASH_FOREACH_VAL(chunks, value) {
+        ZVAL_DEREF(value);
+        if (Z_TYPE_P(value) != IS_STRING || Z_STRLEN_P(value) > UINT32_MAX) {
+            smart_str_free(&output);
+            RETURN_NULL();
+        }
+        pam_append_u32(&output, Z_STRLEN_P(value));
+        smart_str_appendl(&output, Z_STRVAL_P(value), Z_STRLEN_P(value));
+    } ZEND_HASH_FOREACH_END();
+
+    RETURN_STR(smart_str_extract(&output));
 }
 
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_MASK_EX(
@@ -249,8 +390,10 @@ static PHP_FUNCTION(pam_cache_purge)
 static const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_cache_purge, arginfo_pam_cache_purge)
     PHP_FE(pam_native_abi_version, arginfo_pam_native_abi_version)
+    PHP_FE(pam_native_fiber_stack_reuses, arginfo_pam_native_fiber_stack_reuses)
     PHP_FE(pam_native_stream_fd, arginfo_pam_native_stream_fd)
     PHP_FE(pam_native_reset_response, arginfo_pam_native_reset_response)
+    PHP_FE(pam_native_encode_http_response, arginfo_pam_native_encode_http_response)
     PHP_FE_END
 };
 
@@ -578,6 +721,8 @@ static int pam_copy_string_result(zval *result, char **output, size_t *output_le
 
 int pam_php_init(int argc, char **argv)
 {
+    zend_result status;
+
     /*
      * Embed does not normally expose PHP_BINARY and identifies as a web SAPI.
      * Composer deliberately rejects PHAR execution in that mode, while Laravel
@@ -601,12 +746,19 @@ int pam_php_init(int argc, char **argv)
 
     pam_initialized = true;
     pam_set_php_binary(argc > 0 ? argv[0] : NULL);
-    if (zend_register_functions(
+    /* Like PHP registers a SAPI's additional functions: under the standard
+     * module. Registered without one, opcache's optimizer dereferenced the
+     * NULL module when it folded a literal function_exists('pam_native_…')
+     * or is_callable() call and the worker crashed compiling that file. */
+    EG(current_module) = zend_hash_str_find_ptr(&module_registry, "standard", sizeof("standard") - 1);
+    status = zend_register_functions(
         NULL,
         pam_native_functions,
         NULL,
         MODULE_PERSISTENT
-    ) == FAILURE) {
+    );
+    EG(current_module) = NULL;
+    if (status == FAILURE) {
         php_embed_shutdown();
         pam_initialized = false;
         return PAM_INITIALIZATION_FAILURE;
@@ -822,35 +974,23 @@ int pam_php_routes_info(char **output, size_t *output_length)
     return status;
 }
 
-int pam_php_dispatch_http(
-    const char *method,
-    size_t method_length,
-    const char *target,
-    size_t target_length,
-    const char *headers,
-    size_t headers_length,
+/*
+ * Runs Runtime::beginHttpDispatch with `parameters` while the SAPI request
+ * body (php://input) points at `body`. Takes ownership of the parameters.
+ */
+static int pam_begin_http_dispatch(
+    zval *parameters,
+    uint32_t parameter_count,
     const char *body,
     size_t body_length,
-    const char *context,
-    size_t context_length,
-    const char *request_id,
-    size_t request_id_length,
     char **output,
     size_t *output_length
 )
 {
     int status = FAILURE;
     php_stream *previous_request_body;
-    zval parameters[6];
     zval result;
     ZVAL_UNDEF(&result);
-
-    ZVAL_STRINGL(&parameters[0], method, method_length);
-    ZVAL_STRINGL(&parameters[1], target, target_length);
-    ZVAL_STRINGL(&parameters[2], headers, headers_length);
-    ZVAL_STRINGL(&parameters[3], body, body_length);
-    ZVAL_STRINGL(&parameters[4], context, context_length);
-    ZVAL_STRINGL(&parameters[5], request_id, request_id_length);
 
     /* php_embed considers headers sent after the bootstrap script finishes.
      * Pam dispatches many logical HTTP requests inside that single PHP
@@ -869,14 +1009,14 @@ int pam_php_dispatch_http(
 
     if (body_length != 0 && SG(request_info).request_body == NULL) {
         SG(request_info).request_body = previous_request_body;
-        for (size_t index = 0; index < 6; index++) {
+        for (uint32_t index = 0; index < parameter_count; index++) {
             zval_ptr_dtor(&parameters[index]);
         }
         return FAILURE;
     }
 
     zend_first_try {
-        if (pam_runtime_call("beginHttpDispatch", 6, parameters, &result) == SUCCESS) {
+        if (pam_runtime_call("beginHttpDispatch", parameter_count, parameters, &result) == SUCCESS) {
             status = pam_copy_string_result(&result, output, output_length);
         }
     } zend_catch {
@@ -888,7 +1028,7 @@ int pam_php_dispatch_http(
     }
     SG(request_info).request_body = previous_request_body;
 
-    for (size_t index = 0; index < 6; index++) {
+    for (uint32_t index = 0; index < parameter_count; index++) {
         zval_ptr_dtor(&parameters[index]);
     }
     if (!Z_ISUNDEF(result)) {
@@ -896,6 +1036,297 @@ int pam_php_dispatch_http(
     }
 
     return status;
+}
+
+int pam_php_dispatch_http(
+    const char *method,
+    size_t method_length,
+    const char *target,
+    size_t target_length,
+    const char *headers,
+    size_t headers_length,
+    const char *body,
+    size_t body_length,
+    const char *context,
+    size_t context_length,
+    const char *request_id,
+    size_t request_id_length,
+    char **output,
+    size_t *output_length
+)
+{
+    zval parameters[6];
+
+    ZVAL_STRINGL(&parameters[0], method, method_length);
+    ZVAL_STRINGL(&parameters[1], target, target_length);
+    ZVAL_STRINGL(&parameters[2], headers, headers_length);
+    ZVAL_STRINGL(&parameters[3], body, body_length);
+    ZVAL_STRINGL(&parameters[4], context, context_length);
+    ZVAL_STRINGL(&parameters[5], request_id, request_id_length);
+
+    return pam_begin_http_dispatch(parameters, 6, body, body_length, output, output_length);
+}
+
+typedef struct pam_header_reader {
+    const unsigned char *cursor;
+    const unsigned char *end;
+} pam_header_reader;
+
+static bool pam_header_read_u32(pam_header_reader *reader, uint32_t *value)
+{
+    if ((size_t) (reader->end - reader->cursor) < sizeof(uint32_t)) {
+        return false;
+    }
+    memcpy(value, reader->cursor, sizeof(uint32_t));
+    reader->cursor += sizeof(uint32_t);
+    return true;
+}
+
+static bool pam_header_read_bytes(pam_header_reader *reader, const char **bytes, uint32_t *length)
+{
+    if (!pam_header_read_u32(reader, length)
+        || (size_t) (reader->end - reader->cursor) < (size_t) *length) {
+        return false;
+    }
+    *bytes = (const char *) reader->cursor;
+    reader->cursor += *length;
+    return true;
+}
+
+static void pam_hash_add_string(HashTable *table, const char *key, size_t key_length, const char *value, size_t value_length)
+{
+    zval entry;
+    ZVAL_STRINGL_FAST(&entry, value, value_length);
+    zend_hash_str_update(table, key, key_length, &entry);
+}
+
+#define PAM_HASH_ADD_LITERAL(table, key, value, value_length) \
+    pam_hash_add_string((table), (key), sizeof(key) - 1, (value), (value_length))
+
+/* $_SERVER name of a lowercase header: CONTENT_TYPE, CONTENT_LENGTH or HTTP_*. */
+static zend_string *pam_server_header_name(const char *name, size_t length)
+{
+    if (length == sizeof("content-type") - 1 && memcmp(name, "content-type", length) == 0) {
+        return zend_string_init("CONTENT_TYPE", sizeof("CONTENT_TYPE") - 1, 0);
+    }
+    if (length == sizeof("content-length") - 1 && memcmp(name, "content-length", length) == 0) {
+        return zend_string_init("CONTENT_LENGTH", sizeof("CONTENT_LENGTH") - 1, 0);
+    }
+    zend_string *server_name = zend_string_alloc(length + 5, 0);
+    char *output = ZSTR_VAL(server_name);
+    memcpy(output, "HTTP_", 5);
+    for (size_t index = 0; index < length; index++) {
+        char character = name[index];
+        output[index + 5] = character == '-' ? '_' : zend_toupper_ascii(character);
+    }
+    output[length + 5] = '\0';
+    return server_name;
+}
+
+/*
+ * Builds the header list (name => list<string>) and appends the header
+ * entries of $_SERVER, exactly as Runtime::populateSuperglobals() does.
+ */
+static bool pam_build_request_headers(
+    const char *encoded,
+    size_t encoded_length,
+    zval *headers,
+    HashTable *server
+)
+{
+    pam_header_reader reader = {
+        (const unsigned char *) encoded,
+        (const unsigned char *) encoded + encoded_length,
+    };
+    uint32_t name_count = 0;
+
+    if (encoded_length == 0) {
+        array_init(headers);
+        return true;
+    }
+    if (!pam_header_read_u32(&reader, &name_count) || name_count > 65535) {
+        return false;
+    }
+    array_init_size(headers, name_count);
+    for (uint32_t name_index = 0; name_index < name_count; name_index++) {
+        const char *name;
+        uint32_t name_length;
+        uint32_t value_count;
+        zval values;
+        smart_str joined = {0};
+        zval joined_value;
+
+        if (!pam_header_read_bytes(&reader, &name, &name_length)
+            || !pam_header_read_u32(&reader, &value_count)
+            || value_count > 65535) {
+            return false;
+        }
+        array_init_size(&values, value_count);
+        zend_hash_real_init_packed(Z_ARRVAL(values));
+        for (uint32_t value_index = 0; value_index < value_count; value_index++) {
+            const char *value;
+            uint32_t value_length;
+            zval entry;
+            if (!pam_header_read_bytes(&reader, &value, &value_length)) {
+                zval_ptr_dtor(&values);
+                smart_str_free(&joined);
+                return false;
+            }
+            ZVAL_STRINGL_FAST(&entry, value, value_length);
+            zend_hash_next_index_insert_new(Z_ARRVAL(values), &entry);
+            if (value_count > 1) {
+                if (value_index > 0) {
+                    smart_str_appendl(&joined, ", ", 2);
+                }
+                smart_str_appendl(&joined, value, value_length);
+            }
+        }
+
+        if (value_count == 0) {
+            ZVAL_EMPTY_STRING(&joined_value);
+        } else if (value_count == 1) {
+            ZVAL_COPY(&joined_value, zend_hash_index_find(Z_ARRVAL(values), 0));
+        } else {
+            ZVAL_STR(&joined_value, smart_str_extract(&joined));
+        }
+        zend_string *server_name = pam_server_header_name(name, name_length);
+        zend_hash_update(server, server_name, &joined_value);
+        zend_string_release(server_name);
+
+        zend_hash_str_update(Z_ARRVAL_P(headers), name, name_length, &values);
+    }
+    return reader.cursor == reader.end;
+}
+
+int pam_php_dispatch_http_native(
+    const char *method,
+    size_t method_length,
+    const char *target,
+    size_t target_length,
+    const char *headers,
+    size_t headers_length,
+    const char *body,
+    size_t body_length,
+    const pam_http_request_context *context,
+    const char *request_id,
+    size_t request_id_length,
+    char **output,
+    size_t *output_length
+)
+{
+    zval parameters[7];
+    HashTable *server;
+    HashTable *context_table;
+    php_url *url;
+    zend_string *upper_method;
+    const char *protocol_version = context->protocol_version_length == 0
+        ? "1.1"
+        : context->protocol_version;
+    size_t protocol_version_length = context->protocol_version_length == 0
+        ? 3
+        : context->protocol_version_length;
+    const char *scheme = context->scheme_length == 0 ? "http" : context->scheme;
+    size_t scheme_length = context->scheme_length == 0 ? 4 : context->scheme_length;
+    char server_protocol[32];
+    int server_protocol_length;
+
+    {
+        zend_string *raw_method = zend_string_init_fast(method, method_length);
+        upper_method = zend_string_toupper(raw_method);
+        zend_string_release(raw_method);
+    }
+
+    /* $_SERVER, in Runtime::populateSuperglobals() order. */
+    array_init_size(&parameters[6], 24);
+    server = Z_ARRVAL(parameters[6]);
+    {
+        zval entry;
+        ZVAL_STR_COPY(&entry, upper_method);
+        zend_hash_str_update(server, "REQUEST_METHOD", sizeof("REQUEST_METHOD") - 1, &entry);
+    }
+    PAM_HASH_ADD_LITERAL(server, "REQUEST_URI", target, target_length);
+
+    /* parse_url($target, PHP_URL_QUERY|PHP_URL_PATH) */
+    url = php_url_parse_ex2(target, target_length, &(bool){false});
+    if (url != NULL && url->query != NULL) {
+        PAM_HASH_ADD_LITERAL(server, "QUERY_STRING", ZSTR_VAL(url->query), ZSTR_LEN(url->query));
+    } else {
+        PAM_HASH_ADD_LITERAL(server, "QUERY_STRING", "", 0);
+    }
+    server_protocol_length = snprintf(
+        server_protocol,
+        sizeof(server_protocol),
+        "HTTP/%.*s",
+        (int) (protocol_version_length > 16 ? 16 : protocol_version_length),
+        protocol_version
+    );
+    PAM_HASH_ADD_LITERAL(server, "SERVER_PROTOCOL", server_protocol, (size_t) server_protocol_length);
+    PAM_HASH_ADD_LITERAL(server, "REMOTE_ADDR", context->remote_address, context->remote_address_length);
+    {
+        zval entry;
+        ZVAL_LONG(&entry, (zend_long) context->remote_port);
+        zend_hash_str_update(server, "REMOTE_PORT", sizeof("REMOTE_PORT") - 1, &entry);
+    }
+    PAM_HASH_ADD_LITERAL(server, "REQUEST_SCHEME", scheme, scheme_length);
+    if (scheme_length == 5 && memcmp(scheme, "https", 5) == 0) {
+        PAM_HASH_ADD_LITERAL(server, "HTTPS", "on", 2);
+    } else {
+        PAM_HASH_ADD_LITERAL(server, "HTTPS", "off", 3);
+    }
+    /* Placeholder keeps populateSuperglobals()' key order; the host header
+     * (if any) overwrites it in place below. */
+    PAM_HASH_ADD_LITERAL(server, "HTTP_HOST", "", 0);
+    PAM_HASH_ADD_LITERAL(server, "PAM_REQUEST_ID", request_id, request_id_length);
+    PAM_HASH_ADD_LITERAL(server, "PAM_TRACEPARENT", context->traceparent, context->traceparent_length);
+
+    if (!pam_build_request_headers(headers, headers_length, &parameters[2], server)) {
+        if (url != NULL) {
+            php_url_free(url);
+        }
+        zend_string_release(upper_method);
+        zval_ptr_dtor(&parameters[2]);
+        zval_ptr_dtor(&parameters[6]);
+        return FAILURE;
+    }
+
+    /* Request context: the keys Runtime::executeHttp() reads, plus the
+     * already parsed path. multipart stays JSON (only uploads carry it). */
+    array_init_size(&parameters[4], 8);
+    context_table = Z_ARRVAL(parameters[4]);
+    PAM_HASH_ADD_LITERAL(context_table, "protocolVersion", protocol_version, protocol_version_length);
+    PAM_HASH_ADD_LITERAL(context_table, "remoteAddress", context->remote_address, context->remote_address_length);
+    {
+        zval entry;
+        ZVAL_LONG(&entry, (zend_long) context->remote_port);
+        zend_hash_str_update(context_table, "remotePort", sizeof("remotePort") - 1, &entry);
+    }
+    PAM_HASH_ADD_LITERAL(context_table, "scheme", scheme, scheme_length);
+    PAM_HASH_ADD_LITERAL(context_table, "requestId", request_id, request_id_length);
+    PAM_HASH_ADD_LITERAL(context_table, "traceparent", context->traceparent, context->traceparent_length);
+    if (url != NULL && url->path != NULL && ZSTR_LEN(url->path) != 0
+        && !zend_string_equals_literal(url->path, "0")) {
+        PAM_HASH_ADD_LITERAL(context_table, "path", ZSTR_VAL(url->path), ZSTR_LEN(url->path));
+    } else {
+        PAM_HASH_ADD_LITERAL(context_table, "path", "/", 1);
+    }
+    if (context->multipart_json_length != 0) {
+        PAM_HASH_ADD_LITERAL(
+            context_table,
+            "multipartJson",
+            context->multipart_json,
+            context->multipart_json_length
+        );
+    }
+    if (url != NULL) {
+        php_url_free(url);
+    }
+
+    ZVAL_STR(&parameters[0], upper_method);
+    ZVAL_STRINGL_FAST(&parameters[1], target, target_length);
+    ZVAL_STRINGL_FAST(&parameters[3], body, body_length);
+    ZVAL_STRINGL_FAST(&parameters[5], request_id, request_id_length);
+
+    return pam_begin_http_dispatch(parameters, 7, body, body_length, output, output_length);
 }
 
 int pam_php_resume_http(

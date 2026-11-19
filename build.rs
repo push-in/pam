@@ -12,6 +12,7 @@ enum PhpLibrary {
 fn main() {
     println!("cargo:rerun-if-changed=native/pam_php.c");
     println!("cargo:rerun-if-changed=native/resolver_shim.c");
+    println!("cargo:rerun-if-changed=native/fiber_stack_pool.c");
     println!("cargo:rerun-if-changed=native/pam.h");
     println!("cargo:rerun-if-changed=native/pam_shared.h");
     println!("cargo:rerun-if-changed=native/pam_shared_php.inc");
@@ -38,8 +39,11 @@ fn main() {
     let static_linux = matches!(php_library, PhpLibrary::Static { .. }) && target_os == "linux";
     let msvc = target_env == "msvc";
 
-    compile_shim(&out_dir, &includes, static_linux, msvc);
-    archive_shim(&out_dir, static_linux, msvc);
+    // Fiber C stack pool: interposes mmap & co. for libphp (Linux only;
+    // Android and the other targets keep PHP's own allocation).
+    let fiber_stack_pool = target_os == "linux";
+    compile_shim(&out_dir, &includes, static_linux, msvc, fiber_stack_pool);
+    archive_shim(&out_dir, static_linux, msvc, fiber_stack_pool);
 
     println!("cargo:rustc-link-search=native={}", out_dir.display());
     if static_linux {
@@ -112,13 +116,30 @@ fn link_static_php(php_archive: &Path) {
     }
 }
 
-fn compile_shim(out_dir: &Path, includes: &[String], static_linux: bool, msvc: bool) {
+fn compile_shim(
+    out_dir: &Path,
+    includes: &[String],
+    static_linux: bool,
+    msvc: bool,
+    fiber_stack_pool: bool,
+) {
     let compiler = env::var_os("CC").unwrap_or_else(|| if msvc { "cl" } else { "cc" }.into());
+    let mut php_flags = includes.to_vec();
+    if fiber_stack_pool {
+        php_flags.push("-DPAM_FIBER_STACK_POOL=1".to_owned());
+        compile_c_object(
+            &compiler,
+            Path::new("native/fiber_stack_pool.c"),
+            &out_dir.join("fiber_stack_pool.o"),
+            &[],
+            false,
+        );
+    }
     compile_c_object(
         &compiler,
         Path::new("native/pam_php.c"),
         &out_dir.join(if msvc { "pam_php.obj" } else { "pam_php.o" }),
-        includes,
+        &php_flags,
         msvc,
     );
 
@@ -158,7 +179,7 @@ fn compile_c_object(
     run(&mut command, &format!("compile {}", source.display()));
 }
 
-fn archive_shim(out_dir: &Path, static_linux: bool, msvc: bool) {
+fn archive_shim(out_dir: &Path, static_linux: bool, msvc: bool, fiber_stack_pool: bool) {
     let archiver = env::var_os("AR").unwrap_or_else(|| if msvc { "lib" } else { "ar" }.into());
     let mut command = Command::new(&archiver);
     if msvc {
@@ -177,6 +198,9 @@ fn archive_shim(out_dir: &Path, static_linux: bool, msvc: bool) {
 
     if static_linux {
         command.arg(out_dir.join("resolver_shim.o"));
+    }
+    if fiber_stack_pool {
+        command.arg(out_dir.join("fiber_stack_pool.o"));
     }
 
     run(&mut command, "archive the PHP Embed shim");

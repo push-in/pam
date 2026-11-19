@@ -579,6 +579,10 @@ namespace Pam\Internal {
 
         private static int $completedDispatches = 0;
 
+        private static ?bool $nativeEncoder = null;
+
+        private static ?bool $nativeReset = null;
+
         /** @var array<string, PendingHttpDispatch> */
         private static array $httpDispatches = [];
 
@@ -990,13 +994,22 @@ namespace Pam\Internal {
             return json_encode($routes, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         }
 
+        /**
+         * The native server passes $headers, $context and $server as arrays
+         * built by the extension (no JSON); embedders may pass JSON strings.
+         *
+         * @param string|array<string, list<string>> $headers
+         * @param string|array<string, mixed> $context
+         * @param array<string, scalar|null>|null $server prebuilt $_SERVER (native dispatch)
+         */
         public static function beginHttpDispatch(
             string $method,
             string $target,
-            string $headersJson,
+            string|array $headers,
             string $body,
-            string $contextJson = '{}',
+            string|array $context = '{}',
             string $requestId = '',
+            ?array $server = null,
         ): string {
             if ($requestId === '') {
                 throw new \InvalidArgumentException('HTTP dispatch request IDs cannot be empty.');
@@ -1009,10 +1022,11 @@ namespace Pam\Internal {
             $fiber = new \Fiber(static function () use (
                 $method,
                 $target,
-                $headersJson,
+                $headers,
                 $body,
-                $contextJson,
+                $context,
                 $requestId,
+                $server,
             ): string {
                 \Pam\Async\FiberContext::set('pam.request_id', $requestId);
                 $currentFiber = \Fiber::getCurrent();
@@ -1020,7 +1034,7 @@ namespace Pam\Internal {
                     throw new \LogicException('The HTTP dispatcher must execute inside a Fiber.');
                 }
                 \Pam\Async\FiberContext::set('pam.native_root_fiber_id', spl_object_id($currentFiber));
-                return self::executeHttp($method, $target, $headersJson, $body, $contextJson);
+                return self::executeHttp($method, $target, $headers, $body, $context, $server);
             });
             $dispatch = new PendingHttpDispatch($requestId, $fiber);
             self::$httpDispatches[$requestId] = $dispatch;
@@ -1127,12 +1141,18 @@ namespace Pam\Internal {
             return $response;
         }
 
+        /**
+         * @param string|array<string, list<string>> $headers
+         * @param string|array<string, mixed> $context
+         * @param array<string, scalar|null>|null $server
+         */
         private static function executeHttp(
             string $method,
             string $target,
-            string $headersJson,
+            string|array $headers,
             string $body,
-            string $contextJson,
+            string|array $context,
+            ?array $server = null,
         ): string {
             $request = null;
             $response = new Response();
@@ -1140,14 +1160,29 @@ namespace Pam\Internal {
             $outputLevel = ob_get_level();
 
             try {
-                $path = parse_url($target, PHP_URL_PATH) ?: '/';
-                $query = self::parseQuery((string) (parse_url($target, PHP_URL_QUERY) ?? ''));
-                $headers = self::normalizeHeaders(self::decodeObject($headersJson, 512));
-                $context = self::decodeObject($contextJson, 32);
+                if ($server !== null && is_array($headers) && is_array($context)) {
+                    // Native dispatch: the extension already parsed the target,
+                    // lowercased the headers and built $_SERVER.
+                    $path = is_string($context['path'] ?? null) ? $context['path'] : '/';
+                    $queryString = is_string($server['QUERY_STRING'] ?? null) ? $server['QUERY_STRING'] : '';
+                    $multipart = is_string($context['multipartJson'] ?? null)
+                        ? json_decode($context['multipartJson'], true, 31, JSON_THROW_ON_ERROR)
+                        : null;
+                } else {
+                    $path = parse_url($target, PHP_URL_PATH) ?: '/';
+                    $queryString = (string) (parse_url($target, PHP_URL_QUERY) ?? '');
+                    $headers = self::normalizeHeaders(
+                        is_array($headers) ? $headers : self::decodeObject($headers, 512),
+                    );
+                    $context = is_array($context) ? $context : self::decodeObject($context, 32);
+                    $multipart = $context['multipart'] ?? null;
+                    $server = null;
+                }
+                $query = $queryString === '' ? [] : self::parseQuery($queryString);
                 [$cookies, $parsedBody, $files, $psrUploads, $temporaryUploads] = self::requestData(
                     $headers,
                     $body,
-                    is_array($context['multipart'] ?? null) ? $context['multipart'] : null,
+                    is_array($multipart) ? $multipart : null,
                 );
                 self::populateSuperglobals(
                     strtoupper($method),
@@ -1158,6 +1193,8 @@ namespace Pam\Internal {
                     $parsedBody,
                     $files,
                     $context,
+                    $server,
+                    $queryString,
                 );
                 $leakSampleRate = self::serverInteger('leakDetectionSampleRate', 1024);
                 $sampleLeaks = $leakSampleRate > 0
@@ -1476,7 +1513,8 @@ namespace Pam\Internal {
          */
         private static function resetNativeResponse(int $statusCode = 200): void
         {
-            if (function_exists('pam_native_reset_response')) {
+            self::$nativeReset ??= function_exists('pam_native_reset_response');
+            if (self::$nativeReset) {
                 pam_native_reset_response($statusCode);
                 return;
             }
@@ -1520,6 +1558,15 @@ namespace Pam\Internal {
             $headers = $response['headers'];
             $body = $response['body'];
             $chunks = $response['chunks'] ?? [];
+            self::$nativeEncoder ??= function_exists('pam_native_encode_http_response');
+            if (self::$nativeEncoder) {
+                // Same bytes as below; null when a limit or value needs the
+                // PHP path (and its exceptions).
+                $encoded = \pam_native_encode_http_response($status, $headers, $body, $chunks);
+                if ($encoded !== null) {
+                    return $encoded;
+                }
+            }
             if ($status < 100 || $status > 999 || count($headers) > 65535) {
                 throw new \UnexpectedValueException('HTTP response metadata exceeds the native protocol limits.');
             }
@@ -1951,6 +1998,7 @@ namespace Pam\Internal {
          * @param array<array-key, mixed>|null $parsedBody
          * @param array<string, array<string, int|string>> $files
          * @param array<string, mixed> $context
+         * @param array<string, scalar|null>|null $server
          */
         private static function populateSuperglobals(
             string $method,
@@ -1961,16 +2009,27 @@ namespace Pam\Internal {
             ?array $parsedBody,
             array $files,
             array $context,
+            ?array $server = null,
+            ?string $queryString = null,
         ): void {
             $_GET = $query;
             $_POST = is_array($parsedBody) ? $parsedBody : [];
             $_COOKIE = $cookies;
             $_FILES = $files;
-            $_REQUEST = [...$_GET, ...$_POST, ...$_COOKIE];
+            $_REQUEST = $_POST === [] && $_COOKIE === [] ? $_GET : [...$_GET, ...$_POST, ...$_COOKIE];
+            if ($server !== null) {
+                // Built by the extension with the same keys and order as below.
+                $_SERVER = $server;
+                \Pam\Observability\Telemetry::beginRequest(
+                    (string) $server['PAM_REQUEST_ID'],
+                    (string) $server['PAM_TRACEPARENT'],
+                );
+                return;
+            }
             $_SERVER = [
                 'REQUEST_METHOD' => $method,
                 'REQUEST_URI' => $target,
-                'QUERY_STRING' => (string) (parse_url($target, PHP_URL_QUERY) ?? ''),
+                'QUERY_STRING' => $queryString ?? (string) (parse_url($target, PHP_URL_QUERY) ?? ''),
                 'SERVER_PROTOCOL' => 'HTTP/' . self::contextString($context, 'protocolVersion', '1.1'),
                 'REMOTE_ADDR' => self::contextString($context, 'remoteAddress', ''),
                 'REMOTE_PORT' => self::contextInt($context, 'remotePort', 0),
