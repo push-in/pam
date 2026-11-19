@@ -70,6 +70,37 @@ namespace Pam\Redis {
 }
 
 namespace Pam\Http {
+    final readonly class ClientResponse
+    {
+        /** @param array<string, list<string>> $headers */
+        public function __construct(
+            public int $status,
+            public array $headers,
+            public string $body,
+        ) {
+        }
+    }
+
+    final class Client
+    {
+        public function __construct(
+            public readonly float $timeout = 30.0,
+            public readonly int $maxResponseBytes = 16 * 1024 * 1024,
+            public readonly int $maxHeaderBytes = 64 * 1024,
+            public readonly int $maxRedirects = 5,
+            public readonly bool $verifyTls = true,
+        ) {
+        }
+
+        /** @param array<string, string|list<string>> $headers */
+        public function request(string $method, string $url, array $headers = [], string $body = ''): ClientResponse
+        {
+            throw new \LogicException('The HTTP client is provided by the PAM runtime.');
+        }
+    }
+}
+
+namespace Pam\Http {
     final class Request
     {
         /**

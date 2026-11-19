@@ -3,6 +3,26 @@
 All notable changes to Nimbus are documented here. Nimbus follows Semantic
 Versioning; the 0.x line may still adjust public API between minor versions.
 
+## Unreleased
+
+### Added
+- Notifications (`Nimbus\Notifications`): `Notification`, `Notifiable` with the `RoutesNotifications`
+  trait, on-demand recipients, the `NotificationSender` channel registry and `Notifier::send()` /
+  `sendLater()`, which queues one `SendNotificationJob` per recipient and channel through the
+  existing `JobDispatcher`; `SendNotificationHandler` retries transient failures and dead-letters
+  permanent ones.
+- Mail channel on `symfony/mailer` (optional) with the `MailMessage` builder and
+  `MAILER_DSN`/`MAIL_MAILER` configuration.
+- Push channel: FCM HTTP v1 (service account RS256 assertion, access token cached per worker) and
+  APNs (ES256 provider token, HTTP/2), with invalid-token callbacks.
+- Database channel on Arcano with the `notifications` migration and `DatabaseNotifications`
+  (list, unread count, mark read/unread, delete, prune).
+- Webhook channel: JSON POST signed with `Nimbus-Signature: t=..,v1=..` (HMAC-SHA256) and
+  `WebhookSignature::verify()` for receivers.
+- `HttpClient` transport for push and webhooks: PAM runtime client, curl (HTTP/2) or any PSR-18 client.
+- `Notifier::fake()` with `assertSentTo`, `assertNotSentTo`, `assertSentLaterTo`, `assertSentTimes`
+  and `assertNothingSent`.
+
 ## 0.2.0 - 2026-11-19
 
 ### Added
