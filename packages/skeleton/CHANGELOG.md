@@ -4,6 +4,11 @@ All notable changes to the Nimbus skeleton are documented in this file.
 
 ## Unreleased
 
+## 0.3.0 - 2026-11-19
+
+### Changed
+- Requires `pushinbr/nimbus` `^0.5` and `pushinbr/arcano` `^0.2.5`.
+
 ## 0.2.0 - 2026-11-19
 
 ### Changed
