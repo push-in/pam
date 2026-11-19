@@ -3,6 +3,32 @@
 All notable changes to Nimbus are documented here. Nimbus follows Semantic
 Versioning; the 0.x line may still adjust public API between minor versions.
 
+## Unreleased
+
+### Added
+- `Nimbus\Testing\TestCase`: a PHPUnit base that boots a fresh application per test, with
+  `getJson`/`postJson`/`putJson`/`patchJson`/`deleteJson`, `withHeaders`, `withToken`, `actingAs`
+  (through the `Authenticator` contract), `seed()` and `assertDatabaseHas`/`Missing`/`Count`.
+- `RefreshDatabase`: pending migrations, then one transaction per test shared by its requests and
+  rolled back at the end.
+- `TestResponse`: `assertOk`, `assertCreated`, `assertNoContent`, `assertNotFound`,
+  `assertUnauthorized`, `assertForbidden`, `assertUnprocessableEntity`, `assertExactJson`,
+  `assertJsonCount`, `assertJsonStructure`, `assertJsonMissingPath`, `assertJsonValidationErrors`,
+  `assertJsonMissingValidationErrors`, `assertHeaderMissing`, `json($path)`, `dump()`;
+  `assertJsonPath()` accepts a closure.
+- `TestClient`: `getJson`, `putJson`, `patchJson`, `deleteJson`, `json()`, `withHeaders`,
+  `withHeader`, `withToken`, `actingAs`; query strings in paths are parsed.
+- `Nimbus\Database\Factory` (Faker-backed entity factories with `count`, `state`, `sequence`,
+  `make`, `create`, `raw` and callbacks), `Seeder` and `SeederRunner`. `fakerphp/faker` is suggested.
+- `Container::has()`.
+
+### Changed
+- `TestResponse::assertJson()` checks a subset of the payload; use `assertExactJson()` for the
+  previous exact match.
+- `TestResponse` failures are PHPUnit assertion failures when PHPUnit is loaded (they were
+  `RuntimeException`, which remains the fallback).
+- `TestClient::postJson()` payload is optional and sends `accept: application/json`.
+
 ## 0.2.0 - 2026-11-19
 
 ### Added

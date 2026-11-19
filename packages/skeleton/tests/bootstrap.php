@@ -16,12 +16,19 @@ foreach ($autoloaders as $autoloader) {
 }
 
 spl_autoload_register(static function (string $class): void {
-    $prefix = 'App\\';
-    if (!str_starts_with($class, $prefix)) {
+    $directories = [
+        'App\\' => '/app/',
+        'Database\\Factories\\' => '/database/factories/',
+        'Database\\Seeders\\' => '/database/seeders/',
+    ];
+    foreach ($directories as $prefix => $directory) {
+        if (!str_starts_with($class, $prefix)) {
+            continue;
+        }
+        $path = dirname(__DIR__) . $directory . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+        if (is_file($path)) {
+            require $path;
+        }
         return;
-    }
-    $path = dirname(__DIR__) . '/app/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-    if (is_file($path)) {
-        require $path;
     }
 });

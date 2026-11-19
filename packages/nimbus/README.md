@@ -436,16 +436,123 @@ sequential integer codes.
 
 ## In-memory testing
 
+`Nimbus\Testing\TestCase` (PHPUnit) builds and boots a fresh application per test and sends
+requests to it in memory:
+
+```php
+use Nimbus\Testing\RefreshDatabase;
+use Nimbus\Testing\TestCase;
+
+final class ProductTest extends TestCase
+{
+    use RefreshDatabase;
+
+    protected function createApplication(): App
+    {
+        $app = new App(discoverPackages: false);
+        $app->provider(new ArcanoServiceProvider($config, $entities, migrations: $migrations));
+        $app->routes(dirname(__DIR__) . '/routes.php');
+        return $app;
+    }
+
+    public function testListsProducts(): void
+    {
+        ProductFactory::new()->count(3)->sequence(['name' => 'Keyboard'], ['name' => 'Mouse'])->create();
+
+        $this->getJson('/products')
+            ->assertOk()
+            ->assertJsonCount(3, 'data')
+            ->assertJsonPath('data.0.name', 'Keyboard')
+            ->assertJsonStructure(['data' => ['*' => ['id', 'name']]]);
+
+        $this->actingAs($user)
+            ->postJson('/products', ['name' => ''])
+            ->assertUnprocessableEntity()
+            ->assertJsonValidationErrors(['name' => 'required']);
+
+        $this->assertDatabaseCount('products', 3);
+        $this->assertDatabaseHas(Product::class, ['name' => 'Mouse']);
+    }
+}
+```
+
+- Requests: `getJson`, `postJson`, `putJson`, `patchJson`, `deleteJson`, `json($method, ...)` and
+  `get`; `withHeaders()`, `withHeader()` and `withToken()` apply to the following requests.
+- `actingAs($principal)` binds an `Authenticator` returning the principal, so routes with
+  `auth()`/`can()` and `AuthenticateMiddleware` resolved through the container see it.
+- Responses: `assertOk`, `assertCreated`, `assertNoContent`, `assertStatus`, `assertNotFound`,
+  `assertUnauthorized`, `assertForbidden`, `assertUnprocessableEntity`, `assertHeader`,
+  `assertHeaderMissing`, `assertJson` (subset), `assertExactJson`, `assertJsonPath` (value or
+  closure), `assertJsonMissingPath`, `assertJsonCount`, `assertJsonStructure` (`*` for lists),
+  `assertJsonValidationErrors` and `assertJsonMissingValidationErrors` (the 422 Problem Details
+  `errors` member), `json($path)` and `dump()`. Failures are PHPUnit assertion failures.
+- `RefreshDatabase` runs the pending migrations, then opens a transaction that every request of the
+  test shares and that is rolled back when the test ends. A request that leaves its own transaction
+  open loses only its writes, as in production.
+- `assertDatabaseHas`, `assertDatabaseMissing` and `assertDatabaseCount` take a table or an entity
+  class.
+
+Without the base class, `TestClient` offers the same requests over any `App`:
+
 ```php
 (new TestClient($app))
+    ->withToken($token)
     ->postJson('/login', ['email' => 'dev@pam.dev'])
     ->assertSuccessful()
-    ->assertHeader('content-type', 'application/json')
     ->assertJsonPath('data.status', 1);
 ```
 
-Use `assertJson()` for an exact payload, `assertJsonPath()` for a focused value,
-and `assertStatus()` when the endpoint intentionally returns a specific code.
+### Factories and seeders
+
+Factories build Arcano entities with [Faker](https://fakerphp.org) (`composer require --dev
+fakerphp/faker`). Attributes named like constructor parameters go to the constructor; the rest are
+set as properties.
+
+```php
+/** @extends Factory<Product> */
+final class ProductFactory extends Factory
+{
+    protected string $model = Product::class;
+
+    public function definition(): array
+    {
+        return [
+            'name' => $this->faker->words(2, true),
+            'priceInCents' => $this->faker->numberBetween(100, 100_000),
+            'category' => CategoryFactory::new(), // made, then persisted by cascade
+        ];
+    }
+
+    public function archived(): self
+    {
+        return $this->state(['status' => ProductStatus::Archived]);
+    }
+}
+
+ProductFactory::new()->makeOne();                      // unsaved
+ProductFactory::new()->count(10)->archived()->create(); // persisted in one unit of work
+ProductFactory::new()->state(fn (array $a) => ['name' => strtoupper($a['name'])])->raw();
+```
+
+`count()`, `state()`, `sequence()`, `afterMaking()` and `afterCreating()` return copies;
+`make()`/`create()` return one entity, or a list after `count()` (`makeOne`, `makeMany`,
+`createOne`, `createMany` are typed). `create()` persists through the manager set with
+`Factory::useManager()`, which `TestCase` and `SeederRunner` set; `Factory::useFaker()` changes
+the locale or seed.
+
+Seeders define `run()`, resolved through the container, and chain others with `call()`:
+
+```php
+final class DatabaseSeeder extends Seeder
+{
+    public function run(ArcanoManager $arcano): void
+    {
+        $this->call([CategorySeeder::class, ProductSeeder::class]);
+    }
+}
+
+(new SeederRunner($app))->run(DatabaseSeeder::class); // or $this->seed(...) in a TestCase
+```
 
 Run `composer benchmark` for the standalone router benchmark. Its schema 1 JSON
 reports warmed static and constrained-dynamic throughput, p50/p95/p99 latency,

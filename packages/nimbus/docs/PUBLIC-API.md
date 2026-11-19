@@ -37,6 +37,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\ArcanoTenantScope`](#nimbusdatabasearcanotenantscope)
 - [`Nimbus\Database\DatabaseConfig`](#nimbusdatabasedatabaseconfig)
 - [`Nimbus\Database\DatabaseHealthCheck`](#nimbusdatabasedatabasehealthcheck)
+- [`Nimbus\Database\Factory`](#nimbusdatabasefactory)
 - [`Nimbus\Database\Pgsql\AsyncPostgresDriver`](#nimbusdatabasepgsqlasyncpostgresdriver)
 - [`Nimbus\Database\Pgsql\PgsqlException`](#nimbusdatabasepgsqlpgsqlexception)
 - [`Nimbus\Database\QueryBudget`](#nimbusdatabasequerybudget)
@@ -44,6 +45,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\QueryBudgetViolation`](#nimbusdatabasequerybudgetviolation)
 - [`Nimbus\Database\QueryMonitor`](#nimbusdatabasequerymonitor)
 - [`Nimbus\Database\QueryReport`](#nimbusdatabasequeryreport)
+- [`Nimbus\Database\Seeder`](#nimbusdatabaseseeder)
+- [`Nimbus\Database\SeederRunner`](#nimbusdatabaseseederrunner)
 - [`Nimbus\Events\EventDispatcher`](#nimbuseventseventdispatcher)
 - [`Nimbus\Events\SyncEventDispatcher`](#nimbuseventssynceventdispatcher)
 - [`Nimbus\HandlerResolver`](#nimbushandlerresolver)
@@ -129,6 +132,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Tenancy\Tenant`](#nimbustenancytenant)
 - [`Nimbus\Tenancy\TenantContext`](#nimbustenancytenantcontext)
 - [`Nimbus\Tenancy\TenantResolver`](#nimbustenancytenantresolver)
+- [`Nimbus\Testing\ActingAsAuthenticator`](#nimbustestingactingasauthenticator)
+- [`Nimbus\Testing\TestCase`](#nimbustestingtestcase)
 - [`Nimbus\Testing\TestClient`](#nimbustestingtestclient)
 - [`Nimbus\Testing\TestResponse`](#nimbustestingtestresponse)
 - [`Nimbus\Transactions\TransactionManager`](#nimbustransactionstransactionmanager)
@@ -486,6 +491,7 @@ final class Nimbus\Container\Container
 - `public diagnostics(): array`
 - `public endScope(): void`
 - `public get(string $id): mixed`
+- `public has(string $id): bool`
 - `public instance(string $id, mixed $instance): self`
 - `public scoped(string $id, callable|null|string $factory = null): self`
 - `public scopedInstance(string $id, mixed $instance): self`
@@ -636,6 +642,32 @@ final readonly class Nimbus\Database\DatabaseHealthCheck implements Nimbus\Healt
 - `public __construct(Nimbus\Database\ArcanoManager $arcano, ?string $connection = null): mixed`
 - `public check(): Nimbus\Health\HealthResult`
 
+## `Nimbus\Database\Factory`
+
+```php
+abstract class Nimbus\Database\Factory
+```
+
+### Methods
+
+- `public __construct(): mixed`
+- `public afterCreating(Closure $callback): static`
+- `public afterMaking(Closure $callback): static`
+- `public count(int $count): static`
+- `public create(array $attributes = []): array|object`
+- `public createMany(array $attributes = []): array`
+- `public createOne(array $attributes = []): object`
+- `public definition(): array`
+- `public make(array $attributes = []): array|object`
+- `public makeMany(array $attributes = []): array`
+- `public makeOne(array $attributes = []): object`
+- `public static new(): static`
+- `public raw(array $attributes = []): array`
+- `public sequence(Closure|array ...$states): static`
+- `public state(Closure|array $state): static`
+- `public static useFaker(?Faker\Generator $faker): void`
+- `public static useManager(?Nimbus\Database\ArcanoManager $manager): ?Nimbus\Database\ArcanoManager`
+
 ## `Nimbus\Database\Pgsql\AsyncPostgresDriver`
 
 ```php
@@ -747,6 +779,28 @@ final readonly class Nimbus\Database\QueryReport
 
 - `public __construct(int $count, float $elapsedMilliseconds, array $duplicates, array $violations): mixed`
 - `public withinBudget(): bool`
+
+## `Nimbus\Database\Seeder`
+
+```php
+abstract class Nimbus\Database\Seeder
+```
+
+### Methods
+
+- `public call(array|string $seeders): void`
+- `public invoke(?Nimbus\Container\Container $container = null): array`
+
+## `Nimbus\Database\SeederRunner`
+
+```php
+final readonly class Nimbus\Database\SeederRunner
+```
+
+### Methods
+
+- `public __construct(Nimbus\App $app): mixed`
+- `public run(string $seeder): array`
 
 ## `Nimbus\Events\EventDispatcher`
 
@@ -2039,6 +2093,27 @@ abstract interface Nimbus\Tenancy\TenantResolver
 
 - `public resolve(Pam\Http\Request $request): ?Nimbus\Tenancy\Tenant`
 
+## `Nimbus\Testing\ActingAsAuthenticator`
+
+```php
+final readonly class Nimbus\Testing\ActingAsAuthenticator implements Nimbus\Auth\Authenticator
+```
+
+### Properties
+
+- `public readonly Nimbus\Auth\Principal $principal`
+
+### Methods
+
+- `public __construct(Nimbus\Auth\Principal $principal): mixed`
+- `public authenticate(Pam\Http\Request $request): Nimbus\Auth\Principal`
+
+## `Nimbus\Testing\TestCase`
+
+```php
+abstract class Nimbus\Testing\TestCase extends PHPUnit\Framework\TestCase implements Countable, PHPUnit\Framework\Reorderable, PHPUnit\Framework\SelfDescribing, PHPUnit\Framework\Test
+```
+
 ## `Nimbus\Testing\TestClient`
 
 ```php
@@ -2047,10 +2122,19 @@ final readonly class Nimbus\Testing\TestClient
 
 ### Methods
 
-- `public __construct(Nimbus\App $app): mixed`
+- `public __construct(Nimbus\App $app, array $headers = []): mixed`
+- `public actingAs(Nimbus\Auth\Principal $principal): self`
+- `public deleteJson(string $path, ?array $payload = null, array $headers = []): Nimbus\Testing\TestResponse`
 - `public get(string $path, array $headers = []): Nimbus\Testing\TestResponse`
-- `public postJson(string $path, array $payload, array $headers = []): Nimbus\Testing\TestResponse`
+- `public getJson(string $path, array $headers = []): Nimbus\Testing\TestResponse`
+- `public json(string $method, string $path, ?array $payload = null, array $headers = []): Nimbus\Testing\TestResponse`
+- `public patchJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
+- `public postJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
+- `public putJson(string $path, array $payload = [], array $headers = []): Nimbus\Testing\TestResponse`
 - `public request(string $method, string $path, array $query = [], array $headers = [], string $body = ""): Nimbus\Testing\TestResponse`
+- `public withHeader(string $name, string $value): self`
+- `public withHeaders(array $headers): self`
+- `public withToken(string $token, string $type = "Bearer"): self`
 
 ## `Nimbus\Testing\TestResponse`
 
@@ -2061,14 +2145,29 @@ final readonly class Nimbus\Testing\TestResponse
 ### Methods
 
 - `public __construct(array $response): mixed`
+- `public assertCreated(): self`
+- `public assertExactJson(array $expected): self`
+- `public assertForbidden(): self`
 - `public assertHeader(string $name, ?string $expected = null): self`
+- `public assertHeaderMissing(string $name): self`
 - `public assertJson(array $expected): self`
+- `public assertJsonCount(int $count, ?string $path = null): self`
+- `public assertJsonMissingPath(string $path): self`
+- `public assertJsonMissingValidationErrors(array|null|string $fields = null): self`
 - `public assertJsonPath(string $path, mixed $expected): self`
+- `public assertJsonStructure(array $structure, ?string $path = null): self`
+- `public assertJsonValidationErrors(array|string $fields): self`
+- `public assertNoContent(): self`
+- `public assertNotFound(): self`
+- `public assertOk(): self`
 - `public assertStatus(int $expected): self`
 - `public assertSuccessful(): self`
+- `public assertUnauthorized(): self`
+- `public assertUnprocessableEntity(): self`
 - `public body(): string`
+- `public dump(): self`
 - `public header(string $name): ?string`
-- `public json(): mixed`
+- `public json(?string $path = null): mixed`
 - `public status(): int`
 
 ## `Nimbus\Transactions\TransactionManager`

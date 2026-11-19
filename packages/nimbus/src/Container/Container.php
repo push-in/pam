@@ -64,6 +64,16 @@ final class Container
         return $this->register($id, $factory, BindingLifetime::Scoped);
     }
 
+    /** Whether the entry is bound, registered as an instance or set in the current scope. */
+    public function has(string $id): bool
+    {
+        if (isset($this->bindings[$id]) || array_key_exists($id, $this->singletons)) {
+            return true;
+        }
+        $scope = $this->currentScope();
+        return $scope !== null && array_key_exists($id, $scope);
+    }
+
     public function instance(string $id, mixed $instance): self
     {
         $this->singletons[$id] = $instance;
