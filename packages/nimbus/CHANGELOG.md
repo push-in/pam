@@ -5,6 +5,8 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-19
+
 ### Added
 
 - API authentication (`Nimbus\Auth`): `PersonalAccessTokens` (hashed, scoped, expiring, `last_used_at`,
