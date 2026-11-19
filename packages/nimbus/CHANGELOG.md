@@ -5,6 +5,17 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+### Added
+
+- Admin panel over Arcano (`Nimbus\Admin`): `Admin::panel($app, '/admin')` registers a dashboard and CRUD
+  routes for `AdminResource` classes (or plain entity classes). Default `AdminField`s come from the
+  compiled schema and `#[Column]` attributes (types, size, nullability, belongs-to selects) plus the Nimbus
+  validation attributes on the entity; resources relabel, hide or add fields, scope the query, validate
+  through an `Input` class and declare bulk `AdminAction`s. Search, filters, sorting, pagination, flash
+  messages, `viewAdmin` and per-entity policy checks, CSRF, `en`/`pt_BR` texts, light/dark CSS without
+  JavaScript dependencies; templates can be overridden by directory.
+- CLI: `pam make:admin Product` creates `app/Admin/ProductAdmin.php`.
+
 ## 0.4.0 - 2026-11-19
 
 ### Added

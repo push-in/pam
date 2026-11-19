@@ -64,6 +64,7 @@ export default defineConfig({
           { text: 'Sessão, cookies e CSRF', link: '/sessao' },
           { text: 'Views .nim.php', link: '/views' },
           { text: 'Tradução', link: '/traducao' },
+          { text: 'Painel administrativo', link: '/admin' },
         ],
       },
       {

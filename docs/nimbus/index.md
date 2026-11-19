@@ -44,6 +44,7 @@ Requisitos: PAM instalado (`curl -fsSL https://push-in.github.io/pam/install.sh 
 - [Sessão, cookies e CSRF](./sessao.md)
 - [Views `.nim.php`](./views.md)
 - [Tradução](./traducao.md)
+- [Painel administrativo sobre o Arcano](./admin.md)
 
 **Operação**
 

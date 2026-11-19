@@ -729,6 +729,28 @@ Return `view('products.index', ['products' => $products])` (or `$views->make()` 
 Translations come from `lang/{locale}/*.php` and `lang/{locale}.json` (`__('messages.welcome', ['name'
 => $name])`, `trans_choice()`); the locale is per request (`?lang=`, session, `Accept-Language`).
 
+### Admin panel over Arcano (optional)
+
+`Nimbus\Admin` serves CRUD pages for Arcano entities, with the fields read from their `#[Column]`
+attributes and belongs-to relations:
+
+```php
+use Nimbus\Admin\Admin;
+
+Admin::panel($app, '/admin', loginUrl: '/login')
+    ->resource(ProductAdmin::class)   // an AdminResource subclass
+    ->resource(Category::class);      // or just the entity, with the defaults
+
+$app->gate()->define('viewAdmin', static fn (User $user): bool => $user->isAdmin);
+```
+
+Lists have search, filters (booleans, selects, belongs-to), sorting, pagination and bulk actions;
+forms validate through the field rules (column size, `#[Max]`/`#[Min]`/... on the entity) or an
+`Input` class. Every route needs `viewAdmin`; with a Gate policy the entity also needs `viewAny`,
+`create`, `update` and `delete`. It requires the session (CSRF) and an `Authenticator`; templates are
+`.nim.php` with a solid CSS (light and dark) and an optional 2 KB script. `pam make:admin Product`
+creates `app/Admin/ProductAdmin.php`.
+
 ## Notifications
 
 `Nimbus\Notifications` sends one `Notification` through the channels its
