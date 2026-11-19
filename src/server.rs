@@ -2795,23 +2795,22 @@ async fn invoke_php_http_local(
     let free_slot = state.request_slots.clone().try_acquire_owned().ok();
     let _request_slot = match free_slot {
         Some(permit) => permit,
-        None => match tokio::time::timeout(
-            slot_timeout,
-            state.request_slots.clone().acquire_owned(),
-        )
-        .await
-        {
-            Ok(Ok(permit)) => permit,
-            _ => {
-                return (
-                    error_response(
-                        StatusCode::SERVICE_UNAVAILABLE,
-                        "worker concurrent request limit reached",
-                    ),
-                    0,
-                );
+        None => {
+            match tokio::time::timeout(slot_timeout, state.request_slots.clone().acquire_owned())
+                .await
+            {
+                Ok(Ok(permit)) => permit,
+                _ => {
+                    return (
+                        error_response(
+                            StatusCode::SERVICE_UNAVAILABLE,
+                            "worker concurrent request limit reached",
+                        ),
+                        0,
+                    );
+                }
             }
-        },
+        }
     };
     let encoded_headers = encode_php_request_headers(headers);
     let multipart_json = match request.upload.as_deref() {

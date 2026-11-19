@@ -36,11 +36,11 @@ use std::time::Duration;
 
 use axum::Router;
 use axum::body::Body;
+use axum::body::HttpBody as _;
 use axum::extract::{ConnectInfo, Request, State};
 use axum::middleware::Next;
 use axum::response::Response;
 use http::{HeaderValue, Method, StatusCode, Version, header};
-use axum::body::HttpBody as _;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::{TcpListener, TcpStream};
