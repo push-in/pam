@@ -103,6 +103,12 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RateLimit\MemoryRateLimitStore`](#nimbusratelimitmemoryratelimitstore)
 - [`Nimbus\RateLimit\RateLimitDecision`](#nimbusratelimitratelimitdecision)
 - [`Nimbus\RateLimit\RateLimitStore`](#nimbusratelimitratelimitstore)
+- [`Nimbus\Redis\Connection`](#nimbusredisconnection)
+- [`Nimbus\Redis\PamConnection`](#nimbusredispamconnection)
+- [`Nimbus\Redis\RedisIdempotencyStore`](#nimbusredisredisidempotencystore)
+- [`Nimbus\Redis\RedisPool`](#nimbusredisredispool)
+- [`Nimbus\Redis\RedisRateLimitStore`](#nimbusredisredisratelimitstore)
+- [`Nimbus\Redis\RedisResponseCacheStore`](#nimbusredisredisresponsecachestore)
 - [`Nimbus\Resilience\CircuitBreaker`](#nimbusresiliencecircuitbreaker)
 - [`Nimbus\Resilience\CircuitOpenException`](#nimbusresiliencecircuitopenexception)
 - [`Nimbus\Resilience\CircuitState`](#nimbusresiliencecircuitstate)
@@ -1639,6 +1645,75 @@ abstract interface Nimbus\RateLimit\RateLimitStore
 ### Methods
 
 - `public consume(string $key, int $requestsPerSecond, int $capacity, float $now): Nimbus\RateLimit\RateLimitDecision`
+
+## `Nimbus\Redis\Connection`
+
+```php
+abstract interface Nimbus\Redis\Connection
+```
+
+### Methods
+
+- `public command(array $arguments): mixed`
+
+## `Nimbus\Redis\PamConnection`
+
+```php
+final readonly class Nimbus\Redis\PamConnection implements Nimbus\Redis\Connection
+```
+
+### Methods
+
+- `public __construct(Pam\Redis\Client $client): mixed`
+- `public command(array $arguments): mixed`
+
+## `Nimbus\Redis\RedisIdempotencyStore`
+
+```php
+final readonly class Nimbus\Redis\RedisIdempotencyStore implements Nimbus\Idempotency\IdempotencyStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:idempotency:"): mixed`
+- `public get(string $key, int $now): ?Nimbus\Idempotency\IdempotencyRecord`
+- `public put(string $key, Nimbus\Idempotency\IdempotencyRecord $record): void`
+
+## `Nimbus\Redis\RedisPool`
+
+```php
+final class Nimbus\Redis\RedisPool implements Nimbus\Redis\Connection
+```
+
+### Methods
+
+- `public __construct(Closure $connect, int $maxIdle = 16): mixed`
+- `public command(array $arguments): mixed`
+- `public static fromEnvironment(int $maxIdle = 16): self`
+
+## `Nimbus\Redis\RedisRateLimitStore`
+
+```php
+final readonly class Nimbus\Redis\RedisRateLimitStore implements Nimbus\RateLimit\RateLimitStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:rate:"): mixed`
+- `public consume(string $key, int $requestsPerSecond, int $capacity, float $now): Nimbus\RateLimit\RateLimitDecision`
+
+## `Nimbus\Redis\RedisResponseCacheStore`
+
+```php
+final readonly class Nimbus\Redis\RedisResponseCacheStore implements Nimbus\Cache\ResponseCacheStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:response:"): mixed`
+- `public forget(string $key): void`
+- `public get(string $key, int $now): ?Nimbus\Cache\CacheRecord`
+- `public put(string $key, Nimbus\Cache\CacheRecord $record): void`
 
 ## `Nimbus\Resilience\CircuitBreaker`
 
