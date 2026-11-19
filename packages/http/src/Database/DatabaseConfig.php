@@ -15,7 +15,7 @@ final readonly class DatabaseConfig
         public array $connections,
     ) {
         if ($this->connections === [] || !isset($this->connections[$this->defaultConnection])) {
-            throw new \InvalidArgumentException('The default Eloquent connection must be configured.');
+            throw new \InvalidArgumentException('The default database connection must be configured.');
         }
     }
 

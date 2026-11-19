@@ -24,16 +24,14 @@ final class CoreDependencyBoundaryTest extends TestCase
     }
 
     /** @throws JsonException */
-    public function testIlluminateIsDevelopmentOnlyUntilTheLegacyBridgeIsExtracted(): void
+    public function testNoIlluminateComponentIsInstalledOrSuggested(): void
     {
         $manifest = self::manifest();
 
-        foreach (['database', 'events', 'filesystem', 'pagination'] as $component) {
-            $package = 'illuminate/' . $component;
-
-            self::assertArrayNotHasKey($package, $manifest['require']);
-            self::assertArrayHasKey($package, $manifest['require-dev']);
-            self::assertArrayHasKey($package, $manifest['suggest']);
+        foreach (['require', 'require-dev', 'suggest'] as $section) {
+            foreach (array_keys($manifest[$section]) as $package) {
+                self::assertStringStartsNotWith('illuminate/', $package, $section);
+            }
         }
     }
 

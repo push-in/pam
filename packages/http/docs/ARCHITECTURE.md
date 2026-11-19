@@ -32,7 +32,7 @@ checking the production dependency set.
 | `pushinbr/pam-http-openapi` | OpenAPI generation, compatibility checks, client generation |
 | `pushinbr/pam-http-observability` | HTTP OpenTelemetry tracing, metrics, logging integration |
 | `pushinbr/pam-http-testing` | In-process HTTP client, assertions, protocol conformance |
-| `pushinbr/pam-http-eloquent` | HTTP-aware Eloquent lifecycle, tenancy, query budgets |
+| `pushinbr/arcano` | ORM: entities, repositories, tenancy, migrations |
 | `pushinbr/pam-jobs` | Job contracts, codecs, dispatchers, workers |
 | `pushinbr/pam-http-psr` | PSR-7, PSR-15 and PSR-17 HTTP adapters |
 

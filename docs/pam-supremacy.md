@@ -1,7 +1,7 @@
 # PAM Supremacy delivery contract
 
 PAM Supremacy is the evidence-backed program for making PAM a mature,
-API-first, Eloquent-first and persistent-worker-first PHP framework. This is a
+API-first, Arcano-first and persistent-worker-first PHP framework. This is a
 delivery contract, not a claim that every capability is currently available.
 
 The creation of a family of official packages is deliberately out of scope
@@ -13,7 +13,7 @@ remain in scope.
 
 PAM measures itself against the strengths users already receive elsewhere:
 
-- Laravel: Eloquent, batteries-included application DX, queues and operational tooling;
+- Laravel: its ORM, batteries-included application DX, queues and operational tooling;
 - Symfony: stable components, security, diagnostics and the Web Profiler;
 - Fastify: compiled schema validation/serialization and encapsulated plugins;
 - Hyperf and OpenSwoole: coroutine-aware services, pools and concurrency;
@@ -41,7 +41,7 @@ used to claim application-level superiority.
 | Stream | Required outcome |
 | --- | --- |
 | Runtime | Structured concurrency, cancellation, backpressure, graceful lifecycle, protocol coverage, warmup and leak-free workers. |
-| Data | Fiber-safe Eloquent, migrations, savepoints, pools, read/write routing, tenancy, query budgets, outbox and health telemetry. |
+| Data | Fiber-safe Arcano ORM, migrations, savepoints, pools, read/write routing, tenancy, query budgets, outbox and health telemetry. |
 | HTTP | Compiled routes, complete semantics, negotiation, uploads, streaming, SSE, WebSockets and PSR interoperability. |
 | Contracts | JSON Schema 2020-12, OpenAPI 3.1, compiled validators/serializers, compatibility checks, mocks and typed clients. |
 | Security | Tokens, API keys, OAuth/OIDC/passkey foundations, policies, distributed throttling, redaction, audit and supply-chain evidence. |
@@ -60,7 +60,7 @@ PAM 2.0 cannot be called stable until all of the following are evidenced:
 - clean installation reaches a working API in under five minutes;
 - public API compatibility tooling reports no unexplained break;
 - PostgreSQL, MySQL and SQLite integration suites pass;
-- a complete application demonstrates auth, Eloquent, validation, resources,
+- a complete application demonstrates auth, Arcano, validation, resources,
   distributed state, queues, telemetry and deployment;
 - a 24-hour sustained test shows no unbounded RSS or retained request state;
 - benchmark artifacts publish P50/P95/P99, throughput, errors and memory on

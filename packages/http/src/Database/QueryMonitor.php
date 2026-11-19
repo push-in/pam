@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace Pam\Api\Database;
 
-use Illuminate\Database\Events\QueryExecuted;
-
 final class QueryMonitor
 {
     /** @var \WeakMap<object, QueryScope> */
@@ -13,15 +11,9 @@ final class QueryMonitor
 
     private ?QueryScope $mainScope = null;
 
-    public function __construct(?FiberConnectionResolver $connections = null)
+    public function __construct()
     {
         $this->fiberScopes = new \WeakMap();
-        $connections?->eventDispatcher()->listen(
-            QueryExecuted::class,
-            function (QueryExecuted $event): void {
-                $this->record($event->sql, $event->time);
-            },
-        );
     }
 
     public static function forArcano(ArcanoDatabaseProvider $databases): self

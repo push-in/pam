@@ -179,7 +179,7 @@ def architecture(mode: str) -> str:
     box(710, 470, 210, 74, "GTK 4 · AppKit · Win32", ["PAM Desktop 2.0 preview", "no web view in the path"])
     arrow(590, 436, 590, 468, "renders", lx=600, ly=456, anchor="start")
     arrow(815, 436, 815, 468, "renders", lx=825, ly=456, anchor="start")
-    box(40, 470, 410, 74, "Your PHP stays PHP", ["PSR-7/15/17 · Laravel 12/13 · Pest · PHPUnit · Eloquent", "no fork, no new language, no second package manager"])
+    box(40, 470, 410, 74, "Your PHP stays PHP", ["PSR-7/15/17 · Laravel 12/13 · Pest · PHPUnit · Arcano", "no fork, no new language, no second package manager"])
 
     o.append("</svg>")
     return "\n".join(o) + "\n"
