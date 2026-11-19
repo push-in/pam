@@ -5,6 +5,24 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-19
+
+### Added
+
+- Admin panel over Arcano (`Nimbus\Admin`): `Admin::panel($app, '/admin')` registers a dashboard and CRUD
+  routes for `AdminResource` classes (or plain entity classes). Default `AdminField`s come from the
+  compiled schema and `#[Column]` attributes (types, size, nullability, belongs-to selects) plus the Nimbus
+  validation attributes on the entity; resources relabel, hide or add fields, scope the query, validate
+  through an `Input` class and declare bulk `AdminAction`s. Search, filters, sorting, pagination, flash
+  messages, `viewAdmin` and per-entity policy checks, CSRF, `en`/`pt_BR` texts, light/dark CSS without
+  JavaScript dependencies; templates can be overridden by directory.
+- CLI: `pam make:admin Product` creates `app/Admin/ProductAdmin.php`.
+
+### Changed
+
+- `ArcanoManager::select()` reuses a select prototype per role and connection (roles with scopes excluded); queries are only timed and logged while a query budget is active.
+- Development and tests use `pushinbr/arcano` `^0.2.5` (compiled hydration, `COUNT(*)`, single-statement writes without BEGIN/COMMIT, cached `fetchOne`).
+
 ## 0.4.0 - 2026-11-19
 
 ### Added
@@ -67,6 +85,10 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   `AccessTokenIssuer`.
 - `TokenPrincipal::can()` honours namespace wildcards (`orders:*`).
 - `Input` and `FormRequest` read urlencoded and multipart form bodies as well as JSON.
+- `ArcanoManager::select()` clones one prototype per role and connection set, so repeated queries share
+  the loader and Arcano's cached statement of their shape (roles with a scope still build a fresh select).
+- The query monitor hooks the Arcano query log only when the first query budget starts; apps without
+  `QueryBudgetMiddleware` no longer time and log every query.
 
 ## 0.3.0 - 2026-11-19
 

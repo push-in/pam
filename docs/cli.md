@@ -237,6 +237,7 @@ pam make:job SendWelcomeEmail
 pam make:factory UserFactory
 pam make:seeder DatabaseSeeder
 pam make:test UserApiTest
+pam make:admin Product          # app/Admin/ProductAdmin.php (Nimbus admin panel)
 ```
 
 Generators require a bounded PascalCase name, create missing application
