@@ -238,6 +238,42 @@ impl ServerProcess {
 }
 
 #[test]
+fn streams_chunks_while_php_blocks_between_them() {
+    let server = ServerProcess::start();
+    let mut stream = TcpStream::connect(("127.0.0.1", server.port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .unwrap();
+    let started = Instant::now();
+    stream
+        .write_all(b"GET /stream-blocking HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    let mut received = Vec::new();
+    let mut first_chunk = None;
+    let mut buffer = [0_u8; 4096];
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        if read == 0 {
+            break;
+        }
+        received.extend_from_slice(&buffer[..read]);
+        if first_chunk.is_none() && String::from_utf8_lossy(&received).contains("first-chunk") {
+            first_chunk = Some(started.elapsed());
+        }
+    }
+    let complete = started.elapsed();
+    let body = String::from_utf8_lossy(&received);
+    assert!(body.starts_with("HTTP/1.1 200"), "{body}");
+    assert!(body.contains("second-chunk"), "{body}");
+    let first_chunk = first_chunk.expect("the first chunk was never received");
+    assert!(complete >= Duration::from_millis(650), "{complete:?}");
+    assert!(
+        first_chunk < Duration::from_millis(400),
+        "first chunk after {first_chunk:?}, complete after {complete:?}"
+    );
+}
+
+#[test]
 fn caches_only_explicit_public_anonymous_responses() {
     let server = ServerProcess::start_with_response_cache();
     let first = response_json(

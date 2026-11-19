@@ -258,6 +258,15 @@ $app->get('/stream', static function (Request $request, Response $response): Res
         yield 'second-chunk';
     })(), 'text/plain; charset=utf-8');
 });
+$app->get('/stream-blocking', static function (Request $request, Response $response): Response {
+    // Blocks the PHP thread between chunks (usleep, a blocking query): the first chunk
+    // must still reach the client before the second is produced.
+    return $response->stream((static function (): Generator {
+        yield 'first-chunk';
+        usleep(700_000);
+        yield 'second-chunk';
+    })(), 'text/plain; charset=utf-8');
+});
 $app->get('/oversized-response', static fn (Request $request, Response $response): Response =>
     $response->send(str_repeat('o', 8 * 1024)));
 $app->get('/oversized-chunk', static fn (Request $request, Response $response): Response =>

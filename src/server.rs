@@ -1166,30 +1166,49 @@ pub fn run(config: ServerConfig) -> Result<(), ServerError> {
 }
 
 fn serve(config: ServerConfig) -> Result<(), ServerError> {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(io_threads())
-        .thread_name("pam-io")
-        .enable_all()
-        .build()
-        .map_err(ServerError::Runtime)?;
+    let mut threads = io_threads();
+    if threads == 0
+        && config.tls_cert.is_some()
+        && std::env::var_os("PAM_INTERNAL_LISTEN_ADDRESS").is_none()
+    {
+        // The watchdog answers a blocked request by writing to its socket,
+        // which a TLS connection does not allow.
+        threads = 1;
+    }
+    let runtime = if threads == 0 {
+        crate::inline_serve::enable();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(ServerError::Runtime)?
+    } else {
+        tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(threads)
+            .thread_name("pam-io")
+            .enable_all()
+            .build()
+            .map_err(ServerError::Runtime)?
+    };
     let local = LocalSet::new();
     runtime.block_on(local.run_until(run_async(config)))
 }
 
-/// I/O threads of a worker (`PAM_IO_THREADS`, 1-16). The PHP thread is
-/// separate; every request crosses from an I/O thread to it and back.
+/// I/O threads of a worker (`PAM_IO_THREADS`, 0-16). With 0 (the default)
+/// connections are served on the PHP thread (see `inline_serve`); otherwise
+/// every request crosses from an I/O thread to the PHP thread and back.
 fn io_threads() -> usize {
     std::env::var("PAM_IO_THREADS")
         .ok()
         .and_then(|value| value.trim().parse::<usize>().ok())
-        .filter(|threads| (1..=16).contains(threads))
+        .filter(|threads| (0..=16).contains(threads))
         .unwrap_or(DEFAULT_IO_THREADS)
 }
 
-// One I/O thread per worker measured fastest (nimbus-bench, 16 workers on
-// 8 CPUs): with two, tokio woke the idle sibling to steal the request task
-// handed back by the PHP thread (+1.5 epoll_wait and futex per request).
-const DEFAULT_IO_THREADS: usize = 1;
+// Serving on the PHP thread measured fastest (nimbus-bench, 16 workers on 8
+// CPUs: /ping +9%, database endpoints +10-14% over one I/O thread). With I/O
+// threads, one per worker was fastest: with two, tokio woke the idle sibling
+// to steal the request task handed back by the PHP thread.
+const DEFAULT_IO_THREADS: usize = 0;
 
 /// PHP's Zend signal layer installs SIGTERM/SIGINT handlers that, for a
 /// default disposition, restore SIG_DFL and re-raise the signal. Tokio's
@@ -1370,6 +1389,12 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
         .map_err(ServerError::Configuration)?;
     crate::page_cache::register_global(&state.page_cache);
     start_php_executor(state.clone(), php_receiver);
+    if crate::inline_serve::enabled() {
+        let watched = state.clone();
+        crate::inline_serve::spawn_watchdog(HARD_TIMEOUT_GRACE_MILLIS, move |request_id| {
+            watched.php_wedged(request_id);
+        });
+    }
     let recycle = state.shutdown.subscribe();
     let shutdown_sender = state.shutdown.clone();
     let http3 = if state.config.http3 {
@@ -2659,6 +2684,12 @@ async fn with_hard_deadline(
     request_id: &str,
     php: impl Future<Output = (Response, usize)>,
 ) -> (Response, usize) {
+    if crate::inline_serve::enabled() {
+        // PHP runs on this thread: while it is blocked no timer here could
+        // fire (the watchdog answers instead), and every wait of a suspended
+        // request is already bounded by its remaining time.
+        return php.await;
+    }
     tokio::pin!(php);
     let mut wedged = state.drain.subscribe_wedged();
     // The execution deadline is at least a full timeout away, so a request
@@ -2850,18 +2881,20 @@ async fn invoke_php_http_local(
         Err(error) => return (internal_error(error), 0),
     };
     let started = Instant::now();
+    let deadline_millis = worker_epoch_millis().saturating_add(state.config.request_timeout_ms);
     let _execution = PhpExecutionGuard::begin(state, request_id);
     let mut cancellation = PhpHttpDispatchGuard::new(request_id);
-    let mut envelope = match php::dispatch_http_native(
+    let call = crate::inline_serve::PhpCall::enter(deadline_millis, remote, version, request_id);
+    let dispatched = php::dispatch_http_native(
         method.as_str(),
         target,
         &encoded_headers,
         body,
         &context,
         request_id,
-    )
-    .and_then(|json| parse_dispatch_envelope(&json))
-    {
+    );
+    drop(call);
+    let mut envelope = match dispatched.and_then(|json| parse_dispatch_envelope(&json)) {
         Ok(envelope) => envelope,
         Err(error) => return (internal_error(error), 0),
     };
@@ -3032,9 +3065,15 @@ async fn invoke_php_http_local(
                         );
                     }
                 };
-                envelope = match php::resume_http(request_id, body, &operation_result)
-                    .and_then(|json| parse_dispatch_envelope(&json))
-                {
+                let call = crate::inline_serve::PhpCall::enter(
+                    deadline_millis,
+                    remote,
+                    version,
+                    request_id,
+                );
+                let resumed = php::resume_http(request_id, body, &operation_result);
+                drop(call);
+                envelope = match resumed.and_then(|json| parse_dispatch_envelope(&json)) {
                     Ok(envelope) => envelope,
                     Err(error) => return (internal_error(error), 0),
                 };
@@ -3059,6 +3098,23 @@ struct PhpResponseStream {
     _request_slot: OwnedSemaphorePermit,
 }
 
+/// With HTTP served on the PHP thread (see `inline_serve`), a streamed
+/// chunk is only written when the connection task runs. PHP code that blocks
+/// between chunks (`usleep()`, a blocking query) would hold every chunk until
+/// the response ends, so the stream yields to the connection task (which
+/// writes what is queued: the head, a chunk) before PHP runs again.
+async fn inline_flush_point() {
+    if crate::inline_serve::enabled() {
+        for _ in 0..INLINE_FLUSH_YIELDS {
+            tokio::task::yield_now().await;
+        }
+    }
+}
+
+/// Scheduler turns given to the connection task: one to receive the response
+/// head or chunk, one more to finish writing it.
+const INLINE_FLUSH_YIELDS: usize = 2;
+
 impl PhpResponseStream {
     async fn drive(self) {
         let Self {
@@ -3080,6 +3136,8 @@ impl PhpResponseStream {
             .response_bytes
             .fetch_add(initial_response_bytes as u64, Ordering::Relaxed);
         let mut sent_bytes = initial_response_bytes;
+        // The head reaches the client before PHP runs again (and may block).
+        inline_flush_point().await;
         let mut envelope = match php::resume_http(&request_id, &request_body, "null")
             .and_then(|json| parse_dispatch_envelope(&json))
         {
@@ -3163,6 +3221,8 @@ impl PhpResponseStream {
                                     {
                                         return;
                                     }
+                                    // The chunk is written before PHP produces the next one.
+                                    inline_flush_point().await;
                                     "null".to_owned()
                                 }
                                 Err(error) => serde_json::json!({ "error": error }).to_string(),

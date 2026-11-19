@@ -185,6 +185,26 @@ namespace Pam\Async {
             $bag->values[$key] = $value;
         }
 
+        /**
+         * Sets several keys with one lookup of the current Fiber's values.
+         *
+         * @param array<string, mixed> $values
+         */
+        public static function setMany(array $values): void
+        {
+            if (isset($values[''])) {
+                throw new \InvalidArgumentException('Context keys cannot be empty.');
+            }
+            $fiber = \Fiber::getCurrent();
+            if ($fiber === null) {
+                self::$rootValues = [...self::$rootValues, ...$values];
+                return;
+            }
+            self::$fiberValues ??= new \WeakMap();
+            $bag = self::$fiberValues[$fiber] ??= new FiberContextBag();
+            $bag->values = $bag->values === [] ? $values : [...$bag->values, ...$values];
+        }
+
         public static function get(string $key, mixed $default = null): mixed
         {
             $fiber = \Fiber::getCurrent();
@@ -374,6 +394,9 @@ namespace Pam\Async {
 
         public static function reset(?string $scope = null): void
         {
+            if (self::$futures === []) {
+                return;
+            }
             $scope ??= self::scope();
             if ((self::$futures[$scope] ?? []) === []) {
                 return;

@@ -251,6 +251,18 @@ Route::get('/stream', static function () {
     }, 200, ['content-type' => 'text/plain; charset=utf-8']);
 });
 
+Route::get('/stream-blocking', static function () {
+    // Blocks the PHP thread between chunks, like the readiness matrix's /_r/stream.
+    return response()->stream(static function (): void {
+        echo 'pam-blocking-first|';
+        if (ob_get_level() > 0) {
+            ob_flush();
+        }
+        flush();
+        usleep(700_000);
+        echo '|pam-blocking-last';
+    }, 200, ['content-type' => 'text/plain; charset=utf-8']);
+});
 Route::get('/stream-unbounded', static function () {
     return response()->stream(static function (): void {
         for ($chunk = 0; $chunk < 2_048; ++$chunk) {

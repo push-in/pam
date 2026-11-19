@@ -121,12 +121,13 @@ final class Container
         ];
     }
 
-    public function beginScope(): void
+    /** @param array<class-string|string, mixed> $entries scoped entries the scope starts with */
+    public function beginScope(array $entries = []): void
     {
         if ($this->currentScope() !== null) {
             throw new \LogicException('A Nimbus container scope is already active.');
         }
-        $this->replaceCurrentScope([]);
+        $this->replaceCurrentScope($entries);
     }
 
     public function endScope(): void

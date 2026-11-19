@@ -583,6 +583,14 @@ namespace Pam\Internal {
 
         private static ?bool $nativeReset = null;
 
+        /**
+         * Per-request settings read from the server options once:
+         * [leakDetectionSampleRate, leakThresholdBytes, gcCollectCyclesEvery, gcMemCachesEvery].
+         *
+         * @var array{int, int, int, int}|null
+         */
+        private static ?array $requestConfig = null;
+
         /** @var array<string, PendingHttpDispatch> */
         private static array $httpDispatches = [];
 
@@ -753,6 +761,7 @@ namespace Pam\Internal {
                 // own upload settings.
                 'uploads' => self::uploadLimits(),
             ];
+            self::$requestConfig = null;
         }
 
         /** @return array{enabled: bool, maxFileBytes: int, maxPostBytes: int, maxFiles: int, temporaryDirectory: string} */
@@ -817,6 +826,17 @@ namespace Pam\Internal {
                 throw new \InvalidArgumentException("{$key} must be a positive integer.");
             }
             return $value;
+        }
+
+        /** @return array{int, int, int, int} */
+        private static function requestConfig(): array
+        {
+            return self::$requestConfig ??= [
+                self::serverInteger('leakDetectionSampleRate', 1024),
+                self::serverInteger('leakThresholdBytes', 8 * 1024 * 1024),
+                self::serverInteger('gcCollectCyclesEvery', 256),
+                self::serverInteger('gcMemCachesEvery', 1024),
+            ];
         }
 
         private static function serverInteger(string $key, int $default): int
@@ -1028,12 +1048,14 @@ namespace Pam\Internal {
                 $requestId,
                 $server,
             ): string {
-                \Pam\Async\FiberContext::set('pam.request_id', $requestId);
                 $currentFiber = \Fiber::getCurrent();
                 if ($currentFiber === null) {
                     throw new \LogicException('The HTTP dispatcher must execute inside a Fiber.');
                 }
-                \Pam\Async\FiberContext::set('pam.native_root_fiber_id', spl_object_id($currentFiber));
+                \Pam\Async\FiberContext::setMany([
+                    'pam.request_id' => $requestId,
+                    'pam.native_root_fiber_id' => spl_object_id($currentFiber),
+                ]);
                 return self::executeHttp($method, $target, $headers, $body, $context, $server);
             });
             $dispatch = new PendingHttpDispatch($requestId, $fiber);
@@ -1166,7 +1188,7 @@ namespace Pam\Internal {
                     // lowercased the headers and built $_SERVER.
                     $path = is_string($context['path'] ?? null) ? $context['path'] : '/';
                     $queryString = is_string($server['QUERY_STRING'] ?? null) ? $server['QUERY_STRING'] : '';
-                    $multipart = is_string($context['multipartJson'] ?? null)
+                    $multipart = isset($context['multipartJson']) && is_string($context['multipartJson'])
                         ? json_decode($context['multipartJson'], true, 31, JSON_THROW_ON_ERROR)
                         : null;
                 } else {
@@ -1180,11 +1202,17 @@ namespace Pam\Internal {
                     $server = null;
                 }
                 $query = $queryString === '' ? [] : self::parseQuery($queryString);
-                [$cookies, $parsedBody, $files, $psrUploads, $temporaryUploads] = self::requestData(
-                    $headers,
-                    $body,
-                    is_array($multipart) ? $multipart : null,
-                );
+                if (!is_array($multipart) && !isset($headers['cookie']) && !isset($headers['content-type'])) {
+                    // Nothing to parse: what requestData() returns for such a request.
+                    $cookies = $files = $psrUploads = [];
+                    $parsedBody = null;
+                } else {
+                    [$cookies, $parsedBody, $files, $psrUploads, $temporaryUploads] = self::requestData(
+                        $headers,
+                        $body,
+                        is_array($multipart) ? $multipart : null,
+                    );
+                }
                 self::populateSuperglobals(
                     $method,
                     $target,
@@ -1197,18 +1225,18 @@ namespace Pam\Internal {
                     $server,
                     $queryString,
                 );
-                $leakSampleRate = self::serverInteger('leakDetectionSampleRate', 1024);
+                $leakSampleRate = (self::$requestConfig ?? self::requestConfig())[0];
                 $sampleLeaks = $leakSampleRate > 0
                     && count(self::$httpDispatches) === 1
                     && (self::$completedDispatches + 1) % $leakSampleRate === 0;
-                $fiberRequestId = \Pam\Async\FiberContext::get('pam.request_id', '');
-                $fiberRequestId = is_string($fiberRequestId) ? $fiberRequestId : '';
-                $profileRequestId = self::contextString(
-                    $context,
-                    'requestId',
-                    $fiberRequestId,
-                );
-                \Pam\Runtime\RequestScope::begin($profileRequestId, $sampleLeaks);
+                $profileRequestId = isset($context['requestId']) && is_string($context['requestId'])
+                    ? $context['requestId']
+                    : null;
+                if ($profileRequestId === null) {
+                    $fiberRequestId = \Pam\Async\FiberContext::get('pam.request_id', '');
+                    $profileRequestId = is_string($fiberRequestId) ? $fiberRequestId : '';
+                }
+                $requestScope = \Pam\Runtime\RequestScope::open($profileRequestId, $sampleLeaks);
                 \Pam\Diagnostics\Profiler::begin($profileRequestId);
                 if (\Pam\Diagnostics\Channel::enabled()) {
                     \Pam\Diagnostics\Channel::publish(
@@ -1216,9 +1244,11 @@ namespace Pam\Internal {
                         ['method' => $method, 'target' => $target],
                     );
                 }
-                $incomingSessionId = $cookies[session_name()] ?? null;
-                if (session_status() === PHP_SESSION_NONE && is_string($incomingSessionId)) {
-                    session_id($incomingSessionId);
+                if ($cookies !== []) {
+                    $incomingSessionId = $cookies[session_name()] ?? null;
+                    if (is_string($incomingSessionId) && session_status() === PHP_SESSION_NONE) {
+                        session_id($incomingSessionId);
+                    }
                 }
                 $request = self::$nativeHttpHandler === null
                     ? new Request($method, $path, $query, $headers, $body)
@@ -1307,9 +1337,9 @@ namespace Pam\Internal {
                         ['requestId' => $profileRequestId ?? null],
                     );
                 }
-                \Pam\Runtime\RequestScope::finish(
-                    self::serverInteger('leakThresholdBytes', 8 * 1024 * 1024),
-                );
+                if (isset($requestScope)) {
+                    $requestScope->end((self::$requestConfig ?? self::requestConfig())[1]);
+                }
                 while (ob_get_level() > $outputLevel) {
                     ob_end_clean();
                 }
@@ -1321,7 +1351,7 @@ namespace Pam\Internal {
                 // response code immediately before every logical request.
                 $_GET = $_POST = $_COOKIE = $_FILES = $_REQUEST = $_SERVER = [];
                 $_SESSION = [];
-                \Pam\Observability\Telemetry::endRequest();
+                \Pam\Observability\Telemetry::endRequestBeforeContextClear();
                 if (isset($profileRequestId)) {
                     \Pam\Diagnostics\Profiler::finish($profileRequestId);
                 }
@@ -1336,7 +1366,7 @@ namespace Pam\Internal {
                 foreach ($temporaryUploads as $temporaryUpload) {
                     @unlink($temporaryUpload);
                 }
-                unset($request, $response, $handler, $result, $psrResponse);
+                unset($request, $response, $handler, $result, $psrResponse, $requestScope);
             }
 
             return $serialized;
@@ -1522,10 +1552,12 @@ namespace Pam\Internal {
 
         private static function clearHttpEnvironment(): void
         {
-            if (session_status() === PHP_SESSION_ACTIVE) {
+            $sessionStatus = session_status();
+            if ($sessionStatus === PHP_SESSION_ACTIVE) {
                 session_write_close();
+                $sessionStatus = session_status();
             }
-            if (session_status() === PHP_SESSION_NONE && session_id() !== '') {
+            if ($sessionStatus === PHP_SESSION_NONE && session_id() !== '') {
                 session_id('');
             }
             $_GET = $_POST = $_COOKIE = $_FILES = $_REQUEST = $_SERVER = [];
@@ -2479,15 +2511,10 @@ namespace Pam\Internal {
         private static function collectRequestMemory(): void
         {
             self::$completedDispatches++;
-
-            $configuredCyclesEvery = self::$server['gcCollectCyclesEvery'] ?? 256;
-            $cyclesEvery = is_int($configuredCyclesEvery) ? $configuredCyclesEvery : 256;
+            [, , $cyclesEvery, $cachesEvery] = self::$requestConfig ?? self::requestConfig();
             if ($cyclesEvery > 0 && self::$completedDispatches % $cyclesEvery === 0) {
                 gc_collect_cycles();
             }
-
-            $configuredCachesEvery = self::$server['gcMemCachesEvery'] ?? 1024;
-            $cachesEvery = is_int($configuredCachesEvery) ? $configuredCachesEvery : 1024;
             if ($cachesEvery > 0 && self::$completedDispatches % $cachesEvery === 0) {
                 gc_mem_caches();
             }
