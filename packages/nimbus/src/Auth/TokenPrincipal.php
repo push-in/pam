@@ -24,6 +24,6 @@ final readonly class TokenPrincipal implements Principal
 
     public function can(string $ability): bool
     {
-        return in_array('*', $this->abilities, true) || in_array($ability, $this->abilities, true);
+        return Abilities::allows($this->abilities, $ability);
     }
 }

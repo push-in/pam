@@ -11,7 +11,7 @@ final readonly class BearerTokenAuthenticator implements Authenticator
     private \Closure $clock;
 
     public function __construct(
-        private HmacTokenCodec $tokens,
+        private AccessTokenVerifier $tokens,
         private ?TokenRevocationStore $revocations = null,
         ?callable $clock = null,
     ) {

@@ -85,13 +85,17 @@ final readonly class PendingRoute
         return $this->middleware(Middleware\AuthenticateMiddleware::class);
     }
 
-    /** Requires the authenticated principal to have the ability; implies `auth()`. */
-    public function can(string $ability): self
+    /**
+     * Requires the ability through the `Auth\Gate` (token abilities when no rule is defined);
+     * implies `auth()`. `$subject` names the route parameter (or entity class) checked by a policy:
+     * `can('update', 'product')`.
+     */
+    public function can(string $ability, ?string $subject = null): self
     {
         if (!$this->authenticates()) {
             $this->auth();
         }
-        return $this->middleware(new Middleware\AuthorizeMiddleware($this->container(), $ability));
+        return $this->middleware(new Middleware\AuthorizeMiddleware($this->container(), $ability, $subject));
     }
 
     /** Requires a URL signed by `Security\UrlSigner` (APP_KEY) that has not expired. */

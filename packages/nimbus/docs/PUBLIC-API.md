@@ -7,14 +7,48 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 ## Symbols
 
 - [`Nimbus\App`](#nimbusapp)
+- [`Nimbus\Auth\Abilities`](#nimbusauthabilities)
+- [`Nimbus\Auth\AccessTokenIssuer`](#nimbusauthaccesstokenissuer)
+- [`Nimbus\Auth\AccessTokenVerifier`](#nimbusauthaccesstokenverifier)
 - [`Nimbus\Auth\AuthContext`](#nimbusauthauthcontext)
+- [`Nimbus\Auth\AuthRoutes`](#nimbusauthauthroutes)
+- [`Nimbus\Auth\AuthTablesMigration`](#nimbusauthauthtablesmigration)
+- [`Nimbus\Auth\AuthUser`](#nimbusauthauthuser)
+- [`Nimbus\Auth\AuthUserProvider`](#nimbusauthauthuserprovider)
 - [`Nimbus\Auth\Authenticator`](#nimbusauthauthenticator)
 - [`Nimbus\Auth\BearerTokenAuthenticator`](#nimbusauthbearertokenauthenticator)
+- [`Nimbus\Auth\ChainAuthenticator`](#nimbusauthchainauthenticator)
+- [`Nimbus\Auth\DatabaseTokenRevocationStore`](#nimbusauthdatabasetokenrevocationstore)
+- [`Nimbus\Auth\EmailVerification`](#nimbusauthemailverification)
+- [`Nimbus\Auth\Gate`](#nimbusauthgate)
 - [`Nimbus\Auth\HmacTokenCodec`](#nimbusauthhmactokencodec)
+- [`Nimbus\Auth\JwtAuthenticator`](#nimbusauthjwtauthenticator)
+- [`Nimbus\Auth\JwtCodec`](#nimbusauthjwtcodec)
+- [`Nimbus\Auth\LoginTokenIssuer`](#nimbusauthlogintokenissuer)
 - [`Nimbus\Auth\MemoryTokenRevocationStore`](#nimbusauthmemorytokenrevocationstore)
+- [`Nimbus\Auth\NewPersonalAccessToken`](#nimbusauthnewpersonalaccesstoken)
+- [`Nimbus\Auth\NewRefreshToken`](#nimbusauthnewrefreshtoken)
+- [`Nimbus\Auth\OAuth\DatabaseOAuthStateStore`](#nimbusauthoauthdatabaseoauthstatestore)
+- [`Nimbus\Auth\OAuth\MemoryOAuthStateStore`](#nimbusauthoauthmemoryoauthstatestore)
+- [`Nimbus\Auth\OAuth\OAuthStateStore`](#nimbusauthoauthoauthstatestore)
+- [`Nimbus\Auth\OAuth\SocialIdentity`](#nimbusauthoauthsocialidentity)
+- [`Nimbus\Auth\OAuth\SocialLogin`](#nimbusauthoauthsociallogin)
+- [`Nimbus\Auth\OAuth\SocialUserResolver`](#nimbusauthoauthsocialuserresolver)
+- [`Nimbus\Auth\OneTimeTokens`](#nimbusauthonetimetokens)
+- [`Nimbus\Auth\PasswordResets`](#nimbusauthpasswordresets)
+- [`Nimbus\Auth\PersonalAccessToken`](#nimbusauthpersonalaccesstoken)
+- [`Nimbus\Auth\PersonalAccessTokenAuthenticator`](#nimbusauthpersonalaccesstokenauthenticator)
+- [`Nimbus\Auth\PersonalAccessTokens`](#nimbusauthpersonalaccesstokens)
 - [`Nimbus\Auth\Principal`](#nimbusauthprincipal)
+- [`Nimbus\Auth\RefreshToken`](#nimbusauthrefreshtoken)
+- [`Nimbus\Auth\RefreshTokenReusedException`](#nimbusauthrefreshtokenreusedexception)
+- [`Nimbus\Auth\RefreshTokens`](#nimbusauthrefreshtokens)
+- [`Nimbus\Auth\ResetPasswordNotification`](#nimbusauthresetpasswordnotification)
+- [`Nimbus\Auth\TokenPair`](#nimbusauthtokenpair)
+- [`Nimbus\Auth\TokenPairIssuer`](#nimbusauthtokenpairissuer)
 - [`Nimbus\Auth\TokenPrincipal`](#nimbusauthtokenprincipal)
 - [`Nimbus\Auth\TokenRevocationStore`](#nimbusauthtokenrevocationstore)
+- [`Nimbus\Auth\VerifyEmailNotification`](#nimbusauthverifyemailnotification)
 - [`Nimbus\Cache\CacheRecord`](#nimbuscachecacherecord)
 - [`Nimbus\Cache\MemoryResponseCacheStore`](#nimbuscachememoryresponsecachestore)
 - [`Nimbus\Cache\ResponseCacheStore`](#nimbuscacheresponsecachestore)
@@ -156,9 +190,11 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Redis\Connection`](#nimbusredisconnection)
 - [`Nimbus\Redis\PamConnection`](#nimbusredispamconnection)
 - [`Nimbus\Redis\RedisIdempotencyStore`](#nimbusredisredisidempotencystore)
+- [`Nimbus\Redis\RedisOAuthStateStore`](#nimbusredisredisoauthstatestore)
 - [`Nimbus\Redis\RedisPool`](#nimbusredisredispool)
 - [`Nimbus\Redis\RedisRateLimitStore`](#nimbusredisredisratelimitstore)
 - [`Nimbus\Redis\RedisResponseCacheStore`](#nimbusredisredisresponsecachestore)
+- [`Nimbus\Redis\RedisTokenRevocationStore`](#nimbusredisredistokenrevocationstore)
 - [`Nimbus\Resilience\CircuitBreaker`](#nimbusresiliencecircuitbreaker)
 - [`Nimbus\Resilience\CircuitOpenException`](#nimbusresiliencecircuitopenexception)
 - [`Nimbus\Resilience\CircuitState`](#nimbusresiliencecircuitstate)
@@ -231,6 +267,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public controller(string $controller, callable $routes): void`
 - `public delete(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public docs(string $path = "/docs", string $title = "Nimbus API", string $version = "1.0.0"): self`
+- `public gate(): Nimbus\Auth\Gate`
 - `public get(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public group(callable $routes): void`
 - `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
@@ -254,6 +291,37 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public transport(Pam\Contracts\Transport\TransportProviderInterface $provider): self`
 - `public transports(): array`
 
+## `Nimbus\Auth\Abilities`
+
+```php
+final readonly class Nimbus\Auth\Abilities
+```
+
+### Methods
+
+- `public static allows(array $granted, string $ability): bool`
+- `public static normalize(array $abilities): array`
+
+## `Nimbus\Auth\AccessTokenIssuer`
+
+```php
+abstract interface Nimbus\Auth\AccessTokenIssuer
+```
+
+### Methods
+
+- `public issue(string $subject, array $abilities, int $ttlSeconds = 900): string`
+
+## `Nimbus\Auth\AccessTokenVerifier`
+
+```php
+abstract interface Nimbus\Auth\AccessTokenVerifier
+```
+
+### Methods
+
+- `public verify(string $token): ?Nimbus\Auth\TokenPrincipal`
+
 ## `Nimbus\Auth\AuthContext`
 
 ```php
@@ -267,6 +335,58 @@ final readonly class Nimbus\Auth\AuthContext
 ### Methods
 
 - `public __construct(Nimbus\Auth\Principal $principal): mixed`
+
+## `Nimbus\Auth\AuthRoutes`
+
+```php
+final readonly class Nimbus\Auth\AuthRoutes
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Auth\PasswordResets $passwords = null, ?Nimbus\Auth\EmailVerification $verification = null, ?Nimbus\Auth\TokenPairIssuer $tokens = null, ?Nimbus\Auth\OAuth\SocialLogin $social = null, ?Nimbus\RateLimit\RateLimitStore $throttleStore = null, int $throttleBurst = 10, Nimbus\Http\ClientIpResolver $clientIp = {"@object":"Nimbus\\Http\\ClientIpResolver","properties":[]}): mixed`
+- `public forgotPassword(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public refresh(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public register(Nimbus\App $app, string $path = "/auth"): void`
+- `public resendVerification(Pam\Http\Request $request, Pam\Http\Response $response, Nimbus\Auth\Principal $principal): Pam\Http\Response`
+- `public resetPassword(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public revoke(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public verifyEmail(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+
+## `Nimbus\Auth\AuthTablesMigration`
+
+```php
+final class Nimbus\Auth\AuthTablesMigration extends Arcano\Migrations\Migration implements Arcano\Migrations\MigrationInterface
+```
+
+### Methods
+
+- `public down(): void`
+- `public up(): void`
+
+## `Nimbus\Auth\AuthUser`
+
+```php
+abstract interface Nimbus\Auth\AuthUser implements Nimbus\Notifications\Notifiable
+```
+
+### Methods
+
+- `public authIdentifier(): string`
+- `public hasVerifiedEmail(): bool`
+
+## `Nimbus\Auth\AuthUserProvider`
+
+```php
+abstract interface Nimbus\Auth\AuthUserProvider
+```
+
+### Methods
+
+- `public findByEmail(string $email): ?Nimbus\Auth\AuthUser`
+- `public findById(string $identifier): ?Nimbus\Auth\AuthUser`
+- `public markEmailAsVerified(Nimbus\Auth\AuthUser $user): void`
+- `public updatePassword(Nimbus\Auth\AuthUser $user, string $passwordHash): void`
 
 ## `Nimbus\Auth\Authenticator`
 
@@ -286,13 +406,75 @@ final readonly class Nimbus\Auth\BearerTokenAuthenticator implements Nimbus\Auth
 
 ### Methods
 
-- `public __construct(Nimbus\Auth\HmacTokenCodec $tokens, ?Nimbus\Auth\TokenRevocationStore $revocations = null, ?callable $clock = null): mixed`
+- `public __construct(Nimbus\Auth\AccessTokenVerifier $tokens, ?Nimbus\Auth\TokenRevocationStore $revocations = null, ?callable $clock = null): mixed`
 - `public authenticate(Pam\Http\Request $request): ?Nimbus\Auth\Principal`
+
+## `Nimbus\Auth\ChainAuthenticator`
+
+```php
+final readonly class Nimbus\Auth\ChainAuthenticator implements Nimbus\Auth\Authenticator
+```
+
+### Methods
+
+- `public __construct(Nimbus\Auth\Authenticator ...$authenticators): mixed`
+- `public authenticate(Pam\Http\Request $request): ?Nimbus\Auth\Principal`
+
+## `Nimbus\Auth\DatabaseTokenRevocationStore`
+
+```php
+final readonly class Nimbus\Auth\DatabaseTokenRevocationStore implements Nimbus\Auth\TokenRevocationStore
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, ?string $connection = null, ?Closure $clock = null): mixed`
+- `public isRevoked(string $tokenIdentifier, int $now): bool`
+- `public prune(): int`
+- `public revoke(string $tokenIdentifier, int $expiresAt): void`
+
+## `Nimbus\Auth\EmailVerification`
+
+```php
+final readonly class Nimbus\Auth\EmailVerification
+```
+
+### Constants
+
+- `PURPOSE = "email-verification"`
+
+### Methods
+
+- `public __construct(Nimbus\Auth\AuthUserProvider $users, Nimbus\Auth\OneTimeTokens $tokens, Nimbus\Notifications\NotificationDispatcher $notifications, string $verifyUrl, int $ttlSeconds = 86400, int $throttleSeconds = 60, ?Closure $notification = null): mixed`
+- `public send(Nimbus\Auth\AuthUser $user): bool`
+- `public users(): Nimbus\Auth\AuthUserProvider`
+- `public verify(string $token): bool`
+
+## `Nimbus\Auth\Gate`
+
+```php
+final class Nimbus\Auth\Gate
+```
+
+### Methods
+
+- `public __construct(Nimbus\Container\Container $container): mixed`
+- `public allows(string $ability, mixed ...$arguments): bool`
+- `public authorize(string $ability, mixed ...$arguments): void`
+- `public before(Closure $callback): self`
+- `public check(?Nimbus\Auth\Principal $principal, string $ability, array $arguments = []): bool`
+- `public define(string $ability, Closure $callback): self`
+- `public denies(string $ability, mixed ...$arguments): bool`
+- `public entityForParameter(string $parameter): ?string`
+- `public has(string $ability): bool`
+- `public policy(string $entity, string $policy): self`
+- `public policyFor(object|string $entity): ?object`
+- `public principal(): ?Nimbus\Auth\Principal`
 
 ## `Nimbus\Auth\HmacTokenCodec`
 
 ```php
-final readonly class Nimbus\Auth\HmacTokenCodec
+final readonly class Nimbus\Auth\HmacTokenCodec implements Nimbus\Auth\AccessTokenIssuer, Nimbus\Auth\AccessTokenVerifier
 ```
 
 ### Methods
@@ -300,6 +482,42 @@ final readonly class Nimbus\Auth\HmacTokenCodec
 - `public __construct(string $secret, string $issuer, string $audience, int $leewaySeconds = 5, ?callable $clock = null, string $keyIdentifier = "primary", array $verificationKeys = []): mixed`
 - `public issue(string $subject, array $abilities, int $ttlSeconds = 900): string`
 - `public verify(string $token): ?Nimbus\Auth\TokenPrincipal`
+
+## `Nimbus\Auth\JwtAuthenticator`
+
+```php
+final readonly class Nimbus\Auth\JwtAuthenticator implements Nimbus\Auth\Authenticator
+```
+
+### Methods
+
+- `public __construct(Nimbus\Auth\JwtCodec $codec, ?Nimbus\Auth\TokenRevocationStore $revocations = null): mixed`
+- `public authenticate(Pam\Http\Request $request): ?Nimbus\Auth\Principal`
+
+## `Nimbus\Auth\JwtCodec`
+
+```php
+final readonly class Nimbus\Auth\JwtCodec implements Nimbus\Auth\AccessTokenIssuer, Nimbus\Auth\AccessTokenVerifier
+```
+
+### Methods
+
+- `public static asymmetric(string $publicKey, ?string $privateKey, string $issuer, string $audience, string $algorithm = "RS256", string $keyIdentifier = "primary"): self`
+- `public static fromJwks(array $jwks, string $issuer, string $audience, ?string $defaultAlgorithm = null): self`
+- `public static fromKeySet(ArrayAccess $keys, string $issuer, string $audience): self`
+- `public static hmac(string $secret, string $issuer, string $audience, string $algorithm = "HS256", string $keyIdentifier = "primary"): self`
+- `public issue(string $subject, array $abilities, int $ttlSeconds = 900, array $claims = []): string`
+- `public verify(string $token): ?Nimbus\Auth\TokenPrincipal`
+
+## `Nimbus\Auth\LoginTokenIssuer`
+
+```php
+abstract interface Nimbus\Auth\LoginTokenIssuer
+```
+
+### Methods
+
+- `public issueLoginToken(string $subject, array $abilities = ["*"]): array`
 
 ## `Nimbus\Auth\MemoryTokenRevocationStore`
 
@@ -313,6 +531,200 @@ final class Nimbus\Auth\MemoryTokenRevocationStore implements Nimbus\Auth\TokenR
 - `public isRevoked(string $tokenIdentifier, int $now): bool`
 - `public revoke(string $tokenIdentifier, int $expiresAt): void`
 
+## `Nimbus\Auth\NewPersonalAccessToken`
+
+```php
+final readonly class Nimbus\Auth\NewPersonalAccessToken
+```
+
+### Properties
+
+- `public readonly Nimbus\Auth\PersonalAccessToken $accessToken`
+- `public readonly string $plainTextToken`
+
+### Methods
+
+- `public __construct(string $plainTextToken, Nimbus\Auth\PersonalAccessToken $accessToken): mixed`
+- `public toArray(): array`
+
+## `Nimbus\Auth\NewRefreshToken`
+
+```php
+final readonly class Nimbus\Auth\NewRefreshToken
+```
+
+### Properties
+
+- `public readonly string $plainTextToken`
+- `public readonly Nimbus\Auth\RefreshToken $token`
+
+### Methods
+
+- `public __construct(string $plainTextToken, Nimbus\Auth\RefreshToken $token): mixed`
+
+## `Nimbus\Auth\OAuth\DatabaseOAuthStateStore`
+
+```php
+final readonly class Nimbus\Auth\OAuth\DatabaseOAuthStateStore implements Nimbus\Auth\OAuth\OAuthStateStore
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, ?string $connection = null, ?Closure $clock = null): mixed`
+- `public prune(): int`
+- `public pull(string $state, int $now): ?array`
+- `public put(string $state, array $data, int $expiresAt): void`
+
+## `Nimbus\Auth\OAuth\MemoryOAuthStateStore`
+
+```php
+final class Nimbus\Auth\OAuth\MemoryOAuthStateStore implements Nimbus\Auth\OAuth\OAuthStateStore
+```
+
+### Methods
+
+- `public __construct(int $maximumEntries = 10000): mixed`
+- `public pull(string $state, int $now): ?array`
+- `public put(string $state, array $data, int $expiresAt): void`
+
+## `Nimbus\Auth\OAuth\OAuthStateStore`
+
+```php
+abstract interface Nimbus\Auth\OAuth\OAuthStateStore
+```
+
+### Methods
+
+- `public pull(string $state, int $now): ?array`
+- `public put(string $state, array $data, int $expiresAt): void`
+
+## `Nimbus\Auth\OAuth\SocialIdentity`
+
+```php
+final readonly class Nimbus\Auth\OAuth\SocialIdentity
+```
+
+### Properties
+
+- `public readonly ?string $email`
+- `public readonly bool $emailVerified`
+- `public readonly string $id`
+- `public readonly ?string $name`
+- `public readonly string $provider`
+- `public readonly array $raw`
+
+### Methods
+
+- `public __construct(string $provider, string $id, ?string $email, ?string $name, bool $emailVerified, array $raw): mixed`
+- `public static fromResourceOwner(string $provider, League\OAuth2\Client\Provider\ResourceOwnerInterface $owner): self`
+
+## `Nimbus\Auth\OAuth\SocialLogin`
+
+```php
+final readonly class Nimbus\Auth\OAuth\SocialLogin
+```
+
+### Methods
+
+- `public __construct(array $providers, Nimbus\Auth\OAuth\OAuthStateStore $states, Nimbus\Auth\OAuth\SocialUserResolver $users, Nimbus\Auth\LoginTokenIssuer $tokens, array $abilities = ["*"], int $stateTtlSeconds = 600, ?Closure $clock = null): mixed`
+- `public authorizationUrl(string $provider, array $scopes = []): array`
+- `public callback(string $provider, string $state, string $code): array`
+- `public providers(): array`
+- `public routes(Nimbus\App $app, string $path = "/auth/oauth", array $middleware = []): void`
+
+## `Nimbus\Auth\OAuth\SocialUserResolver`
+
+```php
+abstract interface Nimbus\Auth\OAuth\SocialUserResolver
+```
+
+### Methods
+
+- `public resolve(Nimbus\Auth\OAuth\SocialIdentity $identity): string`
+
+## `Nimbus\Auth\OneTimeTokens`
+
+```php
+final readonly class Nimbus\Auth\OneTimeTokens
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, ?string $connection = null, ?Closure $clock = null): mixed`
+- `public consume(string $purpose, string $token): ?string`
+- `public create(string $purpose, string $subject, int $ttlSeconds): string`
+- `public createdWithin(string $purpose, string $subject, int $seconds): bool`
+- `public invalidate(string $purpose, string $subject): int`
+- `public prune(): int`
+
+## `Nimbus\Auth\PasswordResets`
+
+```php
+final readonly class Nimbus\Auth\PasswordResets
+```
+
+### Constants
+
+- `PURPOSE = "password-reset"`
+
+### Methods
+
+- `public __construct(Nimbus\Auth\AuthUserProvider $users, Nimbus\Auth\OneTimeTokens $tokens, Nimbus\Notifications\NotificationDispatcher $notifications, string $resetUrl, int $ttlSeconds = 3600, int $throttleSeconds = 60, int $minimumPasswordLength = 8, ?Closure $notification = null, ?Closure $afterReset = null): mixed`
+- `public assertPassword(string $password): void`
+- `public reset(string $token, string $password): bool`
+- `public sendResetLink(string $email): bool`
+
+## `Nimbus\Auth\PersonalAccessToken`
+
+```php
+final readonly class Nimbus\Auth\PersonalAccessToken
+```
+
+### Properties
+
+- `public readonly array $abilities`
+- `public readonly int $createdAt`
+- `public readonly ?int $expiresAt`
+- `public readonly string $id`
+- `public readonly ?int $lastUsedAt`
+- `public readonly string $name`
+- `public readonly string $subject`
+
+### Methods
+
+- `public __construct(string $id, string $subject, string $name, array $abilities, ?int $lastUsedAt, ?int $expiresAt, int $createdAt): mixed`
+- `public can(string $ability): bool`
+- `public expired(int $now): bool`
+- `public toArray(): array`
+
+## `Nimbus\Auth\PersonalAccessTokenAuthenticator`
+
+```php
+final readonly class Nimbus\Auth\PersonalAccessTokenAuthenticator implements Nimbus\Auth\Authenticator
+```
+
+### Methods
+
+- `public __construct(Nimbus\Auth\PersonalAccessTokens $tokens): mixed`
+- `public authenticate(Pam\Http\Request $request): ?Nimbus\Auth\Principal`
+
+## `Nimbus\Auth\PersonalAccessTokens`
+
+```php
+final readonly class Nimbus\Auth\PersonalAccessTokens
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, string $prefix = "nbp_", int $lastUsedResolution = 60, ?string $connection = null, ?Closure $clock = null): mixed`
+- `public create(string $subject, string $name, array $abilities = ["*"], ?int $expiresAt = null): Nimbus\Auth\NewPersonalAccessToken`
+- `public find(string $plainTextToken): ?Nimbus\Auth\PersonalAccessToken`
+- `public prune(): int`
+- `public revoke(string $id, ?string $subject = null): bool`
+- `public revokeAll(string $subject): int`
+- `public tokensFor(string $subject): array`
+- `public use(string $plainTextToken): ?Nimbus\Auth\PersonalAccessToken`
+
 ## `Nimbus\Auth\Principal`
 
 ```php
@@ -323,6 +735,105 @@ abstract interface Nimbus\Auth\Principal
 
 - `public can(string $ability): bool`
 - `public identifier(): string`
+
+## `Nimbus\Auth\RefreshToken`
+
+```php
+final readonly class Nimbus\Auth\RefreshToken
+```
+
+### Properties
+
+- `public readonly array $abilities`
+- `public readonly int $expiresAt`
+- `public readonly string $familyId`
+- `public readonly string $id`
+- `public readonly string $subject`
+
+### Methods
+
+- `public __construct(string $id, string $familyId, string $subject, array $abilities, int $expiresAt): mixed`
+
+## `Nimbus\Auth\RefreshTokenReusedException`
+
+```php
+final class Nimbus\Auth\RefreshTokenReusedException extends RuntimeException implements Stringable, Throwable
+```
+
+### Properties
+
+- `public readonly string $familyId`
+- `public readonly string $subject`
+
+### Methods
+
+- `public __construct(string $familyId, string $subject): mixed`
+
+## `Nimbus\Auth\RefreshTokens`
+
+```php
+final readonly class Nimbus\Auth\RefreshTokens
+```
+
+### Methods
+
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, int $ttlSeconds = 2592000, string $prefix = "nbr_", ?string $connection = null, ?Closure $clock = null): mixed`
+- `public issue(string $subject, array $abilities = ["*"]): Nimbus\Auth\NewRefreshToken`
+- `public prune(int $graceSeconds = 86400): int`
+- `public revoke(string $plainTextToken): bool`
+- `public revokeAll(string $subject): int`
+- `public revokeFamily(string $familyId): int`
+- `public rotate(string $plainTextToken): ?Nimbus\Auth\NewRefreshToken`
+
+## `Nimbus\Auth\ResetPasswordNotification`
+
+```php
+final class Nimbus\Auth\ResetPasswordNotification extends Nimbus\Notifications\Notification
+```
+
+### Properties
+
+- `public readonly int $expiresInMinutes`
+- `public readonly string $url`
+
+### Methods
+
+- `public __construct(string $url, int $expiresInMinutes): mixed`
+- `public toMail(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Mail\MailMessage`
+- `public via(Nimbus\Notifications\Notifiable $notifiable): array`
+
+## `Nimbus\Auth\TokenPair`
+
+```php
+final readonly class Nimbus\Auth\TokenPair
+```
+
+### Properties
+
+- `public readonly array $abilities`
+- `public readonly string $accessToken`
+- `public readonly int $expiresIn`
+- `public readonly int $refreshExpiresAt`
+- `public readonly string $refreshToken`
+
+### Methods
+
+- `public __construct(string $accessToken, int $expiresIn, string $refreshToken, int $refreshExpiresAt, array $abilities): mixed`
+- `public toArray(): array`
+
+## `Nimbus\Auth\TokenPairIssuer`
+
+```php
+final readonly class Nimbus\Auth\TokenPairIssuer implements Nimbus\Auth\LoginTokenIssuer
+```
+
+### Methods
+
+- `public __construct(Nimbus\Auth\AccessTokenIssuer $accessTokens, Nimbus\Auth\RefreshTokens $refreshTokens, int $accessTtlSeconds = 900): mixed`
+- `public issue(string $subject, array $abilities = ["*"]): Nimbus\Auth\TokenPair`
+- `public issueLoginToken(string $subject, array $abilities = ["*"]): array`
+- `public refresh(string $refreshToken): Nimbus\Auth\TokenPair`
+- `public revoke(string $refreshToken): bool`
 
 ## `Nimbus\Auth\TokenPrincipal`
 
@@ -351,6 +862,23 @@ abstract interface Nimbus\Auth\TokenRevocationStore
 
 - `public isRevoked(string $tokenIdentifier, int $now): bool`
 - `public revoke(string $tokenIdentifier, int $expiresAt): void`
+
+## `Nimbus\Auth\VerifyEmailNotification`
+
+```php
+final class Nimbus\Auth\VerifyEmailNotification extends Nimbus\Notifications\Notification
+```
+
+### Properties
+
+- `public readonly int $expiresInMinutes`
+- `public readonly string $url`
+
+### Methods
+
+- `public __construct(string $url, int $expiresInMinutes): mixed`
+- `public toMail(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Mail\MailMessage`
+- `public via(Nimbus\Notifications\Notifiable $notifiable): array`
 
 ## `Nimbus\Cache\CacheRecord`
 
@@ -558,6 +1086,7 @@ final class Nimbus\Container\Container
 - `public get(string $id): mixed`
 - `public has(string $id): bool`
 - `public instance(string $id, mixed $instance): self`
+- `public resolveRouteBinding(string $class, string $value): object`
 - `public scoped(string $id, callable|null|string $factory = null): self`
 - `public scopedInstance(string $id, mixed $instance): self`
 - `public scopedValue(string $id): mixed`
@@ -1485,7 +2014,7 @@ final readonly class Nimbus\Middleware\AuthorizeMiddleware implements Pam\Contra
 
 ### Methods
 
-- `public __construct(Nimbus\Container\Container $container, string $ability): mixed`
+- `public __construct(Nimbus\Container\Container $container, string $ability, ?string $subject = null): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Middleware\CorsMiddleware`
@@ -2342,7 +2871,7 @@ final readonly class Nimbus\PendingRoute
 
 - `public __construct(Nimbus\App $app, Nimbus\Router $router, Nimbus\Route $route): mixed`
 - `public auth(): self`
-- `public can(string $ability): self`
+- `public can(string $ability, ?string $subject = null): self`
 - `public definition(): Nimbus\Route`
 - `public delete(string $path, array|callable|string $handler): self`
 - `public get(string $path, array|callable|string $handler): self`
@@ -2504,6 +3033,18 @@ final readonly class Nimbus\Redis\RedisIdempotencyStore implements Nimbus\Idempo
 - `public get(string $key, int $now): ?Nimbus\Idempotency\IdempotencyRecord`
 - `public put(string $key, Nimbus\Idempotency\IdempotencyRecord $record): void`
 
+## `Nimbus\Redis\RedisOAuthStateStore`
+
+```php
+final readonly class Nimbus\Redis\RedisOAuthStateStore implements Nimbus\Auth\OAuth\OAuthStateStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:oauth:"): mixed`
+- `public pull(string $state, int $now): ?array`
+- `public put(string $state, array $data, int $expiresAt): void`
+
 ## `Nimbus\Redis\RedisPool`
 
 ```php
@@ -2539,6 +3080,18 @@ final readonly class Nimbus\Redis\RedisResponseCacheStore implements Nimbus\Cach
 - `public forget(string $key): void`
 - `public get(string $key, int $now): ?Nimbus\Cache\CacheRecord`
 - `public put(string $key, Nimbus\Cache\CacheRecord $record): void`
+
+## `Nimbus\Redis\RedisTokenRevocationStore`
+
+```php
+final readonly class Nimbus\Redis\RedisTokenRevocationStore implements Nimbus\Auth\TokenRevocationStore
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:revoked:"): mixed`
+- `public isRevoked(string $tokenIdentifier, int $now): bool`
+- `public revoke(string $tokenIdentifier, int $expiresAt): void`
 
 ## `Nimbus\Resilience\CircuitBreaker`
 
@@ -2670,7 +3223,7 @@ final class Nimbus\RouteRegistrar
 - `public __construct(Nimbus\App $app, string $prefix = ""): mixed`
 - `public apiResource(string $path, string $controller): void`
 - `public auth(): self`
-- `public can(string $ability): self`
+- `public can(string $ability, ?string $subject = null): self`
 - `public controller(string $controller, callable $routes): void`
 - `public delete(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public get(string $path, array|callable|string $handler): Nimbus\PendingRoute`
