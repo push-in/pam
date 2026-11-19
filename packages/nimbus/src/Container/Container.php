@@ -148,6 +148,19 @@ final class Container
         return $reflection->invokeArgs($callable[0], $arguments);
     }
 
+    /**
+     * Calls a closure, injecting route parameters by name, the provided objects by type
+     * and everything else from the container.
+     *
+     * @param array<string, mixed> $named
+     * @param list<mixed> $provided
+     */
+    public function callFunction(\Closure $function, array $named = [], array $provided = []): mixed
+    {
+        $reflection = new \ReflectionFunction($function);
+        return $function(...$this->resolveParameters($reflection->getParameters(), $named, $provided));
+    }
+
     /** @param class-string $class */
     private function build(string $class): object
     {

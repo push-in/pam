@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Nimbus;
 
 use Nimbus\Container\Container;
+use Pam\Http\Request;
+use Pam\Http\Response;
 
 final readonly class HandlerResolver
 {
@@ -36,6 +38,35 @@ final readonly class HandlerResolver
             }
             return (new ControllerHandler($this->container, $handler, '__invoke'))(...);
         }
-        return \Closure::fromCallable($handler);
+        $closure = \Closure::fromCallable($handler);
+        if (self::takesRequestAndResponse($closure)) {
+            return $closure;
+        }
+        $container = $this->container;
+        return static fn (Request $request, Response $response): mixed => $container->callFunction(
+            $closure,
+            $request->routeParameters(),
+            [$request, $response],
+        );
+    }
+
+    /** Closures declaring only `($request, $response)` skip the container. */
+    private static function takesRequestAndResponse(\Closure $closure): bool
+    {
+        $parameters = (new \ReflectionFunction($closure))->getParameters();
+        if (count($parameters) > 2) {
+            return false;
+        }
+        foreach ($parameters as $position => $parameter) {
+            $type = $parameter->getType();
+            if ($type === null || ($type instanceof \ReflectionNamedType && $type->getName() === 'mixed')) {
+                continue;
+            }
+            $expected = $position === 0 ? Request::class : Response::class;
+            if (!$type instanceof \ReflectionNamedType || $type->getName() !== $expected) {
+                return false;
+            }
+        }
+        return true;
     }
 }

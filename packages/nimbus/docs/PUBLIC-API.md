@@ -93,6 +93,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\OpenApi\CompatibilityChecker`](#nimbusopenapicompatibilitychecker)
 - [`Nimbus\OpenApi\OpenApiGenerator`](#nimbusopenapiopenapigenerator)
 - [`Nimbus\PackageDiscovery`](#nimbuspackagediscovery)
+- [`Nimbus\Pagination\Page`](#nimbuspaginationpage)
+- [`Nimbus\Pagination\Paginator`](#nimbuspaginationpaginator)
 - [`Nimbus\PendingRoute`](#nimbuspendingroute)
 - [`Nimbus\Pipeline`](#nimbuspipeline)
 - [`Nimbus\Profiler\MemoryProfiler`](#nimbusprofilermemoryprofiler)
@@ -119,9 +121,18 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Testing\TestClient`](#nimbustestingtestclient)
 - [`Nimbus\Testing\TestResponse`](#nimbustestingtestresponse)
 - [`Nimbus\Transactions\TransactionManager`](#nimbustransactionstransactionmanager)
+- [`Nimbus\Validation\Attributes\Email`](#nimbusvalidationattributesemail)
+- [`Nimbus\Validation\Attributes\Field`](#nimbusvalidationattributesfield)
+- [`Nimbus\Validation\Attributes\In`](#nimbusvalidationattributesin)
+- [`Nimbus\Validation\Attributes\Max`](#nimbusvalidationattributesmax)
+- [`Nimbus\Validation\Attributes\Min`](#nimbusvalidationattributesmin)
+- [`Nimbus\Validation\Attributes\Regex`](#nimbusvalidationattributesregex)
+- [`Nimbus\Validation\Attributes\Url`](#nimbusvalidationattributesurl)
+- [`Nimbus\Validation\Attributes\Uuid`](#nimbusvalidationattributesuuid)
 - [`Nimbus\Validation\DtoHydrator`](#nimbusvalidationdtohydrator)
 - [`Nimbus\Validation\EnumRule`](#nimbusvalidationenumrule)
 - [`Nimbus\Validation\FormRequest`](#nimbusvalidationformrequest)
+- [`Nimbus\Validation\Input`](#nimbusvalidationinput)
 - [`Nimbus\Validation\Rule`](#nimbusvalidationrule)
 - [`Nimbus\Validation\ValidationException`](#nimbusvalidationvalidationexception)
 - [`Nimbus\Validation\ValidationRule`](#nimbusvalidationvalidationrule)
@@ -458,6 +469,7 @@ final class Nimbus\Container\Container
 - `public bind(string $id, callable|null|string $factory = null): self`
 - `public bindRoute(string $class, callable $resolver): self`
 - `public call(array $callable, array $named = [], array $provided = []): mixed`
+- `public callFunction(Closure $function, array $named = [], array $provided = []): mixed`
 - `public diagnostics(): array`
 - `public endScope(): void`
 - `public get(string $id): mixed`
@@ -835,7 +847,7 @@ abstract readonly class Nimbus\Http\JsonResource implements Nimbus\Http\Responsa
 ### Methods
 
 - `public __construct(mixed $resource, int $status = 200): mixed`
-- `public static collection(iterable $resources): Nimbus\Http\ResourceCollection`
+- `public static collection(Nimbus\Pagination\Page|Traversable|array $resources): Nimbus\Http\ResourceCollection`
 - `public toArray(Pam\Http\Request $request): array`
 - `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 
@@ -888,7 +900,7 @@ final readonly class Nimbus\Http\ResourceCollection implements Nimbus\Http\Respo
 
 ### Methods
 
-- `public __construct(array $resources, array $meta = []): mixed`
+- `public __construct(array $resources, array $meta = [], array $links = []): mixed`
 - `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 - `public withMeta(array $meta): self`
 
@@ -1458,6 +1470,37 @@ final class Nimbus\PackageDiscovery
 
 - `public static providers(string $projectRoot): array`
 
+## `Nimbus\Pagination\Page`
+
+```php
+final readonly class Nimbus\Pagination\Page
+```
+
+### Properties
+
+- `public readonly array $items`
+- `public readonly array $links`
+- `public readonly array $meta`
+
+### Methods
+
+- `public __construct(array $items, array $meta, array $links): mixed`
+
+## `Nimbus\Pagination\Paginator`
+
+```php
+final readonly class Nimbus\Pagination\Paginator
+```
+
+### Constants
+
+- `MAX_PER_PAGE = 100`
+
+### Methods
+
+- `public static cursor(Arcano\ORM\Select $select, Pam\Http\Request $request, int $perPage = 20, string $column = "id", string $property = "id"): Nimbus\Pagination\Page`
+- `public static paginate(Arcano\ORM\Select $select, Pam\Http\Request $request, int $perPage = 20): Nimbus\Pagination\Page`
+
 ## `Nimbus\PendingRoute`
 
 ```php
@@ -1898,6 +1941,110 @@ abstract interface Nimbus\Transactions\TransactionManager
 
 - `public transaction(callable $operation): mixed`
 
+## `Nimbus\Validation\Attributes\Email`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Email implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Field`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Field
+```
+
+### Properties
+
+- `public readonly string $name`
+
+### Methods
+
+- `public __construct(string $name): mixed`
+
+## `Nimbus\Validation\Attributes\In`
+
+```php
+final readonly class Nimbus\Validation\Attributes\In implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly array $values`
+
+### Methods
+
+- `public __construct(bool|float|int|string ...$values): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Max`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Max implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly float|int $value`
+
+### Methods
+
+- `public __construct(float|int $value): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Min`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Min implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly float|int $value`
+
+### Methods
+
+- `public __construct(float|int $value): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Regex`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Regex implements Nimbus\Validation\ValidationRule
+```
+
+### Properties
+
+- `public readonly string $pattern`
+
+### Methods
+
+- `public __construct(string $pattern): mixed`
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Url`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Url implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Attributes\Uuid`
+
+```php
+final readonly class Nimbus\Validation\Attributes\Uuid implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public validate(string $field, mixed $value): ?string`
+
 ## `Nimbus\Validation\DtoHydrator`
 
 ```php
@@ -1933,6 +2080,20 @@ abstract class Nimbus\Validation\FormRequest
 - `public input(string $key, mixed $default = null): mixed`
 - `public rules(): array`
 - `public validated(): array`
+
+## `Nimbus\Validation\Input`
+
+```php
+abstract class Nimbus\Validation\Input
+```
+
+### Methods
+
+- `public __construct(Pam\Http\Request $request): mixed`
+- `public authorize(Pam\Http\Request $request): bool`
+- `public static from(array $data): static`
+- `public static nested(array $data, string $prefix, array &$errors): static`
+- `public toArray(): array`
 
 ## `Nimbus\Validation\Rule`
 
