@@ -1,5 +1,18 @@
 # Changelog
 
+## 2.2.25 - 2026-11-19
+
+HTTP/1 runs on the PHP worker thread. Nimbus on PAM, 16 workers against Postgres, against Laravel
+with FrankenPHP: `/ping` 23.2x, `/me` 15.5x, `/products/{id}` 13.6x, `POST /products` 12.9x, a
+numbered page 10.0x.
+
+- Plain HTTP/1 connections are served on the PHP thread by default, with no hop to an I/O thread.
+  `PAM_IO_THREADS=1..16` restores the previous mode; TLS keeps it. Streamed responses and SSE flush
+  each chunk before PHP runs again.
+- Request deadlines still answer 504 and recycle the worker, through a watchdog thread instead of a
+  timer per request.
+- `$_SERVER` and header keys are interned once per process.
+
 ## 2.2.24 - 2026-11-19
 
 Lower fixed cost per HTTP request. Nimbus on PAM, 16 workers against Postgres: `/ping` 76k to 139k
