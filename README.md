@@ -128,6 +128,16 @@ cd my-api && pam dev
 
 </details>
 
+<details>
+<summary><b>Web app with login</b></summary>
+
+```sh
+pam init my-app --template web
+cd my-app && pam composer install && pam exec bin/migrate && pam dev
+```
+
+</details>
+
 ```html
 <Column class="card">
   <Text class="title">Hello, {{ $name }}</Text>

@@ -72,6 +72,24 @@
                 }
             }
         },
+        "deploy": {
+            "type": "object",
+            "description": "Defaults of `pam deploy:remote`; command-line options win.",
+            "additionalProperties": false,
+            "properties": {
+                "host": {"type": "string", "pattern": "^[A-Za-z0-9@._\\[\\]:][A-Za-z0-9@._\\[\\]:-]{0,254}$"},
+                "path": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9/._+@][A-Za-z0-9/._+@-]{0,511}$",
+                    "description": "Absolute, or relative to the remote home; defaults to pam-apps/<name>."
+                },
+                "name": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+                "workers": {"type": "integer", "minimum": 1, "maximum": 65535},
+                "healthCheckUrl": {"type": "string", "pattern": "^http://"},
+                "keep": {"type": "integer", "minimum": 1, "maximum": 100, "description": "Releases kept on the server (default 5)."},
+                "pam": {"type": "string", "minLength": 1, "description": "The pam executable on the server (default pam)."}
+            }
+        },
         "commands": {
             "type": "object",
             "propertyNames": {"pattern": "^[a-z0-9][a-z0-9:_-]{0,95}$"},

@@ -4163,6 +4163,94 @@ fn initializes_a_project_without_overwriting_files() {
 }
 
 #[test]
+fn initializes_the_web_starter_with_login_views_and_tests() {
+    let directory = temporary_path("init-web");
+    let output = run_pam(&[
+        "init",
+        directory.to_str().unwrap(),
+        "--template",
+        "web",
+        "--no-install",
+        "--no-interaction",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    for path in [
+        "index.php",
+        "routes.php",
+        "bootstrap/app.php",
+        "bin/migrate",
+        "app/Models/User.php",
+        "app/Controllers/LoginController.php",
+        "app/Controllers/RegisterController.php",
+        "app/Controllers/PasswordResetController.php",
+        "resources/views/components/layout.nim.php",
+        "resources/views/auth/login.nim.php",
+        "resources/views/auth/register.nim.php",
+        "resources/views/auth/forgot-password.nim.php",
+        "resources/views/dashboard.nim.php",
+        "lang/pt_BR/auth.php",
+        "lang/en/auth.php",
+        "tests/Feature/AuthenticationTest.php",
+        "tests/Feature/RegistrationTest.php",
+        "phpunit.xml",
+        ".env",
+    ] {
+        assert!(directory.join(path).is_file(), "{path} is missing");
+    }
+    let migrations = fs::read_dir(directory.join("database/migrations"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(migrations.len(), 1);
+    assert!(migrations[0].ends_with("_0_0_default_create_users.php"));
+    let manifest: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
+            .unwrap();
+    assert_eq!(manifest["require"]["pushinbr/nimbus"], "^0.3");
+    assert_eq!(manifest["require"]["symfony/translation"], "^7.3");
+    assert_eq!(manifest["require"]["symfony/mailer"], "^7.3");
+    let environment = fs::read_to_string(directory.join(".env")).unwrap();
+    assert!(environment.contains("APP_KEY=base64:"));
+    let project: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(directory.join("pam.json")).unwrap()).unwrap();
+    assert_eq!(project["type"], 1);
+    let layout =
+        fs::read_to_string(directory.join("resources/views/components/layout.nim.php")).unwrap();
+    assert!(!layout.contains("radial-gradient") && !layout.contains("conic-gradient"));
+
+    let socket = run_pam(&[
+        "init",
+        temporary_path("init-web-socket").to_str().unwrap(),
+        "--template",
+        "web",
+        "--socket",
+        "--no-install",
+    ]);
+    assert!(!socket.status.success());
+    let unknown = run_pam(&["init", "x", "--template", "webapp"]);
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("raw, api, web, laravel"));
+
+    let remote = run_pam_in(
+        &directory,
+        &["deploy:remote", "deploy@app.example.com", "--dry-run"],
+    );
+    assert!(
+        remote.status.success(),
+        "{}",
+        String::from_utf8_lossy(&remote.stderr)
+    );
+    let plan = String::from_utf8_lossy(&remote.stdout);
+    assert!(plan.contains("--exclude=/vendor/"));
+    assert!(plan.contains("composer install --no-dev --optimize-autoloader"));
+    assert!(plan.contains("exec bin/migrate"));
+    fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
 fn initializes_raw_and_socket_presets_without_composer() {
     let raw = temporary_path("init-raw");
     let output = run_pam(&[

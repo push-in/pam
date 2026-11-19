@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit bootstrap="vendor/autoload.php" colors="true" cacheDirectory=".pam/phpunit-cache">
+    <testsuites>
+        <testsuite name="Pam application">
+            <directory>tests</directory>
+        </testsuite>
+    </testsuites>
+    <php>
+        <env name="DB_CONNECTION" value="sqlite" force="true"/>
+        <env name="DB_DATABASE" value=":memory:" force="true"/>
+        <env name="SESSION_DRIVER" value="memory" force="true"/>
+        <env name="APP_LOCALE" value="pt_BR" force="true"/>
+        <env name="APP_URL" value="http://localhost" force="true"/>
+        <env name="APP_KEY" value="base64:bmltYnVzLXdlYi1zdGFydGVyLXRlc3Qta2V5LTMyYnk=" force="true"/>
+        <env name="MAILER_DSN" value="null://null" force="true"/>
+        <env name="MAIL_FROM_ADDRESS" value="test@example.com" force="true"/>
+    </php>
+</phpunit>

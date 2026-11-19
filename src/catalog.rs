@@ -230,6 +230,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Inspect bounded deployment history",
             "Ship",
         ),
+        command(
+            "deploy:remote",
+            "Ship the app to a server over ssh and activate it",
+            "Ship",
+        ),
         command("rollback", "Restore a previous healthy release", "Ship"),
         command("traffic:start", "Start a weighted release ingress", "Ship"),
         command("traffic:set", "Change candidate traffic atomically", "Ship"),
@@ -268,6 +273,11 @@ pub static COMMANDS: LazyLock<Vec<CommandSpec>> = LazyLock::new(|| {
             "Quality",
         ),
         command("test", "Run Pest or PHPUnit inside PAM", "Quality"),
+        command(
+            "views:check",
+            "Compile every Nimbus view and report file:line errors",
+            "Quality",
+        ),
         command("benchmark", "Run the contextual benchmark", "Quality"),
         command("profile", "Capture contextual performance data", "Quality"),
         command("build", "Create a release build", "Ship"),
@@ -367,6 +377,7 @@ pub fn package_can_override(name: &str) -> bool {
             | "make:resource"
             | "make:screen"
             | "make:test"
+            | "make:view"
             | "package"
             | "profile"
             | "release"

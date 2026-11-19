@@ -5,6 +5,18 @@ use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub fn run(command: &str, root: &Path, arguments: Vec<OsString>) -> Result<u8, String> {
+    if command == "make:view" {
+        let name = parse_view_name(arguments)?;
+        let path = root
+            .join("resources/views")
+            .join(format!("{}.nim.php", name.replace('.', "/")));
+        let layout = root
+            .join("resources/views/components/layout.nim.php")
+            .is_file();
+        write_new(&path, view(&name, layout).as_bytes())?;
+        println!("Created {}", path.display());
+        return Ok(0);
+    }
     let name = parse_name(arguments)?;
     let (directory, file_name, source) = match command {
         "make:model" => ("app/Models", format!("{name}.php"), model(&name)),
@@ -65,6 +77,63 @@ fn parse_name(arguments: Vec<OsString>) -> Result<String, String> {
         );
     }
     Ok(name)
+}
+
+/// `products.index` or `products/index`: lowercase segments of letters, digits, `-` and `_`.
+fn parse_view_name(arguments: Vec<OsString>) -> Result<String, String> {
+    let mut arguments = arguments.into_iter();
+    let name = arguments
+        .next()
+        .ok_or_else(|| "make:view requires a view name such as products.index".to_owned())?
+        .into_string()
+        .map_err(|_| "view names must be valid UTF-8".to_owned())?;
+    if arguments.next().is_some() {
+        return Err("make:view accepts exactly one name".to_owned());
+    }
+    let name = name.replace('/', ".");
+    let valid = name.len() <= 120
+        && name.split('.').all(|segment| {
+            !segment.is_empty()
+                && segment
+                    .bytes()
+                    .next()
+                    .is_some_and(|byte| byte.is_ascii_lowercase())
+                && segment.bytes().all(|byte| {
+                    byte.is_ascii_lowercase()
+                        || byte.is_ascii_digit()
+                        || byte == b'-'
+                        || byte == b'_'
+                })
+        });
+    if !valid {
+        return Err(
+            "view names are lowercase segments separated by dots, such as products.index"
+                .to_owned(),
+        );
+    }
+    Ok(name)
+}
+
+fn view(name: &str, layout: bool) -> String {
+    let title = name
+        .rsplit('.')
+        .next()
+        .unwrap_or(name)
+        .replace(['-', '_'], " ");
+    let mut characters = title.chars();
+    let title = characters
+        .next()
+        .map(|first| first.to_uppercase().chain(characters).collect::<String>())
+        .unwrap_or_default();
+    if layout {
+        format!(
+            "<x-layout title=\"{title}\">\n    <section class=\"card wide\">\n        <h1>{title}</h1>\n    </section>\n</x-layout>\n"
+        )
+    } else {
+        format!(
+            "<!DOCTYPE html>\n<html>\n<head>\n    <meta charset=\"utf-8\">\n    <title>{title}</title>\n</head>\n<body>\n    <h1>{title}</h1>\n</body>\n</html>\n"
+        )
+    }
 }
 
 fn write_new(path: &Path, bytes: &[u8]) -> Result<(), String> {
@@ -171,7 +240,7 @@ fn migration(name: &str, timestamp: u64) -> String {
 }
 
 /// `YYYYMMDD.HHMMSS` in UTC, the prefix Arcano migrations are ordered by.
-fn migration_date(timestamp: u64) -> String {
+pub(crate) fn migration_date(timestamp: u64) -> String {
     let days = (timestamp / 86_400) as i64;
     let seconds = timestamp % 86_400;
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
@@ -262,5 +331,18 @@ mod tests {
     #[test]
     fn rejects_path_traversal() {
         assert!(parse_name(vec![OsString::from("../Secret")]).is_err());
+        assert!(parse_view_name(vec![OsString::from("../secret")]).is_err());
+        assert!(parse_view_name(vec![OsString::from("pages..index")]).is_err());
+        assert!(parse_view_name(vec![OsString::from("Pages.index")]).is_err());
+    }
+
+    #[test]
+    fn generates_views_inside_the_layout_when_the_app_has_one() {
+        assert_eq!(
+            parse_view_name(vec![OsString::from("orders/order-items")]).unwrap(),
+            "orders.order-items"
+        );
+        assert!(view("orders.order-items", true).starts_with("<x-layout title=\"Order items\">"));
+        assert!(view("orders.index", false).contains("<title>Index</title>"));
     }
 }

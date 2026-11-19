@@ -1,0 +1,54 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Usage: bin/migrate [migrate|rollback [steps]|status|cache|seed]
+// `pam deploy:remote` runs `bin/migrate` on every release.
+
+use Database\Seeders\DatabaseSeeder;
+use Nimbus\Database\ArcanoMigrationManager;
+use Nimbus\Database\ArcanoSchemaCompiler;
+use Nimbus\Database\SeederRunner;
+
+$root = dirname(__DIR__);
+if (!is_file($root . '/vendor/autoload.php')) {
+    fwrite(STDERR, "Composer dependencies are missing; run pam composer install.\n");
+    exit(1);
+}
+require $root . '/vendor/autoload.php';
+
+$command = $argv[1] ?? 'migrate';
+if ($command === 'cache') {
+    // Production reads the entity schema from this cache instead of rescanning app/Models.
+    (new ArcanoSchemaCompiler($root . '/app/Models', $root . '/storage/cache/arcano-schema.php'))->clear();
+}
+
+/** @var \Nimbus\App $app */
+$app = require $root . '/bootstrap/app.php';
+$app->boot();
+$migrations = $app->container()->get(ArcanoMigrationManager::class);
+if (!$migrations instanceof ArcanoMigrationManager) {
+    throw new LogicException('The migration manager binding is invalid.');
+}
+
+$output = match ($command) {
+    'migrate' => ($done = $migrations->migrate()) === []
+        ? 'Database is already up to date.'
+        : 'Migrated: ' . implode(', ', $done),
+    'rollback' => ($done = $migrations->rollback(max(1, (int) ($argv[2] ?? 1)))) === []
+        ? 'Nothing to roll back.'
+        : 'Rolled back: ' . implode(', ', $done),
+    'status' => implode("\n", array_map(
+        static fn (array $migration): string => sprintf(
+            '%-60s %s',
+            $migration['name'],
+            $migration['executed_at']?->format('Y-m-d H:i:s') ?? 'pending',
+        ),
+        $migrations->status(),
+    )) ?: 'No migrations.',
+    'cache' => 'Schema cache written to storage/cache/arcano-schema.php.',
+    'seed' => 'Seeded: ' . implode(', ', (new SeederRunner($app))->run(DatabaseSeeder::class)),
+    default => throw new InvalidArgumentException("Unknown command {$command}; use migrate, rollback [steps], status, cache or seed."),
+};
+fwrite(STDOUT, $output . "\n");
