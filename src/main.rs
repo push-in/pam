@@ -37,6 +37,7 @@ mod editor;
 mod extension_profile;
 mod http_serve;
 mod ingress;
+mod inline_serve;
 #[cfg(target_os = "linux")]
 mod listener_registry;
 mod manager_dashboard;

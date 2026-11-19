@@ -364,6 +364,7 @@ pub async fn accept_loop<P, S, H, F, T>(
 {
     let serve = |stream: TcpStream, remote: SocketAddr| {
         let _ = stream.set_nodelay(true);
+        let fd = std::os::fd::AsRawFd::as_raw_fd(&stream);
         let Some(stream) = place(stream) else {
             return;
         };
@@ -371,8 +372,10 @@ pub async fn accept_loop<P, S, H, F, T>(
         let handshake = handshake.clone();
         let app = app.clone();
         let drain = drain.clone();
+        let registration = crate::inline_serve::Registration::new(remote, fd);
         tokio::spawn(async move {
             let _active = active;
+            let _registration = registration;
             if let Ok(io) = handshake(stream).await {
                 serve_connection(io, remote, app, drain, http).await;
             }

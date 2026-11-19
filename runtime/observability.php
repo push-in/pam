@@ -20,8 +20,10 @@ namespace Pam\Observability {
 
         public static function beginRequest(string $requestId, string $traceparent): void
         {
-            \Pam\Async\FiberContext::set(self::REQUEST_ID, $requestId);
-            \Pam\Async\FiberContext::set(self::TRACEPARENT, $traceparent);
+            \Pam\Async\FiberContext::setMany([
+                self::REQUEST_ID => $requestId,
+                self::TRACEPARENT => $traceparent,
+            ]);
             self::$openTelemetryAvailable ??= class_exists(
                 \OpenTelemetry\API\Trace\Propagation\TraceContextPropagator::class,
             );
@@ -33,6 +35,19 @@ namespace Pam\Observability {
                     )
                     ->activate();
                 \Pam\Async\FiberContext::set(self::REQUEST_SCOPE, $scope);
+            }
+        }
+
+        /**
+         * endRequest() for a caller that clears the Fiber's context right
+         * after: only the OpenTelemetry scope needs detaching.
+         *
+         * @internal
+         */
+        public static function endRequestBeforeContextClear(): void
+        {
+            if (self::$openTelemetryAvailable !== false) {
+                self::endRequest();
             }
         }
 

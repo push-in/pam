@@ -6,6 +6,7 @@ namespace Nimbus;
 
 use Pam\Contracts\Http\ApplicationInterface;
 use Pam\Contracts\Http\MiddlewareInterface;
+use Pam\Contracts\Http\RequestHandlerInterface;
 use Pam\Contracts\Package\ServiceProviderInterface;
 use Pam\Contracts\Transport\TransportCapability;
 use Pam\Contracts\Transport\TransportProviderInterface;
@@ -45,6 +46,14 @@ final class App implements ApplicationInterface
     private array $transports = [];
 
     private ?Pipeline $pipeline = null;
+
+    /**
+     * Each route's handler with its middleware, built on its first request
+     * (routes no longer change once the application is frozen).
+     *
+     * @var \WeakMap<Route, RequestHandlerInterface>|null
+     */
+    private ?\WeakMap $routeHandlers = null;
 
     private ?object $psrHandler = null;
 
@@ -354,9 +363,7 @@ final class App implements ApplicationInterface
     public function handle(Request $request, Response $response): Response
     {
         $this->freeze();
-        $this->container->beginScope();
-        $this->container->scopedInstance(Request::class, $request);
-        $this->container->scopedInstance(Response::class, $response);
+        $this->container->beginScope([Request::class => $request, Response::class => $response]);
         $failure = null;
         $startedObservers = [];
         try {
@@ -458,11 +465,11 @@ final class App implements ApplicationInterface
         $route = $result->route ?? throw new \LogicException('A matched route must contain a handler.');
         $this->container->scopedInstance(\Nimbus\Route::class, $route);
         $request = $request->withRouteParameters($result->parameters);
-        $destination = new CallableRequestHandler($route->handler);
-        if ($route->middleware === []) {
-            return $destination->handle($request, $response);
-        }
-        return (new Pipeline($route->middleware, $destination))->handle($request, $response);
+        $this->routeHandlers ??= new \WeakMap();
+        $handler = $this->routeHandlers[$route] ??= $route->middleware === []
+            ? new CallableRequestHandler($route->handler)
+            : new Pipeline($route->middleware, new CallableRequestHandler($route->handler));
+        return $handler->handle($request, $response);
     }
 
     private function freeze(): void

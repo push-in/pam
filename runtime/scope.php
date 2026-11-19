@@ -45,6 +45,34 @@ namespace Pam\Runtime {
             return $scope;
         }
 
+        /**
+         * Opens the scope of a request in its new Fiber (runtime use: the
+         * Fiber has no scope yet, so begin()'s check is not needed).
+         *
+         * @internal
+         */
+        public static function open(string $id, bool $sampleLeaks = false): self
+        {
+            if ($id === '') {
+                throw new \InvalidArgumentException('Request scope ID cannot be empty.');
+            }
+            $scope = new self($id, $sampleLeaks ? LeakDetector::snapshot() : null);
+            FiberContext::set(self::CONTEXT_KEY, $scope);
+            LeakDetector::scopeOpened();
+            return $scope;
+        }
+
+        /**
+         * Closes a scope opened by open(). The runtime clears the Fiber's
+         * context right after, which removes the scope from it.
+         *
+         * @internal
+         */
+        public function end(int $memoryThresholdBytes): void
+        {
+            $this->close($memoryThresholdBytes);
+        }
+
         public static function current(): self
         {
             $scope = FiberContext::get(self::CONTEXT_KEY);
