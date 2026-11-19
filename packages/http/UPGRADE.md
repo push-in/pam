@@ -22,10 +22,10 @@ baseline after approving compatible additions. Refreshing it for a breaking
 change is allowed only on an intentional major-version branch after documenting
 every reported break; normal `composer verify` never regenerates it.
 
-## From Eloquent to Arcano (2.1)
+## From Eloquent to Arcano (2.2)
 
 The Eloquent bridge keeps working in 2.x; Arcano is the recommended ORM from
-2.1. The two can run side by side on the same `DatabaseConfig` while models
+2.2. The two can run side by side on the same `DatabaseConfig` while models
 move one at a time.
 
 1. `pam composer require pushinbr/arcano` and register `ArcanoServiceProvider`

@@ -2,7 +2,7 @@
 
 All notable changes to PAM Skeleton are documented in this file.
 
-## Unreleased
+## 2.1.0 - 2026-11-18
 
 - Persist products with the Arcano ORM (`pushinbr/arcano`): `Product` is an
   `#[Entity]`, `ArcanoProductRepository` replaces the Eloquent repository and

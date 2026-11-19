@@ -3,7 +3,7 @@
 All notable PAM API changes are documented here. The package follows Semantic
 Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 
-## Unreleased
+## 2.2.0 - 2026-11-18
 
 ### Added
 
