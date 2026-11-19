@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9ad5a76efaa6b2993dac04327f49483b",
+    "content-hash": "4824aed3203177867589f87924d796fb",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2721,11 +2721,11 @@
         },
         {
             "name": "pushinbr/nimbus",
-            "version": "0.1.0",
+            "version": "0.2.0",
             "dist": {
                 "type": "path",
                 "url": "../../packages/nimbus",
-                "reference": "bb0e3a0374baf1ddc8f02838930fcc66d35553ef"
+                "reference": "daecf919e433f98d9fd691c8a6bd7eafa26ef4c6"
             },
             "require": {
                 "php": "^8.4",
@@ -2823,7 +2823,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/contracts",
-                "reference": "d1e50e0ac28339628c4f8f318bfcf05b00eb24ce"
+                "reference": "781ec86eb31732835785523b4ee91441b9de783b"
             },
             "require": {
                 "php": "^8.4"
@@ -2860,7 +2860,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-psr",
-                "reference": "9688914541de758bb6e017d476b52a4ecef8c3a9"
+                "reference": "809a5e271103ef5c0e68f0413236830f674c1125"
             },
             "require": {
                 "php": "^8.4",
@@ -2908,7 +2908,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/psr",
-                "reference": "72ee921c65616114dca455f836f224330d6517a8"
+                "reference": "bad1f0fb5406dcfc62b57b33cbeabd24b5170658"
             },
             "require": {
                 "php": "^8.4",
@@ -2942,7 +2942,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/socket",
-                "reference": "9c3ca4ea511764285d7d6cd7a33b83b5558248d0"
+                "reference": "21c56a5921cfc74a9c9aca09440180cbf4eb6ffa"
             },
             "require": {
                 "php": "^8.4",
@@ -7363,7 +7363,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/http-testing",
-                "reference": "04c41d71e2668bea6a34ce5c14e67028aba29194"
+                "reference": "aecf29cdc283959436a7eca731f550fd258c13a0"
             },
             "require": {
                 "php": "^8.4",
@@ -7411,7 +7411,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/testing",
-                "reference": "4162a9046059403b7d31fec70ad9385fd0d79a3c"
+                "reference": "8b296313ed50a7f68577f34d50fd82993809e0c0"
             },
             "require": {
                 "php": "^8.4",
