@@ -3,6 +3,10 @@
 All notable PAM API changes are documented here. The package follows Semantic
 Versioning and the compatibility policy in [UPGRADE.md](UPGRADE.md).
 
+## 2.2.1 - 2026-11-19
+
+- pam-http is abandoned in favour of [Nimbus](https://github.com/push-in/nimbus) (`pushinbr/nimbus`). This release only marks the package as abandoned; 2.2.x receives security fixes only.
+
 ## 2.2.0 - 2026-11-18
 
 ### Added

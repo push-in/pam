@@ -68,5 +68,6 @@
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",
         "pushinbr/arcano": "^0.2.2"
-    }
+    },
+    "abandoned": "pushinbr/nimbus"
 }
