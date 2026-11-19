@@ -98,6 +98,42 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Middleware\SecurityHeadersMiddleware`](#nimbusmiddlewaresecurityheadersmiddleware)
 - [`Nimbus\Middleware\TransactionalMiddleware`](#nimbusmiddlewaretransactionalmiddleware)
 - [`Nimbus\Middleware\ValidateSignatureMiddleware`](#nimbusmiddlewarevalidatesignaturemiddleware)
+- [`Nimbus\Notifications\Database\DatabaseChannel`](#nimbusnotificationsdatabasedatabasechannel)
+- [`Nimbus\Notifications\Database\DatabaseNotification`](#nimbusnotificationsdatabasedatabasenotification)
+- [`Nimbus\Notifications\Database\DatabaseNotifications`](#nimbusnotificationsdatabasedatabasenotifications)
+- [`Nimbus\Notifications\Http\CurlHttpClient`](#nimbusnotificationshttpcurlhttpclient)
+- [`Nimbus\Notifications\Http\HttpClient`](#nimbusnotificationshttphttpclient)
+- [`Nimbus\Notifications\Http\HttpClients`](#nimbusnotificationshttphttpclients)
+- [`Nimbus\Notifications\Http\HttpRequest`](#nimbusnotificationshttphttprequest)
+- [`Nimbus\Notifications\Http\HttpResponse`](#nimbusnotificationshttphttpresponse)
+- [`Nimbus\Notifications\Http\HttpTransportException`](#nimbusnotificationshttphttptransportexception)
+- [`Nimbus\Notifications\Http\PamHttpClient`](#nimbusnotificationshttppamhttpclient)
+- [`Nimbus\Notifications\Http\Psr18HttpClient`](#nimbusnotificationshttppsr18httpclient)
+- [`Nimbus\Notifications\Mail\MailChannel`](#nimbusnotificationsmailmailchannel)
+- [`Nimbus\Notifications\Mail\MailMessage`](#nimbusnotificationsmailmailmessage)
+- [`Nimbus\Notifications\Notifiable`](#nimbusnotificationsnotifiable)
+- [`Nimbus\Notifications\Notification`](#nimbusnotificationsnotification)
+- [`Nimbus\Notifications\NotificationChannel`](#nimbusnotificationsnotificationchannel)
+- [`Nimbus\Notifications\NotificationDeliveryException`](#nimbusnotificationsnotificationdeliveryexception)
+- [`Nimbus\Notifications\NotificationDispatcher`](#nimbusnotificationsnotificationdispatcher)
+- [`Nimbus\Notifications\NotificationFake`](#nimbusnotificationsnotificationfake)
+- [`Nimbus\Notifications\NotificationSender`](#nimbusnotificationsnotificationsender)
+- [`Nimbus\Notifications\Notifier`](#nimbusnotificationsnotifier)
+- [`Nimbus\Notifications\OnDemandNotifiable`](#nimbusnotificationsondemandnotifiable)
+- [`Nimbus\Notifications\Push\ApnsProvider`](#nimbusnotificationspushapnsprovider)
+- [`Nimbus\Notifications\Push\FcmProvider`](#nimbusnotificationspushfcmprovider)
+- [`Nimbus\Notifications\Push\JsonWebToken`](#nimbusnotificationspushjsonwebtoken)
+- [`Nimbus\Notifications\Push\PushChannel`](#nimbusnotificationspushpushchannel)
+- [`Nimbus\Notifications\Push\PushMessage`](#nimbusnotificationspushpushmessage)
+- [`Nimbus\Notifications\Push\PushOutcome`](#nimbusnotificationspushpushoutcome)
+- [`Nimbus\Notifications\Push\PushPlatform`](#nimbusnotificationspushpushplatform)
+- [`Nimbus\Notifications\Push\PushProvider`](#nimbusnotificationspushpushprovider)
+- [`Nimbus\Notifications\Push\PushTarget`](#nimbusnotificationspushpushtarget)
+- [`Nimbus\Notifications\SendNotificationHandler`](#nimbusnotificationssendnotificationhandler)
+- [`Nimbus\Notifications\SendNotificationJob`](#nimbusnotificationssendnotificationjob)
+- [`Nimbus\Notifications\Webhook\WebhookChannel`](#nimbusnotificationswebhookwebhookchannel)
+- [`Nimbus\Notifications\Webhook\WebhookMessage`](#nimbusnotificationswebhookwebhookmessage)
+- [`Nimbus\Notifications\Webhook\WebhookSignature`](#nimbusnotificationswebhookwebhooksignature)
 - [`Nimbus\Observability\RequestObservation`](#nimbusobservabilityrequestobservation)
 - [`Nimbus\Observability\RequestObserver`](#nimbusobservabilityrequestobserver)
 - [`Nimbus\OpenApi\ClientGenerator`](#nimbusopenapiclientgenerator)
@@ -1572,6 +1608,552 @@ final readonly class Nimbus\Middleware\ValidateSignatureMiddleware implements Pa
 
 - `public __construct(Nimbus\Security\UrlSigner $signer): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
+## `Nimbus\Notifications\Database\DatabaseChannel`
+
+```php
+final readonly class Nimbus\Notifications\Database\DatabaseChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(Nimbus\Database\ArcanoDatabaseProvider $databases, string $table = "notifications", ?string $connection = null): mixed`
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Database\DatabaseNotification`
+
+```php
+final readonly class Nimbus\Notifications\Database\DatabaseNotification implements JsonSerializable
+```
+
+### Properties
+
+- `public readonly DateTimeImmutable $createdAt`
+- `public readonly array $data`
+- `public readonly string $id`
+- `public readonly ?DateTimeImmutable $readAt`
+- `public readonly string $type`
+
+### Methods
+
+- `public __construct(string $id, string $type, array $data, ?DateTimeImmutable $readAt, DateTimeImmutable $createdAt): mixed`
+- `public jsonSerialize(): array`
+- `public read(): bool`
+
+## `Nimbus\Notifications\Database\DatabaseNotifications`
+
+```php
+final readonly class Nimbus\Notifications\Database\DatabaseNotifications
+```
+
+### Methods
+
+- `public __construct(Nimbus\Database\ArcanoDatabaseProvider $databases, string $table = "notifications", ?string $connection = null): mixed`
+- `public delete(Nimbus\Notifications\Notifiable $notifiable, string $id): bool`
+- `public find(Nimbus\Notifications\Notifiable $notifiable, string $id): ?Nimbus\Notifications\Database\DatabaseNotification`
+- `public latest(Nimbus\Notifications\Notifiable $notifiable, int $limit = 50, bool $unreadOnly = false, ?string $before = null): array`
+- `public markAllAsRead(Nimbus\Notifications\Notifiable $notifiable): int`
+- `public markAsRead(Nimbus\Notifications\Notifiable $notifiable, string $id): bool`
+- `public markAsUnread(Nimbus\Notifications\Notifiable $notifiable, string $id): bool`
+- `public prune(DateTimeInterface $before): int`
+- `public unreadCount(Nimbus\Notifications\Notifiable $notifiable): int`
+
+## `Nimbus\Notifications\Http\CurlHttpClient`
+
+```php
+final class Nimbus\Notifications\Http\CurlHttpClient implements Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public __construct(): mixed`
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Http\HttpClient`
+
+```php
+abstract interface Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Http\HttpClients`
+
+```php
+final class Nimbus\Notifications\Http\HttpClients
+```
+
+### Methods
+
+- `public static detect(): Nimbus\Notifications\Http\HttpClient`
+
+## `Nimbus\Notifications\Http\HttpRequest`
+
+```php
+final readonly class Nimbus\Notifications\Http\HttpRequest
+```
+
+### Properties
+
+- `public readonly string $body`
+- `public readonly array $headers`
+- `public readonly bool $http2`
+- `public readonly string $method`
+- `public readonly float $timeout`
+- `public readonly string $url`
+
+### Methods
+
+- `public __construct(string $method, string $url, array $headers = [], string $body = "", float $timeout = 10, bool $http2 = false): mixed`
+
+## `Nimbus\Notifications\Http\HttpResponse`
+
+```php
+final readonly class Nimbus\Notifications\Http\HttpResponse
+```
+
+### Properties
+
+- `public readonly string $body`
+- `public readonly array $headers`
+- `public readonly int $status`
+
+### Methods
+
+- `public __construct(int $status, array $headers = [], string $body = ""): mixed`
+- `public header(string $name): ?string`
+- `public json(): array`
+- `public successful(): bool`
+
+## `Nimbus\Notifications\Http\HttpTransportException`
+
+```php
+final class Nimbus\Notifications\Http\HttpTransportException extends RuntimeException implements Stringable, Throwable
+```
+
+## `Nimbus\Notifications\Http\PamHttpClient`
+
+```php
+final class Nimbus\Notifications\Http\PamHttpClient implements Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Notifications\Http\HttpClient $http2 = null): mixed`
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Http\Psr18HttpClient`
+
+```php
+final readonly class Nimbus\Notifications\Http\Psr18HttpClient implements Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public __construct(Psr\Http\Client\ClientInterface $client, Psr\Http\Message\RequestFactoryInterface $requests, Psr\Http\Message\StreamFactoryInterface $streams): mixed`
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
+
+## `Nimbus\Notifications\Mail\MailChannel`
+
+```php
+final readonly class Nimbus\Notifications\Mail\MailChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(Symfony\Component\Mailer\Transport\TransportInterface $transport, string $fromAddress, string $fromName = ""): mixed`
+- `public deliver(array $payload): void`
+- `public static dsn(array $environment): string`
+- `public static fromDsn(string $dsn, string $fromAddress, string $fromName = ""): self`
+- `public static fromEnvironment(?array $environment = null): self`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Mail\MailMessage`
+
+```php
+final class Nimbus\Notifications\Mail\MailMessage
+```
+
+### Methods
+
+- `public action(string $text, string $url): self`
+- `public bcc(string $address): self`
+- `public cc(string $address): self`
+- `public from(string $address, string $name = ""): self`
+- `public getSubject(): string`
+- `public greeting(string $greeting): self`
+- `public html(string $html): self`
+- `public line(string $line): self`
+- `public static make(): self`
+- `public renderHtml(): string`
+- `public renderText(): string`
+- `public replyTo(string $address): self`
+- `public salutation(string $salutation): self`
+- `public subject(string $subject): self`
+- `public text(string $text): self`
+- `public toArray(): array`
+
+## `Nimbus\Notifications\Notifiable`
+
+```php
+abstract interface Nimbus\Notifications\Notifiable
+```
+
+### Methods
+
+- `public notifiableKey(): string`
+- `public notifiableType(): string`
+- `public routeNotificationFor(string $channel, Nimbus\Notifications\Notification $notification): mixed`
+
+## `Nimbus\Notifications\Notification`
+
+```php
+abstract class Nimbus\Notifications\Notification
+```
+
+### Methods
+
+- `public delaySeconds(): int`
+- `public maximumAttempts(): int`
+- `public toDatabase(Nimbus\Notifications\Notifiable $notifiable): array`
+- `public toMail(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Mail\MailMessage`
+- `public toPush(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Push\PushMessage`
+- `public toWebhook(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Webhook\WebhookMessage|array`
+- `public type(): string`
+- `public via(Nimbus\Notifications\Notifiable $notifiable): array`
+
+## `Nimbus\Notifications\NotificationChannel`
+
+```php
+abstract interface Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\NotificationDeliveryException`
+
+```php
+final class Nimbus\Notifications\NotificationDeliveryException extends RuntimeException implements Stringable, Throwable
+```
+
+### Properties
+
+- `public readonly bool $retryable`
+
+### Methods
+
+- `public __construct(string $message, bool $retryable = true, ?Throwable $previous = null): mixed`
+- `public static permanent(string $message, ?Throwable $previous = null): self`
+
+## `Nimbus\Notifications\NotificationDispatcher`
+
+```php
+abstract interface Nimbus\Notifications\NotificationDispatcher
+```
+
+### Methods
+
+- `public send(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification): void`
+- `public sendLater(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification, ?int $delaySeconds = null): array`
+
+## `Nimbus\Notifications\NotificationFake`
+
+```php
+final class Nimbus\Notifications\NotificationFake implements Nimbus\Notifications\NotificationDispatcher
+```
+
+### Methods
+
+- `public assertNotSentTo(Nimbus\Notifications\Notifiable $notifiable, string $notification, ?callable $callback = null): void`
+- `public assertNothingSent(): void`
+- `public assertSentLaterTo(Nimbus\Notifications\Notifiable $notifiable, string $notification): void`
+- `public assertSentTimes(string $notification, int $times): void`
+- `public assertSentTo(Nimbus\Notifications\Notifiable $notifiable, string $notification, ?callable $callback = null): void`
+- `public send(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification): void`
+- `public sendLater(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification, ?int $delaySeconds = null): array`
+- `public sent(?string $notification = null): array`
+
+## `Nimbus\Notifications\NotificationSender`
+
+```php
+final class Nimbus\Notifications\NotificationSender
+```
+
+### Methods
+
+- `public __construct(array $channels = []): mixed`
+- `public channel(string $name, Nimbus\Notifications\NotificationChannel $channel): self`
+- `public deliver(string $channel, array $payload): void`
+- `public get(string $name): Nimbus\Notifications\NotificationChannel`
+- `public has(string $name): bool`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, ?string $id = null): array`
+- `public send(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification): void`
+- `public static uuid(): string`
+
+## `Nimbus\Notifications\Notifier`
+
+```php
+final readonly class Nimbus\Notifications\Notifier implements Nimbus\Notifications\NotificationDispatcher
+```
+
+### Methods
+
+- `public __construct(Nimbus\Notifications\NotificationSender $sender, ?Nimbus\Jobs\JobDispatcher $jobs = null): mixed`
+- `public static fake(): Nimbus\Notifications\NotificationFake`
+- `public send(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification): void`
+- `public sendLater(Nimbus\Notifications\Notifiable|Traversable|array $notifiables, Nimbus\Notifications\Notification $notification, ?int $delaySeconds = null): array`
+
+## `Nimbus\Notifications\OnDemandNotifiable`
+
+```php
+final class Nimbus\Notifications\OnDemandNotifiable implements Nimbus\Notifications\Notifiable
+```
+
+### Methods
+
+- `public and(string $channel, mixed $route): self`
+- `public notifiableKey(): string`
+- `public notifiableType(): string`
+- `public static route(string $channel, mixed $route): self`
+- `public routeNotificationFor(string $channel, Nimbus\Notifications\Notification $notification): mixed`
+
+## `Nimbus\Notifications\Push\ApnsProvider`
+
+```php
+final class Nimbus\Notifications\Push\ApnsProvider implements Nimbus\Notifications\Push\PushProvider
+```
+
+### Methods
+
+- `public __construct(string $teamId, string $keyId, string $privateKey, string $topic, bool $production = true, ?Nimbus\Notifications\Http\HttpClient $http = null, float $timeout = 10, ?Closure $clock = null): mixed`
+- `public static fromKeyFile(string $teamId, string $keyId, string $path, string $topic, bool $production = true, ?Nimbus\Notifications\Http\HttpClient $http = null): self`
+- `public send(Nimbus\Notifications\Push\PushMessage $message, string $token): Nimbus\Notifications\Push\PushOutcome`
+
+## `Nimbus\Notifications\Push\FcmProvider`
+
+```php
+final class Nimbus\Notifications\Push\FcmProvider implements Nimbus\Notifications\Push\PushProvider
+```
+
+### Methods
+
+- `public __construct(array $serviceAccount, ?Nimbus\Notifications\Http\HttpClient $http = null, float $timeout = 10, ?Closure $clock = null): mixed`
+- `public static fromServiceAccountFile(string $path, ?Nimbus\Notifications\Http\HttpClient $http = null): self`
+- `public static fromServiceAccountJson(string $json, ?Nimbus\Notifications\Http\HttpClient $http = null): self`
+- `public send(Nimbus\Notifications\Push\PushMessage $message, string $token): Nimbus\Notifications\Push\PushOutcome`
+
+## `Nimbus\Notifications\Push\JsonWebToken`
+
+```php
+final class Nimbus\Notifications\Push\JsonWebToken
+```
+
+### Methods
+
+- `public static base64Url(string $bytes): string`
+- `public static es256(array $claims, string $privateKeyPem, array $header = []): string`
+- `public static rs256(array $claims, string $privateKeyPem, array $header = []): string`
+
+## `Nimbus\Notifications\Push\PushChannel`
+
+```php
+final readonly class Nimbus\Notifications\Push\PushChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Notifications\Push\PushProvider $fcm = null, ?Nimbus\Notifications\Push\PushProvider $apns = null, ?Closure $onInvalidToken = null): mixed`
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Push\PushMessage`
+
+```php
+final class Nimbus\Notifications\Push\PushMessage
+```
+
+### Methods
+
+- `public badge(int $badge): self`
+- `public body(string $body): self`
+- `public collapseKey(string $key): self`
+- `public data(array $data): self`
+- `public static fromArray(array $data): self`
+- `public getCollapseKey(): ?string`
+- `public image(string $url): self`
+- `public isHighPriority(): bool`
+- `public isSilent(): bool`
+- `public static make(?string $title = null, ?string $body = null): self`
+- `public normalPriority(): self`
+- `public silent(): self`
+- `public sound(string $sound = "default"): self`
+- `public threadId(string $threadId): self`
+- `public title(string $title): self`
+- `public toApns(): array`
+- `public toArray(): array`
+- `public toFcm(): array`
+- `public ttl(int $seconds): self`
+- `public ttlSeconds(): ?int`
+
+## `Nimbus\Notifications\Push\PushOutcome`
+
+```php
+final enum Nimbus\Notifications\Push\PushOutcome implements BackedEnum, UnitEnum: int
+```
+
+### Enum cases
+
+- `Delivered = 1`
+- `InvalidToken = 2`
+
+### Constants
+
+- `Delivered = 1`
+- `InvalidToken = 2`
+
+### Properties
+
+- `public readonly string $name`
+- `public readonly int $value`
+
+### Methods
+
+- `public static cases(): array`
+- `public static from(int|string $value): static`
+- `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Notifications\Push\PushPlatform`
+
+```php
+final enum Nimbus\Notifications\Push\PushPlatform implements BackedEnum, UnitEnum: string
+```
+
+### Enum cases
+
+- `Fcm = "fcm"`
+- `Apns = "apns"`
+
+### Constants
+
+- `Apns = "apns"`
+- `Fcm = "fcm"`
+
+### Properties
+
+- `public readonly string $name`
+- `public readonly string $value`
+
+### Methods
+
+- `public static cases(): array`
+- `public static from(int|string $value): static`
+- `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Notifications\Push\PushProvider`
+
+```php
+abstract interface Nimbus\Notifications\Push\PushProvider
+```
+
+### Methods
+
+- `public send(Nimbus\Notifications\Push\PushMessage $message, string $token): Nimbus\Notifications\Push\PushOutcome`
+
+## `Nimbus\Notifications\Push\PushTarget`
+
+```php
+final readonly class Nimbus\Notifications\Push\PushTarget
+```
+
+### Properties
+
+- `public readonly Nimbus\Notifications\Push\PushPlatform $platform`
+- `public readonly string $token`
+
+### Methods
+
+- `public __construct(Nimbus\Notifications\Push\PushPlatform $platform, string $token): mixed`
+- `public static apns(string $token): self`
+- `public static fcm(string $token): self`
+- `public static parse(string $target): self`
+- `public toString(): string`
+
+## `Nimbus\Notifications\SendNotificationHandler`
+
+```php
+final readonly class Nimbus\Notifications\SendNotificationHandler implements Nimbus\Jobs\JobHandler
+```
+
+### Methods
+
+- `public __construct(Nimbus\Notifications\NotificationSender $sender): mixed`
+- `public handle(object $job): Nimbus\Jobs\JobOutcome`
+
+## `Nimbus\Notifications\SendNotificationJob`
+
+```php
+final readonly class Nimbus\Notifications\SendNotificationJob implements Nimbus\Jobs\SerializableJob
+```
+
+### Properties
+
+- `public readonly string $channel`
+- `public readonly array $payload`
+
+### Methods
+
+- `public __construct(string $channel, array $payload): mixed`
+- `public static fromJobPayload(array $payload): self`
+- `public static jobName(): string`
+- `public toJobPayload(): array`
+
+## `Nimbus\Notifications\Webhook\WebhookChannel`
+
+```php
+final readonly class Nimbus\Notifications\Webhook\WebhookChannel implements Nimbus\Notifications\NotificationChannel
+```
+
+### Methods
+
+- `public __construct(string $secret, ?Nimbus\Notifications\Http\HttpClient $http = null, float $timeout = 10, ?Closure $secretFor = null, ?Closure $clock = null): mixed`
+- `public deliver(array $payload): void`
+- `public prepare(Nimbus\Notifications\Notifiable $notifiable, Nimbus\Notifications\Notification $notification, string $id): ?array`
+
+## `Nimbus\Notifications\Webhook\WebhookMessage`
+
+```php
+final class Nimbus\Notifications\Webhook\WebhookMessage
+```
+
+### Methods
+
+- `public __construct(array $data = []): mixed`
+- `public data(array $data): self`
+- `public event(string $event): self`
+- `public header(string $name, string $value): self`
+- `public static make(array $data = []): self`
+- `public toArray(): array`
+
+## `Nimbus\Notifications\Webhook\WebhookSignature`
+
+```php
+final class Nimbus\Notifications\Webhook\WebhookSignature
+```
+
+### Constants
+
+- `HEADER = "Nimbus-Signature"`
+
+### Methods
+
+- `public static sign(string $secret, string $body, int $timestamp): string`
+- `public static verify(string $header, string $body, string $secret, int $toleranceSeconds = 300, ?int $now = null): bool`
 
 ## `Nimbus\Observability\RequestObservation`
 

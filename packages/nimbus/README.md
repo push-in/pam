@@ -547,6 +547,108 @@ on SIGTERM or SIGINT:
 
 ```php
 $background->run(intervalSeconds: 1.0);
+
+## Notifications
+
+`Nimbus\Notifications` sends one `Notification` through the channels its
+`via()` returns: `mail`, `push`, `database` and `webhook`, or channels of your
+own (`NotificationChannel`). Recipients implement `Notifiable`; the
+`RoutesNotifications` trait reads `routeNotificationFor<Channel>()` methods, an
+`email` property for mail and an `id` property for the stored key.
+
+```php
+final class InvoicePaid extends Notification
+{
+    public function __construct(private readonly Invoice $invoice) {}
+
+    public function via(Notifiable $notifiable): array
+    {
+        return ['mail', 'push', 'database', 'webhook'];
+    }
+
+    public function toMail(Notifiable $notifiable): MailMessage
+    {
+        return MailMessage::make()
+            ->subject("Invoice {$this->invoice->number} paid")
+            ->greeting('Hello')
+            ->line('We received your payment.')
+            ->action('View invoice', $this->invoice->url);
+    }
+
+    public function toPush(Notifiable $notifiable): PushMessage
+    {
+        return PushMessage::make('Invoice paid', $this->invoice->number)
+            ->data(['invoice' => $this->invoice->id])
+            ->collapseKey('invoices');
+    }
+
+    public function toDatabase(Notifiable $notifiable): array
+    {
+        return ['invoice' => $this->invoice->id, 'amount_in_cents' => $this->invoice->amountInCents];
+    }
+
+    public function toWebhook(Notifiable $notifiable): WebhookMessage
+    {
+        return WebhookMessage::make(['invoice' => $this->invoice->id])->event('invoice.paid');
+    }
+}
+
+$sender = new NotificationSender([
+    'mail' => MailChannel::fromEnvironment(),
+    'push' => new PushChannel(
+        FcmProvider::fromServiceAccountFile('/run/secrets/firebase.json'),
+        ApnsProvider::fromKeyFile('TEAMID', 'KEYID', '/run/secrets/apns.p8', 'com.example.app'),
+        onInvalidToken: static fn (PushTarget $target) => $devices->forget($target->token),
+    ),
+    'database' => new DatabaseChannel($databases),
+    'webhook' => new WebhookChannel((string) getenv('WEBHOOK_SECRET')),
+]);
+$notifier = new Notifier($sender, $queue);
+
+$notifier->send($user, new InvoicePaid($invoice));       // now
+$notifier->sendLater($users, new InvoicePaid($invoice)); // one job per user and channel
+```
+
+Register `SendNotificationJob` in your `JobCodec` and run `SendNotificationHandler`
+in a `JobWorker`. Channels render the notification when it is queued, so the job
+payload is plain JSON and the worker never reloads the notifiable. Retryable
+failures (timeouts, HTTP 408/429/5xx, SMTP errors) return `JobOutcome::Retry`;
+permanent ones (other 4xx, invalid addresses) are dead-lettered. Override
+`maximumAttempts()` and `delaySeconds()` on the notification to tune them.
+
+- **Mail** uses `symfony/mailer` (`composer require symfony/mailer`).
+  `MailChannel::fromEnvironment()` reads `MAILER_DSN`, or `MAIL_MAILER` as a DSN
+  or `smtp` with `MAIL_HOST`/`MAIL_PORT`/`MAIL_USERNAME`/`MAIL_PASSWORD`, and
+  `MAIL_FROM_ADDRESS`/`MAIL_FROM_NAME`. The route is an address, a list, or an
+  `address => name` map. `html()` and `text()` replace the generated bodies.
+- **Push** routes are `PushTarget` objects or `fcm:<token>` / `apns:<token>`
+  strings. FCM uses HTTP v1 with the service account (RS256 assertion, OAuth2
+  token cached per worker until five minutes before expiry). APNs uses token
+  authentication (ES256 JWT reused for 50 minutes) over HTTP/2. Unregistered
+  tokens are reported to `onInvalidToken` instead of failing the delivery.
+- **Database** writes to the `notifications` table of
+  `database/migrations/20261119.000000_0_create_notifications.php` (copy it into
+  your migrations directory). `DatabaseNotifications` lists, counts, marks read
+  or unread, deletes and prunes, always scoped to the notifiable.
+- **Webhook** POSTs `{"id","event","created_at","data"}` with
+  `Nimbus-Event`, `Nimbus-Delivery` (the notification id, for receiver
+  deduplication) and `Nimbus-Signature: t=<unix>,v1=<hex HMAC-SHA256 of "t.body">`.
+  Receivers check it with `WebhookSignature::verify($header, $body, $secret)`.
+  The secret never enters the job payload; pass `secretFor:` for per-URL secrets.
+
+Push and webhooks share the `HttpClient` interface. `HttpClients::detect()`
+uses the non-blocking PAM client inside the runtime and ext-curl otherwise (and
+for HTTP/2, which the PAM client does not speak); wrap any PSR-18 client with
+`Psr18HttpClient`.
+
+In tests, bind `Notifier::fake()` where a `NotificationDispatcher` is expected:
+
+```php
+$notifications = Notifier::fake();
+// ... exercise the code ...
+$notifications->assertSentTo($user, InvoicePaid::class);
+$notifications->assertSentLaterTo($user, InvoicePaid::class);
+$notifications->assertNothingSent();
 ```
 
 ## Request lifecycle observers

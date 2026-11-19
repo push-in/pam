@@ -28,13 +28,17 @@
     },
     "suggest": {
         "dragonmantank/cron-expression": "Required by the scheduler (Nimbus\\Scheduling).",
+        "ext-curl": "HTTP/2 transport of the APNs push provider and fallback HTTP client outside PAM.",
+        "ext-openssl": "Signs the FCM and APNs tokens of the push notification channel.",
         "fakerphp/faker": "Fake data in Nimbus\\Database\\Factory definitions.",
         "league/flysystem": "Required by Nimbus\\Storage (StorageManager, Disk, local disks).",
         "league/flysystem-aws-s3-v3": "S3 disks and presigned uploads in Nimbus\\Storage.",
+        "psr/http-client": "Send push and webhook notifications through any PSR-18 client (Psr18HttpClient).",
         "psr/log": "PSR-3 logging; LoggerInterface resolves to the PAM runtime structured log.",
         "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
         "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
-        "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets."
+        "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets.",
+        "symfony/mailer": "Required by the mail notification channel (Nimbus\\Notifications\\Mail\\MailChannel)."
     },
     "conflict": {
         "pushinbr/arcano": "<0.2.3"
@@ -77,6 +81,11 @@
         "league/flysystem": "^3.29",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",
-        "pushinbr/arcano": "^0.2.4"
+        "psr/http-client": "^1.0",
+        "psr/http-factory": "^1.1",
+        "psr/http-message": "^2.0",
+        "pushinbr/arcano": "^0.2.4",
+        "symfony/mailer": "^7.3",
+        "symfony/mime": "^7.3"
     }
 }
