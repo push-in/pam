@@ -9,8 +9,9 @@ use Pam\Api\Config\ConfigDefinition;
 use Pam\Api\Config\Configuration;
 use Pam\Api\Config\ConfigType;
 use Pam\Api\Middleware\SecurityHeadersMiddleware;
+use Pam\Api\Database\ArcanoSchemaCompiler;
+use Pam\Api\Database\ArcanoServiceProvider;
 use Pam\Api\Database\DatabaseConfig;
-use Pam\Api\Database\EloquentServiceProvider;
 use Pam\App;
 
 $config = Configuration::fromEnvironment([
@@ -23,7 +24,12 @@ $config = Configuration::fromEnvironment([
     ),
 ]);
 $app = new App();
-$app->provider(new EloquentServiceProvider(DatabaseConfig::fromEnvironment()));
+$app->provider(new ArcanoServiceProvider(
+    DatabaseConfig::fromEnvironment(),
+    // Production builds the schema cache on deploy (bin/migrate cache) and never rescans.
+    new ArcanoSchemaCompiler(__DIR__ . '/src/Models', __DIR__ . '/var/cache/arcano-schema.php', refresh: getenv('PAM_ENV') !== 'production'),
+    migrations: __DIR__ . '/database/migrations',
+));
 $app->provider(new AppServiceProvider());
 $app->middleware(new SecurityHeadersMiddleware());
 $app->get('/api/ping', [PingController::class, 'show']);

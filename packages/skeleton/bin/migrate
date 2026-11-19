@@ -4,14 +4,16 @@
 declare(strict_types=1);
 
 use App\Providers\AppServiceProvider;
+use Pam\Api\Database\ArcanoMigrationManager;
+use Pam\Api\Database\ArcanoSchemaCompiler;
+use Pam\Api\Database\ArcanoServiceProvider;
 use Pam\Api\Database\DatabaseConfig;
-use Pam\Api\Database\EloquentServiceProvider;
-use Pam\Api\Database\MigrationManager;
 use Pam\App;
 
 $root = dirname(__DIR__);
 $autoloaders = [
     $root . '/vendor/autoload.php',
+    dirname(__DIR__, 2) . '/http/vendor/autoload.php',
     dirname(__DIR__, 2) . '/api/vendor/autoload.php',
 ];
 $loaded = false;
@@ -36,17 +38,42 @@ spl_autoload_register(static function (string $class) use ($root): void {
     }
 });
 
+$command = $argv[1] ?? 'migrate';
+$entities = new ArcanoSchemaCompiler($root . '/src/Models', $root . '/var/cache/arcano-schema.php');
+if ($command === 'cache') {
+    // Rebuilds the schema cache that production reads without rescanning the entities.
+    $entities->clear();
+}
+
 $app = new App(discoverPackages: false);
-$app->provider(new EloquentServiceProvider(DatabaseConfig::fromEnvironment()));
+$app->provider(new ArcanoServiceProvider(DatabaseConfig::fromEnvironment(), $entities, migrations: $root . '/database/migrations'));
 $app->provider(new AppServiceProvider());
 $app->boot();
 
-$migrations = $app->container()->get(MigrationManager::class);
-if (!$migrations instanceof MigrationManager) {
+$migrations = $app->container()->get(ArcanoMigrationManager::class);
+if (!$migrations instanceof ArcanoMigrationManager) {
     throw new LogicException('Migration manager binding is invalid.');
 }
 
-$completed = $migrations->migrate(dirname(__DIR__) . '/database/migrations');
-fwrite(STDOUT, $completed === []
-    ? "Database is already up to date.\n"
-    : 'Migrated: ' . implode(', ', $completed) . "\n");
+$output = match ($command) {
+    'migrate' => ($done = $migrations->migrate()) === []
+        ? 'Database is already up to date.'
+        : 'Migrated: ' . implode(', ', $done),
+    'rollback' => ($done = $migrations->rollback(max(1, (int) ($argv[2] ?? 1)))) === []
+        ? 'Nothing to roll back.'
+        : 'Rolled back: ' . implode(', ', $done),
+    'status' => implode("\n", array_map(
+        static fn (array $migration): string => sprintf(
+            '%-60s %s',
+            $migration['name'],
+            $migration['executed_at']?->format('Y-m-d H:i:s') ?? 'pending',
+        ),
+        $migrations->status(),
+    )) ?: 'No migrations.',
+    'generate' => ($files = $migrations->generate()) === []
+        ? 'The entities match the database.'
+        : 'Created: ' . implode(', ', array_map('basename', $files)),
+    'cache' => 'Schema cache written to var/cache/arcano-schema.php.',
+    default => throw new InvalidArgumentException("Unknown command {$command}; use migrate, rollback [steps], status, generate or cache."),
+};
+fwrite(STDOUT, $output . "\n");

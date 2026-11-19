@@ -18,9 +18,9 @@ final readonly class ProductResource extends JsonResource
 
         return [
             'id' => $this->resource->identifier(),
-            'name' => $this->resource->name(),
-            'priceInCents' => $this->resource->priceInCents(),
-            'status' => $this->resource->status()->value,
+            'name' => $this->resource->name,
+            'priceInCents' => $this->resource->priceInCents,
+            'status' => $this->resource->status->value,
         ];
     }
 }

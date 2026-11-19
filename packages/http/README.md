@@ -48,10 +48,99 @@ final readonly class LoginController
 }
 ```
 
-## Eloquent ORM (optional)
+## Arcano ORM (optional)
 
-PAM HTTP keeps its kernel independent from any database. Install Eloquent only
-when the application needs the legacy built-in integration:
+Arcano is the PAM data mapper, derived from Cycle ORM: attribute entities,
+relations, an identity map, migrations and SQLite, MySQL, PostgreSQL and SQL
+Server drivers. PAM HTTP keeps its kernel independent from any database; install
+Arcano when the application needs one:
+
+```bash
+pam composer require pushinbr/arcano
+```
+
+Entities are plain classes with attributes:
+
+```php
+use Arcano\Annotated\Annotation\{Column, Entity};
+use Arcano\Annotated\Annotation\Relation\HasMany;
+
+#[Entity(role: 'author')]
+class Author
+{
+    #[Column(type: 'primary')]
+    public ?int $id = null;
+
+    #[Column(type: 'string(120)')]
+    public string $name = '';
+
+    /** @var list<Post> */
+    #[HasMany(target: Post::class, collection: 'array')]
+    public array $posts = [];
+}
+```
+
+The provider compiles the entities of a directory and keeps the schema in a PHP
+cache file. In development the cache is rebuilt when an entity file changes; in
+production pass `refresh: false` and build the cache during deployment.
+
+```php
+use Pam\Api\Database\{ArcanoSchemaCompiler, ArcanoServiceProvider, DatabaseConfig};
+
+$app->provider(new ArcanoServiceProvider(
+    DatabaseConfig::fromEnvironment(),
+    new ArcanoSchemaCompiler(__DIR__ . '/src/Entities', __DIR__ . '/var/arcano-schema.php', refresh: $debug),
+    migrations: __DIR__ . '/database/arcano',
+));
+```
+
+A compiled schema array (or `Arcano\ORM\Schema`) is accepted in place of the
+compiler. The same `DB_*` variables configure the connection.
+
+Every request Fiber gets its own connections and identity map, so transactions
+and loaded entities cannot leak between persistent-worker requests. Request
+cleanup rolls back unfinished transactions and disconnects. Resolve
+`ArcanoManager` to work with entities:
+
+```php
+$arcano = $app->container()->get(ArcanoManager::class);
+
+$author = $arcano->select(Author::class)->load('posts')->wherePK($id)->fetchOne();
+$author->name = 'Ada';
+$arcano->entityManager()->persist($author)->run();
+```
+
+### Migrations
+
+`ArcanoMigrationManager` writes migrations from the difference between the
+entities and the database, runs them and rolls them back. Each migration runs
+in its own transaction and is recorded in the `migrations` table.
+
+```php
+$migrations = $app->container()->get(ArcanoMigrationManager::class);
+
+$migrations->generate();   // new files in database/arcano for the changed entities
+$migrations->migrate();    // runs the pending ones, returns their names
+$migrations->rollback(1);  // reverts the last one
+$migrations->status();     // name, created_at, executed_at of every migration
+```
+
+Generated files can be edited, and migrations can be written by hand with the
+`Arcano\Migrations\Migration` table API. Generation requires every existing
+migration to have run, so the database reflects them.
+
+### Transactions, budgets and tenants
+
+`ArcanoManager` is the `TransactionManager` of the application, and
+`DatabaseHealthCheck` and `QueryMonitor` budgets work with it as with Eloquent.
+Tenant-owned roles are protected once during boot with
+`$arcano->protectTenant(Order::class)`: selects are limited to the current
+tenant, new entities get its key, and both fail closed without a `TenantContext`.
+
+## Eloquent ORM (optional, deprecated)
+
+Install Eloquent only when the application needs the legacy built-in
+integration:
 
 ```bash
 pam composer require illuminate/database illuminate/events illuminate/filesystem illuminate/pagination

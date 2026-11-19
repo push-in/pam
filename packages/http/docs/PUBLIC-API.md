@@ -28,6 +28,12 @@ Every symbol below is protected by the PAM API Semantic Versioning gate.
 - [`Pam\Api\Container\Container`](#pamapicontainercontainer)
 - [`Pam\Api\Container\ContainerState`](#pamapicontainercontainerstate)
 - [`Pam\Api\ControllerHandler`](#pamapicontrollerhandler)
+- [`Pam\Api\Database\ArcanoManager`](#pamapidatabasearcanomanager)
+- [`Pam\Api\Database\ArcanoMigrationManager`](#pamapidatabasearcanomigrationmanager)
+- [`Pam\Api\Database\ArcanoSchemaCompiler`](#pamapidatabasearcanoschemacompiler)
+- [`Pam\Api\Database\ArcanoServiceProvider`](#pamapidatabasearcanoserviceprovider)
+- [`Pam\Api\Database\ArcanoTenantMapper`](#pamapidatabasearcanotenantmapper)
+- [`Pam\Api\Database\ArcanoTenantScope`](#pamapidatabasearcanotenantscope)
 - [`Pam\Api\Database\DatabaseConfig`](#pamapidatabasedatabaseconfig)
 - [`Pam\Api\Database\DatabaseHealthCheck`](#pamapidatabasedatabasehealthcheck)
 - [`Pam\Api\Database\EloquentManager`](#pamapidatabaseeloquentmanager)
@@ -69,6 +75,7 @@ Every symbol below is protected by the PAM API Semantic Versioning gate.
 - [`Pam\Api\Jobs\MemoryJobDispatcher`](#pamapijobsmemoryjobdispatcher)
 - [`Pam\Api\Jobs\SerializableJob`](#pamapijobsserializablejob)
 - [`Pam\Api\Lifecycle\RequestLifecycleObserver`](#pamapilifecyclerequestlifecycleobserver)
+- [`Pam\Api\Middleware\ArcanoLifecycleMiddleware`](#pamapimiddlewarearcanolifecyclemiddleware)
 - [`Pam\Api\Middleware\AuthenticateMiddleware`](#pamapimiddlewareauthenticatemiddleware)
 - [`Pam\Api\Middleware\AuthorizeMiddleware`](#pamapimiddlewareauthorizemiddleware)
 - [`Pam\Api\Middleware\CorsMiddleware`](#pamapimiddlewarecorsmiddleware)
@@ -469,6 +476,85 @@ final readonly class Pam\Api\ControllerHandler
 - `public __construct(Pam\Api\Container\Container $container, string $controller, string $method): mixed`
 - `public __invoke(Pam\Http\Request $request, Pam\Http\Response $response): mixed`
 
+## `Pam\Api\Database\ArcanoManager`
+
+```php
+final class Pam\Api\Database\ArcanoManager implements Pam\Api\Transactions\TransactionManager
+```
+
+### Methods
+
+- `public __construct(Pam\Api\Database\ArcanoDatabaseProvider $databases, Arcano\ORM\SchemaInterface|array $schema, ?Pam\Api\Container\Container $container = null): mixed`
+- `public database(UnitEnum|null|string $name = null): Arcano\Database\DatabaseInterface`
+- `public entityManager(): Arcano\ORM\EntityManagerInterface`
+- `public orm(): Arcano\ORM\ORMInterface`
+- `public protectTenant(string $role, string $column = "tenant_id"): void`
+- `public releaseCurrentRequest(): void`
+- `public repository(string $role): Arcano\ORM\RepositoryInterface`
+- `public select(string $role): Arcano\ORM\Select`
+- `public transaction(callable $operation): mixed`
+
+## `Pam\Api\Database\ArcanoMigrationManager`
+
+```php
+final class Pam\Api\Database\ArcanoMigrationManager
+```
+
+### Methods
+
+- `public __construct(Pam\Api\Database\ArcanoDatabaseProvider $databases, string $directory, string $table = "migrations", string $namespace = "Migration", ?Pam\Api\Database\ArcanoSchemaCompiler $entities = null): mixed`
+- `public generate(): array`
+- `public migrate(): array`
+- `public rollback(int $steps = 1): array`
+- `public status(): array`
+
+## `Pam\Api\Database\ArcanoSchemaCompiler`
+
+```php
+final readonly class Pam\Api\Database\ArcanoSchemaCompiler
+```
+
+### Methods
+
+- `public __construct(array|string $directories, ?string $cacheFile = null, bool $refresh = true): mixed`
+- `public clear(): void`
+- `public compile(Arcano\Database\DatabaseProviderInterface $databases, array $generators = []): array`
+- `public schema(Arcano\Database\DatabaseProviderInterface $databases): array`
+
+## `Pam\Api\Database\ArcanoServiceProvider`
+
+```php
+final readonly class Pam\Api\Database\ArcanoServiceProvider implements Pam\Contracts\Package\ServiceProviderInterface
+```
+
+### Methods
+
+- `public __construct(Pam\Api\Database\DatabaseConfig $config, Arcano\ORM\SchemaInterface|Pam\Api\Database\ArcanoSchemaCompiler|array $schema, ?string $migrations = null): mixed`
+- `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
+- `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
+
+## `Pam\Api\Database\ArcanoTenantMapper`
+
+```php
+class Pam\Api\Database\ArcanoTenantMapper extends Arcano\ORM\Mapper\Mapper implements Arcano\ORM\MapperInterface
+```
+
+### Methods
+
+- `public queueCreate(object $entity, Arcano\ORM\Heap\Node $node, Arcano\ORM\Heap\State $state): Arcano\ORM\Command\CommandInterface`
+
+## `Pam\Api\Database\ArcanoTenantScope`
+
+```php
+final readonly class Pam\Api\Database\ArcanoTenantScope implements Arcano\ORM\Select\ScopeInterface
+```
+
+### Methods
+
+- `public __construct(Pam\Api\Container\Container $container, string $column = "tenant_id"): mixed`
+- `public apply(Arcano\ORM\Select\QueryBuilder $query): void`
+- `public assign(Arcano\ORM\Heap\State $state): void`
+
 ## `Pam\Api\Database\DatabaseConfig`
 
 ```php
@@ -493,7 +579,7 @@ final readonly class Pam\Api\Database\DatabaseHealthCheck implements Pam\Api\Hea
 
 ### Methods
 
-- `public __construct(Pam\Api\Database\EloquentManager $eloquent, ?string $connection = null): mixed`
+- `public __construct(Pam\Api\Database\ArcanoManager|Pam\Api\Database\EloquentManager $eloquent, ?string $connection = null): mixed`
 - `public check(): Pam\Api\Health\HealthResult`
 
 ## `Pam\Api\Database\EloquentManager`
@@ -603,9 +689,10 @@ final class Pam\Api\Database\QueryMonitor
 
 ### Methods
 
-- `public __construct(Pam\Api\Database\FiberConnectionResolver $connections): mixed`
+- `public __construct(?Pam\Api\Database\FiberConnectionResolver $connections = null): mixed`
 - `public begin(Pam\Api\Database\QueryBudget $budget): void`
 - `public finish(): Pam\Api\Database\QueryReport`
+- `public static forArcano(Pam\Api\Database\ArcanoDatabaseProvider $databases): self`
 
 ## `Pam\Api\Database\QueryReport`
 
@@ -1115,6 +1202,17 @@ abstract interface Pam\Api\Lifecycle\RequestLifecycleObserver
 
 - `public finished(Pam\Http\Request $request, Pam\Http\Response $response, ?Throwable $failure): void`
 - `public starting(Pam\Http\Request $request): void`
+
+## `Pam\Api\Middleware\ArcanoLifecycleMiddleware`
+
+```php
+final readonly class Pam\Api\Middleware\ArcanoLifecycleMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public __construct(Pam\Api\Database\ArcanoManager $arcano): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Pam\Api\Middleware\AuthenticateMiddleware`
 
