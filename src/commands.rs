@@ -1121,7 +1121,7 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let nimbus_version = "^0.1";
+    let nimbus_version = "^0.2";
     let testing_version = "^1.0";
     let socket_version = "^1.1";
     let mut require = serde_json::Map::from_iter([
@@ -3526,7 +3526,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                     "symlink": false,
                     "versions": {
                         "pushinbr/pam-contracts": "1.1.0",
-                        "pushinbr/nimbus": "0.1.0",
+                        "pushinbr/nimbus": "0.2.0",
                         "pushinbr/pam-http-psr": "1.0.0",
                         "pushinbr/pam-socket": "1.1.0",
                         "pushinbr/pam-http-testing": "1.0.0"

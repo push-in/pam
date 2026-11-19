@@ -11,7 +11,7 @@
                 "symlink": true,
                 "versions": {
                     "pushinbr/pam-contracts": "1.1.0",
-                    "pushinbr/nimbus": "0.1.0",
+                    "pushinbr/nimbus": "0.2.0",
                     "pushinbr/pam-http-psr": "1.0.0",
                     "pushinbr/pam-psr": "2.0.0",
                     "pushinbr/pam-socket": "1.0.2",
@@ -38,7 +38,7 @@
         "psr/http-server-handler": "^1.0",
         "psr/http-server-middleware": "^1.0",
         "psr/log": "^3.0",
-        "pushinbr/nimbus": "^0.1",
+        "pushinbr/nimbus": "^0.2",
         "pushinbr/pam-http-psr": "^1.0",
         "pushinbr/pam-psr": "^2.0",
         "pushinbr/pam-socket": "^1.0",
