@@ -41,6 +41,45 @@ int pam_php_dispatch_http(
     char **output,
     size_t *output_length
 );
+/*
+ * Request metadata of pam_php_dispatch_http_native. Strings are not
+ * NUL-terminated; a zero length means empty (multipart_json: absent).
+ */
+typedef struct pam_http_request_context {
+    const char *protocol_version;
+    size_t protocol_version_length;
+    const char *remote_address;
+    size_t remote_address_length;
+    const char *scheme;
+    size_t scheme_length;
+    const char *traceparent;
+    size_t traceparent_length;
+    const char *multipart_json;
+    size_t multipart_json_length;
+    uint32_t remote_port;
+} pam_http_request_context;
+
+/*
+ * Same contract as pam_php_dispatch_http, without JSON: `headers` is a native
+ * endian binary list (u32 name count, then per name: u32 length, name bytes,
+ * u32 value count, per value: u32 length, value bytes; names lowercase) and
+ * the extension builds the PHP header, context and $_SERVER arrays directly.
+ */
+int pam_php_dispatch_http_native(
+    const char *method,
+    size_t method_length,
+    const char *target,
+    size_t target_length,
+    const char *headers,
+    size_t headers_length,
+    const char *body,
+    size_t body_length,
+    const pam_http_request_context *context,
+    const char *request_id,
+    size_t request_id_length,
+    char **output,
+    size_t *output_length
+);
 int pam_php_resume_http(
     const char *request_id,
     size_t request_id_length,

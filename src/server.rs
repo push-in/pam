@@ -337,6 +337,16 @@ impl ServerState {
         }
     }
 
+    /// Per-request variant of `refresh_php_metrics_on_owner_thread`: samples
+    /// at most once a second and does not clone the cached sample otherwise.
+    fn refresh_php_metrics_if_due(&self) {
+        let now = worker_epoch_millis();
+        let next = self.next_php_metrics_at.load(Ordering::Relaxed);
+        if now >= next {
+            self.refresh_php_metrics_on_owner_thread(false);
+        }
+    }
+
     fn report_worker_state(
         &self,
         lifecycle: WorkerLifecycle,
@@ -1143,7 +1153,7 @@ pub fn run(config: ServerConfig) -> Result<(), ServerError> {
 
 fn serve(config: ServerConfig) -> Result<(), ServerError> {
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
+        .worker_threads(io_threads())
         .thread_name("pam-io")
         .enable_all()
         .build()
@@ -1151,6 +1161,21 @@ fn serve(config: ServerConfig) -> Result<(), ServerError> {
     let local = LocalSet::new();
     runtime.block_on(local.run_until(run_async(config)))
 }
+
+/// I/O threads of a worker (`PAM_IO_THREADS`, 1-16). The PHP thread is
+/// separate; every request crosses from an I/O thread to it and back.
+fn io_threads() -> usize {
+    std::env::var("PAM_IO_THREADS")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|threads| (1..=16).contains(threads))
+        .unwrap_or(DEFAULT_IO_THREADS)
+}
+
+// One I/O thread per worker measured fastest (nimbus-bench, 16 workers on
+// 8 CPUs): with two, tokio woke the idle sibling to steal the request task
+// handed back by the PHP thread (+1.5 epoll_wait and futex per request).
+const DEFAULT_IO_THREADS: usize = 1;
 
 /// PHP's Zend signal layer installs SIGTERM/SIGINT handlers that, for a
 /// default disposition, restore SIG_DFL and re-raise the signal. Tokio's
@@ -1194,7 +1219,7 @@ fn start_php_executor(state: ServerState, mut receiver: mpsc::Receiver<PhpJob>) 
                             return;
                         };
                         if !request_state.recycle_if_engine_failed() {
-                            request_state.refresh_php_metrics_on_owner_thread(false);
+                            request_state.refresh_php_metrics_if_due();
                         }
                         let _ = response.send(result);
                     });
@@ -2679,6 +2704,37 @@ async fn invoke_php_http(
         .await
 }
 
+/// Request headers for `pam_php_dispatch_http_native`: native-endian u32
+/// name count, then per name its length and bytes, value count and each
+/// value's length and bytes. Names are lowercase (`http` normalizes them);
+/// values that are not visible ASCII are skipped, as the JSON envelope did.
+fn encode_php_request_headers(headers: &HeaderMap) -> Vec<u8> {
+    fn push_bytes(output: &mut Vec<u8>, bytes: &[u8]) {
+        output.extend_from_slice(&u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_ne_bytes());
+        output.extend_from_slice(bytes);
+    }
+    let mut output = Vec::with_capacity(512);
+    output.extend_from_slice(
+        &u32::try_from(headers.keys_len())
+            .unwrap_or(u32::MAX)
+            .to_ne_bytes(),
+    );
+    for name in headers.keys() {
+        push_bytes(&mut output, name.as_str().as_bytes());
+        let count_offset = output.len();
+        output.extend_from_slice(&0u32.to_ne_bytes());
+        let mut count = 0u32;
+        for value in headers.get_all(name) {
+            if let Ok(value) = value.to_str() {
+                push_bytes(&mut output, value.as_bytes());
+                count += 1;
+            }
+        }
+        output[count_offset..count_offset + 4].copy_from_slice(&count.to_ne_bytes());
+    }
+    output
+}
+
 async fn invoke_php_http_local(
     state: &ServerState,
     request: &OwnedHttpRequest,
@@ -2712,25 +2768,20 @@ async fn invoke_php_http_local(
                 );
             }
         };
-    let mut normalized_headers = HashMap::<String, Vec<String>>::new();
-    for name in headers.keys() {
-        let values = headers
-            .get_all(name)
-            .iter()
-            .filter_map(|value| value.to_str().ok().map(str::to_owned))
-            .collect::<Vec<_>>();
-        normalized_headers.insert(name.as_str().to_owned(), values);
-    }
-    let headers_json = match serde_json::to_string(&normalized_headers) {
-        Ok(json) => json,
-        Err(error) => {
-            return (
-                internal_error(format!("cannot serialize request headers: {error}")),
-                0,
-            );
-        }
+    let encoded_headers = encode_php_request_headers(headers);
+    let multipart_json = match request.upload.as_deref() {
+        Some(multipart) => match serde_json::to_string(multipart) {
+            Ok(json) => json,
+            Err(error) => {
+                return (
+                    internal_error(format!("cannot serialize request context: {error}")),
+                    0,
+                );
+            }
+        },
+        None => String::new(),
     };
-    let context = HttpRequestContext {
+    let context = php::HttpRequestMeta {
         protocol_version: match version {
             Version::HTTP_09 => "0.9",
             Version::HTTP_10 => "1.0",
@@ -2746,18 +2797,8 @@ async fn invoke_php_http_local(
         } else {
             "http"
         },
-        request_id,
         traceparent,
-        multipart: request.upload.as_deref(),
-    };
-    let context_json = match serde_json::to_string(&context) {
-        Ok(json) => json,
-        Err(error) => {
-            return (
-                internal_error(format!("cannot serialize request context: {error}")),
-                0,
-            );
-        }
+        multipart_json: &multipart_json,
     };
 
     let _uploads = match RegisteredUploads::register(request.upload.clone()) {
@@ -2767,12 +2808,12 @@ async fn invoke_php_http_local(
     let started = Instant::now();
     let _execution = PhpExecutionGuard::begin(state, request_id);
     let mut cancellation = PhpHttpDispatchGuard::new(request_id);
-    let mut envelope = match php::dispatch_http(
+    let mut envelope = match php::dispatch_http_native(
         method.as_str(),
         target,
-        &headers_json,
+        &encoded_headers,
         body,
-        &context_json,
+        &context,
         request_id,
     )
     .and_then(|json| parse_dispatch_envelope(&json))
@@ -3989,19 +4030,6 @@ impl PhpHttpResponse {
             .body(body)
             .unwrap_or_else(|error| internal_error(format!("cannot build PHP stream: {error}")))
     }
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct HttpRequestContext<'a> {
-    protocol_version: &'a str,
-    remote_address: &'a str,
-    remote_port: u16,
-    scheme: &'a str,
-    request_id: &'a str,
-    traceparent: &'a str,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    multipart: Option<&'a crate::upload::MultipartBody>,
 }
 
 #[repr(i32)]

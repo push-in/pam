@@ -98,7 +98,7 @@ unsafe extern "C" {
     fn pam_php_runtime_metrics(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
     fn pam_php_runtime_diagnostics(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
     fn pam_php_routes_info(output: *mut *mut c_char, output_length: *mut usize) -> c_int;
-    fn pam_php_dispatch_http(
+    fn pam_php_dispatch_http_native(
         method: *const c_char,
         method_length: usize,
         target: *const c_char,
@@ -107,8 +107,7 @@ unsafe extern "C" {
         headers_length: usize,
         body: *const c_char,
         body_length: usize,
-        context: *const c_char,
-        context_length: usize,
+        context: *const HttpRequestContextFfi,
         request_id: *const c_char,
         request_id_length: usize,
         output: *mut *mut c_char,
@@ -705,30 +704,72 @@ impl Drop for PhpRuntime {
     }
 }
 
-pub fn dispatch_http(
+/// `pam_http_request_context` of native/pam.h.
+#[repr(C)]
+struct HttpRequestContextFfi {
+    protocol_version: *const c_char,
+    protocol_version_length: usize,
+    remote_address: *const c_char,
+    remote_address_length: usize,
+    scheme: *const c_char,
+    scheme_length: usize,
+    traceparent: *const c_char,
+    traceparent_length: usize,
+    multipart_json: *const c_char,
+    multipart_json_length: usize,
+    remote_port: u32,
+}
+
+/// Per-request metadata the extension turns into the PHP context array and
+/// `$_SERVER` (see `pam_php_dispatch_http_native`).
+pub struct HttpRequestMeta<'a> {
+    pub protocol_version: &'a str,
+    pub remote_address: &'a str,
+    pub remote_port: u16,
+    pub scheme: &'a str,
+    pub traceparent: &'a str,
+    /// JSON of the streamed multipart body; empty when there is none.
+    pub multipart_json: &'a str,
+}
+
+/// Dispatches an HTTP request without a JSON envelope: `headers` is the
+/// binary list built by `server::encode_php_request_headers`.
+pub fn dispatch_http_native(
     method: &str,
     target: &str,
-    headers_json: &str,
+    headers: &[u8],
     body: &[u8],
-    context_json: &str,
+    meta: &HttpRequestMeta<'_>,
     request_id: &str,
 ) -> Result<Vec<u8>, String> {
     ensure_owner()?;
+    let context = HttpRequestContextFfi {
+        protocol_version: meta.protocol_version.as_ptr().cast::<c_char>(),
+        protocol_version_length: meta.protocol_version.len(),
+        remote_address: meta.remote_address.as_ptr().cast::<c_char>(),
+        remote_address_length: meta.remote_address.len(),
+        scheme: meta.scheme.as_ptr().cast::<c_char>(),
+        scheme_length: meta.scheme.len(),
+        traceparent: meta.traceparent.as_ptr().cast::<c_char>(),
+        traceparent_length: meta.traceparent.len(),
+        multipart_json: meta.multipart_json.as_ptr().cast::<c_char>(),
+        multipart_json_length: meta.multipart_json.len(),
+        remote_port: u32::from(meta.remote_port),
+    };
     track_engine_failure(call_for_bytes(|output, length| {
-        // SAFETY: All slices remain valid for the synchronous call; PHP runs only on
-        // the owner thread and allocates the returned buffer for call_for_string.
+        // SAFETY: All slices and the context struct remain valid for the
+        // synchronous call on the owner thread; the C side copies them.
         unsafe {
-            pam_php_dispatch_http(
+            pam_php_dispatch_http_native(
                 method.as_ptr().cast::<c_char>(),
                 method.len(),
                 target.as_ptr().cast::<c_char>(),
                 target.len(),
-                headers_json.as_ptr().cast::<c_char>(),
-                headers_json.len(),
+                headers.as_ptr().cast::<c_char>(),
+                headers.len(),
                 body.as_ptr().cast::<c_char>(),
                 body.len(),
-                context_json.as_ptr().cast::<c_char>(),
-                context_json.len(),
+                &raw const context,
                 request_id.as_ptr().cast::<c_char>(),
                 request_id.len(),
                 output,
