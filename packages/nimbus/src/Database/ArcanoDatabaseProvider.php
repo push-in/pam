@@ -42,6 +42,12 @@ final class ArcanoDatabaseProvider
 
     private ?ArcanoQueryLogger $logger = null;
 
+    /** The connection set every Fiber shares while a test transaction is open. */
+    private ?DatabaseManager $pinned = null;
+
+    /** @var array<int, int> Transaction level each pinned driver returns to, by object id. */
+    private array $pinnedLevels = [];
+
     /** @var list<DatabaseManager> Connected managers waiting for the next request. */
     private array $idle = [];
 
@@ -59,6 +65,9 @@ final class ArcanoDatabaseProvider
 
     public function manager(): DatabaseManager
     {
+        if ($this->pinned !== null) {
+            return $this->pinned;
+        }
         $fiber = \Fiber::getCurrent();
         if ($fiber === null) {
             return $this->mainManager ??= $this->acquire();
@@ -69,6 +78,9 @@ final class ArcanoDatabaseProvider
     /** The manager of the current Fiber, without acquiring one. */
     public function current(): ?DatabaseManager
     {
+        if ($this->pinned !== null) {
+            return $this->pinned;
+        }
         $fiber = \Fiber::getCurrent();
         return $fiber === null ? $this->mainManager : ($this->fiberManagers[$fiber] ?? null);
     }
@@ -102,6 +114,16 @@ final class ArcanoDatabaseProvider
 
     public function releaseCurrent(): void
     {
+        if ($this->pinned !== null) {
+            // Requests end inside the test transaction: only their own work is rolled back.
+            foreach ($this->pinned->getDrivers() as $driver) {
+                $base = $this->pinnedLevels[spl_object_id($driver)] ?? 0;
+                while ($driver->getTransactionLevel() > $base) {
+                    $driver->rollbackTransaction();
+                }
+            }
+            return;
+        }
         $fiber = \Fiber::getCurrent();
         $manager = $fiber === null ? $this->mainManager : ($this->fiberManagers[$fiber] ?? null);
         if ($manager === null) {
@@ -135,6 +157,48 @@ final class ArcanoDatabaseProvider
         }
         foreach ($manager->getDrivers() as $driver) {
             $driver->disconnect();
+        }
+    }
+
+    /**
+     * Shares one connection set between every Fiber and opens a transaction on each of its
+     * connections; requests and their transactions run inside it until rollbackPinned().
+     * For tests: production code never pins.
+     */
+    public function beginPinned(): void
+    {
+        if ($this->pinned !== null) {
+            throw new \LogicException('A pinned database transaction is already open.');
+        }
+        $manager = $this->manager();
+        $levels = [];
+        foreach ($manager->getDrivers() as $driver) {
+            $driver->beginTransaction();
+            $levels[spl_object_id($driver)] = $driver->getTransactionLevel();
+        }
+        $this->pinned = $manager;
+        $this->pinnedLevels = $levels;
+    }
+
+    /** Rolls back everything written since beginPinned() and returns to per-Fiber connections. */
+    public function rollbackPinned(): void
+    {
+        $manager = $this->pinned;
+        if ($manager === null) {
+            return;
+        }
+        $this->pinned = null;
+        $this->pinnedLevels = [];
+        foreach ($manager->getDrivers() as $driver) {
+            while ($driver->getTransactionLevel() > 0) {
+                $driver->rollbackTransaction();
+            }
+        }
+        $fiber = \Fiber::getCurrent();
+        if ($fiber === null) {
+            $this->mainManager = $manager;
+        } else {
+            $this->fiberManagers[$fiber] = $manager;
         }
     }
 

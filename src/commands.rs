@@ -1121,11 +1121,15 @@ Server::create(static fn (Request $request, Response $response): Response => mat
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     let local_packages = local_packages_repository();
-    let nimbus_version = "^0.2";
-    let testing_version = "^1.0";
+    let nimbus_version = "^0.3";
+    let arcano_version = "^0.2.4";
     let socket_version = "^1.1";
     let mut require = serde_json::Map::from_iter([
         ("php".to_owned(), serde_json::json!("^8.5")),
+        (
+            "pushinbr/arcano".to_owned(),
+            serde_json::json!(arcano_version),
+        ),
         (
             "pushinbr/nimbus".to_owned(),
             serde_json::json!(nimbus_version),
@@ -1144,11 +1148,16 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
         "license": "proprietary",
         "require": require,
         "require-dev": {
+            "fakerphp/faker": "^1.24",
             "laravel/pint": "^1.30",
-            "pushinbr/pam-http-testing": testing_version,
             "phpunit/phpunit": "^12.5"
         },
-        "autoload": {"psr-4": {"App\\": "app/"}},
+        "autoload": {"psr-4": {
+            "App\\": "app/",
+            "Database\\Factories\\": "database/factories/",
+            "Database\\Seeders\\": "database/seeders/"
+        }},
+        "autoload-dev": {"psr-4": {"Tests\\": "tests/"}},
         "config": {"platform": {"php": "8.5.0"}, "platform-check": true, "sort-packages": true},
         "scripts": {
             "dev": "pam dev index.php",
@@ -1158,6 +1167,16 @@ fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
     });
     if let Some(repository) = local_packages {
         manifest["repositories"] = serde_json::json!([repository]);
+    }
+    for path in [
+        "app/Controllers",
+        "database/factories",
+        "database/migrations",
+        "database/seeders",
+        "tests",
+    ] {
+        fs::create_dir_all(directory.join(path))
+            .map_err(|error| format!("cannot create {path}: {error}"))?;
     }
     write_new(
         &directory.join("composer.json"),
@@ -1184,17 +1203,47 @@ $socket->on('connection', static function (\Pam\WS\Socket $client): void {
 declare(strict_types=1);
 
 use Nimbus\App;
-use Pam\Http\Request;
-use Pam\Http\Response;
 
-$app = new App;
+$app = new App();
 {socket_setup}
-$app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json([
-    'message' => 'pong',
-]));
+$app->routes(__DIR__ . '/routes.php');
 $app->listen((int) (getenv('PAM_PORT') ?: 3000));
 "#
         ),
+    )?;
+    write_new(
+        &directory.join("routes.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+use App\Controllers\PingController;
+use Nimbus\RouteRegistrar;
+
+/** @var RouteRegistrar $router */
+
+$router->get('api/ping', [PingController::class, 'show']);
+"#,
+    )?;
+    write_new(
+        &directory.join("app/Controllers/PingController.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers;
+
+use Pam\Http\Request;
+use Pam\Http\Response;
+
+final readonly class PingController
+{
+    public function show(Request $request, Response $response): Response
+    {
+        return $response->json(['message' => 'pong']);
+    }
+}
+"#,
     )?;
     write_new(&directory.join(".gitignore"), "/vendor/\n/.pam/\n")?;
     write_new(&directory.join(".env.example"), "PAM_PORT=3000\n")?;
@@ -1210,32 +1259,43 @@ $app->listen((int) (getenv('PAM_PORT') ?: 3000));
 </phpunit>
 "#,
     )?;
-    fs::create_dir_all(directory.join("tests"))
-        .map_err(|error| format!("cannot create test directory: {error}"))?;
+    write_new(
+        &directory.join("tests/TestCase.php"),
+        r#"<?php
+
+declare(strict_types=1);
+
+namespace Tests;
+
+use Nimbus\App;
+
+abstract class TestCase extends \Nimbus\Testing\TestCase
+{
+    protected function createApplication(): App
+    {
+        $app = new App(discoverPackages: false);
+        $app->routes(dirname(__DIR__) . '/routes.php');
+
+        return $app;
+    }
+}
+"#,
+    )?;
     write_new(
         &directory.join("tests/ApplicationTest.php"),
         r#"<?php
 
 declare(strict_types=1);
 
-use Nimbus\App;
-use Pam\Http\Request;
-use Pam\Http\Response;
-use Pam\Testing\TestClient;
-use PHPUnit\Framework\TestCase;
+namespace Tests;
 
 final class ApplicationTest extends TestCase
 {
     public function test_ping_endpoint(): void
     {
-        $app = new App(discoverPackages: false);
-        $app->get('/api/ping', static fn (Request $request, Response $response): Response => $response->json(['message' => 'pong']));
-
-        (new TestClient($app))
-            ->get('/api/ping')
-            ->assertSuccessful()
-            ->assertJson(['message' => 'pong']);
-        self::addToAssertionCount(1);
+        $this->getJson('/api/ping')
+            ->assertOk()
+            ->assertJsonPath('message', 'pong');
     }
 }
 "#,
@@ -3526,7 +3586,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                     "symlink": false,
                     "versions": {
                         "pushinbr/pam-contracts": "1.1.0",
-                        "pushinbr/nimbus": "0.2.0",
+                        "pushinbr/nimbus": "0.3.0",
                         "pushinbr/pam-http-psr": "1.0.0",
                         "pushinbr/pam-socket": "1.1.0",
                         "pushinbr/pam-http-testing": "1.0.0"

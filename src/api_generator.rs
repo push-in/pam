@@ -13,6 +13,10 @@ pub fn run(command: &str, root: &Path, arguments: Vec<OsString>) -> Result<u8, S
         "make:resource" => ("app/Resources", format!("{name}.php"), resource(&name)),
         "make:service" => ("app/Services", format!("{name}.php"), service(&name)),
         "make:repository" => ("app/Repositories", format!("{name}.php"), repository(&name)),
+        "make:factory" => ("database/factories", format!("{name}.php"), factory(&name)),
+        "make:seeder" => ("database/seeders", format!("{name}.php"), seeder(&name)),
+        "make:job" => ("app/Jobs", format!("{name}.php"), job(&name)),
+        "make:test" => ("tests", format!("{name}.php"), test(&name)),
         "make:migration" => {
             let timestamp = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -105,7 +109,7 @@ fn controller(name: &str) -> String {
 
 fn request(name: &str) -> String {
     format!(
-        "{}use Nimbus\\Validation\\FormRequest;\n\nfinal class {name} extends FormRequest\n{{\n    public function rules(): array\n    {{\n        return [];\n    }}\n}}\n",
+        "{}use Nimbus\\Validation\\Attributes\\Max;\nuse Nimbus\\Validation\\Input;\n\nfinal class {name} extends Input\n{{\n    #[Max(255)]\n    public string \u{24}name;\n}}\n",
         prelude("Requests")
     )
 }
@@ -128,6 +132,34 @@ fn repository(name: &str) -> String {
     format!(
         "{}final readonly class {name}\n{{\n}}\n",
         prelude("Repositories")
+    )
+}
+
+fn factory(name: &str) -> String {
+    let model = name.trim_end_matches("Factory");
+    let model = if model.is_empty() { name } else { model };
+    format!(
+        "<?php\n\ndeclare(strict_types=1);\n\nnamespace Database\\Factories;\n\nuse App\\Models\\{model};\nuse Nimbus\\Database\\Factory;\n\n/** @extends Factory<{model}> */\nfinal class {name} extends Factory\n{{\n    protected string \u{24}model = {model}::class;\n\n    public function definition(): array\n    {{\n        return [];\n    }}\n}}\n"
+    )
+}
+
+fn seeder(name: &str) -> String {
+    format!(
+        "<?php\n\ndeclare(strict_types=1);\n\nnamespace Database\\Seeders;\n\nuse Nimbus\\Database\\Seeder;\n\nfinal class {name} extends Seeder\n{{\n    public function run(): void\n    {{\n    }}\n}}\n"
+    )
+}
+
+fn job(name: &str) -> String {
+    format!(
+        "{}use Nimbus\\Jobs\\SerializableJob;\n\nfinal readonly class {name} implements SerializableJob\n{{\n    public function __construct(public int \u{24}id)\n    {{\n    }}\n\n    public static function jobName(): string\n    {{\n        return '{job}';\n    }}\n\n    public function toJobPayload(): array\n    {{\n        return ['id' => \u{24}this->id];\n    }}\n\n    public static function fromJobPayload(array \u{24}payload): self\n    {{\n        return new self((int) \u{24}payload['id']);\n    }}\n\n    public function handle(): void\n    {{\n    }}\n}}\n",
+        prelude("Jobs"),
+        job = snake_case(name),
+    )
+}
+
+fn test(name: &str) -> String {
+    format!(
+        "<?php\n\ndeclare(strict_types=1);\n\nnamespace Tests;\n\nfinal class {name} extends TestCase\n{{\n    public function test_example(): void\n    {{\n        \u{24}this->getJson('/api/ping')->assertOk();\n    }}\n}}\n"
     )
 }
 
@@ -214,6 +246,17 @@ mod tests {
         assert!(migration.contains("extends Migration"));
         assert!(migration.contains("$this->table('order_items')"));
         assert_eq!(migration_date(1_763_510_400), "20251119.000000");
+    }
+
+    #[test]
+    fn generates_inputs_factories_seeders_and_tests() {
+        assert!(request("StoreOrder").contains("final class StoreOrder extends Input"));
+        let factory = factory("OrderItemFactory");
+        assert!(factory.contains("use App\\Models\\OrderItem;"));
+        assert!(factory.contains("protected string $model = OrderItem::class;"));
+        assert!(seeder("DatabaseSeeder").contains("namespace Database\\Seeders;"));
+        assert!(job("SendInvoice").contains("return 'send_invoice';"));
+        assert!(test("OrderTest").contains("final class OrderTest extends TestCase"));
     }
 
     #[test]

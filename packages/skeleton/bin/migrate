@@ -7,7 +7,9 @@ use App\Providers\AppServiceProvider;
 use Nimbus\Database\ArcanoMigrationManager;
 use Nimbus\Database\ArcanoSchemaCompiler;
 use Nimbus\Database\ArcanoServiceProvider;
+use Database\Seeders\DatabaseSeeder;
 use Nimbus\Database\DatabaseConfig;
+use Nimbus\Database\SeederRunner;
 use Nimbus\App;
 
 $root = dirname(__DIR__);
@@ -28,13 +30,20 @@ if (!$loaded) {
     throw new RuntimeException('Composer dependencies are missing; run pam composer install.');
 }
 spl_autoload_register(static function (string $class) use ($root): void {
-    $prefix = 'App\\';
-    if (!str_starts_with($class, $prefix)) {
+    $directories = [
+        'App\\' => '/app/',
+        'Database\\Factories\\' => '/database/factories/',
+        'Database\\Seeders\\' => '/database/seeders/',
+    ];
+    foreach ($directories as $prefix => $directory) {
+        if (!str_starts_with($class, $prefix)) {
+            continue;
+        }
+        $path = $root . $directory . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
+        if (is_file($path)) {
+            require $path;
+        }
         return;
-    }
-    $path = $root . '/app/' . str_replace('\\', '/', substr($class, strlen($prefix))) . '.php';
-    if (is_file($path)) {
-        require $path;
     }
 });
 
@@ -74,6 +83,7 @@ $output = match ($command) {
         ? 'The entities match the database.'
         : 'Created: ' . implode(', ', array_map('basename', $files)),
     'cache' => 'Schema cache written to var/cache/arcano-schema.php.',
-    default => throw new InvalidArgumentException("Unknown command {$command}; use migrate, rollback [steps], status, generate or cache."),
+    'seed' => 'Seeded: ' . implode(', ', (new SeederRunner($app))->run(DatabaseSeeder::class)),
+    default => throw new InvalidArgumentException("Unknown command {$command}; use migrate, rollback [steps], status, generate, cache or seed."),
 };
 fwrite(STDOUT, $output . "\n");
