@@ -315,6 +315,15 @@ worker cai e vai esperar backoff antes de reiniciar, e no shutdown.
   `mprotect`, `madvise`, `prctl`, `munmap` nem page faults por requisição. Só a
   memória da pilha é reaproveitada (nenhum objeto Fiber ou estado PHP).
   `PAM_FIBER_STACK_POOL=0` desliga. Detalhes em `native/fiber_stack_pool.c`.
+- `DateTime::format()`/`DateTimeImmutable::format()` com `DATE_ATOM` (ou
+  `DATE_RFC3339`) de horários em UTC ou em offset fixo são escritos em C, com os
+  mesmos bytes do PHP; outros formatos e fusos seguem para o PHP.
+  `PAM_FAST_DATE_FORMAT=0` desliga.
+- `pam_native_utc_datetime($valor, $prototipo)` devolve o mesmo
+  `DateTimeImmutable` que `new DateTimeImmutable($valor, UTC)` para um timestamp
+  de banco `AAAA-MM-DD HH:MM:SS` (clone do protótipo com data, hora e epoch
+  preenchidos), ou `null` para qualquer outra entrada. O Arcano usa quando a
+  função existe.
 
 ### Timeout de requisição
 
