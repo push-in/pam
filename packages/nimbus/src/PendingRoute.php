@@ -94,6 +94,12 @@ final readonly class PendingRoute
         return $this->middleware(new Middleware\AuthorizeMiddleware($this->container(), $ability));
     }
 
+    /** Requires a URL signed by `Security\UrlSigner` (APP_KEY) that has not expired. */
+    public function signed(): self
+    {
+        return $this->middleware(Middleware\ValidateSignatureMiddleware::class);
+    }
+
     private function authenticates(): bool
     {
         foreach ($this->route->middleware as $middleware) {

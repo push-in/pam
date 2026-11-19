@@ -136,6 +136,9 @@ namespace Pam\Http {
 
         private string $body = '';
 
+        /** @var list<string> */
+        private array $chunks = [];
+
         public function status(int $status): self
         {
             $this->status = $status;
@@ -168,6 +171,16 @@ namespace Pam\Http {
             return $this;
         }
 
+        /** @param iterable<string|int|float|bool|null> $chunks */
+        public function stream(iterable $chunks, string $contentType = 'application/octet-stream'): self
+        {
+            $this->header('content-type', $contentType);
+            foreach ($chunks as $chunk) {
+                $this->chunks[] = $chunk === null ? '' : (is_bool($chunk) ? ($chunk ? 'true' : 'false') : (string) $chunk);
+            }
+            return $this;
+        }
+
         public function isEmpty(): bool
         {
             return $this->body === '';
@@ -176,7 +189,7 @@ namespace Pam\Http {
         /** @return array{status: int, headers: array<string, list<string>>, body: string, chunks: list<string>} */
         public function export(): array
         {
-            return ['status' => $this->status, 'headers' => $this->headers, 'body' => $this->body, 'chunks' => []];
+            return ['status' => $this->status, 'headers' => $this->headers, 'body' => $this->body, 'chunks' => $this->chunks];
         }
     }
 

@@ -15,4 +15,7 @@ enum ProblemCode: int
     case Timeout = 7;
     case InternalError = 8;
     case MethodNotAllowed = 9;
+    case InvalidSignature = 10;
+    case PayloadTooLarge = 11;
+    case UnsupportedMediaType = 12;
 }

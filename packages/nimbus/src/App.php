@@ -68,6 +68,11 @@ final class App implements ApplicationInterface
         if (interface_exists(\Psr\Log\LoggerInterface::class) && class_exists(\Pam\Observability\Logger::class)) {
             $this->container->singleton(\Psr\Log\LoggerInterface::class, \Pam\Observability\Logger::class);
         }
+        // Signed routes use APP_KEY unless the application binds its own signer.
+        $this->container->singleton(
+            \Nimbus\Security\UrlSigner::class,
+            static fn (): \Nimbus\Security\UrlSigner => \Nimbus\Security\UrlSigner::fromEnvironment(),
+        );
         $this->errorHandler = static function (\Throwable $error, Response $response): Response {
             \Pam\Observability\Telemetry::log('error', 'Unhandled Nimbus exception', [
                 'exception' => $error::class,
@@ -145,6 +150,19 @@ final class App implements ApplicationInterface
     public function container(): Container
     {
         return $this->container;
+    }
+
+    /** The disks registered by `Storage\StorageServiceProvider`. */
+    public function storage(): \Nimbus\Storage\StorageManager
+    {
+        try {
+            $storage = $this->container->get(\Nimbus\Storage\StorageManager::class);
+        } catch (\RuntimeException $error) {
+            throw new \LogicException('Register Nimbus\\Storage\\StorageServiceProvider to use storage().', 0, $error);
+        }
+        return $storage instanceof \Nimbus\Storage\StorageManager
+            ? $storage
+            : throw new \LogicException('Register Nimbus\\Storage\\StorageServiceProvider to use storage().');
     }
 
     /** Boot providers and freeze application configuration without serving a request. */

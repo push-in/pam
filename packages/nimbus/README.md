@@ -359,6 +359,67 @@ OAuth/OIDC authorization-server duties belong to the application
 or a dedicated identity provider; they must not be simulated with long-lived
 access tokens.
 
+## File storage
+
+`Nimbus\Storage` puts named disks over [league/flysystem](https://flysystem.thephpleague.com)
+v3. Nimbus does not require it: install `league/flysystem` for local disks and
+`league/flysystem-aws-s3-v3` for S3 (also AWS-compatible stores such as MinIO and R2).
+
+```php
+$app->provider(new StorageServiceProvider(
+    StorageConfig::fromEnvironment(),
+    routes: '/files', // opt-in signed upload and download routes for local disks
+));
+
+$disk = $app->storage()->disk();           // FILESYSTEM_DISK, `local` by default
+$disk->put('avatars/42.png', $bytes);
+$disk->get('avatars/42.png');
+$disk->url('avatars/42.png');               // STORAGE_URL / AWS_URL prefix, or the S3 object URL
+$disk->temporaryUrl('invoices/7.pdf', 300); // download URL valid for 5 minutes
+```
+
+`StorageConfig::fromEnvironment()` defines `local` from `STORAGE_ROOT` (default `./storage`)
+and `STORAGE_URL`, and `s3` when `AWS_BUCKET` is set (`AWS_DEFAULT_REGION`, `AWS_ENDPOINT`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_USE_PATH_STYLE_ENDPOINT`, `AWS_URL`).
+`APP_URL` prefixes the signed routes. Pass an array of disks to the constructor for more,
+or wrap any flysystem operator with `StorageManager::filesystem($name, $operator)`. A
+`Disk` is injectable and resolves to the default disk; `Disk::filesystem()` exposes the
+flysystem operator for listing, moving and visibility.
+
+### Direct uploads
+
+`temporaryUploadUrl()` returns a URL the client sends the file to with `PUT`, so the
+upload does not pass through your handler:
+
+```php
+$app->post('/avatars', static fn (Disk $disk, Response $response): Response => $response->json([
+    'upload' => $disk->temporaryUploadUrl('avatars/42.png', ttl: 600, maxBytes: 2_000_000, contentType: 'image/png'),
+]));
+```
+
+On S3 the URL is a presigned `PutObject` from the AWS SDK; S3 binds the content type
+but cannot cap the size of a presigned PUT, so check `Disk::size()` once the client
+reports the upload. On local disks it points at `PUT {routes}/upload`, which answers
+`413` above `maxBytes`, `415` for another content type and `403` for a tampered or
+expired URL, then writes the body and answers `201` with `{disk, path, size}`. The
+runtime buffers request bodies up to the `maxBodyBytes` listen option (2 MiB by
+default); raise it for larger local uploads or use S3. `GET {routes}/download` streams
+the file behind a local `temporaryUrl()`.
+
+### Signed URLs
+
+`UrlSigner` signs a path and its query with HMAC-SHA256 under a key derived from
+`APP_KEY`; changing the path, any parameter or the expiry invalidates the signature,
+which is compared in constant time. `signed()` guards a route or a group and answers
+`403` with problem code `InvalidSignature`:
+
+```php
+$signer = $app->container()->get(UrlSigner::class);
+$link = $signer->temporary('/reports/7', ttl: 3600, query: ['format' => 'csv']);
+
+$app->get('/reports/{id}', ReportController::class)->signed();
+```
+
 ## Production building blocks
 
 Nimbus exposes small, replaceable contracts instead of choosing application

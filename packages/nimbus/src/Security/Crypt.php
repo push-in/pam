@@ -23,6 +23,12 @@ final readonly class Crypt
     /** Reads APP_KEY as `base64:...` (generate one with Crypt::generateKey()). */
     public static function fromEnvironment(): self
     {
+        return new self(self::keyFromEnvironment());
+    }
+
+    /** The raw bytes of APP_KEY, shared with `UrlSigner`. */
+    public static function keyFromEnvironment(): string
+    {
         $value = getenv('APP_KEY');
         if (!is_string($value) || !str_starts_with($value, 'base64:')) {
             throw new \RuntimeException('APP_KEY must be set as base64:<32 random bytes>.');
@@ -31,7 +37,7 @@ final readonly class Crypt
         if ($key === false) {
             throw new \RuntimeException('APP_KEY is not valid base64.');
         }
-        return new self($key);
+        return $key;
     }
 
     public static function generateKey(): string

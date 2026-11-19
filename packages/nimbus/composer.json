@@ -27,6 +27,8 @@
         "pushinbr/pam-contracts": "^1.1"
     },
     "suggest": {
+        "league/flysystem": "Required by Nimbus\\Storage (StorageManager, Disk, local disks).",
+        "league/flysystem-aws-s3-v3": "S3 disks and presigned uploads in Nimbus\\Storage.",
         "psr/log": "PSR-3 logging; LoggerInterface resolves to the PAM runtime structured log.",
         "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
         "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
@@ -68,6 +70,7 @@
         "sort-packages": true
     },
     "require-dev": {
+        "league/flysystem": "^3.29",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",
         "pushinbr/arcano": "^0.2.4"

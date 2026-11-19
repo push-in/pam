@@ -3,6 +3,20 @@
 All notable changes to Nimbus are documented here. Nimbus follows Semantic
 Versioning; the 0.x line may still adjust public API between minor versions.
 
+## Unreleased
+
+### Added
+- `Storage`: named disks over league/flysystem v3 (local and S3, optional dependencies) with
+  `StorageConfig::fromEnvironment()`, `StorageServiceProvider`, `App::storage()` and an
+  injectable `Disk` (put, get, streams, exists, delete, size, mimeType, url, temporaryUrl).
+- `Disk::temporaryUploadUrl()`: direct uploads by presigned S3 `PutObject`, or for local disks
+  through opt-in signed `PUT {routes}/upload` and `GET {routes}/download` routes that enforce
+  the signed size limit and content type.
+- `UrlSigner` (HMAC-SHA256 with a key derived from `APP_KEY`, expiry, constant-time check) and
+  `signed()` on routes and route groups.
+- Problem codes `InvalidSignature`, `PayloadTooLarge` and `UnsupportedMediaType`.
+- `Crypt::keyFromEnvironment()`.
+
 ## 0.2.0 - 2026-11-19
 
 ### Added

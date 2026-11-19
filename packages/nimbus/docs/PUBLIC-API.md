@@ -86,6 +86,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Middleware\ResponseCacheMiddleware`](#nimbusmiddlewareresponsecachemiddleware)
 - [`Nimbus\Middleware\SecurityHeadersMiddleware`](#nimbusmiddlewaresecurityheadersmiddleware)
 - [`Nimbus\Middleware\TransactionalMiddleware`](#nimbusmiddlewaretransactionalmiddleware)
+- [`Nimbus\Middleware\ValidateSignatureMiddleware`](#nimbusmiddlewarevalidatesignaturemiddleware)
 - [`Nimbus\Observability\RequestObservation`](#nimbusobservabilityrequestobservation)
 - [`Nimbus\Observability\RequestObserver`](#nimbusobservabilityrequestobserver)
 - [`Nimbus\OpenApi\ClientGenerator`](#nimbusopenapiclientgenerator)
@@ -126,6 +127,16 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Security\Crypt`](#nimbussecuritycrypt)
 - [`Nimbus\Security\DecryptException`](#nimbussecuritydecryptexception)
 - [`Nimbus\Security\Hash`](#nimbussecurityhash)
+- [`Nimbus\Security\UrlSignatureState`](#nimbussecurityurlsignaturestate)
+- [`Nimbus\Security\UrlSigner`](#nimbussecurityurlsigner)
+- [`Nimbus\Storage\Disk`](#nimbusstoragedisk)
+- [`Nimbus\Storage\S3UploadUrlGenerator`](#nimbusstorages3uploadurlgenerator)
+- [`Nimbus\Storage\SignedStorageUrls`](#nimbusstoragesignedstorageurls)
+- [`Nimbus\Storage\StorageConfig`](#nimbusstoragestorageconfig)
+- [`Nimbus\Storage\StorageManager`](#nimbusstoragestoragemanager)
+- [`Nimbus\Storage\StorageRoutes`](#nimbusstoragestorageroutes)
+- [`Nimbus\Storage\StorageServiceProvider`](#nimbusstoragestorageserviceprovider)
+- [`Nimbus\Storage\UploadUrlGenerator`](#nimbusstorageuploadurlgenerator)
 - [`Nimbus\Tenancy\Tenant`](#nimbustenancytenant)
 - [`Nimbus\Tenancy\TenantContext`](#nimbustenancytenantcontext)
 - [`Nimbus\Tenancy\TenantResolver`](#nimbustenancytenantresolver)
@@ -181,6 +192,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public resource(string $path, string $controller, ?callable $routes = null): void`
 - `public route(string $method, string $path, array|callable|string $handler): self`
 - `public routes(string $file): self`
+- `public storage(): Nimbus\Storage\StorageManager`
 - `public transport(Pam\Contracts\Transport\TransportProviderInterface $provider): self`
 - `public transports(): array`
 
@@ -903,17 +915,23 @@ final enum Nimbus\Http\ProblemCode implements BackedEnum, UnitEnum: int
 - `Timeout = 7`
 - `InternalError = 8`
 - `MethodNotAllowed = 9`
+- `InvalidSignature = 10`
+- `PayloadTooLarge = 11`
+- `UnsupportedMediaType = 12`
 
 ### Constants
 
 - `Conflict = 5`
 - `Forbidden = 3`
 - `InternalError = 8`
+- `InvalidSignature = 10`
 - `MethodNotAllowed = 9`
 - `NotFound = 4`
+- `PayloadTooLarge = 11`
 - `RateLimited = 6`
 - `Timeout = 7`
 - `Unauthenticated = 2`
+- `UnsupportedMediaType = 12`
 - `ValidationFailed = 1`
 
 ### Properties
@@ -1359,6 +1377,17 @@ final readonly class Nimbus\Middleware\TransactionalMiddleware implements Pam\Co
 - `public __construct(Nimbus\Transactions\TransactionManager $transactions): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
+## `Nimbus\Middleware\ValidateSignatureMiddleware`
+
+```php
+final readonly class Nimbus\Middleware\ValidateSignatureMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Security\UrlSigner $signer): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
 ## `Nimbus\Observability\RequestObservation`
 
 ```php
@@ -1558,6 +1587,7 @@ final readonly class Nimbus\PendingRoute
 - `public patch(string $path, array|callable|string $handler): self`
 - `public post(string $path, array|callable|string $handler): self`
 - `public put(string $path, array|callable|string $handler): self`
+- `public signed(): self`
 - `public summary(string $summary): self`
 - `public tags(array $tags): self`
 - `public where(string $parameter, Nimbus\RouteConstraint|string $constraint): self`
@@ -1887,6 +1917,7 @@ final class Nimbus\RouteRegistrar
 - `public prefix(string $prefix): self`
 - `public put(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public resource(string $path, string $controller, ?callable $routes = null): void`
+- `public signed(): self`
 
 ## `Nimbus\Router`
 
@@ -1986,6 +2017,7 @@ final readonly class Nimbus\Security\Crypt
 - `public encrypt(string $plaintext): string`
 - `public static fromEnvironment(): self`
 - `public static generateKey(): string`
+- `public static keyFromEnvironment(): string`
 
 ## `Nimbus\Security\DecryptException`
 
@@ -2004,6 +2036,169 @@ final readonly class Nimbus\Security\Hash
 - `public static check(string $password, string $hash): bool`
 - `public static make(string $password): string`
 - `public static needsRehash(string $hash): bool`
+
+## `Nimbus\Security\UrlSignatureState`
+
+```php
+final enum Nimbus\Security\UrlSignatureState implements BackedEnum, UnitEnum: int
+```
+
+### Enum cases
+
+- `Valid = 1`
+- `Invalid = 2`
+- `Expired = 3`
+
+### Constants
+
+- `Expired = 3`
+- `Invalid = 2`
+- `Valid = 1`
+
+### Properties
+
+- `public readonly string $name`
+- `public readonly int $value`
+
+### Methods
+
+- `public static cases(): array`
+- `public static from(int|string $value): static`
+- `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Security\UrlSigner`
+
+```php
+final readonly class Nimbus\Security\UrlSigner
+```
+
+### Constants
+
+- `EXPIRES = "expires"`
+- `SIGNATURE = "signature"`
+
+### Methods
+
+- `public __construct(string $key): mixed`
+- `public check(string $path, array $query, ?int $now = null): Nimbus\Security\UrlSignatureState`
+- `public static fromEnvironment(): self`
+- `public sign(string $path, array $query = [], ?int $expiresAt = null): string`
+- `public temporary(string $path, int $ttl, array $query = []): string`
+- `public verify(string $path, array $query, ?int $now = null): bool`
+
+## `Nimbus\Storage\Disk`
+
+```php
+final readonly class Nimbus\Storage\Disk
+```
+
+### Methods
+
+- `public __construct(string $name, League\Flysystem\FilesystemOperator $filesystem, ?Nimbus\Storage\UploadUrlGenerator $uploads = null): mixed`
+- `public delete(string $path): void`
+- `public exists(string $path): bool`
+- `public filesystem(): League\Flysystem\FilesystemOperator`
+- `public get(string $path): string`
+- `public mimeType(string $path): string`
+- `public name(): string`
+- `public put(string $path, string $contents, array $config = []): void`
+- `public readStream(string $path): mixed`
+- `public size(string $path): int`
+- `public temporaryUploadUrl(string $path, int $ttl, int $maxBytes, ?string $contentType = null): string`
+- `public temporaryUrl(string $path, int $ttl): string`
+- `public url(string $path): string`
+- `public writeStream(string $path, mixed $stream, array $config = []): void`
+
+## `Nimbus\Storage\S3UploadUrlGenerator`
+
+```php
+final readonly class Nimbus\Storage\S3UploadUrlGenerator implements Nimbus\Storage\UploadUrlGenerator
+```
+
+### Methods
+
+- `public __construct(object $client, string $bucket, string $prefix = ""): mixed`
+- `public temporaryUploadUrl(string $path, DateTimeImmutable $expiresAt, int $maxBytes, ?string $contentType = null): string`
+
+## `Nimbus\Storage\SignedStorageUrls`
+
+```php
+final readonly class Nimbus\Storage\SignedStorageUrls implements League\Flysystem\UrlGeneration\TemporaryUrlGenerator, Nimbus\Storage\UploadUrlGenerator
+```
+
+### Methods
+
+- `public __construct(Nimbus\Security\UrlSigner $signer, string $disk, string $routes, string $baseUrl = ""): mixed`
+- `public temporaryUploadUrl(string $path, DateTimeImmutable $expiresAt, int $maxBytes, ?string $contentType = null): string`
+- `public temporaryUrl(string $path, DateTimeInterface $expiresAt, League\Flysystem\Config $config): string`
+
+## `Nimbus\Storage\StorageConfig`
+
+```php
+final readonly class Nimbus\Storage\StorageConfig
+```
+
+### Properties
+
+- `public readonly string $defaultDisk`
+- `public readonly array $disks`
+- `public readonly string $url`
+
+### Methods
+
+- `public __construct(string $defaultDisk, array $disks, string $url = ""): mixed`
+- `public disk(string $name): array`
+- `public static fromEnvironment(): self`
+
+## `Nimbus\Storage\StorageManager`
+
+```php
+final class Nimbus\Storage\StorageManager
+```
+
+### Methods
+
+- `public __construct(Nimbus\Storage\StorageConfig $config, ?Nimbus\Security\UrlSigner $signer = null, ?string $routes = null): mixed`
+- `public disk(?string $name = null): Nimbus\Storage\Disk`
+- `public filesystem(string $name, League\Flysystem\FilesystemOperator $filesystem): Nimbus\Storage\Disk`
+- `public register(Nimbus\Storage\Disk $disk): self`
+
+## `Nimbus\Storage\StorageRoutes`
+
+```php
+final readonly class Nimbus\Storage\StorageRoutes
+```
+
+### Methods
+
+- `public __construct(Nimbus\Storage\StorageManager $storage): mixed`
+- `public download(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public static downloadPath(string $path): string`
+- `public register(Nimbus\App $app, string $path): void`
+- `public upload(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public static uploadPath(string $path): string`
+
+## `Nimbus\Storage\StorageServiceProvider`
+
+```php
+final readonly class Nimbus\Storage\StorageServiceProvider implements Pam\Contracts\Package\ServiceProviderInterface
+```
+
+### Methods
+
+- `public __construct(Nimbus\Storage\StorageConfig $config, ?string $routes = null, ?Nimbus\Security\UrlSigner $signer = null): mixed`
+- `public boot(Pam\Contracts\Http\ApplicationInterface $application): void`
+- `public register(Pam\Contracts\Http\ApplicationInterface $application): void`
+
+## `Nimbus\Storage\UploadUrlGenerator`
+
+```php
+abstract interface Nimbus\Storage\UploadUrlGenerator
+```
+
+### Methods
+
+- `public temporaryUploadUrl(string $path, DateTimeImmutable $expiresAt, int $maxBytes, ?string $contentType = null): string`
 
 ## `Nimbus\Tenancy\Tenant`
 

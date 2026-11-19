@@ -58,6 +58,12 @@ final class RouteRegistrar
         return $this->auth()->middleware(new Middleware\AuthorizeMiddleware($this->app->container(), $ability));
     }
 
+    /** Routes registered through the returned registrar require a valid URL signature. */
+    public function signed(): self
+    {
+        return $this->middleware(Middleware\ValidateSignatureMiddleware::class);
+    }
+
     private function withAuthentication(): self
     {
         $clone = $this->middleware(Middleware\AuthenticateMiddleware::class);
