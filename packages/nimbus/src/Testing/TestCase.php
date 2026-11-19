@@ -10,6 +10,7 @@ use Nimbus\Auth\Principal;
 use Nimbus\Database\ArcanoDatabaseProvider;
 use Nimbus\Database\ArcanoManager;
 use Nimbus\Database\ArcanoMigrationManager;
+use Nimbus\Database\DatabaseConfig;
 use Nimbus\Database\Factory;
 use Nimbus\Database\Seeder;
 use Nimbus\Database\SeederRunner;
@@ -28,6 +29,9 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
     private ?TestClient $client = null;
 
     private bool $databasePinned = false;
+
+    /** @var array<string, true> Databases migrated by this process, by connection and directory. */
+    private static array $migrated = [];
 
     /** Builds the application under test; it is booted by setUp(). */
     abstract protected function createApplication(): App;
@@ -65,14 +69,24 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         parent::tearDown();
     }
 
-    /** Runs the pending migrations, then opens the transaction rolled back in tearDown(). */
+    /**
+     * Runs the pending migrations, once per process for a persistent database and before
+     * every test for an in-memory SQLite one, then opens the transaction rolled back in
+     * tearDown(). Migrations always run outside the test transaction.
+     */
     protected function refreshDatabase(): void
     {
         $container = $this->application()->container();
         if ($container->has(ArcanoMigrationManager::class)) {
-            $migrations = $container->get(ArcanoMigrationManager::class);
-            if ($migrations instanceof ArcanoMigrationManager) {
-                $migrations->migrate();
+            $key = self::migrationKey($container->has(DatabaseConfig::class) ? $container->get(DatabaseConfig::class) : null);
+            if ($key === null || !isset(self::$migrated[$key])) {
+                $migrations = $container->get(ArcanoMigrationManager::class);
+                if ($migrations instanceof ArcanoMigrationManager) {
+                    $migrations->migrate();
+                }
+                if ($key !== null) {
+                    self::$migrated[$key] = true;
+                }
             }
         }
         $databases = $container->get(ArcanoDatabaseProvider::class);
@@ -81,6 +95,12 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         }
         $databases->beginPinned();
         $this->databasePinned = true;
+    }
+
+    /** Makes the next RefreshDatabase test migrate again, e.g. after tables were dropped outside it. */
+    protected static function forgetMigrations(): void
+    {
+        self::$migrated = [];
     }
 
     protected function application(): App
@@ -240,6 +260,20 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
             $query->where($columns);
         }
         return $query->count();
+    }
+
+    /** The key of a persistent database; null for in-memory SQLite, which every application recreates. */
+    private static function migrationKey(mixed $config): ?string
+    {
+        if (!$config instanceof DatabaseConfig) {
+            return null;
+        }
+        $connection = $config->connections[$config->defaultConnection];
+        $database = $connection['database'] ?? null;
+        if (($connection['driver'] ?? null) === 'sqlite' && ($database === null || $database === '' || $database === ':memory:')) {
+            return null;
+        }
+        return md5(serialize($config->connections));
     }
 
     /**

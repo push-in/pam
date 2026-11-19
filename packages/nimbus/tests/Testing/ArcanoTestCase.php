@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nimbus\Tests\Testing;
 
 use Nimbus\App;
+use Nimbus\Database\ArcanoDatabaseProvider;
 use Nimbus\Database\ArcanoManager;
 use Nimbus\Database\ArcanoSchemaCompiler;
 use Nimbus\Database\ArcanoServiceProvider;
@@ -29,6 +30,16 @@ abstract class ArcanoTestCase extends TestCase
     public static function setUpBeforeClass(): void
     {
         self::$path = tempnam(sys_get_temp_dir(), 'nimbus-testing') ?: null;
+        if (ArcanoTestDatabase::driver() !== 'sqlite' && class_exists(\Arcano\ORM\ORM::class)) {
+            // A server database is shared with other suites that create the same tables.
+            $databases = new ArcanoDatabaseProvider(ArcanoTestDatabase::config(''));
+            foreach (['posts', 'authors', 'migrations'] as $table) {
+                $databases->database()->execute('DROP TABLE IF EXISTS ' . $table);
+            }
+            $databases->releaseCurrent();
+            $databases->disconnectIdle();
+            self::forgetMigrations();
+        }
     }
 
     public static function tearDownAfterClass(): void
