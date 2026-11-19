@@ -4146,7 +4146,7 @@ fn initializes_a_project_without_overwriting_files() {
     assert_eq!(manifest_json["require"]["pushinbr/nimbus"], "^0.5");
     assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
     assert_eq!(manifest_json["require-dev"]["fakerphp/faker"], "^1.24");
-    assert_eq!(manifest_json["require"]["pushinbr/arcano"], "^0.2.5");
+    assert_eq!(manifest_json["require"]["pushinbr/arcano"], "^0.2.6");
     assert!(directory.join("routes.php").is_file());
     assert!(
         directory

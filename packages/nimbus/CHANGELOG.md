@@ -5,6 +5,8 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.5.1 - 2026-11-19
+
 ### Changed
 
 - `Paginator::paginate()` reads the page and the total with one statement when Arcano offers
@@ -12,6 +14,7 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   numbered page costs one database round trip instead of two. The total is still a real `COUNT`;
   a page past the last row counts with its own statement.
 - `ResourceCollection` builds its `data` list without a closure per item.
+- Development and tests use `pushinbr/arcano` `^0.2.6` (page and count in one statement, cached insert plans, UTC hydration through `pam_native_utc_datetime()` on PAM).
 
 ## 0.5.0 - 2026-11-19
 
