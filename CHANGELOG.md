@@ -19,6 +19,9 @@ Security hardening.
   waits up to `requestTimeoutMs` and then gets `503` with `Retry-After`. Every request of a worker
   shares one `memory_limit`; 30 suspended 2 MiB POSTs used to exhaust 48M and recycle the worker
   with every request in flight. `php://input` reads the body PHP already holds instead of a copy.
+- `rateLimitPerSecond` sweeps idle clients at most once per second instead of scanning every client
+  on every request, and tracks at most 65,536 clients per worker; past that a new client is limited
+  until buckets expire.
 
 ## 2.2.25 - 2026-11-19
 

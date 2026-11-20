@@ -96,7 +96,7 @@ struct ServerStateInner {
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
     otlp: Option<crate::otlp::Exporter>,
-    rate_limits: Arc<Mutex<HashMap<String, RateBucket>>>,
+    rate_limits: Arc<Mutex<RateLimiter>>,
     trusted_proxies: crate::client_ip::TrustedProxies,
     worker_state: WorkerStateReporter,
     next_worker_metrics_at: Arc<AtomicU64>,
@@ -159,7 +159,7 @@ impl ServerState {
                 otlp_counters,
             )),
             otlp,
-            rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            rate_limits: Arc::new(Mutex::new(RateLimiter::default())),
             trusted_proxies,
             worker_state: WorkerStateReporter::from_environment(),
             next_worker_metrics_at: Arc::new(AtomicU64::new(0)),
@@ -270,21 +270,10 @@ impl ServerState {
         if limit == 0 {
             return false;
         }
-        let now = Instant::now();
-        let mut windows = self.rate_limits.lock().await;
-        windows.retain(|_, bucket| now.duration_since(bucket.updated) < Duration::from_secs(2));
-        let bucket = windows.entry(client.to_owned()).or_insert(RateBucket {
-            available: f64::from(limit),
-            updated: now,
-        });
-        let elapsed = now.duration_since(bucket.updated).as_secs_f64();
-        bucket.available = (bucket.available + elapsed * f64::from(limit)).min(f64::from(limit));
-        bucket.updated = now;
-        if bucket.available < 1.0 {
-            return true;
-        }
-        bucket.available -= 1.0;
-        false
+        self.rate_limits
+            .lock()
+            .await
+            .limited(client, limit, Instant::now())
     }
 
     fn metrics_snapshot(&self) -> WorkerMetricsSnapshot {
@@ -759,6 +748,65 @@ struct RouteMetric {
 struct RateBucket {
     available: f64,
     updated: Instant,
+}
+
+/// Token buckets per client address (`rateLimitPerSecond`).
+///
+/// Idle buckets are swept at most once per second (not on every request),
+/// and the table holds at most [`RATE_LIMIT_MAX_CLIENTS`] clients: when it is
+/// full after a sweep, a new client is limited until buckets expire.
+#[derive(Default)]
+struct RateLimiter {
+    buckets: HashMap<String, RateBucket>,
+    last_sweep: Option<Instant>,
+}
+
+const RATE_LIMIT_MAX_CLIENTS: usize = 65_536;
+const RATE_LIMIT_IDLE: Duration = Duration::from_secs(2);
+const RATE_LIMIT_SWEEP_EVERY: Duration = Duration::from_secs(1);
+
+impl RateLimiter {
+    fn sweep(&mut self, now: Instant) {
+        self.buckets
+            .retain(|_, bucket| now.saturating_duration_since(bucket.updated) < RATE_LIMIT_IDLE);
+        self.last_sweep = Some(now);
+    }
+
+    fn limited(&mut self, client: &str, limit: u32, now: Instant) -> bool {
+        if self
+            .last_sweep
+            .is_none_or(|last| now.saturating_duration_since(last) >= RATE_LIMIT_SWEEP_EVERY)
+        {
+            self.sweep(now);
+        }
+        let capacity = f64::from(limit);
+        let bucket = match self.buckets.get_mut(client) {
+            Some(bucket) => {
+                if now.saturating_duration_since(bucket.updated) >= RATE_LIMIT_IDLE {
+                    bucket.available = capacity;
+                    bucket.updated = now;
+                }
+                bucket
+            }
+            None => {
+                if self.buckets.len() >= RATE_LIMIT_MAX_CLIENTS {
+                    return true;
+                }
+                self.buckets.entry(client.to_owned()).or_insert(RateBucket {
+                    available: capacity,
+                    updated: now,
+                })
+            }
+        };
+        let elapsed = now.saturating_duration_since(bucket.updated).as_secs_f64();
+        bucket.available = (bucket.available + elapsed * capacity).min(capacity);
+        bucket.updated = now;
+        if bucket.available < 1.0 {
+            return true;
+        }
+        bucket.available -= 1.0;
+        false
+    }
 }
 
 impl Metrics {
@@ -4610,6 +4658,33 @@ fn event_loop_lag_average_micros(total_micros: u64, samples: u64) -> f64 {
 mod tests {
     use super::*;
     use std::task::{Context, Poll};
+
+    #[test]
+    fn rate_limiter_bounds_tracked_clients_without_scanning_every_request() {
+        let mut limiter = RateLimiter::default();
+        let start = Instant::now();
+        // Distinct (possibly forged) clients inside one window cannot grow
+        // the table without bound; past the cap a new client is limited.
+        for index in 0..(RATE_LIMIT_MAX_CLIENTS + 1_000) {
+            limiter.limited(
+                &format!("198.51.{}.{}", index / 256, index % 256),
+                10,
+                start,
+            );
+        }
+        assert!(limiter.buckets.len() <= RATE_LIMIT_MAX_CLIENTS);
+        assert!(limiter.limited("203.0.113.1", 10, start));
+        // A known client keeps its bucket.
+        assert!(!limiter.limited("198.51.0.0", 10, start + Duration::from_millis(500)));
+        // Idle buckets are swept once the window passed.
+        let later = start + Duration::from_secs(3);
+        assert!(!limiter.limited("203.0.113.1", 10, later));
+        assert_eq!(limiter.buckets.len(), 1);
+        // Within one second there is no further sweep (no O(n) per request).
+        assert_eq!(limiter.last_sweep, Some(later));
+        limiter.limited("203.0.113.2", 10, later + Duration::from_millis(10));
+        assert_eq!(limiter.last_sweep, Some(later));
+    }
 
     struct PendingOperation(Arc<AtomicBool>);
 
