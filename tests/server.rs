@@ -119,6 +119,29 @@ impl ServerProcess {
         server
     }
 
+    fn start_with_env(variables: &[(&str, &str)]) -> Self {
+        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pam"));
+        command
+            .arg("tests/fixtures/server.php")
+            .env("PAM_TEST_PORT", port.to_string())
+            .envs(variables.iter().copied())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let child = command.spawn().expect("Pam server should start");
+        let mut server = Self {
+            child,
+            port,
+            temporary_directory: None,
+            certificate: None,
+        };
+        server.wait_until_ready();
+        server
+    }
+
     fn start_with_options(
         response_limits: Option<(usize, usize)>,
         rate_limit_per_second: Option<u32>,
@@ -1462,4 +1485,35 @@ fn client_request_ids_never_collide_inside_the_worker() {
         response.starts_with("HTTP/1.1 200 OK"),
         "worker must survive: {response}"
     );
+}
+
+#[test]
+fn resolves_the_client_from_the_right_of_x_forwarded_for() {
+    let client_ip = |server: &ServerProcess, forwarded: &str| {
+        let response = server.http_request(&format!(
+            "GET /client-ip HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Forwarded-For: {forwarded}\r\nConnection: close\r\n\r\n"
+        ));
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        response_json(&response)["remoteAddress"].clone()
+    };
+
+    // The peer (127.0.0.1) is a trusted proxy: the client is the address it
+    // appended, not the forged one on the left; junk is never the address.
+    let server = ServerProcess::start_with_env(&[("PAM_TEST_TRUSTED_PROXIES", "127.0.0.1")]);
+    assert_eq!(client_ip(&server, "6.6.6.6, 203.0.113.9"), "203.0.113.9");
+    assert_eq!(client_ip(&server, "<script>alert(1)</script>"), "127.0.0.1");
+    drop(server);
+
+    // Ranges come from the option or from PAM_TRUSTED_PROXIES.
+    let server =
+        ServerProcess::start_with_env(&[("PAM_TRUSTED_PROXIES", "127.0.0.0/8, 10.0.0.0/8")]);
+    assert_eq!(
+        client_ip(&server, "6.6.6.6, 198.51.100.4, 10.1.2.3"),
+        "198.51.100.4"
+    );
+    drop(server);
+
+    // Without trusted proxies the header is ignored.
+    let server = ServerProcess::start();
+    assert_eq!(client_ip(&server, "6.6.6.6"), "127.0.0.1");
 }

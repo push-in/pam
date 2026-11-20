@@ -95,6 +95,7 @@ struct ServerStateInner {
     metrics: Arc<Metrics>,
     otlp: Option<crate::otlp::Exporter>,
     rate_limits: Arc<Mutex<HashMap<String, RateBucket>>>,
+    trusted_proxies: crate::client_ip::TrustedProxies,
     worker_state: WorkerStateReporter,
     next_worker_metrics_at: Arc<AtomicU64>,
     last_reported_active_requests: Arc<AtomicU64>,
@@ -115,6 +116,18 @@ impl ServerState {
         let route_metrics_max_entries = config.route_metrics_max_entries;
         let page_cache = PageCache::new(page_cache_config(&config));
         let otlp = crate::otlp::Exporter::from_environment()?;
+        let trusted_proxies =
+            crate::client_ip::TrustedProxies::from_config(&config.trusted_proxies)?;
+        if trusted_proxies.trusts_everyone() {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "level": "warning",
+                    "event": "trusted_proxies_wildcard",
+                    "message": "trustedProxies contains \"*\": any client can choose its address with X-Forwarded-For; list the proxy addresses or CIDR ranges instead",
+                })
+            );
+        }
         let otlp_counters = otlp
             .as_ref()
             .map_or_else(crate::otlp::Counters::default, |exporter| {
@@ -144,6 +157,7 @@ impl ServerState {
             )),
             otlp,
             rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            trusted_proxies,
             worker_state: WorkerStateReporter::from_environment(),
             next_worker_metrics_at: Arc::new(AtomicU64::new(0)),
             last_reported_active_requests: Arc::new(AtomicU64::new(0)),
@@ -1827,7 +1841,10 @@ async fn handle_http3_request(
             None,
         )
     } else {
-        let client = client_address(remote, &headers, &state.config.trusted_proxies);
+        let client = state
+            .trusted_proxies
+            .client_address(remote.ip(), &headers)
+            .to_string();
         if state.rate_limited(&client).await {
             let mut response = error_response(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
             response
@@ -2072,7 +2089,10 @@ async fn http_dispatch(
         );
     }
 
-    let client = client_address(remote, &headers, &state.config.trusted_proxies);
+    let client = state
+        .trusted_proxies
+        .client_address(remote.ip(), &headers)
+        .to_string();
     if state.rate_limited(&client).await {
         let mut response = error_response(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
         response
@@ -4453,25 +4473,6 @@ fn header_bytes(headers: &HeaderMap) -> usize {
         .iter()
         .map(|(name, value)| name.as_str().len() + value.as_bytes().len() + 4)
         .sum()
-}
-
-fn client_address(remote: SocketAddr, headers: &HeaderMap, trusted_proxies: &[String]) -> String {
-    let direct = remote.ip().to_string();
-    let trusted = trusted_proxies
-        .iter()
-        .any(|proxy| proxy == "*" || proxy == &direct);
-    if !trusted {
-        return direct;
-    }
-
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && value.len() <= 128)
-        .map(str::to_owned)
-        .unwrap_or(direct)
 }
 
 fn allowed_cors_origin(headers: &HeaderMap, configured: &[String]) -> Option<String> {

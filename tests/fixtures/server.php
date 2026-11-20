@@ -182,6 +182,9 @@ $app->post('/upload-block', static function (Request $request, Response $respons
     usleep(10_000_000);
     return $response->send('late');
 });
+$app->get('/client-ip', static fn (Request $request, Response $response): Response => $response->json([
+    'remoteAddress' => $_SERVER['REMOTE_ADDR'] ?? null,
+]));
 $app->post('/async-context', static function (Request $request, Response $response): Response {
     $requestIdBefore = $_SERVER['PAM_REQUEST_ID'] ?? null;
     $bodyBefore = $request->body();
@@ -428,7 +431,11 @@ $options = [
     'maxResponseBytes' => (int) (getenv('PAM_TEST_MAX_RESPONSE_BYTES') ?: 256 * 1024 * 1024),
     'maxResponseChunkBytes' => (int) (getenv('PAM_TEST_MAX_RESPONSE_CHUNK_BYTES') ?: 1024 * 1024),
     'leakDetectionSampleRate' => 1,
+    'trustedProxies' => array_values(array_filter(explode(',', (string) getenv('PAM_TEST_TRUSTED_PROXIES')))),
 ];
+if (getenv('PAM_TEST_MAX_BODY_BYTES') !== false) {
+    $options['maxBodyBytes'] = (int) getenv('PAM_TEST_MAX_BODY_BYTES');
+}
 if (getenv('PAM_TEST_RESPONSE_CACHE') === '1') {
     $options['responseCachePaths'] = ['/cached', '/cached-slow'];
     $options['responseCacheVaryHeaders'] = ['accept-language'];

@@ -357,8 +357,12 @@ urlencoded, corpos crus) e não se aplica a multipart.
 Pam pode terminar TLS/HTTP2 e QUIC/HTTP3 diretamente, mas um proxy dedicado
 continua útil para certificados automatizados, WAF e roteamento. HTTP/3 exige que
 TCP e UDP estejam liberados na porta configurada; mantenha `http3 => false` quando
-o ambiente não expuser UDP. Configure `trustedProxies` somente com endereços
-realmente confiáveis; headers encaminhados de clientes não confiáveis são ignorados.
+o ambiente não expuser UDP. Configure `trustedProxies` somente com endereços ou faixas CIDR
+realmente confiáveis (`['10.0.0.0/8', '172.16.0.1']`), ou pela variável `PAM_TRUSTED_PROXIES`
+(separada por vírgula, somada à opção). Headers encaminhados por peers não confiáveis são
+ignorados. Com o peer confiável, o cliente é a entrada de `X-Forwarded-For` mais à direita que não
+é um proxy confiável: o que estiver à esquerda foi escrito pelo próprio cliente. Entradas que não
+são IP param a busca no último proxy confiável. `*` confia em qualquer peer e gera um aviso no boot.
 
 Certificado e chave são relidos somente quando um novo worker inicia. Após renovar
 arquivos, envie SIGHUP ao master.
