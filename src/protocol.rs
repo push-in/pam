@@ -147,12 +147,54 @@ pub(crate) fn parse_dispatch_envelope(payload: &[u8]) -> Result<PhpDispatchEnvel
             operation: None,
         });
     }
+    if let Some(wait) = payload.strip_prefix(&[0x89, b'P', b'A', b'M', 2]) {
+        return parse_binary_socket_wait(wait);
+    }
     let envelope: JsonPhpDispatchEnvelope = serde_json::from_slice(payload)
         .map_err(|error| format!("invalid PHP dispatch envelope: {error}"))?;
     Ok(PhpDispatchEnvelope {
         state: envelope.state,
         response: envelope.response.map(JsonPhpHttpResponse::into_php),
         operation: envelope.operation,
+    })
+}
+
+/// A suspension waiting for one socket (`Pam\\Async\\socketReady()`): interest
+/// (1 readable, 2 writable), descriptor (u32 LE) and timeout in microseconds
+/// (u64 LE). Same operation as the JSON `stream` kind with one descriptor.
+fn parse_binary_socket_wait(payload: &[u8]) -> Result<PhpDispatchEnvelope, String> {
+    let invalid = || "invalid PHP socket wait".to_owned();
+    if payload.len() != 13 {
+        return Err(invalid());
+    }
+    let interest = payload[0];
+    let descriptor = u32::from_le_bytes(payload[1..5].try_into().map_err(|_| invalid())?);
+    let descriptor = RawFd::try_from(descriptor).map_err(|_| invalid())?;
+    let delay_micros = u64::from_le_bytes(payload[5..13].try_into().map_err(|_| invalid())?);
+    let (read_file_descriptors, write_file_descriptors) = match interest {
+        1 => (vec![descriptor], Vec::new()),
+        2 => (Vec::new(), vec![descriptor]),
+        _ => return Err(invalid()),
+    };
+    Ok(PhpDispatchEnvelope {
+        state: PhpDispatchState::Suspended,
+        response: None,
+        operation: Some(PhpOperation {
+            kind: PhpOperationKind::Stream,
+            delay_micros,
+            read_file_descriptors,
+            write_file_descriptors,
+            host: None,
+            path: None,
+            data: None,
+            atomic: false,
+            arguments: Vec::new(),
+            stdin: None,
+            max_output_bytes: default_native_output_limit(),
+            signal: None,
+            response: None,
+            chunk: None,
+        }),
     })
 }
 

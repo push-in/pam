@@ -218,6 +218,37 @@ $app->get('/async-stream', static function (Request $request, Response $response
     }
     return $response->json(['payload' => $payload]);
 });
+$app->get('/socket-ready', static function (Request $request, Response $response): Response {
+    // A child writes after `sleep` ms; the request waits on the pipe with socketReady().
+    $sleep = (int) ($request->getQuery('sleep') ?? 50);
+    $timeout = (float) ($request->getQuery('timeout') ?? 1.0);
+    $pipes = [];
+    $process = proc_open(
+        ['/usr/bin/php', '-r', "usleep({$sleep}000); echo 'socket-ready';"],
+        [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        null,
+        null,
+        ['bypass_shell' => true],
+    );
+    if (!is_resource($process)) {
+        throw new RuntimeException('Unable to create the socket wait fixture.');
+    }
+    fclose($pipes[0]);
+    $started = microtime(true);
+    try {
+        $descriptor = pam_native_stream_fd($pipes[1]);
+        $ready = \Pam\Async\socketReady($pipes[1], is_int($descriptor) ? $descriptor : -1, false, $started + $timeout);
+        $elapsed = (microtime(true) - $started) * 1000;
+        $payload = $ready ? stream_get_contents($pipes[1]) : '';
+    } finally {
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        proc_terminate($process);
+        proc_close($process);
+    }
+    return $response->json(['ready' => $ready, 'payload' => $payload, 'elapsedMs' => $elapsed]);
+});
 $app->get('/native-io', static function (Request $request, Response $response): Response {
     $path = sys_get_temp_dir() . '/pam-native-io-' . bin2hex(random_bytes(8));
     try {

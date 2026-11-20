@@ -523,6 +523,7 @@ namespace Pam\Internal {
         public array $nativeHeaders = [];
 
         public int $statusCode = 200;
+        public bool $native = false;
         public string $output = '';
         public string $sessionId = '';
         public bool $resumeSession = false;
@@ -1059,6 +1060,8 @@ namespace Pam\Internal {
                 return self::executeHttp($method, $target, $headers, $body, $context, $server);
             });
             $dispatch = new PendingHttpDispatch($requestId, $fiber);
+            // The native server reads binary suspensions; embedders get JSON.
+            $dispatch->native = $server !== null;
             self::$httpDispatches[$requestId] = $dispatch;
 
             return self::advanceHttpDispatch($dispatch);
@@ -1078,7 +1081,12 @@ namespace Pam\Internal {
                 \Pam\Diagnostics\EventKind::FiberResume,
                 ['requestId' => $requestId],
             );
-            $result = json_decode($resultJson, true, 64, JSON_THROW_ON_ERROR);
+            $result = match ($resultJson) {
+                // The answers to a stream wait, the most frequent resume.
+                '{"timedOut":false}' => ['timedOut' => false],
+                '{"timedOut":true}' => ['timedOut' => true],
+                default => json_decode($resultJson, true, 64, JSON_THROW_ON_ERROR),
+            };
             return self::advanceHttpDispatch($dispatch, resumeValue: $result);
         }
 
@@ -1445,6 +1453,17 @@ namespace Pam\Internal {
                     ],
                 );
 
+                if ($dispatch->native && $suspension->socket >= 0) {
+                    // One socket wait: kind byte (1 read, 2 write), descriptor, timeout.
+                    return "\x89PAM\x02" . pack(
+                        'CVP',
+                        $suspension->socketWrite ? 2 : 1,
+                        $suspension->socket,
+                        is_finite($suspension->resumeAt)
+                            ? max(0, (int) ceil(($suspension->resumeAt - microtime(true)) * 1_000_000))
+                            : PHP_INT_MAX,
+                    );
+                }
                 return json_encode([
                     'state' => HttpDispatchState::Suspended->value,
                     'operation' => $suspension->export(),

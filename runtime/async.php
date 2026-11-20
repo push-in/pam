@@ -31,7 +31,19 @@ namespace Pam\Async {
             public OperationKind $kind = OperationKind::Timer,
             /** @var array<string, mixed> */
             public array $payload = [],
+            /** Descriptor of a single-socket wait ({@see socket()}), -1 otherwise. */
+            public int $socket = -1,
+            public bool $socketWrite = false,
         ) {
+        }
+
+        /** Waits for one socket descriptor to become readable or writable. */
+        public static function socket(int $fileDescriptor, bool $write, float $resumeAt): self
+        {
+            return new self($resumeAt, OperationKind::Stream, [
+                'readFileDescriptors' => $write ? [] : [$fileDescriptor],
+                'writeFileDescriptors' => $write ? [$fileDescriptor] : [],
+            ], $fileDescriptor, $write);
         }
 
         /** @return array<string, mixed> */
@@ -659,6 +671,36 @@ namespace Pam\Async {
             }
             delay(min(0.001, max(0.0, $deadline - microtime(true))));
         }
+    }
+
+    /**
+     * Waits until a socket is readable (or writable) without polling it first: for a
+     * caller that already knows it would block (a database client waiting for its
+     * answer). In a PAM request Fiber the server watches the descriptor; elsewhere it
+     * falls back to waitForStreams(). Returns false when the deadline passed.
+     *
+     * @param resource $stream
+     */
+    function socketReady($stream, int $fileDescriptor, bool $write, float $deadline): bool
+    {
+        if ($deadline <= microtime(true)) {
+            return false;
+        }
+        if ($fileDescriptor >= 0 && NativeOperation::available()) {
+            $result = \Fiber::suspend(Suspension::socket($fileDescriptor, $write, $deadline));
+            return !(is_array($result) && ($result['timedOut'] ?? false) === true);
+        }
+        try {
+            $write
+                ? waitForStreams([], [$stream], max(0.0, $deadline - microtime(true)))
+                : waitForStreams([$stream], [], max(0.0, $deadline - microtime(true)));
+        } catch (\RuntimeException $error) {
+            if ($error->getMessage() === 'Stream operation timed out.') {
+                return false;
+            }
+            throw $error;
+        }
+        return true;
     }
 
     /** @param resource $stream */
