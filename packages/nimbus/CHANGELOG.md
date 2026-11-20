@@ -5,6 +5,13 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+### Security
+
+- `ClientIpResolver` takes the client from the right of `X-Forwarded-For`: the rightmost entry
+  that is not a trusted proxy, instead of the leftmost entry the client writes itself. This closes
+  a bypass of the auth route throttle by a forged header. Trusted proxies accept CIDR ranges;
+  an entry that is neither an address nor a range throws at construction.
+
 ## 0.5.2 - 2026-11-19
 
 ### Changed
