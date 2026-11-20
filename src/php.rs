@@ -717,6 +717,8 @@ struct HttpRequestContextFfi {
     traceparent_length: usize,
     multipart_json: *const c_char,
     multipart_json_length: usize,
+    public_request_id: *const c_char,
+    public_request_id_length: usize,
     remote_port: u32,
 }
 
@@ -730,6 +732,8 @@ pub struct HttpRequestMeta<'a> {
     pub traceparent: &'a str,
     /// JSON of the streamed multipart body; empty when there is none.
     pub multipart_json: &'a str,
+    /// The client's X-Request-Id label; empty: the dispatch request ID.
+    pub public_request_id: &'a str,
 }
 
 /// Dispatches an HTTP request without a JSON envelope: `headers` is the
@@ -754,6 +758,8 @@ pub fn dispatch_http_native(
         traceparent_length: meta.traceparent.len(),
         multipart_json: meta.multipart_json.as_ptr().cast::<c_char>(),
         multipart_json_length: meta.multipart_json.len(),
+        public_request_id: meta.public_request_id.as_ptr().cast::<c_char>(),
+        public_request_id_length: meta.public_request_id.len(),
         remote_port: u32::from(meta.remote_port),
     };
     track_engine_failure(call_for_bytes(|output, length| {

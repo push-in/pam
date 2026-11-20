@@ -1513,6 +1513,12 @@ int pam_php_dispatch_http_native(
     size_t scheme_length = context->scheme_length == 0 ? 4 : context->scheme_length;
     char server_protocol[32];
     int server_protocol_length;
+    const char *public_request_id = context->public_request_id_length == 0
+        ? request_id
+        : context->public_request_id;
+    size_t public_request_id_length = context->public_request_id_length == 0
+        ? request_id_length
+        : context->public_request_id_length;
 
     {
         zend_string *raw_method = zend_string_init_fast(method, method_length);
@@ -1560,7 +1566,7 @@ int pam_php_dispatch_http_native(
     /* Placeholder keeps populateSuperglobals()' key order; the host header
      * (if any) overwrites it in place below. */
     PAM_HASH_ADD_LITERAL(server, "HTTP_HOST", "", 0);
-    PAM_HASH_ADD_LITERAL(server, "PAM_REQUEST_ID", request_id, request_id_length);
+    PAM_HASH_ADD_LITERAL(server, "PAM_REQUEST_ID", public_request_id, public_request_id_length);
     PAM_HASH_ADD_LITERAL(server, "PAM_TRACEPARENT", context->traceparent, context->traceparent_length);
 
     if (!pam_build_request_headers(headers, headers_length, &parameters[2], server)) {
@@ -1585,7 +1591,7 @@ int pam_php_dispatch_http_native(
         zend_hash_update(context_table, PAM_LITERAL_KEY("remotePort"), &entry);
     }
     PAM_HASH_ADD_LITERAL(context_table, "scheme", scheme, scheme_length);
-    PAM_HASH_ADD_LITERAL(context_table, "requestId", request_id, request_id_length);
+    PAM_HASH_ADD_LITERAL(context_table, "requestId", public_request_id, public_request_id_length);
     PAM_HASH_ADD_LITERAL(context_table, "traceparent", context->traceparent, context->traceparent_length);
     if (url != NULL && url->path != NULL && ZSTR_LEN(url->path) != 0
         && !zend_string_equals_literal(url->path, "0")) {

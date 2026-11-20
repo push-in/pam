@@ -1413,3 +1413,53 @@ fn cancels_suspended_php_when_the_http_client_disconnects() {
         server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     assert!(recovered.starts_with("HTTP/1.1 200 OK"), "{recovered}");
 }
+
+#[test]
+fn client_request_ids_never_collide_inside_the_worker() {
+    // The X-Request-Id a client sends is only a correlation label: two
+    // in-flight requests carrying the same value must both be served, keep
+    // that label, and leave the worker running (it used to be the internal
+    // dispatch key, so the second request failed and recycled the worker).
+    let server = ServerProcess::start();
+    let barrier = Arc::new(Barrier::new(2));
+    let requests = (0..2)
+        .map(|index| {
+            let port = server.port;
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                let body = format!("same-id-{index}");
+                barrier.wait();
+                if index == 1 {
+                    thread::sleep(Duration::from_millis(15));
+                }
+                let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                stream
+                    .write_all(
+                        format!(
+                            "POST /async-context HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Request-Id: shared-client-id\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len(),
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                let mut response = String::new();
+                stream.read_to_string(&mut response).unwrap();
+                (body, response)
+            })
+        })
+        .collect::<Vec<_>>();
+    for request in requests {
+        let (body, response) = request.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        let payload = response_json(&response);
+        assert_eq!(payload["bodyAfter"], body, "{response}");
+        assert_eq!(payload["requestIdBefore"], "shared-client-id");
+        assert_eq!(payload["requestIdAfter"], "shared-client-id");
+    }
+    let response =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "worker must survive: {response}"
+    );
+}

@@ -1780,7 +1780,9 @@ async fn handle_http3_request(
     let target = uri
         .path_and_query()
         .map_or_else(|| uri.path().to_owned(), ToString::to_string);
-    let request_id = request_identifier(&headers).unwrap_or_else(|| state.allocate_request_id());
+    let client_request_id = request_identifier(&headers);
+    let request_id = state.allocate_request_id();
+    let public_request_id = client_request_id.as_deref().unwrap_or(&request_id);
     let traceparent = request_traceparent(&headers, &state);
     let parent_span_id = state
         .otlp
@@ -1857,7 +1859,7 @@ async fn handle_http3_request(
                             let response = telemetry.finish(
                                 response,
                                 0,
-                                &request_id,
+                                public_request_id,
                                 &traceparent,
                                 &method,
                                 &target,
@@ -1875,7 +1877,7 @@ async fn handle_http3_request(
                         let response = telemetry.finish(
                             response,
                             0,
-                            &request_id,
+                            public_request_id,
                             &traceparent,
                             &method,
                             &target,
@@ -1914,7 +1916,7 @@ async fn handle_http3_request(
     let response = telemetry.finish(
         response,
         response_bytes,
-        &request_id,
+        public_request_id,
         &traceparent,
         &method,
         &target,
@@ -2004,7 +2006,12 @@ async fn http_dispatch(
     body: Body,
 ) -> Response {
     state.recycle_if_engine_failed();
-    let request_id = request_identifier(&headers).unwrap_or_else(|| state.allocate_request_id());
+    let client_request_id = request_identifier(&headers);
+    // The dispatch key is always generated here: a client-supplied
+    // X-Request-Id is only a correlation label (two in-flight requests may
+    // carry the same one).
+    let request_id = state.allocate_request_id();
+    let public_request_id = client_request_id.as_deref().unwrap_or(&request_id);
     let traceparent = request_traceparent(&headers, &state);
     let parent_span_id = state
         .otlp
@@ -2039,7 +2046,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             bytes,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2057,7 +2064,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             0,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2074,7 +2081,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             0,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2091,7 +2098,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             0,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2131,7 +2138,7 @@ async fn http_dispatch(
                 return telemetry.finish(
                     response,
                     0,
-                    &request_id,
+                    public_request_id,
                     &traceparent,
                     &method,
                     target,
@@ -2167,7 +2174,7 @@ async fn http_dispatch(
                 return telemetry.finish(
                     response,
                     0,
-                    &request_id,
+                    public_request_id,
                     &traceparent,
                     &method,
                     target,
@@ -2182,7 +2189,7 @@ async fn http_dispatch(
                 return telemetry.finish(
                     response,
                     0,
-                    &request_id,
+                    public_request_id,
                     &traceparent,
                     &method,
                     target,
@@ -2208,7 +2215,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             response_bytes,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2234,7 +2241,7 @@ async fn http_dispatch(
     telemetry.finish(
         response,
         response_bytes,
-        &request_id,
+        public_request_id,
         &traceparent,
         &method,
         target,
@@ -2874,6 +2881,7 @@ async fn invoke_php_http_local(
         },
         traceparent,
         multipart_json: &multipart_json,
+        public_request_id: request_identifier_str(headers).unwrap_or_default(),
     };
 
     let _uploads = match RegisteredUploads::register(request.upload.clone()) {
@@ -4333,13 +4341,19 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
 }
 
 fn request_identifier(headers: &HeaderMap) -> Option<String> {
+    request_identifier_str(headers).map(str::to_owned)
+}
+
+/// The client's `X-Request-Id` when it is a safe correlation label. It is
+/// never used as a key inside the worker (see `allocate_request_id`).
+fn request_identifier_str(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get("x-request-id")?.to_str().ok()?;
     (value.len() <= 128
         && !value.is_empty()
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')))
-    .then(|| value.to_owned())
+    .then_some(value)
 }
 
 fn traceparent(headers: &HeaderMap, state: &ServerState) -> String {
