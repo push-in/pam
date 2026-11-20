@@ -274,6 +274,55 @@ fn streams_chunks_while_php_blocks_between_them() {
 }
 
 #[test]
+fn socket_waits_suspend_the_request_and_time_out() {
+    let server = ServerProcess::start();
+    let response = server.http_request(
+        "GET /socket-ready?sleep=50&timeout=2 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    let payload = response_json(&response);
+    assert_eq!(payload["ready"], true, "{response}");
+    assert_eq!(payload["payload"], "socket-ready");
+
+    let response = server.http_request(
+        "GET /socket-ready?sleep=1500&timeout=0.1 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    let payload = response_json(&response);
+    assert_eq!(payload["ready"], false, "{response}");
+    let elapsed = payload["elapsedMs"].as_f64().unwrap();
+    assert!((90.0..600.0).contains(&elapsed), "{response}");
+
+    // Waiting requests do not hold the worker: 8 x 300 ms waits overlap.
+    let started = Instant::now();
+    let requests = (0..8)
+        .map(|_| {
+            let port = server.port;
+            thread::spawn(move || {
+                let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                stream
+                    .write_all(
+                        b"GET /socket-ready?sleep=300&timeout=3 HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+                    )
+                    .unwrap();
+                let mut response = String::new();
+                stream.read_to_string(&mut response).unwrap();
+                response
+            })
+        })
+        .collect::<Vec<_>>();
+    for request in requests {
+        let response = request.join().unwrap();
+        assert_eq!(response_json(&response)["ready"], true, "{response}");
+    }
+    assert!(
+        started.elapsed() < Duration::from_millis(1500),
+        "8 x 300 ms socket waits were serialized: {:?}",
+        started.elapsed()
+    );
+}
+
+#[test]
 fn caches_only_explicit_public_anonymous_responses() {
     let server = ServerProcess::start_with_response_cache();
     let first = response_json(

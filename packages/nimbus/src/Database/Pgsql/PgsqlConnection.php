@@ -30,6 +30,11 @@ final class PgsqlConnection implements PDOInterface
     /** Set when a wait was interrupted mid-command: the session state is unknown. */
     private bool $broken = false;
 
+    /** Descriptor of the session socket for `Pam\Async\socketReady()`, -1 without it. */
+    private int $fileDescriptor = -1;
+
+    private static ?bool $socketWaits = null;
+
     /** @var array<string, string> SQL => server-side statement name */
     private array $prepared = [];
 
@@ -38,6 +43,7 @@ final class PgsqlConnection implements PDOInterface
 
     public function __construct(string $conninfo, private readonly float $timeout = 30.0)
     {
+        self::$socketWaits ??= function_exists('Pam\\Async\\socketReady');
         $deadline = microtime(true) + $timeout;
         $connection = pg_connect($conninfo, PGSQL_CONNECT_ASYNC | PGSQL_CONNECT_FORCE_NEW);
         if (!$connection instanceof Connection) {
@@ -66,6 +72,10 @@ final class PgsqlConnection implements PDOInterface
         if (is_resource($socket)) {
             $this->socket = $socket;
         }
+        // The PAM server watches this descriptor while the request Fiber waits.
+        $this->fileDescriptor = self::$socketWaits && function_exists('pam_native_stream_fd')
+            ? (int) (pam_native_stream_fd($this->socket) ?: -1)
+            : -1;
     }
 
     public function __destruct()
@@ -262,6 +272,12 @@ final class PgsqlConnection implements PDOInterface
         $remaining = $deadline - microtime(true);
         if ($remaining <= 0) {
             throw PgsqlException::from('57014', 'Postgres did not answer before the timeout.');
+        }
+        if ($this->fileDescriptor >= 0 && function_exists('Pam\\Async\\socketReady')) {
+            if (!\Pam\Async\socketReady($this->socket, $this->fileDescriptor, $write, $deadline)) {
+                throw PgsqlException::from('57014', 'Postgres did not answer before the timeout.');
+            }
+            return;
         }
         if (function_exists('Pam\\Async\\readable') && function_exists('Pam\\Async\\writable')) {
             $write

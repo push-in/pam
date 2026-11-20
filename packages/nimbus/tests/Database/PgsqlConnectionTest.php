@@ -42,6 +42,32 @@ final class PgsqlConnectionTest extends TestCase
         self::assertSame(1, $connection->exec('SELECT 1'));
     }
 
+    public function testATransactionStaysOnItsSession(): void
+    {
+        $writer = new PgsqlConnection(self::conninfo());
+        $reader = new PgsqlConnection(self::conninfo());
+        $table = 'nimbus_pgsql_pin_' . bin2hex(random_bytes(4));
+        $writer->exec("CREATE TABLE {$table} (id int)");
+        try {
+            self::assertTrue($writer->beginTransaction());
+            self::assertTrue($writer->inTransaction());
+            $writer->prepare("INSERT INTO {$table} (id) VALUES (?)")->execute([7]);
+            $count = static function (PgsqlConnection $connection) use ($table): mixed {
+                $statement = $connection->prepare("SELECT count(*) AS n FROM {$table}");
+                $statement->execute();
+                $row = $statement->fetch(\PDO::FETCH_ASSOC);
+                return is_array($row) ? ($row['n'] ?? null) : null;
+            };
+            self::assertSame(1, $count($writer), 'The session sees its own uncommitted row.');
+            self::assertSame(0, $count($reader), 'Another session does not.');
+            self::assertTrue($writer->rollBack());
+            self::assertFalse($writer->inTransaction());
+            self::assertSame(0, $count($writer));
+        } finally {
+            $writer->exec("DROP TABLE {$table}");
+        }
+    }
+
     public function testAnInterruptedCommandAbandonsTheSession(): void
     {
         $connection = new PgsqlConnection(self::conninfo(), timeout: 0.2);

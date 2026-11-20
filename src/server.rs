@@ -2957,9 +2957,7 @@ async fn invoke_php_http_local(
                     PhpOperationKind::Stream => {
                         let remaining = timeout.saturating_sub(started.elapsed());
                         match wait_for_php_streams(&operation, remaining).await {
-                            Ok(timed_out) => {
-                                serde_json::json!({ "timedOut": timed_out }).to_string()
-                            }
+                            Ok(timed_out) => stream_wait_result(timed_out).to_owned(),
                             Err(error) => return (internal_error(error), 0),
                         }
                     }
@@ -3244,9 +3242,7 @@ impl PhpResponseStream {
                         }
                         PhpOperationKind::Stream => {
                             match wait_for_php_streams(&operation, remaining).await {
-                                Ok(timed_out) => {
-                                    serde_json::json!({ "timedOut": timed_out }).to_string()
-                                }
+                                Ok(timed_out) => stream_wait_result(timed_out).to_owned(),
                                 Err(error) => serde_json::json!({ "error": error }).to_string(),
                             }
                         }
@@ -3714,10 +3710,36 @@ async fn wait_for_observed_file_descriptor(
     Ok(())
 }
 
+/// What PHP receives back from a stream wait (`resumeHttpDispatch()` knows
+/// both strings without decoding them).
+fn stream_wait_result(timed_out: bool) -> &'static str {
+    if timed_out {
+        r#"{"timedOut":true}"#
+    } else {
+        r#"{"timedOut":false}"#
+    }
+}
+
 async fn wait_for_php_streams(
     operation: &PhpOperation,
     request_remaining: Duration,
 ) -> Result<bool, String> {
+    let operation_timeout = Duration::from_micros(operation.delay_micros);
+    if let ([descriptor], []) | ([], [descriptor]) = (
+        operation.read_file_descriptors.as_slice(),
+        operation.write_file_descriptors.as_slice(),
+    ) {
+        // One socket (a database client waiting for its answer): no map, no boxed futures.
+        if *descriptor < 0 {
+            return Err(format!("invalid PHP file descriptor {descriptor}"));
+        }
+        let readable = operation.write_file_descriptors.is_empty();
+        let wait = wait_for_observed_file_descriptor(*descriptor, readable, !readable);
+        return match tokio::time::timeout(operation_timeout.min(request_remaining), wait).await {
+            Ok(result) => result.map(|()| false),
+            Err(_) => Ok(true),
+        };
+    }
     let mut descriptors = HashMap::<RawFd, (bool, bool)>::new();
     for file_descriptor in &operation.read_file_descriptors {
         if *file_descriptor < 0 {
