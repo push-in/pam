@@ -50,8 +50,11 @@ final readonly class SessionAuthenticator implements Authenticator
             return null;
         }
         $session = $this->session();
-        $identifier = $session?->get(self::KEY);
-        if (!is_string($identifier) || $identifier === '' || $session === null) {
+        if ($session === null) {
+            return null;
+        }
+        $identifier = $session->get(self::KEY);
+        if (!is_string($identifier) || $identifier === '') {
             return null;
         }
         if ($this->revocations !== null) {

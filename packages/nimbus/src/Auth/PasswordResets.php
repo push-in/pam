@@ -62,14 +62,9 @@ final readonly class PasswordResets
                 . 'new SessionRevocations($oneTimeTokens)] (or revoke: [] to opt out).',
             );
         }
-        foreach ($revoke ?? [] as $revoker) {
-            if (!$revoker instanceof RevokesCredentials) {
-                throw new \InvalidArgumentException('PasswordResets revoke entries implement RevokesCredentials.');
-            }
-        }
         $this->notification = $notification;
         $this->afterReset = $afterReset;
-        $this->revoke = array_values($revoke ?? []);
+        $this->revoke = $revoke ?? [];
     }
 
     /** Mails a reset link when the address belongs to a user and no link was sent in the throttle window. */

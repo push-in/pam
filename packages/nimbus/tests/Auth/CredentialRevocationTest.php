@@ -69,7 +69,7 @@ final class CredentialRevocationTest extends TestCase
         $container = new Container();
         $authenticator = new SessionAuthenticator(
             $container,
-            static fn (string $id): ?Principal => new TokenPrincipal($id, [], 'session'),
+            static fn (string $id): Principal => new TokenPrincipal($id, [], 'session'),
             $sessions,
             $clock,
         );
