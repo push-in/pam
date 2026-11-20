@@ -2470,6 +2470,10 @@ final readonly class Nimbus\Middleware\ValidateSignatureMiddleware implements Pa
 final readonly class Nimbus\Middleware\VerifyCsrfTokenMiddleware implements Pam\Contracts\Http\MiddlewareInterface
 ```
 
+### Constants
+
+- `BEARER_ONLY = "nimbus.csrf.bearer_only"`
+
 ### Methods
 
 - `public __construct(Nimbus\Container\Container $container, array $except = [], bool $xsrfCookie = true, bool $secureCookie = true): mixed`

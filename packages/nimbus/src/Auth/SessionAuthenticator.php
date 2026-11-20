@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Nimbus\Auth;
 
 use Nimbus\Container\Container;
+use Nimbus\Middleware\VerifyCsrfTokenMiddleware;
 use Nimbus\Session\Session;
 use Pam\Http\Request;
 
@@ -30,6 +31,11 @@ final readonly class SessionAuthenticator implements Authenticator
 
     public function authenticate(Request $request): ?Principal
     {
+        if ($this->container->scopedValue(VerifyCsrfTokenMiddleware::BEARER_ONLY) === true) {
+            // The CSRF check was skipped because of a bearer token: only that token may
+            // authenticate this request, not the session cookie it carries.
+            return null;
+        }
         $identifier = $this->session()?->get(self::KEY);
         return is_string($identifier) && $identifier !== '' ? ($this->resolver)($identifier) : null;
     }

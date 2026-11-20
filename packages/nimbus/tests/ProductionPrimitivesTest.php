@@ -97,6 +97,13 @@ final class ProductionPrimitivesTest extends TestCase
         self::assertSame(204, $allowed['status']);
     }
 
+    public function testCorsRefusesAnyOriginWithCredentials(): void
+    {
+        // Reflecting every Origin with credentials lets any site read authenticated responses.
+        $this->expectException(\InvalidArgumentException::class);
+        new CorsMiddleware(['*'], credentials: true);
+    }
+
     public function testObservationsUseNormalizedRouteTemplates(): void
     {
         $observer = new CollectingObserver();

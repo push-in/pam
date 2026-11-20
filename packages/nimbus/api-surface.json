@@ -14644,7 +14644,9 @@
             "interfaces": [
                 "Pam\\Contracts\\Http\\MiddlewareInterface"
             ],
-            "constants": [],
+            "constants": {
+                "BEARER_ONLY": "nimbus.csrf.bearer_only"
+            },
             "properties": [],
             "methods": {
                 "__construct": {

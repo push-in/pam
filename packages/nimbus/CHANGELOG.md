@@ -23,6 +23,12 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   (`Authorization` and `Cookie`) as well, so a cached response of one user is never served to
   another, and never stores responses that set a cookie, are `Cache-Control: private`, `no-store`
   or `no-cache`, or `Vary: *`.
+- `VerifyCsrfTokenMiddleware` still skips requests with a bearer token, but such a request can
+  then only be authenticated by the token: `SessionAuthenticator` ignores its session cookie. A
+  cross-site request with an invented `Authorization: Bearer x` and the victim's cookie no longer
+  acts as the victim. If the session already authenticated the request, the CSRF check runs.
+- **Breaking:** `CorsMiddleware` throws when `'*'` is combined with `credentials: true`, which
+  reflected any origin with credentials.
 
 ## 0.5.2 - 2026-11-19
 
