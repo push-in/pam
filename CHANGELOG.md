@@ -30,6 +30,7 @@ Security hardening.
   request's host) gets `403`, so a page elsewhere cannot open a socket with the user's cookies.
   `websocketOrigins` / `PAM_WEBSOCKET_ORIGINS` lists allowed origins (`*` for any); when empty,
   `corsOrigins` is used. Clients without `Origin` (not browsers) are unaffected.
+- `SECURITY.md` covers PAM 2.2.x, Nimbus and Arcano, with response times and the hardening defaults.
 
 ## 2.2.25 - 2026-11-19
 
