@@ -94,6 +94,7 @@ struct ServerStateInner {
     /// Request body budget in KiB permits (see `max_inflight_body_bytes`).
     body_budget: Option<(Arc<Semaphore>, u32)>,
     metrics_access: MetricsAccess,
+    websocket_origins: Vec<String>,
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
     otlp: Option<crate::otlp::Exporter>,
@@ -154,6 +155,7 @@ impl ServerState {
             request_slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
             body_budget: body_budget(&config),
             metrics_access: MetricsAccess::from_config(&config),
+            websocket_origins: websocket_origins(&config),
             config: Arc::new(config),
             metrics: Arc::new(Metrics::new(
                 route_metrics,
@@ -2886,6 +2888,54 @@ fn encode_php_request_headers(headers: &HeaderMap) -> Vec<u8> {
     output
 }
 
+/// `websocketOrigins`, `PAM_WEBSOCKET_ORIGINS` (comma separated) or, when
+/// neither lists any, `corsOrigins`.
+fn websocket_origins(config: &ServerConfig) -> Vec<String> {
+    let from_environment = std::env::var("PAM_WEBSOCKET_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if !from_environment.is_empty() {
+        return from_environment;
+    }
+    if !config.websocket_origins.is_empty() {
+        return config.websocket_origins.clone();
+    }
+    config.cors_origins.clone()
+}
+
+/// Cross-Site WebSocket Hijacking guard: a browser always sends `Origin`
+/// on a WebSocket upgrade, and a page on another site must not open a
+/// socket that carries the user's cookies. Allowed: no `Origin` (not a
+/// browser), a listed origin or `*`, or the request's own host.
+fn websocket_origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
+    let Some(origin) = headers.get(http::header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    if allowed
+        .iter()
+        .any(|allowed| allowed == "*" || allowed.eq_ignore_ascii_case(origin))
+    {
+        return true;
+    }
+    let Some(host) = headers
+        .get(http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    origin.split_once("://").is_some_and(|(scheme, authority)| {
+        matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https")
+            && authority.eq_ignore_ascii_case(host)
+    })
+}
+
 /// Who may read `metricsPath`: loopback peers by default, any peer with the
 /// bearer token when one is configured, or everyone when made public.
 #[derive(Clone, Debug)]
@@ -3516,6 +3566,9 @@ async fn websocket_upgrade(
     uri: Uri,
     headers: HeaderMap,
 ) -> Response {
+    if !websocket_origin_allowed(&headers, &state.websocket_origins) {
+        return error_response(StatusCode::FORBIDDEN, "WebSocket origin is not allowed");
+    }
     let permit = match state.websocket_slots.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -4712,6 +4765,47 @@ fn event_loop_lag_average_micros(total_micros: u64, samples: u64) -> f64 {
 mod tests {
     use super::*;
     use std::task::{Context, Poll};
+
+    #[test]
+    fn websocket_origins_allow_listed_and_same_host_pages() {
+        let headers = |origin: Option<&str>, host: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(http::header::HOST, host.parse().unwrap());
+            if let Some(origin) = origin {
+                headers.insert(http::header::ORIGIN, origin.parse().unwrap());
+            }
+            headers
+        };
+        let listed = vec!["https://app.example".to_owned()];
+        assert!(websocket_origin_allowed(
+            &headers(None, "api.example"),
+            &listed
+        ));
+        assert!(websocket_origin_allowed(
+            &headers(Some("https://app.example"), "api.example"),
+            &listed
+        ));
+        assert!(websocket_origin_allowed(
+            &headers(Some("https://api.example"), "api.example"),
+            &[]
+        ));
+        assert!(!websocket_origin_allowed(
+            &headers(Some("https://evil.example"), "api.example"),
+            &listed
+        ));
+        assert!(!websocket_origin_allowed(
+            &headers(Some("null"), "api.example"),
+            &listed
+        ));
+        assert!(!websocket_origin_allowed(
+            &headers(Some("https://api.example.evil"), "api.example"),
+            &listed
+        ));
+        assert!(websocket_origin_allowed(
+            &headers(Some("https://evil.example"), "api.example"),
+            &["*".to_owned()]
+        ));
+    }
 
     #[test]
     fn metrics_are_private_unless_configured() {

@@ -720,6 +720,7 @@ namespace Pam\Internal {
                 'tlsCert' => self::nullableStringOption($options, 'tlsCert'),
                 'tlsKey' => self::nullableStringOption($options, 'tlsKey'),
                 'http3' => self::booleanOption($options, 'http3', true),
+                'websocketOrigins' => self::stringListOption($options, 'websocketOrigins'),
                 'websocketMaxConnections' => self::integerOption($options, 'websocketMaxConnections', 10_000),
                 'websocketMaxMessageBytes' => self::integerOption($options, 'websocketMaxMessageBytes', 1024 * 1024),
                 'websocketQueueCapacity' => self::integerOption($options, 'websocketQueueCapacity', 256),

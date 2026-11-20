@@ -1589,3 +1589,33 @@ fn metrics_need_the_configured_token() {
     assert!(allowed.starts_with("HTTP/1.1 200 OK"), "{allowed}");
     assert!(allowed.contains("pam_http_requests_total"), "{allowed}");
 }
+
+#[test]
+fn rejects_cross_origin_websocket_upgrades() {
+    let server = ServerProcess::start();
+    let upgrade = |origin: Option<&str>| {
+        let mut request = format!("ws://127.0.0.1:{}/ws", server.port)
+            .into_client_request()
+            .unwrap();
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert("origin", origin.parse().unwrap());
+        }
+        match connect(request) {
+            Ok((_socket, response)) => response.status().as_u16(),
+            Err(tungstenite::Error::Http(response)) => response.status().as_u16(),
+            Err(error) => panic!("unexpected WebSocket error: {error}"),
+        }
+    };
+    // A page on another site cannot open a socket with the user's cookies.
+    assert_eq!(upgrade(Some("https://evil.example")), 403);
+    // Listed origins (corsOrigins here), the same host and non-browser
+    // clients (no Origin) are accepted.
+    assert_eq!(upgrade(Some("https://app.example")), 101);
+    assert_eq!(
+        upgrade(Some(&format!("http://127.0.0.1:{}", server.port))),
+        101
+    );
+    assert_eq!(upgrade(None), 101);
+}

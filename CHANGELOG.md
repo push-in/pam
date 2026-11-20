@@ -26,6 +26,10 @@ Security hardening.
   `metricsToken` / `PAM_METRICS_TOKEN` requires `Authorization: Bearer <token>` from any peer;
   `metricsPublic` / `PAM_METRICS_PUBLIC=1` restores the open endpoint. Other peers reach the
   application's own route.
+- **Behaviour change:** a `/ws` upgrade from another site's page (`Origin` not listed and not the
+  request's host) gets `403`, so a page elsewhere cannot open a socket with the user's cookies.
+  `websocketOrigins` / `PAM_WEBSOCKET_ORIGINS` lists allowed origins (`*` for any); when empty,
+  `corsOrigins` is used. Clients without `Origin` (not browsers) are unaffected.
 
 ## 2.2.25 - 2026-11-19
 

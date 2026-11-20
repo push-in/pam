@@ -194,6 +194,11 @@ pub struct ServerConfig {
     pub tls_key: Option<String>,
     #[serde(default = "default_http3")]
     pub http3: bool,
+    /// Browser origins allowed to open WebSockets (`*` for any); empty:
+    /// `cors_origins`. The page's own host is always allowed, and clients
+    /// without an `Origin` header (not browsers) are not affected.
+    #[serde(default)]
+    pub websocket_origins: Vec<String>,
     #[serde(default = "default_websocket_max_connections")]
     pub websocket_max_connections: usize,
     #[serde(default = "default_websocket_max_message_bytes")]

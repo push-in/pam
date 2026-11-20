@@ -653,6 +653,10 @@ RSS e memória PHP agregados por `pool`.
   quando houver mais de um worker/nó.
 - Configure `websocketResumeSecret` por secret manager, com pelo menos 32 bytes;
   rotacionar o segredo invalida tokens de retomada existentes.
+- O upgrade de `/ws` com `Origin` de outro site recebe `403` (proteção contra Cross-Site
+  WebSocket Hijacking). São aceitos o próprio host, as origens de `websocketOrigins` (ou
+  `PAM_WEBSOCKET_ORIGINS`, separado por vírgula; vazio usa `corsOrigins`; `*` libera todas) e
+  clientes sem `Origin`, que não são navegadores.
 - Mova CPU e chamadas bloqueantes para `ProcessPool`; acompanhe event-loop lag.
 - Mantenha `exposeErrors => false`, ajuste `gcCollectCyclesEvery` e
   `gcMemCachesEvery` a partir de um soak test, e use
