@@ -49,7 +49,9 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Auth\RefreshTokenReusedException`](#nimbusauthrefreshtokenreusedexception)
 - [`Nimbus\Auth\RefreshTokens`](#nimbusauthrefreshtokens)
 - [`Nimbus\Auth\ResetPasswordNotification`](#nimbusauthresetpasswordnotification)
+- [`Nimbus\Auth\RevokesCredentials`](#nimbusauthrevokescredentials)
 - [`Nimbus\Auth\SessionAuthenticator`](#nimbusauthsessionauthenticator)
+- [`Nimbus\Auth\SessionRevocations`](#nimbusauthsessionrevocations)
 - [`Nimbus\Auth\TokenPair`](#nimbusauthtokenpair)
 - [`Nimbus\Auth\TokenPairIssuer`](#nimbusauthtokenpairissuer)
 - [`Nimbus\Auth\TokenPrincipal`](#nimbusauthtokenprincipal)
@@ -836,6 +838,7 @@ final readonly class Nimbus\Auth\OneTimeTokens
 - `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, ?string $connection = null, ?Closure $clock = null): mixed`
 - `public consume(string $purpose, string $token): ?string`
 - `public create(string $purpose, string $subject, int $ttlSeconds): string`
+- `public createdAt(string $purpose, string $subject): ?int`
 - `public createdWithin(string $purpose, string $subject, int $seconds): bool`
 - `public invalidate(string $purpose, string $subject): int`
 - `public prune(): int`
@@ -852,7 +855,7 @@ final readonly class Nimbus\Auth\PasswordResets
 
 ### Methods
 
-- `public __construct(Nimbus\Auth\AuthUserProvider $users, Nimbus\Auth\OneTimeTokens $tokens, Nimbus\Notifications\NotificationDispatcher $notifications, string $resetUrl, int $ttlSeconds = 3600, int $throttleSeconds = 60, int $minimumPasswordLength = 8, ?Closure $notification = null, ?Closure $afterReset = null): mixed`
+- `public __construct(Nimbus\Auth\AuthUserProvider $users, Nimbus\Auth\OneTimeTokens $tokens, Nimbus\Notifications\NotificationDispatcher $notifications, string $resetUrl, int $ttlSeconds = 3600, int $throttleSeconds = 60, int $minimumPasswordLength = 8, ?Closure $notification = null, ?Closure $afterReset = null, ?array $revoke = null): mixed`
 - `public assertPassword(string $password): void`
 - `public reset(string $token, string $password): bool`
 - `public sendResetLink(string $email): bool`
@@ -894,7 +897,7 @@ final readonly class Nimbus\Auth\PersonalAccessTokenAuthenticator implements Nim
 ## `Nimbus\Auth\PersonalAccessTokens`
 
 ```php
-final readonly class Nimbus\Auth\PersonalAccessTokens
+final readonly class Nimbus\Auth\PersonalAccessTokens implements Nimbus\Auth\RevokesCredentials
 ```
 
 ### Methods
@@ -955,7 +958,7 @@ final class Nimbus\Auth\RefreshTokenReusedException extends RuntimeException imp
 ## `Nimbus\Auth\RefreshTokens`
 
 ```php
-final readonly class Nimbus\Auth\RefreshTokens
+final readonly class Nimbus\Auth\RefreshTokens implements Nimbus\Auth\RevokesCredentials
 ```
 
 ### Methods
@@ -985,6 +988,16 @@ final class Nimbus\Auth\ResetPasswordNotification extends Nimbus\Notifications\N
 - `public toMail(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Mail\MailMessage`
 - `public via(Nimbus\Notifications\Notifiable $notifiable): array`
 
+## `Nimbus\Auth\RevokesCredentials`
+
+```php
+abstract interface Nimbus\Auth\RevokesCredentials
+```
+
+### Methods
+
+- `public revokeAll(string $subject): int`
+
 ## `Nimbus\Auth\SessionAuthenticator`
 
 ```php
@@ -993,10 +1006,26 @@ final readonly class Nimbus\Auth\SessionAuthenticator implements Nimbus\Auth\Aut
 
 ### Methods
 
-- `public __construct(Nimbus\Container\Container $container, Closure $resolver): mixed`
+- `public __construct(Nimbus\Container\Container $container, Closure $resolver, ?Nimbus\Auth\SessionRevocations $revocations = null, ?Closure $clock = null): mixed`
 - `public authenticate(Pam\Http\Request $request): ?Nimbus\Auth\Principal`
 - `public login(Nimbus\Auth\Principal $principal): void`
 - `public logout(): void`
+
+## `Nimbus\Auth\SessionRevocations`
+
+```php
+final readonly class Nimbus\Auth\SessionRevocations implements Nimbus\Auth\RevokesCredentials
+```
+
+### Constants
+
+- `PURPOSE = "session-revocation"`
+
+### Methods
+
+- `public __construct(Nimbus\Auth\OneTimeTokens $tokens, int $ttlSeconds = 604800): mixed`
+- `public revokeAll(string $subject): int`
+- `public revokedAt(string $subject): ?int`
 
 ## `Nimbus\Auth\TokenPair`
 

@@ -18,15 +18,28 @@ final readonly class SessionAuthenticator implements Authenticator
 {
     private const string KEY = '_auth_id';
 
+    private const string LOGGED_IN_AT = '_auth_at';
+
     /** @var \Closure(string): ?Principal */
     private \Closure $resolver;
 
-    /** @param \Closure(string): ?Principal $resolver Finds the principal of a stored identifier. */
+    /** @var \Closure(): int */
+    private \Closure $clock;
+
+    /**
+     * @param \Closure(string): ?Principal $resolver Finds the principal of a stored identifier.
+     * @param SessionRevocations|null $revocations Rejects sessions that logged in before the user's
+     *     last revocation (password reset, "sign out everywhere").
+     * @param (\Closure(): int)|null $clock
+     */
     public function __construct(
         private Container $container,
         \Closure $resolver,
+        private ?SessionRevocations $revocations = null,
+        ?\Closure $clock = null,
     ) {
         $this->resolver = $resolver;
+        $this->clock = $clock ?? static fn (): int => time();
     }
 
     public function authenticate(Request $request): ?Principal
@@ -36,8 +49,20 @@ final readonly class SessionAuthenticator implements Authenticator
             // authenticate this request, not the session cookie it carries.
             return null;
         }
-        $identifier = $this->session()?->get(self::KEY);
-        return is_string($identifier) && $identifier !== '' ? ($this->resolver)($identifier) : null;
+        $session = $this->session();
+        $identifier = $session?->get(self::KEY);
+        if (!is_string($identifier) || $identifier === '' || $session === null) {
+            return null;
+        }
+        if ($this->revocations !== null) {
+            $revokedAt = $this->revocations->revokedAt($identifier);
+            $loggedInAt = $session->get(self::LOGGED_IN_AT);
+            if ($revokedAt !== null && (!is_int($loggedInAt) || $loggedInAt <= $revokedAt)) {
+                $session->invalidate();
+                return null;
+            }
+        }
+        return ($this->resolver)($identifier);
     }
 
     /** Logs the principal in for this session and the following requests. */
@@ -46,6 +71,7 @@ final readonly class SessionAuthenticator implements Authenticator
         $session = $this->session() ?? throw new \LogicException('Session login requires StartSessionMiddleware.');
         $session->regenerate()->regenerateToken();
         $session->put(self::KEY, $principal->identifier());
+        $session->put(self::LOGGED_IN_AT, ($this->clock)());
         $this->container
             ->scopedInstance(Principal::class, $principal)
             ->scopedInstance(AuthContext::class, new AuthContext($principal));

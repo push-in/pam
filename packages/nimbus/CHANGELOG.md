@@ -29,6 +29,12 @@ Versioning; the 0.x line may still adjust public API between minor versions.
   acts as the victim. If the session already authenticated the request, the CSRF check runs.
 - **Breaking:** `CorsMiddleware` throws when `'*'` is combined with `credentials: true`, which
   reflected any origin with credentials.
+- **Breaking:** `PasswordResets` signs the user out everywhere on reset through the new `revoke:`
+  list of `RevokesCredentials` (`RefreshTokens`, `PersonalAccessTokens` and the new
+  `SessionRevocations`); constructing it with neither `revoke:` nor `afterReset:` throws
+  (`revoke: []` opts out). Whoever had taken over the account used to stay signed in after the
+  victim reset the password. `SessionAuthenticator` accepts a `SessionRevocations` and rejects
+  sessions that logged in before the user's last revocation.
 
 ## 0.5.2 - 2026-11-19
 

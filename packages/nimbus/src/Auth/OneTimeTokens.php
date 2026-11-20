@@ -82,6 +82,16 @@ final readonly class OneTimeTokens
         return $row !== null && $this->database->now() - AuthDatabase::int($row['created_at'] ?? 0) < $seconds;
     }
 
+    /** When the subject's live token for the purpose was created, or null. */
+    public function createdAt(string $purpose, string $subject): ?int
+    {
+        $row = $this->database->first(self::TABLE, ['created_at', 'expires_at'], ['purpose' => $purpose, 'subject' => $subject]);
+        if ($row === null || AuthDatabase::int($row['expires_at'] ?? 0) <= $this->database->now()) {
+            return null;
+        }
+        return AuthDatabase::int($row['created_at'] ?? 0);
+    }
+
     public function invalidate(string $purpose, string $subject): int
     {
         return $this->database->db()->delete(self::TABLE, ['purpose' => $purpose, 'subject' => $subject])->run();
