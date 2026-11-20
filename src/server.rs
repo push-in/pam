@@ -93,6 +93,7 @@ struct ServerStateInner {
     request_slots: Arc<Semaphore>,
     /// Request body budget in KiB permits (see `max_inflight_body_bytes`).
     body_budget: Option<(Arc<Semaphore>, u32)>,
+    metrics_access: MetricsAccess,
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
     otlp: Option<crate::otlp::Exporter>,
@@ -152,6 +153,7 @@ impl ServerState {
             websocket_slots: Arc::new(Semaphore::new(config.websocket_max_connections)),
             request_slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
             body_budget: body_budget(&config),
+            metrics_access: MetricsAccess::from_config(&config),
             config: Arc::new(config),
             metrics: Arc::new(Metrics::new(
                 route_metrics,
@@ -1863,7 +1865,9 @@ async fn handle_http3_request(
         parent_span_id,
     );
 
-    let (response, response_bytes, cors_origin) = if uri.path() == state.config.metrics_path {
+    let (response, response_bytes, cors_origin) = if uri.path() == state.config.metrics_path
+        && state.metrics_access.allows(remote.ip(), &headers)
+    {
         let runtime_metrics = state.php.metrics().await;
         let body = state.metrics.render(
             state.clients.read().await.len(),
@@ -2098,7 +2102,8 @@ async fn http_dispatch(
         .path_and_query()
         .map_or_else(|| uri.path(), |value| value.as_str());
 
-    if uri.path() == state.config.metrics_path {
+    if uri.path() == state.config.metrics_path && state.metrics_access.allows(remote.ip(), &headers)
+    {
         let runtime_metrics = state.php.metrics().await;
         let body = state.metrics.render(
             state.clients.read().await.len(),
@@ -2879,6 +2884,55 @@ fn encode_php_request_headers(headers: &HeaderMap) -> Vec<u8> {
         output[count_offset..count_offset + 4].copy_from_slice(&count.to_ne_bytes());
     }
     output
+}
+
+/// Who may read `metricsPath`: loopback peers by default, any peer with the
+/// bearer token when one is configured, or everyone when made public.
+#[derive(Clone, Debug)]
+struct MetricsAccess {
+    token: Option<String>,
+    public: bool,
+}
+
+impl MetricsAccess {
+    fn new(token: Option<String>, public: bool) -> Self {
+        Self {
+            token: token.filter(|token| !token.is_empty()),
+            public,
+        }
+    }
+
+    fn from_config(config: &ServerConfig) -> Self {
+        let token = std::env::var("PAM_METRICS_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty())
+            .or_else(|| config.metrics_token.clone());
+        let public = match std::env::var("PAM_METRICS_PUBLIC").as_deref() {
+            Ok("1" | "true") => true,
+            Ok("0" | "false") => false,
+            _ => config.metrics_public,
+        };
+        Self::new(token, public)
+    }
+
+    fn allows(&self, peer: std::net::IpAddr, headers: &HeaderMap) -> bool {
+        if let Some(token) = &self.token {
+            return headers
+                .get(http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "))
+                .is_some_and(|supplied| constant_time_token_eq(token, supplied));
+        }
+        if self.public {
+            return true;
+        }
+        match peer {
+            std::net::IpAddr::V6(v6) => v6
+                .to_ipv4_mapped()
+                .map_or(v6.is_loopback(), |v4| v4.is_loopback()),
+            v4 => v4.is_loopback(),
+        }
+    }
 }
 
 /// The KiB permits of the request body budget: the configured
@@ -4658,6 +4712,26 @@ fn event_loop_lag_average_micros(total_micros: u64, samples: u64) -> f64 {
 mod tests {
     use super::*;
     use std::task::{Context, Poll};
+
+    #[test]
+    fn metrics_are_private_unless_configured() {
+        let local: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        let remote: std::net::IpAddr = "203.0.113.5".parse().unwrap();
+        let mut headers = HeaderMap::new();
+        let private = MetricsAccess::new(None, false);
+        assert!(private.allows(local, &headers));
+        assert!(!private.allows(remote, &headers));
+        assert!(!private.allows("::ffff:203.0.113.5".parse().unwrap(), &headers));
+        let public = MetricsAccess::new(None, true);
+        assert!(public.allows(remote, &headers));
+        let token = MetricsAccess::new(Some("secret-token".to_owned()), false);
+        assert!(!token.allows(local, &headers));
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer secret-token"),
+        );
+        assert!(token.allows(remote, &headers));
+    }
 
     #[test]
     fn rate_limiter_bounds_tracked_clients_without_scanning_every_request() {

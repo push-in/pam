@@ -22,6 +22,10 @@ Security hardening.
 - `rateLimitPerSecond` sweeps idle clients at most once per second instead of scanning every client
   on every request, and tracks at most 65,536 clients per worker; past that a new client is limited
   until buckets expire.
+- **Behaviour change:** a worker's `metricsPath` (`/metrics`) answers only loopback peers by default.
+  `metricsToken` / `PAM_METRICS_TOKEN` requires `Authorization: Bearer <token>` from any peer;
+  `metricsPublic` / `PAM_METRICS_PUBLIC=1` restores the open endpoint. Other peers reach the
+  application's own route.
 
 ## 2.2.25 - 2026-11-19
 

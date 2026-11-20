@@ -715,6 +715,8 @@ namespace Pam\Internal {
                 'corsOrigins' => self::stringListOption($options, 'corsOrigins'),
                 'trustedProxies' => self::stringListOption($options, 'trustedProxies'),
                 'metricsPath' => self::stringOption($options, 'metricsPath', '/metrics'),
+                'metricsToken' => self::nullableStringOption($options, 'metricsToken'),
+                'metricsPublic' => self::booleanOption($options, 'metricsPublic', false),
                 'tlsCert' => self::nullableStringOption($options, 'tlsCert'),
                 'tlsKey' => self::nullableStringOption($options, 'tlsKey'),
                 'http3' => self::booleanOption($options, 'http3', true),

@@ -1569,3 +1569,23 @@ fn bounds_request_bodies_held_by_php_to_the_worker_memory_limit() {
         "worker must survive: {response}"
     );
 }
+
+#[test]
+fn metrics_need_the_configured_token() {
+    let server = ServerProcess::start_with_env(&[("PAM_METRICS_TOKEN", "metrics-token-for-tests")]);
+    let anonymous = server
+        .http_request("GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        !anonymous.contains("pam_http_requests_total"),
+        "{anonymous}"
+    );
+    let wrong = server.http_request(
+        "GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer nope\r\nConnection: close\r\n\r\n",
+    );
+    assert!(!wrong.contains("pam_http_requests_total"), "{wrong}");
+    let allowed = server.http_request(
+        "GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer metrics-token-for-tests\r\nConnection: close\r\n\r\n",
+    );
+    assert!(allowed.starts_with("HTTP/1.1 200 OK"), "{allowed}");
+    assert!(allowed.contains("pam_http_requests_total"), "{allowed}");
+}

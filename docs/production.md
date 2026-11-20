@@ -377,6 +377,12 @@ O control plane do master não chama PHP:
 - `/metrics`: agrega métricas dos workers e identifica PID/geração/estado.
 - `/diagnostics`: snapshot JSON versionado e limitado por worker.
 
+No listener da aplicação, cada worker também responde `metricsPath` (padrão `/metrics`), mas só
+para peers de loopback. Para um Prometheus em outra máquina, configure `metricsToken` (ou
+`PAM_METRICS_TOKEN`) e envie `Authorization: Bearer <token>`; `metricsPublic => true` (ou
+`PAM_METRICS_PUBLIC=1`) volta ao comportamento antigo, aberto a qualquer peer. Sem permissão, o
+caminho segue para a aplicação como qualquer outra rota.
+
 Os três probes preservam os campos históricos `healthy`, `generation`,
 `desiredWorkers`, `readyWorkers` e `workers`, agora com `schemaVersion: 1`,
 `surfaceCode: 1` e `resultCode` (`1` saudável, `2` não saudável). O `state` de

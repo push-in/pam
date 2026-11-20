@@ -182,6 +182,12 @@ pub struct ServerConfig {
     pub trusted_proxies: Vec<String>,
     #[serde(default = "default_metrics_path")]
     pub metrics_path: String,
+    /// Bearer token required for `metrics_path` (`PAM_METRICS_TOKEN`).
+    #[serde(default)]
+    pub metrics_token: Option<String>,
+    /// Serve `metrics_path` to any peer without a token (`PAM_METRICS_PUBLIC=1`).
+    #[serde(default)]
+    pub metrics_public: bool,
     #[serde(default)]
     pub tls_cert: Option<String>,
     #[serde(default)]
