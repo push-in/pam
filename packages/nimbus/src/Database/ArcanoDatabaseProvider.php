@@ -275,7 +275,10 @@ final class ArcanoDatabaseProvider
                 self::postgresConnection($connection, $database, $host, $user, $password, $options),
                 schema: self::optional($connection, 'search_path') ?? self::optional($connection, 'schema') ?? 'public',
                 // Non-blocking sessions let a worker serve other requests while Postgres works.
-                // Opt-in: blocking PDO is faster for short queries on a CPU-bound worker.
+                // Opt-in (DB_ASYNC=true): on CPU-bound workers blocking PDO is still faster for
+                // short queries; each wait costs a Fiber suspend/resume through the server
+                // (nimbus-bench 2026-11-20: ~20 us more CPU per request than the blocked
+                // round trip, while blocking leaves only ~7% of the CPUs idle).
                 driver: self::optional($connection, 'async') === 'true' && AsyncPostgresDriver::available()
                     ? AsyncPostgresDriver::class
                     : PostgresDriver::class,
