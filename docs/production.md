@@ -653,6 +653,10 @@ RSS e memória PHP agregados por `pool`.
   `--max-requests` como segunda barreira contra fragmentação de terceiros.
 - Limite Fibers em voo com `maxConcurrentRequests` e memória de streaming com
   `responseStreamQueueCapacity`; não dimensione essas filas como cache.
+- Todas as requisições de um worker dividem o mesmo `memory_limit`, e estourá-lo recicla o worker
+  com tudo o que está em voo. `maxInflightBodyBytes` (padrão: um quarto do `memory_limit`;
+  `PAM_MAX_INFLIGHT_BODY_BYTES` sobrescreve, `0` desliga) limita os bytes de corpo que o PHP segura
+  ao mesmo tempo; acima disso a requisição espera até `requestTimeoutMs` e recebe `503`.
 - Defina `maxResponseBytes` e `maxResponseChunkBytes` conforme os maiores downloads
   legítimos. O chunk não pode ser maior que o total. Streams acima do teto falham
   no transporte e desconexões cancelam a Fiber/cleanup.

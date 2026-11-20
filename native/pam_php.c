@@ -1198,15 +1198,32 @@ int pam_php_routes_info(char **output, size_t *output_length)
  * Runs Runtime::beginHttpDispatch with `parameters` while the SAPI request
  * body (php://input) points at `body`. Takes ownership of the parameters.
  */
+static php_stream *pam_request_body_stream(zend_string *body)
+{
+#if PHP_VERSION_ID >= 80100
+    /* A read-only memory stream over the body string PHP already holds as
+     * the dispatch argument: php://input costs no second copy, which counts
+     * against the worker's shared memory_limit. */
+    return php_stream_memory_open(TEMP_STREAM_READONLY, body);
+#else
+    return php_stream_temp_open(
+        TEMP_STREAM_DEFAULT,
+        PHP_STREAM_MAX_MEM,
+        ZSTR_VAL(body),
+        ZSTR_LEN(body)
+    );
+#endif
+}
+
 static int pam_begin_http_dispatch(
     zval *parameters,
     uint32_t parameter_count,
-    const char *body,
-    size_t body_length,
+    zend_string *body,
     char **output,
     size_t *output_length
 )
 {
+    size_t body_length = ZSTR_LEN(body);
     int status = FAILURE;
     php_stream *previous_request_body;
     zval result;
@@ -1218,14 +1235,7 @@ static int pam_begin_http_dispatch(
     pam_reset_sapi_response(200);
 
     previous_request_body = SG(request_info).request_body;
-    SG(request_info).request_body = body_length == 0
-        ? NULL
-        : php_stream_temp_open(
-            TEMP_STREAM_DEFAULT,
-            PHP_STREAM_MAX_MEM,
-            body,
-            body_length
-        );
+    SG(request_info).request_body = body_length == 0 ? NULL : pam_request_body_stream(body);
 
     if (body_length != 0 && SG(request_info).request_body == NULL) {
         SG(request_info).request_body = previous_request_body;
@@ -1284,7 +1294,7 @@ int pam_php_dispatch_http(
     ZVAL_STRINGL(&parameters[4], context, context_length);
     ZVAL_STRINGL(&parameters[5], request_id, request_id_length);
 
-    return pam_begin_http_dispatch(parameters, 6, body, body_length, output, output_length);
+    return pam_begin_http_dispatch(parameters, 6, Z_STR(parameters[3]), output, output_length);
 }
 
 typedef struct pam_header_reader {
@@ -1616,7 +1626,7 @@ int pam_php_dispatch_http_native(
     ZVAL_STRINGL_FAST(&parameters[3], body, body_length);
     ZVAL_STRINGL_FAST(&parameters[5], request_id, request_id_length);
 
-    return pam_begin_http_dispatch(parameters, 7, body, body_length, output, output_length);
+    return pam_begin_http_dispatch(parameters, 7, Z_STR(parameters[3]), output, output_length);
 }
 
 int pam_php_resume_http(

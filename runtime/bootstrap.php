@@ -699,6 +699,12 @@ namespace Pam\Internal {
                 'maxHeaders' => self::integerOption($options, 'maxHeaders', 100),
                 'requestTimeoutMs' => self::integerOption($options, 'requestTimeoutMs', 30_000),
                 'maxConcurrentRequests' => self::integerOption($options, 'maxConcurrentRequests', 4096),
+                'maxInflightBodyBytes' => self::integerOption(
+                    $options,
+                    'maxInflightBodyBytes',
+                    self::defaultInflightBodyBytes(),
+                    true,
+                ),
                 'phpExecutorQueueCapacity' => self::integerOption($options, 'phpExecutorQueueCapacity', 1_024),
                 'responseStreamQueueCapacity' => $responseStreamQueueCapacity,
                 'maxResponseBytes' => $maxResponseBytes,
@@ -816,6 +822,20 @@ namespace Pam\Internal {
         }
 
         /** @param array<string, mixed> $options */
+        /**
+         * A quarter of memory_limit: every request of a worker shares that
+         * limit, and the body of a request PHP holds (suspended requests
+         * keep theirs) is copied by parsing. 0 (no budget) without a limit.
+         */
+        private static function defaultInflightBodyBytes(): int
+        {
+            $limit = (string) ini_get('memory_limit');
+            $bytes = function_exists('ini_parse_quantity')
+                ? @ini_parse_quantity($limit)
+                : (int) $limit;
+            return $bytes > 0 ? intdiv($bytes, 4) : 0;
+        }
+
         private static function integerOption(
             array $options,
             string $key,

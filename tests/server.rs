@@ -1517,3 +1517,55 @@ fn resolves_the_client_from_the_right_of_x_forwarded_for() {
     let server = ServerProcess::start();
     assert_eq!(client_ip(&server, "6.6.6.6"), "127.0.0.1");
 }
+
+#[test]
+fn bounds_request_bodies_held_by_php_to_the_worker_memory_limit() {
+    // Every PHP request of a worker shares one memory_limit, and a fatal
+    // "Allowed memory size exhausted" recycles the worker with every request
+    // in flight. Bodies held by suspended requests must not get there.
+    const BODY: usize = 2 * 1024 * 1024;
+    let server = ServerProcess::start_with_env(&[
+        ("PAM_TEST_MAX_BODY_BYTES", "2097152"),
+        ("PAM_INI_ENTRIES", "memory_limit=48M\n"),
+    ]);
+    let port = server.port;
+    let barrier = Arc::new(Barrier::new(30));
+    let requests = (0..30)
+        .map(|_| {
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                let body = vec![b'x'; BODY];
+                barrier.wait();
+                let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                let head = format!(
+                    "POST /async-body HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {BODY}\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+                let mut response = String::new();
+                let _ = stream.read_to_string(&mut response);
+                response
+            })
+        })
+        .collect::<Vec<_>>();
+    for request in requests {
+        let response = request.join().unwrap();
+        let first_line = response.lines().next().unwrap_or_default().to_owned();
+        assert!(
+            first_line == "HTTP/1.1 200 OK" || first_line == "HTTP/1.1 503 Service Unavailable",
+            "a request failed instead of waiting or being shed: {response:.300}"
+        );
+        if first_line.ends_with("200 OK") {
+            assert_eq!(response_json(&response)["size"], BODY);
+        }
+    }
+    let response =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "worker must survive: {response}"
+    );
+}

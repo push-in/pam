@@ -14,6 +14,11 @@ Security hardening.
   `trustedProxies` accepts CIDR ranges (`10.0.0.0/8`), and `PAM_TRUSTED_PROXIES` (comma separated)
   adds to it without changing code. `*` still trusts every peer and logs a warning at boot. This
   feeds `$_SERVER['REMOTE_ADDR']` and `rateLimitPerSecond`.
+- Request bodies held by PHP are bounded per worker: `maxInflightBodyBytes` (default a quarter of
+  `memory_limit`, 0 for none; `PAM_MAX_INFLIGHT_BODY_BYTES` overrides it). A request over the budget
+  waits up to `requestTimeoutMs` and then gets `503` with `Retry-After`. Every request of a worker
+  shares one `memory_limit`; 30 suspended 2 MiB POSTs used to exhaust 48M and recycle the worker
+  with every request in flight. `php://input` reads the body PHP already holds instead of a copy.
 
 ## 2.2.25 - 2026-11-19
 

@@ -157,6 +157,11 @@ pub struct ServerConfig {
     pub request_timeout_ms: u64,
     #[serde(default = "default_max_concurrent_requests")]
     pub max_concurrent_requests: usize,
+    /// Request body bytes PHP may hold at once (suspended requests keep
+    /// theirs); 0 for no limit. Bodies count against the worker's single
+    /// `memory_limit`, whose exhaustion recycles every request in flight.
+    #[serde(default)]
+    pub max_inflight_body_bytes: usize,
     #[serde(default = "default_php_executor_queue_capacity")]
     pub php_executor_queue_capacity: usize,
     #[serde(default = "default_response_stream_queue_capacity")]

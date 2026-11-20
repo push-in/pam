@@ -185,6 +185,11 @@ $app->post('/upload-block', static function (Request $request, Response $respons
 $app->get('/client-ip', static fn (Request $request, Response $response): Response => $response->json([
     'remoteAddress' => $_SERVER['REMOTE_ADDR'] ?? null,
 ]));
+$app->post('/async-body', static function (Request $request, Response $response): Response {
+    \Pam\Async\delay(0.3);
+
+    return $response->json(['size' => strlen($request->body())]);
+});
 $app->post('/async-context', static function (Request $request, Response $response): Response {
     $requestIdBefore = $_SERVER['PAM_REQUEST_ID'] ?? null;
     $bodyBefore = $request->body();

@@ -91,6 +91,8 @@ struct ServerStateInner {
     websocket_timeout: Duration,
     websocket_slots: Arc<Semaphore>,
     request_slots: Arc<Semaphore>,
+    /// Request body budget in KiB permits (see `max_inflight_body_bytes`).
+    body_budget: Option<(Arc<Semaphore>, u32)>,
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
     otlp: Option<crate::otlp::Exporter>,
@@ -149,6 +151,7 @@ impl ServerState {
             websocket_timeout: Duration::from_millis(config.websocket_timeout_ms),
             websocket_slots: Arc::new(Semaphore::new(config.websocket_max_connections)),
             request_slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
+            body_budget: body_budget(&config),
             config: Arc::new(config),
             metrics: Arc::new(Metrics::new(
                 route_metrics,
@@ -2830,6 +2833,57 @@ fn encode_php_request_headers(headers: &HeaderMap) -> Vec<u8> {
     output
 }
 
+/// The KiB permits of the request body budget: the configured
+/// `maxInflightBodyBytes`, or `PAM_MAX_INFLIGHT_BODY_BYTES` (0 disables).
+fn body_budget(config: &ServerConfig) -> Option<(Arc<Semaphore>, u32)> {
+    let bytes = std::env::var("PAM_MAX_INFLIGHT_BODY_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(config.max_inflight_body_bytes);
+    if bytes == 0 {
+        return None;
+    }
+    let permits = u32::try_from(bytes.div_ceil(1024))
+        .unwrap_or(u32::MAX)
+        .max(1);
+    Some((Arc::new(Semaphore::new(permits as usize)), permits))
+}
+
+/// Reserves `length` bytes of the body budget for as long as PHP holds the
+/// body, waiting up to `timeout`. A body larger than the whole budget waits
+/// until it runs alone. `Err` when the budget stayed exhausted.
+async fn reserve_body_budget(
+    state: &ServerState,
+    length: usize,
+    timeout: Duration,
+) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, Response> {
+    let Some((budget, total)) = &state.body_budget else {
+        return Ok(None);
+    };
+    if length == 0 {
+        return Ok(None);
+    }
+    let permits = u32::try_from(length.div_ceil(1024))
+        .unwrap_or(u32::MAX)
+        .min(*total);
+    if let Ok(permit) = budget.clone().try_acquire_many_owned(permits) {
+        return Ok(Some(permit));
+    }
+    match tokio::time::timeout(timeout, budget.clone().acquire_many_owned(permits)).await {
+        Ok(Ok(permit)) => Ok(Some(permit)),
+        _ => {
+            let mut response = error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "worker request body budget exhausted",
+            );
+            response
+                .headers_mut()
+                .insert("retry-after", HeaderValue::from_static("1"));
+            Err(response)
+        }
+    }
+}
+
 async fn invoke_php_http_local(
     state: &ServerState,
     request: &OwnedHttpRequest,
@@ -2869,6 +2923,10 @@ async fn invoke_php_http_local(
                 }
             }
         }
+    };
+    let _body_budget = match reserve_body_budget(state, body.len(), slot_timeout).await {
+        Ok(permit) => permit,
+        Err(response) => return (response, 0),
     };
     let encoded_headers = encode_php_request_headers(headers);
     let multipart_json = match request.upload.as_deref() {
