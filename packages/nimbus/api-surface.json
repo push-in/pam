@@ -3118,6 +3118,14 @@
                         }
                     ]
                 },
+                "hasBeforeHooks": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
+                },
                 "policy": {
                     "static": false,
                     "final": false,
@@ -3170,6 +3178,24 @@
                     "returnsReference": false,
                     "return": "?Nimbus\\Auth\\Principal",
                     "parameters": []
+                },
+                "wildcardScopesGrantUndefinedAbilities": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "grant",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
                 }
             }
         },
@@ -7246,7 +7272,17 @@
                     "abstract": false,
                     "returnsReference": false,
                     "return": "void",
-                    "parameters": []
+                    "parameters": [
+                        {
+                            "name": "entries",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        }
+                    ]
                 },
                 "bind": {
                     "static": false,

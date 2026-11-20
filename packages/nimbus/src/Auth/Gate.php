@@ -13,7 +13,10 @@ use Nimbus\Http\ProblemCode;
  * through the container, one method per ability: `view-any` calls `viewAny()`) and `before()`
  * hooks such as a super-admin bypass. An ability with neither a policy nor a definition falls
  * back to the principal's own `can()`, which for tokens means their abilities (scopes), so
- * `can('products:write')` routes keep checking token scopes.
+ * `can('products:write')` routes keep checking token scopes. The bare `*` scope (the default of
+ * issued tokens) does not count there: an undefined ability needs an explicit or namespace scope
+ * (`products:write`, `products:*`), so a full-scope token cannot pass an authorization ability
+ * nobody defined. `wildcardScopesGrantUndefinedAbilities()` restores the old behaviour.
  *
  * Checks without an explicit principal use the request's authenticated one.
  */
@@ -27,6 +30,8 @@ final class Gate
 
     /** @var list<\Closure> */
     private array $before = [];
+
+    private bool $wildcardScopes = false;
 
     public function __construct(private readonly Container $container)
     {
@@ -67,6 +72,22 @@ final class Gate
     {
         $this->before[] = $callback;
         return $this;
+    }
+
+    /**
+     * Lets the bare `*` token scope satisfy abilities that have neither a definition nor a
+     * policy, as before Nimbus 0.6. Prefer defining the abilities.
+     */
+    public function wildcardScopesGrantUndefinedAbilities(bool $grant = true): self
+    {
+        $this->wildcardScopes = $grant;
+        return $this;
+    }
+
+    /** Whether before() hooks are registered (they may decide any ability). */
+    public function hasBeforeHooks(): bool
+    {
+        return $this->before !== [];
     }
 
     public function has(string $ability): bool
@@ -143,7 +164,13 @@ final class Gate
         if ($callback !== null) {
             return $callback($principal, ...$arguments) === true;
         }
-        return $policy === null && $principal->can($ability);
+        if ($policy !== null) {
+            return false;
+        }
+        if ($principal instanceof TokenPrincipal && !$this->wildcardScopes) {
+            return Abilities::allows(array_values(array_diff($principal->abilities, ['*'])), $ability);
+        }
+        return $principal->can($ability);
     }
 
     public function allows(string $ability, mixed ...$arguments): bool

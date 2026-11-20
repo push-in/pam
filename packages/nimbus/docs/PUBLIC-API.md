@@ -648,9 +648,11 @@ final class Nimbus\Auth\Gate
 - `public denies(string $ability, mixed ...$arguments): bool`
 - `public entityForParameter(string $parameter): ?string`
 - `public has(string $ability): bool`
+- `public hasBeforeHooks(): bool`
 - `public policy(string $entity, string $policy): self`
 - `public policyFor(object|string $entity): ?object`
 - `public principal(): ?Nimbus\Auth\Principal`
+- `public wildcardScopesGrantUndefinedAbilities(bool $grant = true): self`
 
 ## `Nimbus\Auth\HmacTokenCodec`
 
@@ -1270,7 +1272,7 @@ final class Nimbus\Container\Container
 ### Methods
 
 - `public __construct(): mixed`
-- `public beginScope(): void`
+- `public beginScope(array $entries = []): void`
 - `public bind(string $id, callable|null|string $factory = null): self`
 - `public bindRoute(string $class, callable $resolver): self`
 - `public call(array $callable, array $named = [], array $provided = []): mixed`

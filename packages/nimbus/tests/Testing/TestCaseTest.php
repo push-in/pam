@@ -96,7 +96,10 @@ final class TestCaseTest extends TestCase
         $this->getJson('/me')->assertOk()->assertJson(['id' => 'user-7']);
         $this->getJson('/admin')->assertForbidden();
 
+        // The bare `*` scope does not grant an ability nobody defined; an explicit scope does.
         $this->actingAs(new TokenPrincipal('root', ['*'], 'token-root'));
+        $this->getJson('/admin')->assertForbidden();
+        $this->actingAs(new TokenPrincipal('root', ['admin'], 'token-root'));
         $this->getJson('/admin')->assertOk();
     }
 

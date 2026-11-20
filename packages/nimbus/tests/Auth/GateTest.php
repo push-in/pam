@@ -51,6 +51,25 @@ final class GateTest extends TestCase
         self::assertNull($gate->entityForParameter('order'));
     }
 
+    public function testTheWildcardScopeDoesNotGrantUndefinedAbilities(): void
+    {
+        $gate = new Gate(new Container());
+        $everything = new TokenPrincipal('1', ['*'], 'a');
+        // A default full-scope token (social login, token pairs) must not pass an
+        // authorization ability nobody defined, such as viewAdmin.
+        self::assertFalse($gate->check($everything, 'viewAdmin'));
+        self::assertFalse($gate->check($everything, 'products:write'));
+        // Explicit and namespace scopes still satisfy undefined abilities.
+        self::assertTrue($gate->check(new TokenPrincipal('1', ['products:*'], 'b'), 'products:write'));
+        self::assertTrue($gate->check(new TokenPrincipal('1', ['viewAdmin'], 'c'), 'viewAdmin'));
+        // Defined abilities decide regardless of scopes.
+        $gate->define('viewAdmin', static fn (Principal $principal): bool => $principal->identifier() === '1');
+        self::assertTrue($gate->check($everything, 'viewAdmin'));
+        // Opt back in to the previous behaviour.
+        $legacy = (new Gate(new Container()))->wildcardScopesGrantUndefinedAbilities();
+        self::assertTrue($legacy->check($everything, 'products:write'));
+    }
+
     public function testAllowsDeniesAndAuthorizeUseTheRequestPrincipal(): void
     {
         $container = new Container();
