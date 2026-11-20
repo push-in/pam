@@ -824,7 +824,6 @@ namespace Pam\Internal {
             return array_values(array_unique($values));
         }
 
-        /** @param array<string, mixed> $options */
         /**
          * A quarter of memory_limit: every request of a worker shares that
          * limit, and the body of a request PHP holds (suspended requests
@@ -839,6 +838,7 @@ namespace Pam\Internal {
             return $bytes > 0 ? intdiv($bytes, 4) : 0;
         }
 
+        /** @param array<string, mixed> $options */
         private static function integerOption(
             array $options,
             string $key,
