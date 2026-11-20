@@ -19,6 +19,10 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 - **Breaking:** the admin panel answers 403 until the application defines `viewAdmin`
   (`$app->gate()->define('viewAdmin', ...)`) or registers a `before()` hook; a principal's own
   `can('viewAdmin')` is no longer enough.
+- `ResponseCacheMiddleware` keys the default cache entry by the request's credentials
+  (`Authorization` and `Cookie`) as well, so a cached response of one user is never served to
+  another, and never stores responses that set a cookie, are `Cache-Control: private`, `no-store`
+  or `no-cache`, or `Vary: *`.
 
 ## 0.5.2 - 2026-11-19
 
