@@ -1553,13 +1553,15 @@ int pam_php_dispatch_http_native(
     } else {
         PAM_HASH_ADD_LITERAL(server, "QUERY_STRING", "", 0);
     }
-    server_protocol_length = snprintf(
-        server_protocol,
-        sizeof(server_protocol),
-        "HTTP/%.*s",
-        (int) (protocol_version_length > 16 ? 16 : protocol_version_length),
-        protocol_version
-    );
+    {
+        /* Not snprintf("%.*s"): PHP's snprintf runs strlen() on the
+         * argument before applying the precision, and protocol_version is
+         * not NUL terminated (an out-of-bounds read under ASan). */
+        size_t version_length = protocol_version_length > 16 ? 16 : protocol_version_length;
+        memcpy(server_protocol, "HTTP/", 5);
+        memcpy(server_protocol + 5, protocol_version, version_length);
+        server_protocol_length = (int) (5 + version_length);
+    }
     PAM_HASH_ADD_LITERAL(server, "SERVER_PROTOCOL", server_protocol, (size_t) server_protocol_length);
     PAM_HASH_ADD_LITERAL(server, "REMOTE_ADDR", context->remote_address, context->remote_address_length);
     {
