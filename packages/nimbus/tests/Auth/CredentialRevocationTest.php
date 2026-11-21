@@ -96,6 +96,10 @@ final class CredentialRevocationTest extends TestCase
         self::assertNull($personal->find($pat->plainTextToken));
         self::assertSame(0, $refresh->revokeAll($subject), 'Refresh tokens were already revoked.');
 
+        // A login right after the reset, in the same second, works.
+        $authenticator->login(new TokenPrincipal($subject, [], 'session'));
+        self::assertNotNull($authenticator->authenticate($request), 'A login in the reset second stays signed in.');
+
         // A login after the reset works.
         $this->now += 1;
         $authenticator->login(new TokenPrincipal($subject, [], 'session'));

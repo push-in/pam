@@ -60,7 +60,7 @@ final readonly class SessionAuthenticator implements Authenticator
         if ($this->revocations !== null) {
             $revokedAt = $this->revocations->revokedAt($identifier);
             $loggedInAt = $session->get(self::LOGGED_IN_AT);
-            if ($revokedAt !== null && (!is_int($loggedInAt) || $loggedInAt <= $revokedAt)) {
+            if ($revokedAt !== null && (!is_int($loggedInAt) || $loggedInAt < $revokedAt)) {
                 $session->invalidate();
                 return null;
             }
