@@ -37,6 +37,12 @@ Security hardening.
 - The `pam init` web template builds `PasswordResets` with `SessionRevocations` and gives it to the
   `SessionAuthenticator`, so a password reset signs the user's sessions out (Nimbus now requires
   `revoke:` or `afterReset:`).
+- `$_SERVER['SERVER_PROTOCOL']` is built without PHP's `snprintf("%.*s")`, which ran `strlen()`
+  past the unterminated protocol string on every request (found by AddressSanitizer).
+- Sanitizer builds: `PAM_NATIVE_CFLAGS` adds flags to the C shim, and `-Zsanitizer=...` builds leave
+  out the fiber stack pool, whose `mmap` interposition conflicts with the sanitizer. Example:
+  `RUSTFLAGS=-Zsanitizer=address PAM_NATIVE_CFLAGS="-fsanitize=address,undefined"
+  cargo +nightly test --target x86_64-unknown-linux-gnu --test server` (with `USE_ZEND_ALLOC=0`).
 - `SECURITY.md` covers PAM 2.2.x, Nimbus and Arcano, with response times and the hardening defaults.
 
 ## 2.2.25 - 2026-11-19
