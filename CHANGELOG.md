@@ -22,7 +22,9 @@ Security hardening.
 - `rateLimitPerSecond` sweeps idle clients at most once per second instead of scanning every client
   on every request, and tracks at most 65,536 clients per worker; past that a new client is limited
   until buckets expire.
-- **Behaviour change:** a worker's `metricsPath` (`/metrics`) answers only loopback peers by default.
+- **Behaviour change:** a worker's `metricsPath` (`/metrics`) answers only loopback peers by default,
+  and not a loopback request carrying `X-Forwarded-For`, `Forwarded` or `X-Real-IP` (a reverse proxy
+  on the same host, PAM's own ingress included).
   `metricsToken` / `PAM_METRICS_TOKEN` requires `Authorization: Bearer <token>` from any peer;
   `metricsPublic` / `PAM_METRICS_PUBLIC=1` restores the open endpoint. Other peers reach the
   application's own route.
@@ -30,6 +32,11 @@ Security hardening.
   request's host) gets `403`, so a page elsewhere cannot open a socket with the user's cookies.
   `websocketOrigins` / `PAM_WEBSOCKET_ORIGINS` lists allowed origins (`*` for any); when empty,
   `corsOrigins` is used. Clients without `Origin` (not browsers) are unaffected.
+- `quinn-udp` 0.5.16 (RUSTSEC-2026-0538: the HTTP/3 receive loop could spin after a truncated
+  datagram).
+- The `pam init` web template builds `PasswordResets` with `SessionRevocations` and gives it to the
+  `SessionAuthenticator`, so a password reset signs the user's sessions out (Nimbus now requires
+  `revoke:` or `afterReset:`).
 - `SECURITY.md` covers PAM 2.2.x, Nimbus and Arcano, with response times and the hardening defaults.
 
 ## 2.2.25 - 2026-11-19

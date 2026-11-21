@@ -2936,6 +2936,11 @@ fn websocket_origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
     })
 }
 
+/// Headers a reverse proxy adds; their presence means the loopback peer is
+/// a proxy forwarding someone else (PAM's own ingress adds
+/// `x-forwarded-for`).
+const FORWARDING_HEADERS: [&str; 3] = ["x-forwarded-for", "forwarded", "x-real-ip"];
+
 /// Who may read `metricsPath`: loopback peers by default, any peer with the
 /// bearer token when one is configured, or everyone when made public.
 #[derive(Clone, Debug)]
@@ -2975,6 +2980,14 @@ impl MetricsAccess {
         }
         if self.public {
             return true;
+        }
+        // A reverse proxy on the same host connects from loopback too: a
+        // request it forwarded is not a local scrape.
+        if FORWARDING_HEADERS
+            .iter()
+            .any(|name| headers.contains_key(*name))
+        {
+            return false;
         }
         match peer {
             std::net::IpAddr::V6(v6) => v6
@@ -4816,6 +4829,12 @@ mod tests {
         assert!(private.allows(local, &headers));
         assert!(!private.allows(remote, &headers));
         assert!(!private.allows("::ffff:203.0.113.5".parse().unwrap(), &headers));
+        let mut proxied = HeaderMap::new();
+        proxied.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.5"));
+        assert!(
+            !private.allows(local, &proxied),
+            "a same-host reverse proxy is not a local scrape"
+        );
         let public = MetricsAccess::new(None, true);
         assert!(public.allows(remote, &headers));
         let token = MetricsAccess::new(Some("secret-token".to_owned()), false);

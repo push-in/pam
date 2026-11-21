@@ -378,7 +378,8 @@ O control plane do master não chama PHP:
 - `/diagnostics`: snapshot JSON versionado e limitado por worker.
 
 No listener da aplicação, cada worker também responde `metricsPath` (padrão `/metrics`), mas só
-para peers de loopback. Para um Prometheus em outra máquina, configure `metricsToken` (ou
+para peers de loopback sem `X-Forwarded-For`, `Forwarded` ou `X-Real-IP` (um proxy reverso na
+mesma máquina não conta como acesso local). Para um Prometheus em outra máquina, configure `metricsToken` (ou
 `PAM_METRICS_TOKEN`) e envie `Authorization: Bearer <token>`; `metricsPublic => true` (ou
 `PAM_METRICS_PUBLIC=1`) volta ao comportamento antigo, aberto a qualquer peer. Sem permissão, o
 caminho segue para a aplicação como qualquer outra rota.
