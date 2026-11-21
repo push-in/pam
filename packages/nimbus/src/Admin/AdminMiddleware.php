@@ -54,7 +54,12 @@ final readonly class AdminMiddleware implements MiddlewareInterface
             ->scopedInstance(AuthContext::class, new AuthContext($principal));
         try {
             $gate = $this->container->get(Gate::class);
-            if (!$gate instanceof Gate || !$gate->check($principal, 'viewAdmin')) {
+            // The panel stays closed until the application defines `viewAdmin` (or a before()
+            // hook decides): a principal's own can() or a token scope is not enough.
+            if (!$gate instanceof Gate
+                || (!$gate->has('viewAdmin') && !$gate->hasBeforeHooks())
+                || !$gate->check($principal, 'viewAdmin')
+            ) {
                 throw new HttpException(403, ProblemCode::Forbidden, 'This action is not authorized.');
             }
             $response = $next->handle($request, $response);

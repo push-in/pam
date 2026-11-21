@@ -13,6 +13,10 @@ use Nimbus\Security\Hash;
  * token in `{token}`), `reset()` spends the token and stores the new hash. The e-mail is sent
  * synchronously so the token never enters a job payload; unknown addresses and throttled
  * requests are silent, so the response does not reveal which e-mails exist.
+ *
+ * A reset signs the user out everywhere through `$revoke` (refresh tokens, personal access
+ * tokens, `SessionRevocations`): whoever had the account keeps no access. Passing neither
+ * `$revoke` nor `$afterReset` is refused; `revoke: []` opts out explicitly.
  */
 final readonly class PasswordResets
 {
@@ -24,11 +28,15 @@ final readonly class PasswordResets
     /** @var (\Closure(AuthUser): void)|null */
     private ?\Closure $afterReset;
 
+    /** @var list<RevokesCredentials> */
+    private array $revoke;
+
     /**
      * @param string $resetUrl Link of the application's reset screen, with `{token}` (and optionally `{email}`).
      * @param int $throttleSeconds Minimum interval between two links to the same user.
      * @param (\Closure(AuthUser, string): Notification)|null $notification Builds the message from the user and the link.
-     * @param (\Closure(AuthUser): void)|null $afterReset Runs after a reset, e.g. to revoke the user's tokens.
+     * @param (\Closure(AuthUser): void)|null $afterReset Runs after a reset and the revocations.
+     * @param list<RevokesCredentials>|null $revoke Credentials revoked on reset (sessions and tokens).
      */
     public function __construct(
         private AuthUserProvider $users,
@@ -40,6 +48,7 @@ final readonly class PasswordResets
         private int $minimumPasswordLength = 8,
         ?\Closure $notification = null,
         ?\Closure $afterReset = null,
+        ?array $revoke = null,
     ) {
         if (!str_contains($resetUrl, '{token}')) {
             throw new \InvalidArgumentException('The reset URL must contain the {token} placeholder.');
@@ -47,8 +56,15 @@ final readonly class PasswordResets
         if ($ttlSeconds < 60 || $ttlSeconds > 86_400 || $throttleSeconds < 0 || $minimumPasswordLength < 8) {
             throw new \InvalidArgumentException('Password reset TTL, throttle or minimum length is invalid.');
         }
+        if ($revoke === null && $afterReset === null) {
+            throw new \InvalidArgumentException(
+                'PasswordResets must sign the user out on reset: pass revoke: [$refreshTokens, $personalAccessTokens, '
+                . 'new SessionRevocations($oneTimeTokens)] (or revoke: [] to opt out).',
+            );
+        }
         $this->notification = $notification;
         $this->afterReset = $afterReset;
+        $this->revoke = $revoke ?? [];
     }
 
     /** Mails a reset link when the address belongs to a user and no link was sent in the throttle window. */
@@ -90,6 +106,9 @@ final readonly class PasswordResets
             return false;
         }
         $this->users->updatePassword($user, Hash::make($password));
+        foreach ($this->revoke as $revoker) {
+            $revoker->revokeAll($user->authIdentifier());
+        }
         if ($this->afterReset !== null) {
             ($this->afterReset)($user);
         }

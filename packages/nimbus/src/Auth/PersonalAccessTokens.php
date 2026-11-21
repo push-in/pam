@@ -12,7 +12,7 @@ use Nimbus\Database\ArcanoDatabaseProvider;
  * A token reads `{prefix}{id}.{secret}`; only the SHA-256 of the 256-bit secret is stored
  * and it is compared in constant time.
  */
-final readonly class PersonalAccessTokens
+final readonly class PersonalAccessTokens implements RevokesCredentials
 {
     private const string TABLE = 'personal_access_tokens';
 

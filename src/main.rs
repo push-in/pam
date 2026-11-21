@@ -23,6 +23,7 @@ mod api_generator;
 #[cfg(target_os = "linux")]
 mod balance;
 mod catalog;
+mod client_ip;
 mod cluster;
 mod commands;
 mod composer;

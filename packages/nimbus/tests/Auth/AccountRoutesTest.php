@@ -149,7 +149,7 @@ final class AccountRoutesTest extends TestCase
 
     public function testAuthRoutesAreThrottledPerClient(): void
     {
-        $passwords = new PasswordResets($this->users, $this->tokens, $this->mail, 'https://app.test/{token}');
+        $passwords = new PasswordResets($this->users, $this->tokens, $this->mail, 'https://app.test/{token}', revoke: []);
         $client = new TestClient($this->app(new AuthRoutes(passwords: $passwords, throttleBurst: 2)));
 
         $client->postJson('/auth/password/forgot', ['email' => 'x@example.com'])->assertStatus(202);

@@ -1198,15 +1198,32 @@ int pam_php_routes_info(char **output, size_t *output_length)
  * Runs Runtime::beginHttpDispatch with `parameters` while the SAPI request
  * body (php://input) points at `body`. Takes ownership of the parameters.
  */
+static php_stream *pam_request_body_stream(zend_string *body)
+{
+#if PHP_VERSION_ID >= 80100
+    /* A read-only memory stream over the body string PHP already holds as
+     * the dispatch argument: php://input costs no second copy, which counts
+     * against the worker's shared memory_limit. */
+    return php_stream_memory_open(TEMP_STREAM_READONLY, body);
+#else
+    return php_stream_temp_open(
+        TEMP_STREAM_DEFAULT,
+        PHP_STREAM_MAX_MEM,
+        ZSTR_VAL(body),
+        ZSTR_LEN(body)
+    );
+#endif
+}
+
 static int pam_begin_http_dispatch(
     zval *parameters,
     uint32_t parameter_count,
-    const char *body,
-    size_t body_length,
+    zend_string *body,
     char **output,
     size_t *output_length
 )
 {
+    size_t body_length = ZSTR_LEN(body);
     int status = FAILURE;
     php_stream *previous_request_body;
     zval result;
@@ -1218,14 +1235,7 @@ static int pam_begin_http_dispatch(
     pam_reset_sapi_response(200);
 
     previous_request_body = SG(request_info).request_body;
-    SG(request_info).request_body = body_length == 0
-        ? NULL
-        : php_stream_temp_open(
-            TEMP_STREAM_DEFAULT,
-            PHP_STREAM_MAX_MEM,
-            body,
-            body_length
-        );
+    SG(request_info).request_body = body_length == 0 ? NULL : pam_request_body_stream(body);
 
     if (body_length != 0 && SG(request_info).request_body == NULL) {
         SG(request_info).request_body = previous_request_body;
@@ -1284,7 +1294,7 @@ int pam_php_dispatch_http(
     ZVAL_STRINGL(&parameters[4], context, context_length);
     ZVAL_STRINGL(&parameters[5], request_id, request_id_length);
 
-    return pam_begin_http_dispatch(parameters, 6, body, body_length, output, output_length);
+    return pam_begin_http_dispatch(parameters, 6, Z_STR(parameters[3]), output, output_length);
 }
 
 typedef struct pam_header_reader {
@@ -1513,6 +1523,12 @@ int pam_php_dispatch_http_native(
     size_t scheme_length = context->scheme_length == 0 ? 4 : context->scheme_length;
     char server_protocol[32];
     int server_protocol_length;
+    const char *public_request_id = context->public_request_id_length == 0
+        ? request_id
+        : context->public_request_id;
+    size_t public_request_id_length = context->public_request_id_length == 0
+        ? request_id_length
+        : context->public_request_id_length;
 
     {
         zend_string *raw_method = zend_string_init_fast(method, method_length);
@@ -1537,13 +1553,15 @@ int pam_php_dispatch_http_native(
     } else {
         PAM_HASH_ADD_LITERAL(server, "QUERY_STRING", "", 0);
     }
-    server_protocol_length = snprintf(
-        server_protocol,
-        sizeof(server_protocol),
-        "HTTP/%.*s",
-        (int) (protocol_version_length > 16 ? 16 : protocol_version_length),
-        protocol_version
-    );
+    {
+        /* Not snprintf("%.*s"): PHP's snprintf runs strlen() on the
+         * argument before applying the precision, and protocol_version is
+         * not NUL terminated (an out-of-bounds read under ASan). */
+        size_t version_length = protocol_version_length > 16 ? 16 : protocol_version_length;
+        memcpy(server_protocol, "HTTP/", 5);
+        memcpy(server_protocol + 5, protocol_version, version_length);
+        server_protocol_length = (int) (5 + version_length);
+    }
     PAM_HASH_ADD_LITERAL(server, "SERVER_PROTOCOL", server_protocol, (size_t) server_protocol_length);
     PAM_HASH_ADD_LITERAL(server, "REMOTE_ADDR", context->remote_address, context->remote_address_length);
     {
@@ -1560,7 +1578,7 @@ int pam_php_dispatch_http_native(
     /* Placeholder keeps populateSuperglobals()' key order; the host header
      * (if any) overwrites it in place below. */
     PAM_HASH_ADD_LITERAL(server, "HTTP_HOST", "", 0);
-    PAM_HASH_ADD_LITERAL(server, "PAM_REQUEST_ID", request_id, request_id_length);
+    PAM_HASH_ADD_LITERAL(server, "PAM_REQUEST_ID", public_request_id, public_request_id_length);
     PAM_HASH_ADD_LITERAL(server, "PAM_TRACEPARENT", context->traceparent, context->traceparent_length);
 
     if (!pam_build_request_headers(headers, headers_length, &parameters[2], server)) {
@@ -1585,7 +1603,7 @@ int pam_php_dispatch_http_native(
         zend_hash_update(context_table, PAM_LITERAL_KEY("remotePort"), &entry);
     }
     PAM_HASH_ADD_LITERAL(context_table, "scheme", scheme, scheme_length);
-    PAM_HASH_ADD_LITERAL(context_table, "requestId", request_id, request_id_length);
+    PAM_HASH_ADD_LITERAL(context_table, "requestId", public_request_id, public_request_id_length);
     PAM_HASH_ADD_LITERAL(context_table, "traceparent", context->traceparent, context->traceparent_length);
     if (url != NULL && url->path != NULL && ZSTR_LEN(url->path) != 0
         && !zend_string_equals_literal(url->path, "0")) {
@@ -1610,7 +1628,7 @@ int pam_php_dispatch_http_native(
     ZVAL_STRINGL_FAST(&parameters[3], body, body_length);
     ZVAL_STRINGL_FAST(&parameters[5], request_id, request_id_length);
 
-    return pam_begin_http_dispatch(parameters, 7, body, body_length, output, output_length);
+    return pam_begin_http_dispatch(parameters, 7, Z_STR(parameters[3]), output, output_length);
 }
 
 int pam_php_resume_http(

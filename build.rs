@@ -27,6 +27,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PHP_CONFIG");
     println!("cargo:rerun-if-env-changed=PAM_PHP_INCLUDE_DIRS");
     println!("cargo:rerun-if-env-changed=PAM_PHP_LIB_DIR");
+    println!("cargo:rerun-if-env-changed=PAM_NATIVE_CFLAGS");
     println!("cargo:rerun-if-env-changed=PAM_UPDATE_SIGNING_IDENTITY_SHA256");
     println!("cargo:rerun-if-env-changed=PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256");
 
@@ -40,8 +41,11 @@ fn main() {
     let msvc = target_env == "msvc";
 
     // Fiber C stack pool: interposes mmap & co. for libphp (Linux only;
-    // Android and the other targets keep PHP's own allocation).
-    let fiber_stack_pool = target_os == "linux";
+    // Android and the other targets keep PHP's own allocation). Sanitizer
+    // builds (`-Zsanitizer=...`) leave it out: its mmap interposition
+    // conflicts with the sanitizer's own interceptors.
+    let sanitized = env::var("CARGO_CFG_SANITIZE").is_ok_and(|value| !value.is_empty());
+    let fiber_stack_pool = target_os == "linux" && !sanitized;
     compile_shim(&out_dir, &includes, static_linux, msvc, fiber_stack_pool);
     archive_shim(&out_dir, static_linux, msvc, fiber_stack_pool);
 
@@ -171,6 +175,13 @@ fn compile_c_object(
     } else {
         command
             .args(["-std=c11", "-fPIC", "-Wall", "-Wextra", "-Werror", "-c"])
+            // Extra flags for the C shim, e.g. sanitizers:
+            // PAM_NATIVE_CFLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer".
+            .args(
+                env::var("PAM_NATIVE_CFLAGS")
+                    .unwrap_or_default()
+                    .split_whitespace(),
+            )
             .arg(source)
             .arg("-o")
             .arg(object)

@@ -443,9 +443,12 @@ register the routes:
 
 ```php
 $oneTime = new OneTimeTokens($databases);
+// Signs the user's web sessions out on reset; give it to the SessionAuthenticator too:
+// new SessionAuthenticator($container, $resolver, $sessionRevocations)
+$sessionRevocations = new SessionRevocations($oneTime);
 (new AuthRoutes(
     passwords: new PasswordResets($users, $oneTime, $notifier, 'https://app.example.com/reset?token={token}',
-        afterReset: fn (AuthUser $user) => $refreshTokens->revokeAll($user->authIdentifier())),
+        revoke: [$refreshTokens, $personalAccessTokens, $sessionRevocations]),
     verification: new EmailVerification($users, $oneTime, $notifier, 'https://app.example.com/verify?token={token}'),
     tokens: $pairs,
     social: $social,

@@ -13,7 +13,7 @@ use Nimbus\Database\ArcanoDatabaseProvider;
  * a spent token again revokes the family (reuse detection), which logs out a thief and the
  * victim alike. Only the SHA-256 of each 256-bit secret is stored.
  */
-final readonly class RefreshTokens
+final readonly class RefreshTokens implements RevokesCredentials
 {
     private const string TABLE = 'refresh_tokens';
 

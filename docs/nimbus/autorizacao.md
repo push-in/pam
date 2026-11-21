@@ -5,7 +5,10 @@
 1. hooks `before()`: devolvem `true` (permite), `false` (nega) ou `null` (segue);
 2. policy da classe da entidade, um método por ability;
 3. closure definida com `define()`;
-4. sem regra, o `can()` do próprio principal, ou seja, as abilities do token.
+4. sem regra, o `can()` do próprio principal, ou seja, as abilities do token. O escopo `*` sozinho
+   (padrão dos tokens emitidos) não vale aqui: uma ability sem regra exige escopo explícito
+   (`reports:export`) ou de namespace (`reports:*`). `$gate->wildcardScopesGrantUndefinedAbilities()`
+   volta ao comportamento anterior.
 
 ```php
 use Nimbus\Auth\Principal;

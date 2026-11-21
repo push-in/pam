@@ -119,6 +119,29 @@ impl ServerProcess {
         server
     }
 
+    fn start_with_env(variables: &[(&str, &str)]) -> Self {
+        let probe = TcpListener::bind(("127.0.0.1", 0)).expect("test port should be available");
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        let mut command = Command::new(env!("CARGO_BIN_EXE_pam"));
+        command
+            .arg("tests/fixtures/server.php")
+            .env("PAM_TEST_PORT", port.to_string())
+            .envs(variables.iter().copied())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let child = command.spawn().expect("Pam server should start");
+        let mut server = Self {
+            child,
+            port,
+            temporary_directory: None,
+            certificate: None,
+        };
+        server.wait_until_ready();
+        server
+    }
+
     fn start_with_options(
         response_limits: Option<(usize, usize)>,
         rate_limit_per_second: Option<u32>,
@@ -1412,4 +1435,187 @@ fn cancels_suspended_php_when_the_http_client_disconnects() {
     let recovered =
         server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
     assert!(recovered.starts_with("HTTP/1.1 200 OK"), "{recovered}");
+}
+
+#[test]
+fn client_request_ids_never_collide_inside_the_worker() {
+    // The X-Request-Id a client sends is only a correlation label: two
+    // in-flight requests carrying the same value must both be served, keep
+    // that label, and leave the worker running (it used to be the internal
+    // dispatch key, so the second request failed and recycled the worker).
+    let server = ServerProcess::start();
+    let barrier = Arc::new(Barrier::new(2));
+    let requests = (0..2)
+        .map(|index| {
+            let port = server.port;
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                let body = format!("same-id-{index}");
+                barrier.wait();
+                if index == 1 {
+                    thread::sleep(Duration::from_millis(15));
+                }
+                let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                stream
+                    .write_all(
+                        format!(
+                            "POST /async-context HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Request-Id: shared-client-id\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len(),
+                        )
+                        .as_bytes(),
+                    )
+                    .unwrap();
+                let mut response = String::new();
+                stream.read_to_string(&mut response).unwrap();
+                (body, response)
+            })
+        })
+        .collect::<Vec<_>>();
+    for request in requests {
+        let (body, response) = request.join().unwrap();
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        let payload = response_json(&response);
+        assert_eq!(payload["bodyAfter"], body, "{response}");
+        assert_eq!(payload["requestIdBefore"], "shared-client-id");
+        assert_eq!(payload["requestIdAfter"], "shared-client-id");
+    }
+    let response =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "worker must survive: {response}"
+    );
+}
+
+#[test]
+fn resolves_the_client_from_the_right_of_x_forwarded_for() {
+    let client_ip = |server: &ServerProcess, forwarded: &str| {
+        let response = server.http_request(&format!(
+            "GET /client-ip HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Forwarded-For: {forwarded}\r\nConnection: close\r\n\r\n"
+        ));
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        response_json(&response)["remoteAddress"].clone()
+    };
+
+    // The peer (127.0.0.1) is a trusted proxy: the client is the address it
+    // appended, not the forged one on the left; junk is never the address.
+    let server = ServerProcess::start_with_env(&[("PAM_TEST_TRUSTED_PROXIES", "127.0.0.1")]);
+    assert_eq!(client_ip(&server, "6.6.6.6, 203.0.113.9"), "203.0.113.9");
+    assert_eq!(client_ip(&server, "<script>alert(1)</script>"), "127.0.0.1");
+    drop(server);
+
+    // Ranges come from the option or from PAM_TRUSTED_PROXIES.
+    let server =
+        ServerProcess::start_with_env(&[("PAM_TRUSTED_PROXIES", "127.0.0.0/8, 10.0.0.0/8")]);
+    assert_eq!(
+        client_ip(&server, "6.6.6.6, 198.51.100.4, 10.1.2.3"),
+        "198.51.100.4"
+    );
+    drop(server);
+
+    // Without trusted proxies the header is ignored.
+    let server = ServerProcess::start();
+    assert_eq!(client_ip(&server, "6.6.6.6"), "127.0.0.1");
+}
+
+#[test]
+fn bounds_request_bodies_held_by_php_to_the_worker_memory_limit() {
+    // Every PHP request of a worker shares one memory_limit, and a fatal
+    // "Allowed memory size exhausted" recycles the worker with every request
+    // in flight. Bodies held by suspended requests must not get there.
+    const BODY: usize = 2 * 1024 * 1024;
+    let server = ServerProcess::start_with_env(&[
+        ("PAM_TEST_MAX_BODY_BYTES", "2097152"),
+        ("PAM_INI_ENTRIES", "memory_limit=48M\n"),
+    ]);
+    let port = server.port;
+    let barrier = Arc::new(Barrier::new(30));
+    let requests = (0..30)
+        .map(|_| {
+            let barrier = barrier.clone();
+            thread::spawn(move || {
+                let body = vec![b'x'; BODY];
+                barrier.wait();
+                let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(30)))
+                    .unwrap();
+                let head = format!(
+                    "POST /async-body HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: {BODY}\r\nConnection: close\r\n\r\n"
+                );
+                let _ = stream.write_all(head.as_bytes());
+                let _ = stream.write_all(&body);
+                let mut response = String::new();
+                let _ = stream.read_to_string(&mut response);
+                response
+            })
+        })
+        .collect::<Vec<_>>();
+    for request in requests {
+        let response = request.join().unwrap();
+        let first_line = response.lines().next().unwrap_or_default().to_owned();
+        assert!(
+            first_line == "HTTP/1.1 200 OK" || first_line == "HTTP/1.1 503 Service Unavailable",
+            "a request failed instead of waiting or being shed: {response:.300}"
+        );
+        if first_line.ends_with("200 OK") {
+            assert_eq!(response_json(&response)["size"], BODY);
+        }
+    }
+    let response =
+        server.http_request("GET /ping HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "worker must survive: {response}"
+    );
+}
+
+#[test]
+fn metrics_need_the_configured_token() {
+    let server = ServerProcess::start_with_env(&[("PAM_METRICS_TOKEN", "metrics-token-for-tests")]);
+    let anonymous = server
+        .http_request("GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+    assert!(
+        !anonymous.contains("pam_http_requests_total"),
+        "{anonymous}"
+    );
+    let wrong = server.http_request(
+        "GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer nope\r\nConnection: close\r\n\r\n",
+    );
+    assert!(!wrong.contains("pam_http_requests_total"), "{wrong}");
+    let allowed = server.http_request(
+        "GET /metrics HTTP/1.1\r\nHost: 127.0.0.1\r\nAuthorization: Bearer metrics-token-for-tests\r\nConnection: close\r\n\r\n",
+    );
+    assert!(allowed.starts_with("HTTP/1.1 200 OK"), "{allowed}");
+    assert!(allowed.contains("pam_http_requests_total"), "{allowed}");
+}
+
+#[test]
+fn rejects_cross_origin_websocket_upgrades() {
+    let server = ServerProcess::start();
+    let upgrade = |origin: Option<&str>| {
+        let mut request = format!("ws://127.0.0.1:{}/ws", server.port)
+            .into_client_request()
+            .unwrap();
+        if let Some(origin) = origin {
+            request
+                .headers_mut()
+                .insert("origin", origin.parse().unwrap());
+        }
+        match connect(request) {
+            Ok((_socket, response)) => response.status().as_u16(),
+            Err(tungstenite::Error::Http(response)) => response.status().as_u16(),
+            Err(error) => panic!("unexpected WebSocket error: {error}"),
+        }
+    };
+    // A page on another site cannot open a socket with the user's cookies.
+    assert_eq!(upgrade(Some("https://evil.example")), 403);
+    // Listed origins (corsOrigins here), the same host and non-browser
+    // clients (no Origin) are accepted.
+    assert_eq!(upgrade(Some("https://app.example")), 101);
+    assert_eq!(
+        upgrade(Some(&format!("http://127.0.0.1:{}", server.port))),
+        101
+    );
+    assert_eq!(upgrade(None), 101);
 }

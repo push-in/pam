@@ -157,6 +157,11 @@ pub struct ServerConfig {
     pub request_timeout_ms: u64,
     #[serde(default = "default_max_concurrent_requests")]
     pub max_concurrent_requests: usize,
+    /// Request body bytes PHP may hold at once (suspended requests keep
+    /// theirs); 0 for no limit. Bodies count against the worker's single
+    /// `memory_limit`, whose exhaustion recycles every request in flight.
+    #[serde(default)]
+    pub max_inflight_body_bytes: usize,
     #[serde(default = "default_php_executor_queue_capacity")]
     pub php_executor_queue_capacity: usize,
     #[serde(default = "default_response_stream_queue_capacity")]
@@ -177,12 +182,23 @@ pub struct ServerConfig {
     pub trusted_proxies: Vec<String>,
     #[serde(default = "default_metrics_path")]
     pub metrics_path: String,
+    /// Bearer token required for `metrics_path` (`PAM_METRICS_TOKEN`).
+    #[serde(default)]
+    pub metrics_token: Option<String>,
+    /// Serve `metrics_path` to any peer without a token (`PAM_METRICS_PUBLIC=1`).
+    #[serde(default)]
+    pub metrics_public: bool,
     #[serde(default)]
     pub tls_cert: Option<String>,
     #[serde(default)]
     pub tls_key: Option<String>,
     #[serde(default = "default_http3")]
     pub http3: bool,
+    /// Browser origins allowed to open WebSockets (`*` for any); empty:
+    /// `cors_origins`. The page's own host is always allowed, and clients
+    /// without an `Origin` header (not browsers) are not affected.
+    #[serde(default)]
+    pub websocket_origins: Vec<String>,
     #[serde(default = "default_websocket_max_connections")]
     pub websocket_max_connections: usize,
     #[serde(default = "default_websocket_max_message_bytes")]
@@ -717,6 +733,8 @@ struct HttpRequestContextFfi {
     traceparent_length: usize,
     multipart_json: *const c_char,
     multipart_json_length: usize,
+    public_request_id: *const c_char,
+    public_request_id_length: usize,
     remote_port: u32,
 }
 
@@ -730,6 +748,8 @@ pub struct HttpRequestMeta<'a> {
     pub traceparent: &'a str,
     /// JSON of the streamed multipart body; empty when there is none.
     pub multipart_json: &'a str,
+    /// The client's X-Request-Id label; empty: the dispatch request ID.
+    pub public_request_id: &'a str,
 }
 
 /// Dispatches an HTTP request without a JSON envelope: `headers` is the
@@ -754,6 +774,8 @@ pub fn dispatch_http_native(
         traceparent_length: meta.traceparent.len(),
         multipart_json: meta.multipart_json.as_ptr().cast::<c_char>(),
         multipart_json_length: meta.multipart_json.len(),
+        public_request_id: meta.public_request_id.as_ptr().cast::<c_char>(),
+        public_request_id_length: meta.public_request_id.len(),
         remote_port: u32::from(meta.remote_port),
     };
     track_engine_failure(call_for_bytes(|output, length| {

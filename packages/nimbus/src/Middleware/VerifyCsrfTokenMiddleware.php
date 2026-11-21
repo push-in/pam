@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nimbus\Middleware;
 
+use Nimbus\Auth\AuthContext;
+use Nimbus\Auth\TokenPrincipal;
 use Nimbus\Container\Container;
 use Nimbus\Http\Cookie;
 use Nimbus\Http\FormData;
@@ -18,12 +20,17 @@ use Pam\Http\Response;
 /**
  * Rejects state-changing requests (419) whose `_token` field, `X-CSRF-TOKEN` or
  * `X-XSRF-TOKEN` header does not match the session token. GET, HEAD and OPTIONS pass, as
- * do requests with a bearer token (not ambient credentials) and paths in `$except`
+ * do requests with a bearer token (not ambient credentials) and paths in `$except`. A request
+ * that skipped the check for its bearer token can then only be authenticated by that token:
+ * the session authenticator ignores its session cookie, which a cross-site request carries
  * (`/webhooks/*` matches by prefix). Runs after StartSessionMiddleware; when the session has
  * a token, its value is sent in the `XSRF-TOKEN` cookie for JavaScript clients.
  */
 final readonly class VerifyCsrfTokenMiddleware implements MiddlewareInterface
 {
+    /** Scoped flag: the CSRF check was skipped for a bearer token, so the session cannot authenticate. */
+    public const string BEARER_ONLY = 'nimbus.csrf.bearer_only';
+
     /** @param list<string> $except */
     public function __construct(
         private Container $container,
@@ -55,6 +62,12 @@ final readonly class VerifyCsrfTokenMiddleware implements MiddlewareInterface
             return true;
         }
         if (preg_match('/^\s*bearer\s+\S/i', $request->getHeader('authorization') ?? '') === 1) {
+            $auth = $this->container->scopedValue(AuthContext::class);
+            if ($auth instanceof AuthContext && !$auth->principal instanceof TokenPrincipal) {
+                // Already authenticated by something other than a token (the session).
+                return false;
+            }
+            $this->container->scopedInstance(self::BEARER_ONLY, true);
             return true;
         }
         foreach ($this->except as $pattern) {

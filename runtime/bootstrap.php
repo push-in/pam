@@ -699,6 +699,12 @@ namespace Pam\Internal {
                 'maxHeaders' => self::integerOption($options, 'maxHeaders', 100),
                 'requestTimeoutMs' => self::integerOption($options, 'requestTimeoutMs', 30_000),
                 'maxConcurrentRequests' => self::integerOption($options, 'maxConcurrentRequests', 4096),
+                'maxInflightBodyBytes' => self::integerOption(
+                    $options,
+                    'maxInflightBodyBytes',
+                    self::defaultInflightBodyBytes(),
+                    true,
+                ),
                 'phpExecutorQueueCapacity' => self::integerOption($options, 'phpExecutorQueueCapacity', 1_024),
                 'responseStreamQueueCapacity' => $responseStreamQueueCapacity,
                 'maxResponseBytes' => $maxResponseBytes,
@@ -709,9 +715,12 @@ namespace Pam\Internal {
                 'corsOrigins' => self::stringListOption($options, 'corsOrigins'),
                 'trustedProxies' => self::stringListOption($options, 'trustedProxies'),
                 'metricsPath' => self::stringOption($options, 'metricsPath', '/metrics'),
+                'metricsToken' => self::nullableStringOption($options, 'metricsToken'),
+                'metricsPublic' => self::booleanOption($options, 'metricsPublic', false),
                 'tlsCert' => self::nullableStringOption($options, 'tlsCert'),
                 'tlsKey' => self::nullableStringOption($options, 'tlsKey'),
                 'http3' => self::booleanOption($options, 'http3', true),
+                'websocketOrigins' => self::stringListOption($options, 'websocketOrigins'),
                 'websocketMaxConnections' => self::integerOption($options, 'websocketMaxConnections', 10_000),
                 'websocketMaxMessageBytes' => self::integerOption($options, 'websocketMaxMessageBytes', 1024 * 1024),
                 'websocketQueueCapacity' => self::integerOption($options, 'websocketQueueCapacity', 256),
@@ -813,6 +822,20 @@ namespace Pam\Internal {
             }
 
             return array_values(array_unique($values));
+        }
+
+        /**
+         * A quarter of memory_limit: every request of a worker shares that
+         * limit, and the body of a request PHP holds (suspended requests
+         * keep theirs) is copied by parsing. 0 (no budget) without a limit.
+         */
+        private static function defaultInflightBodyBytes(): int
+        {
+            $limit = (string) ini_get('memory_limit');
+            $bytes = function_exists('ini_parse_quantity')
+                ? @ini_parse_quantity($limit)
+                : (int) $limit;
+            return $bytes > 0 ? intdiv($bytes, 4) : 0;
         }
 
         /** @param array<string, mixed> $options */

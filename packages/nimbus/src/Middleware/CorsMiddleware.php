@@ -26,6 +26,9 @@ final readonly class CorsMiddleware implements MiddlewareInterface
         if ($origins === [] || $maxAge < 0) {
             throw new \InvalidArgumentException('CORS requires origins and a non-negative max age.');
         }
+        if ($credentials && in_array('*', $origins, true)) {
+            throw new \InvalidArgumentException('CORS with credentials needs explicit origins: "*" would let any site read authenticated responses.');
+        }
     }
 
     public function process(Request $request, Response $response, RequestHandlerInterface $next): Response

@@ -136,7 +136,7 @@ A busca usa `LIKE` (no Postgres, `ILIKE`) nos campos `searchable`; para tabelas 
 
 ## Autorização
 
-1. Toda rota exige a ability `viewAdmin` no `Gate`. Sem regra definida, vale o `can('viewAdmin')` do principal; um token sem essa ability recebe 403.
+1. Toda rota exige a ability `viewAdmin` no `Gate`, e ela precisa estar definida com `define('viewAdmin', ...)` (ou decidida por um hook `before()`). Sem isso o painel responde 403 a todos, inclusive a tokens com escopo `*`.
 2. Se a entidade tem policy (`$app->gate()->policy(Product::class, ProductPolicy::class)`) ou o Gate define a ability, o painel verifica `viewAny` (lista e menu), `create`, `update` e `delete` contra a entidade. Sem policy, `viewAdmin` basta. Uma policy sem o método da ability nega.
 
 As ações em massa conferem a ability de cada registro selecionado (`delete` para excluir, `update` ou a ability da `AdminAction` para as demais).

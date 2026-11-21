@@ -5,6 +5,37 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+### Security
+
+- `ClientIpResolver` takes the client from the right of `X-Forwarded-For`: the rightmost entry
+  that is not a trusted proxy, instead of the leftmost entry the client writes itself. This closes
+  a bypass of the auth route throttle by a forged header. Trusted proxies accept CIDR ranges;
+  an entry that is neither an address nor a range throws at construction.
+- **Breaking:** the bare `*` token scope no longer satisfies a Gate ability that has neither a
+  definition nor a policy. Default tokens (`PersonalAccessTokens`, `RefreshTokens`, token pairs,
+  social login) carry `*`, so any signed-in user passed undefined abilities such as `viewAdmin`.
+  Explicit and namespace scopes (`products:write`, `products:*`) still do.
+  `$app->gate()->wildcardScopesGrantUndefinedAbilities()` restores the old behaviour.
+- **Breaking:** the admin panel answers 403 until the application defines `viewAdmin`
+  (`$app->gate()->define('viewAdmin', ...)`) or registers a `before()` hook; a principal's own
+  `can('viewAdmin')` is no longer enough.
+- `ResponseCacheMiddleware` keys the default cache entry by the request's credentials
+  (`Authorization` and `Cookie`) as well, so a cached response of one user is never served to
+  another, and never stores responses that set a cookie, are `Cache-Control: private`, `no-store`
+  or `no-cache`, or `Vary: *`.
+- `VerifyCsrfTokenMiddleware` still skips requests with a bearer token, but such a request can
+  then only be authenticated by the token: `SessionAuthenticator` ignores its session cookie. A
+  cross-site request with an invented `Authorization: Bearer x` and the victim's cookie no longer
+  acts as the victim. If the session already authenticated the request, the CSRF check runs.
+- **Breaking:** `CorsMiddleware` throws when `'*'` is combined with `credentials: true`, which
+  reflected any origin with credentials.
+- **Breaking:** `PasswordResets` signs the user out everywhere on reset through the new `revoke:`
+  list of `RevokesCredentials` (`RefreshTokens`, `PersonalAccessTokens` and the new
+  `SessionRevocations`); constructing it with neither `revoke:` nor `afterReset:` throws
+  (`revoke: []` opts out). Whoever had taken over the account used to stay signed in after the
+  victim reset the password. `SessionAuthenticator` accepts a `SessionRevocations` and rejects
+  sessions that logged in before the user's last revocation.
+
 ## 0.5.2 - 2026-11-19
 
 ### Changed

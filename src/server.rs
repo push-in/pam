@@ -91,10 +91,15 @@ struct ServerStateInner {
     websocket_timeout: Duration,
     websocket_slots: Arc<Semaphore>,
     request_slots: Arc<Semaphore>,
+    /// Request body budget in KiB permits (see `max_inflight_body_bytes`).
+    body_budget: Option<(Arc<Semaphore>, u32)>,
+    metrics_access: MetricsAccess,
+    websocket_origins: Vec<String>,
     config: Arc<ServerConfig>,
     metrics: Arc<Metrics>,
     otlp: Option<crate::otlp::Exporter>,
-    rate_limits: Arc<Mutex<HashMap<String, RateBucket>>>,
+    rate_limits: Arc<Mutex<RateLimiter>>,
+    trusted_proxies: crate::client_ip::TrustedProxies,
     worker_state: WorkerStateReporter,
     next_worker_metrics_at: Arc<AtomicU64>,
     last_reported_active_requests: Arc<AtomicU64>,
@@ -115,6 +120,18 @@ impl ServerState {
         let route_metrics_max_entries = config.route_metrics_max_entries;
         let page_cache = PageCache::new(page_cache_config(&config));
         let otlp = crate::otlp::Exporter::from_environment()?;
+        let trusted_proxies =
+            crate::client_ip::TrustedProxies::from_config(&config.trusted_proxies)?;
+        if trusted_proxies.trusts_everyone() {
+            eprintln!(
+                "{}",
+                serde_json::json!({
+                    "level": "warning",
+                    "event": "trusted_proxies_wildcard",
+                    "message": "trustedProxies contains \"*\": any client can choose its address with X-Forwarded-For; list the proxy addresses or CIDR ranges instead",
+                })
+            );
+        }
         let otlp_counters = otlp
             .as_ref()
             .map_or_else(crate::otlp::Counters::default, |exporter| {
@@ -136,6 +153,9 @@ impl ServerState {
             websocket_timeout: Duration::from_millis(config.websocket_timeout_ms),
             websocket_slots: Arc::new(Semaphore::new(config.websocket_max_connections)),
             request_slots: Arc::new(Semaphore::new(config.max_concurrent_requests)),
+            body_budget: body_budget(&config),
+            metrics_access: MetricsAccess::from_config(&config),
+            websocket_origins: websocket_origins(&config),
             config: Arc::new(config),
             metrics: Arc::new(Metrics::new(
                 route_metrics,
@@ -143,7 +163,8 @@ impl ServerState {
                 otlp_counters,
             )),
             otlp,
-            rate_limits: Arc::new(Mutex::new(HashMap::new())),
+            rate_limits: Arc::new(Mutex::new(RateLimiter::default())),
+            trusted_proxies,
             worker_state: WorkerStateReporter::from_environment(),
             next_worker_metrics_at: Arc::new(AtomicU64::new(0)),
             last_reported_active_requests: Arc::new(AtomicU64::new(0)),
@@ -253,21 +274,10 @@ impl ServerState {
         if limit == 0 {
             return false;
         }
-        let now = Instant::now();
-        let mut windows = self.rate_limits.lock().await;
-        windows.retain(|_, bucket| now.duration_since(bucket.updated) < Duration::from_secs(2));
-        let bucket = windows.entry(client.to_owned()).or_insert(RateBucket {
-            available: f64::from(limit),
-            updated: now,
-        });
-        let elapsed = now.duration_since(bucket.updated).as_secs_f64();
-        bucket.available = (bucket.available + elapsed * f64::from(limit)).min(f64::from(limit));
-        bucket.updated = now;
-        if bucket.available < 1.0 {
-            return true;
-        }
-        bucket.available -= 1.0;
-        false
+        self.rate_limits
+            .lock()
+            .await
+            .limited(client, limit, Instant::now())
     }
 
     fn metrics_snapshot(&self) -> WorkerMetricsSnapshot {
@@ -742,6 +752,65 @@ struct RouteMetric {
 struct RateBucket {
     available: f64,
     updated: Instant,
+}
+
+/// Token buckets per client address (`rateLimitPerSecond`).
+///
+/// Idle buckets are swept at most once per second (not on every request),
+/// and the table holds at most [`RATE_LIMIT_MAX_CLIENTS`] clients: when it is
+/// full after a sweep, a new client is limited until buckets expire.
+#[derive(Default)]
+struct RateLimiter {
+    buckets: HashMap<String, RateBucket>,
+    last_sweep: Option<Instant>,
+}
+
+const RATE_LIMIT_MAX_CLIENTS: usize = 65_536;
+const RATE_LIMIT_IDLE: Duration = Duration::from_secs(2);
+const RATE_LIMIT_SWEEP_EVERY: Duration = Duration::from_secs(1);
+
+impl RateLimiter {
+    fn sweep(&mut self, now: Instant) {
+        self.buckets
+            .retain(|_, bucket| now.saturating_duration_since(bucket.updated) < RATE_LIMIT_IDLE);
+        self.last_sweep = Some(now);
+    }
+
+    fn limited(&mut self, client: &str, limit: u32, now: Instant) -> bool {
+        if self
+            .last_sweep
+            .is_none_or(|last| now.saturating_duration_since(last) >= RATE_LIMIT_SWEEP_EVERY)
+        {
+            self.sweep(now);
+        }
+        let capacity = f64::from(limit);
+        let bucket = match self.buckets.get_mut(client) {
+            Some(bucket) => {
+                if now.saturating_duration_since(bucket.updated) >= RATE_LIMIT_IDLE {
+                    bucket.available = capacity;
+                    bucket.updated = now;
+                }
+                bucket
+            }
+            None => {
+                if self.buckets.len() >= RATE_LIMIT_MAX_CLIENTS {
+                    return true;
+                }
+                self.buckets.entry(client.to_owned()).or_insert(RateBucket {
+                    available: capacity,
+                    updated: now,
+                })
+            }
+        };
+        let elapsed = now.saturating_duration_since(bucket.updated).as_secs_f64();
+        bucket.available = (bucket.available + elapsed * capacity).min(capacity);
+        bucket.updated = now;
+        if bucket.available < 1.0 {
+            return true;
+        }
+        bucket.available -= 1.0;
+        false
+    }
 }
 
 impl Metrics {
@@ -1780,7 +1849,9 @@ async fn handle_http3_request(
     let target = uri
         .path_and_query()
         .map_or_else(|| uri.path().to_owned(), ToString::to_string);
-    let request_id = request_identifier(&headers).unwrap_or_else(|| state.allocate_request_id());
+    let client_request_id = request_identifier(&headers);
+    let request_id = state.allocate_request_id();
+    let public_request_id = client_request_id.as_deref().unwrap_or(&request_id);
     let traceparent = request_traceparent(&headers, &state);
     let parent_span_id = state
         .otlp
@@ -1796,7 +1867,9 @@ async fn handle_http3_request(
         parent_span_id,
     );
 
-    let (response, response_bytes, cors_origin) = if uri.path() == state.config.metrics_path {
+    let (response, response_bytes, cors_origin) = if uri.path() == state.config.metrics_path
+        && state.metrics_access.allows(remote.ip(), &headers)
+    {
         let runtime_metrics = state.php.metrics().await;
         let body = state.metrics.render(
             state.clients.read().await.len(),
@@ -1825,7 +1898,10 @@ async fn handle_http3_request(
             None,
         )
     } else {
-        let client = client_address(remote, &headers, &state.config.trusted_proxies);
+        let client = state
+            .trusted_proxies
+            .client_address(remote.ip(), &headers)
+            .to_string();
         if state.rate_limited(&client).await {
             let mut response = error_response(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
             response
@@ -1857,7 +1933,7 @@ async fn handle_http3_request(
                             let response = telemetry.finish(
                                 response,
                                 0,
-                                &request_id,
+                                public_request_id,
                                 &traceparent,
                                 &method,
                                 &target,
@@ -1875,7 +1951,7 @@ async fn handle_http3_request(
                         let response = telemetry.finish(
                             response,
                             0,
-                            &request_id,
+                            public_request_id,
                             &traceparent,
                             &method,
                             &target,
@@ -1914,7 +1990,7 @@ async fn handle_http3_request(
     let response = telemetry.finish(
         response,
         response_bytes,
-        &request_id,
+        public_request_id,
         &traceparent,
         &method,
         &target,
@@ -2004,7 +2080,12 @@ async fn http_dispatch(
     body: Body,
 ) -> Response {
     state.recycle_if_engine_failed();
-    let request_id = request_identifier(&headers).unwrap_or_else(|| state.allocate_request_id());
+    let client_request_id = request_identifier(&headers);
+    // The dispatch key is always generated here: a client-supplied
+    // X-Request-Id is only a correlation label (two in-flight requests may
+    // carry the same one).
+    let request_id = state.allocate_request_id();
+    let public_request_id = client_request_id.as_deref().unwrap_or(&request_id);
     let traceparent = request_traceparent(&headers, &state);
     let parent_span_id = state
         .otlp
@@ -2023,7 +2104,8 @@ async fn http_dispatch(
         .path_and_query()
         .map_or_else(|| uri.path(), |value| value.as_str());
 
-    if uri.path() == state.config.metrics_path {
+    if uri.path() == state.config.metrics_path && state.metrics_access.allows(remote.ip(), &headers)
+    {
         let runtime_metrics = state.php.metrics().await;
         let body = state.metrics.render(
             state.clients.read().await.len(),
@@ -2039,7 +2121,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             bytes,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2057,7 +2139,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             0,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2065,7 +2147,10 @@ async fn http_dispatch(
         );
     }
 
-    let client = client_address(remote, &headers, &state.config.trusted_proxies);
+    let client = state
+        .trusted_proxies
+        .client_address(remote.ip(), &headers)
+        .to_string();
     if state.rate_limited(&client).await {
         let mut response = error_response(StatusCode::TOO_MANY_REQUESTS, "rate limit exceeded");
         response
@@ -2074,7 +2159,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             0,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2091,7 +2176,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             0,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2131,7 +2216,7 @@ async fn http_dispatch(
                 return telemetry.finish(
                     response,
                     0,
-                    &request_id,
+                    public_request_id,
                     &traceparent,
                     &method,
                     target,
@@ -2167,7 +2252,7 @@ async fn http_dispatch(
                 return telemetry.finish(
                     response,
                     0,
-                    &request_id,
+                    public_request_id,
                     &traceparent,
                     &method,
                     target,
@@ -2182,7 +2267,7 @@ async fn http_dispatch(
                 return telemetry.finish(
                     response,
                     0,
-                    &request_id,
+                    public_request_id,
                     &traceparent,
                     &method,
                     target,
@@ -2208,7 +2293,7 @@ async fn http_dispatch(
         return telemetry.finish(
             response,
             response_bytes,
-            &request_id,
+            public_request_id,
             &traceparent,
             &method,
             target,
@@ -2234,7 +2319,7 @@ async fn http_dispatch(
     telemetry.finish(
         response,
         response_bytes,
-        &request_id,
+        public_request_id,
         &traceparent,
         &method,
         target,
@@ -2803,6 +2888,167 @@ fn encode_php_request_headers(headers: &HeaderMap) -> Vec<u8> {
     output
 }
 
+/// `websocketOrigins`, `PAM_WEBSOCKET_ORIGINS` (comma separated) or, when
+/// neither lists any, `corsOrigins`.
+fn websocket_origins(config: &ServerConfig) -> Vec<String> {
+    let from_environment = std::env::var("PAM_WEBSOCKET_ORIGINS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|origin| !origin.is_empty())
+        .map(str::to_owned)
+        .collect::<Vec<_>>();
+    if !from_environment.is_empty() {
+        return from_environment;
+    }
+    if !config.websocket_origins.is_empty() {
+        return config.websocket_origins.clone();
+    }
+    config.cors_origins.clone()
+}
+
+/// Cross-Site WebSocket Hijacking guard: a browser always sends `Origin`
+/// on a WebSocket upgrade, and a page on another site must not open a
+/// socket that carries the user's cookies. Allowed: no `Origin` (not a
+/// browser), a listed origin or `*`, or the request's own host.
+fn websocket_origin_allowed(headers: &HeaderMap, allowed: &[String]) -> bool {
+    let Some(origin) = headers.get(http::header::ORIGIN) else {
+        return true;
+    };
+    let Ok(origin) = origin.to_str() else {
+        return false;
+    };
+    if allowed
+        .iter()
+        .any(|allowed| allowed == "*" || allowed.eq_ignore_ascii_case(origin))
+    {
+        return true;
+    }
+    let Some(host) = headers
+        .get(http::header::HOST)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    origin.split_once("://").is_some_and(|(scheme, authority)| {
+        matches!(scheme.to_ascii_lowercase().as_str(), "http" | "https")
+            && authority.eq_ignore_ascii_case(host)
+    })
+}
+
+/// Headers a reverse proxy adds; their presence means the loopback peer is
+/// a proxy forwarding someone else (PAM's own ingress adds
+/// `x-forwarded-for`).
+const FORWARDING_HEADERS: [&str; 3] = ["x-forwarded-for", "forwarded", "x-real-ip"];
+
+/// Who may read `metricsPath`: loopback peers by default, any peer with the
+/// bearer token when one is configured, or everyone when made public.
+#[derive(Clone, Debug)]
+struct MetricsAccess {
+    token: Option<String>,
+    public: bool,
+}
+
+impl MetricsAccess {
+    fn new(token: Option<String>, public: bool) -> Self {
+        Self {
+            token: token.filter(|token| !token.is_empty()),
+            public,
+        }
+    }
+
+    fn from_config(config: &ServerConfig) -> Self {
+        let token = std::env::var("PAM_METRICS_TOKEN")
+            .ok()
+            .filter(|token| !token.is_empty())
+            .or_else(|| config.metrics_token.clone());
+        let public = match std::env::var("PAM_METRICS_PUBLIC").as_deref() {
+            Ok("1" | "true") => true,
+            Ok("0" | "false") => false,
+            _ => config.metrics_public,
+        };
+        Self::new(token, public)
+    }
+
+    fn allows(&self, peer: std::net::IpAddr, headers: &HeaderMap) -> bool {
+        if let Some(token) = &self.token {
+            return headers
+                .get(http::header::AUTHORIZATION)
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.strip_prefix("Bearer "))
+                .is_some_and(|supplied| constant_time_token_eq(token, supplied));
+        }
+        if self.public {
+            return true;
+        }
+        // A reverse proxy on the same host connects from loopback too: a
+        // request it forwarded is not a local scrape.
+        if FORWARDING_HEADERS
+            .iter()
+            .any(|name| headers.contains_key(*name))
+        {
+            return false;
+        }
+        match peer {
+            std::net::IpAddr::V6(v6) => v6
+                .to_ipv4_mapped()
+                .map_or(v6.is_loopback(), |v4| v4.is_loopback()),
+            v4 => v4.is_loopback(),
+        }
+    }
+}
+
+/// The KiB permits of the request body budget: the configured
+/// `maxInflightBodyBytes`, or `PAM_MAX_INFLIGHT_BODY_BYTES` (0 disables).
+fn body_budget(config: &ServerConfig) -> Option<(Arc<Semaphore>, u32)> {
+    let bytes = std::env::var("PAM_MAX_INFLIGHT_BODY_BYTES")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(config.max_inflight_body_bytes);
+    if bytes == 0 {
+        return None;
+    }
+    let permits = u32::try_from(bytes.div_ceil(1024))
+        .unwrap_or(u32::MAX)
+        .max(1);
+    Some((Arc::new(Semaphore::new(permits as usize)), permits))
+}
+
+/// Reserves `length` bytes of the body budget for as long as PHP holds the
+/// body, waiting up to `timeout`. A body larger than the whole budget waits
+/// until it runs alone. `Err` when the budget stayed exhausted.
+async fn reserve_body_budget(
+    state: &ServerState,
+    length: usize,
+    timeout: Duration,
+) -> Result<Option<tokio::sync::OwnedSemaphorePermit>, Response> {
+    let Some((budget, total)) = &state.body_budget else {
+        return Ok(None);
+    };
+    if length == 0 {
+        return Ok(None);
+    }
+    let permits = u32::try_from(length.div_ceil(1024))
+        .unwrap_or(u32::MAX)
+        .min(*total);
+    if let Ok(permit) = budget.clone().try_acquire_many_owned(permits) {
+        return Ok(Some(permit));
+    }
+    match tokio::time::timeout(timeout, budget.clone().acquire_many_owned(permits)).await {
+        Ok(Ok(permit)) => Ok(Some(permit)),
+        _ => {
+            let mut response = error_response(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "worker request body budget exhausted",
+            );
+            response
+                .headers_mut()
+                .insert("retry-after", HeaderValue::from_static("1"));
+            Err(response)
+        }
+    }
+}
+
 async fn invoke_php_http_local(
     state: &ServerState,
     request: &OwnedHttpRequest,
@@ -2843,6 +3089,10 @@ async fn invoke_php_http_local(
             }
         }
     };
+    let _body_budget = match reserve_body_budget(state, body.len(), slot_timeout).await {
+        Ok(permit) => permit,
+        Err(response) => return (response, 0),
+    };
     let encoded_headers = encode_php_request_headers(headers);
     let multipart_json = match request.upload.as_deref() {
         Some(multipart) => match serde_json::to_string(multipart) {
@@ -2874,6 +3124,7 @@ async fn invoke_php_http_local(
         },
         traceparent,
         multipart_json: &multipart_json,
+        public_request_id: request_identifier_str(headers).unwrap_or_default(),
     };
 
     let _uploads = match RegisteredUploads::register(request.upload.clone()) {
@@ -3328,6 +3579,9 @@ async fn websocket_upgrade(
     uri: Uri,
     headers: HeaderMap,
 ) -> Response {
+    if !websocket_origin_allowed(&headers, &state.websocket_origins) {
+        return error_response(StatusCode::FORBIDDEN, "WebSocket origin is not allowed");
+    }
     let permit = match state.websocket_slots.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -4333,13 +4587,19 @@ fn decode_hex(value: &str) -> Option<Vec<u8>> {
 }
 
 fn request_identifier(headers: &HeaderMap) -> Option<String> {
+    request_identifier_str(headers).map(str::to_owned)
+}
+
+/// The client's `X-Request-Id` when it is a safe correlation label. It is
+/// never used as a key inside the worker (see `allocate_request_id`).
+fn request_identifier_str(headers: &HeaderMap) -> Option<&str> {
     let value = headers.get("x-request-id")?.to_str().ok()?;
     (value.len() <= 128
         && !value.is_empty()
         && value
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b':')))
-    .then(|| value.to_owned())
+    .then_some(value)
 }
 
 fn traceparent(headers: &HeaderMap, state: &ServerState) -> String {
@@ -4441,25 +4701,6 @@ fn header_bytes(headers: &HeaderMap) -> usize {
         .sum()
 }
 
-fn client_address(remote: SocketAddr, headers: &HeaderMap, trusted_proxies: &[String]) -> String {
-    let direct = remote.ip().to_string();
-    let trusted = trusted_proxies
-        .iter()
-        .any(|proxy| proxy == "*" || proxy == &direct);
-    if !trusted {
-        return direct;
-    }
-
-    headers
-        .get("x-forwarded-for")
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split(',').next())
-        .map(str::trim)
-        .filter(|value| !value.is_empty() && value.len() <= 128)
-        .map(str::to_owned)
-        .unwrap_or(direct)
-}
-
 fn allowed_cors_origin(headers: &HeaderMap, configured: &[String]) -> Option<String> {
     let origin = headers.get("origin")?.to_str().ok()?;
     configured
@@ -4537,6 +4778,100 @@ fn event_loop_lag_average_micros(total_micros: u64, samples: u64) -> f64 {
 mod tests {
     use super::*;
     use std::task::{Context, Poll};
+
+    #[test]
+    fn websocket_origins_allow_listed_and_same_host_pages() {
+        let headers = |origin: Option<&str>, host: &str| {
+            let mut headers = HeaderMap::new();
+            headers.insert(http::header::HOST, host.parse().unwrap());
+            if let Some(origin) = origin {
+                headers.insert(http::header::ORIGIN, origin.parse().unwrap());
+            }
+            headers
+        };
+        let listed = vec!["https://app.example".to_owned()];
+        assert!(websocket_origin_allowed(
+            &headers(None, "api.example"),
+            &listed
+        ));
+        assert!(websocket_origin_allowed(
+            &headers(Some("https://app.example"), "api.example"),
+            &listed
+        ));
+        assert!(websocket_origin_allowed(
+            &headers(Some("https://api.example"), "api.example"),
+            &[]
+        ));
+        assert!(!websocket_origin_allowed(
+            &headers(Some("https://evil.example"), "api.example"),
+            &listed
+        ));
+        assert!(!websocket_origin_allowed(
+            &headers(Some("null"), "api.example"),
+            &listed
+        ));
+        assert!(!websocket_origin_allowed(
+            &headers(Some("https://api.example.evil"), "api.example"),
+            &listed
+        ));
+        assert!(websocket_origin_allowed(
+            &headers(Some("https://evil.example"), "api.example"),
+            &["*".to_owned()]
+        ));
+    }
+
+    #[test]
+    fn metrics_are_private_unless_configured() {
+        let local: std::net::IpAddr = "127.0.0.1".parse().unwrap();
+        let remote: std::net::IpAddr = "203.0.113.5".parse().unwrap();
+        let mut headers = HeaderMap::new();
+        let private = MetricsAccess::new(None, false);
+        assert!(private.allows(local, &headers));
+        assert!(!private.allows(remote, &headers));
+        assert!(!private.allows("::ffff:203.0.113.5".parse().unwrap(), &headers));
+        let mut proxied = HeaderMap::new();
+        proxied.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.5"));
+        assert!(
+            !private.allows(local, &proxied),
+            "a same-host reverse proxy is not a local scrape"
+        );
+        let public = MetricsAccess::new(None, true);
+        assert!(public.allows(remote, &headers));
+        let token = MetricsAccess::new(Some("secret-token".to_owned()), false);
+        assert!(!token.allows(local, &headers));
+        headers.insert(
+            "authorization",
+            HeaderValue::from_static("Bearer secret-token"),
+        );
+        assert!(token.allows(remote, &headers));
+    }
+
+    #[test]
+    fn rate_limiter_bounds_tracked_clients_without_scanning_every_request() {
+        let mut limiter = RateLimiter::default();
+        let start = Instant::now();
+        // Distinct (possibly forged) clients inside one window cannot grow
+        // the table without bound; past the cap a new client is limited.
+        for index in 0..(RATE_LIMIT_MAX_CLIENTS + 1_000) {
+            limiter.limited(
+                &format!("198.51.{}.{}", index / 256, index % 256),
+                10,
+                start,
+            );
+        }
+        assert!(limiter.buckets.len() <= RATE_LIMIT_MAX_CLIENTS);
+        assert!(limiter.limited("203.0.113.1", 10, start));
+        // A known client keeps its bucket.
+        assert!(!limiter.limited("198.51.0.0", 10, start + Duration::from_millis(500)));
+        // Idle buckets are swept once the window passed.
+        let later = start + Duration::from_secs(3);
+        assert!(!limiter.limited("203.0.113.1", 10, later));
+        assert_eq!(limiter.buckets.len(), 1);
+        // Within one second there is no further sweep (no O(n) per request).
+        assert_eq!(limiter.last_sweep, Some(later));
+        limiter.limited("203.0.113.2", 10, later + Duration::from_millis(10));
+        assert_eq!(limiter.last_sweep, Some(later));
+    }
 
     struct PendingOperation(Arc<AtomicBool>);
 

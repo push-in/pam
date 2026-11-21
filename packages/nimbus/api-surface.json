@@ -3118,6 +3118,14 @@
                         }
                     ]
                 },
+                "hasBeforeHooks": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
+                },
                 "policy": {
                     "static": false,
                     "final": false,
@@ -3170,6 +3178,24 @@
                     "returnsReference": false,
                     "return": "?Nimbus\\Auth\\Principal",
                     "parameters": []
+                },
+                "wildcardScopesGrantUndefinedAbilities": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "grant",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        }
+                    ]
                 }
             }
         },
@@ -4640,6 +4666,33 @@
                         }
                     ]
                 },
+                "createdAt": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?int",
+                    "parameters": [
+                        {
+                            "name": "purpose",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "subject",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
                 "createdWithin": {
                     "static": false,
                     "final": false,
@@ -4807,6 +4860,15 @@
                         {
                             "name": "afterReset",
                             "type": "?Closure",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "revoke",
+                            "type": "?array",
                             "byReference": false,
                             "variadic": false,
                             "optional": true,
@@ -5100,7 +5162,9 @@
             "readonly": true,
             "abstract": false,
             "parent": null,
-            "interfaces": [],
+            "interfaces": [
+                "Nimbus\\Auth\\RevokesCredentials"
+            ],
             "constants": [],
             "properties": [],
             "methods": {
@@ -5503,7 +5567,9 @@
             "readonly": true,
             "abstract": false,
             "parent": null,
-            "interfaces": [],
+            "interfaces": [
+                "Nimbus\\Auth\\RevokesCredentials"
+            ],
             "constants": [],
             "properties": [],
             "methods": {
@@ -5768,6 +5834,36 @@
                 }
             }
         },
+        "Nimbus\\Auth\\RevokesCredentials": {
+            "kind": "interface",
+            "final": false,
+            "readonly": false,
+            "abstract": true,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "revokeAll": {
+                    "static": false,
+                    "final": false,
+                    "abstract": true,
+                    "returnsReference": false,
+                    "return": "int",
+                    "parameters": [
+                        {
+                            "name": "subject",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\Auth\\SessionAuthenticator": {
             "kind": "class",
             "final": true,
@@ -5804,6 +5900,24 @@
                             "optional": false,
                             "default": null,
                             "hasDefault": false
+                        },
+                        {
+                            "name": "revocations",
+                            "type": "?Nimbus\\Auth\\SessionRevocations",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "clock",
+                            "type": "?Closure",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -5850,6 +5964,85 @@
                     "returnsReference": false,
                     "return": "void",
                     "parameters": []
+                }
+            }
+        },
+        "Nimbus\\Auth\\SessionRevocations": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Auth\\RevokesCredentials"
+            ],
+            "constants": {
+                "PURPOSE": "session-revocation"
+            },
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "tokens",
+                            "type": "Nimbus\\Auth\\OneTimeTokens",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "ttlSeconds",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 604800,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "revokeAll": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "int",
+                    "parameters": [
+                        {
+                            "name": "subject",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "revokedAt": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?int",
+                    "parameters": [
+                        {
+                            "name": "subject",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
                 }
             }
         },
@@ -7246,7 +7439,17 @@
                     "abstract": false,
                     "returnsReference": false,
                     "return": "void",
-                    "parameters": []
+                    "parameters": [
+                        {
+                            "name": "entries",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        }
+                    ]
                 },
                 "bind": {
                     "static": false,
@@ -14608,7 +14811,9 @@
             "interfaces": [
                 "Pam\\Contracts\\Http\\MiddlewareInterface"
             ],
-            "constants": [],
+            "constants": {
+                "BEARER_ONLY": "nimbus.csrf.bearer_only"
+            },
             "properties": [],
             "methods": {
                 "__construct": {

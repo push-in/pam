@@ -357,8 +357,12 @@ urlencoded, corpos crus) e não se aplica a multipart.
 Pam pode terminar TLS/HTTP2 e QUIC/HTTP3 diretamente, mas um proxy dedicado
 continua útil para certificados automatizados, WAF e roteamento. HTTP/3 exige que
 TCP e UDP estejam liberados na porta configurada; mantenha `http3 => false` quando
-o ambiente não expuser UDP. Configure `trustedProxies` somente com endereços
-realmente confiáveis; headers encaminhados de clientes não confiáveis são ignorados.
+o ambiente não expuser UDP. Configure `trustedProxies` somente com endereços ou faixas CIDR
+realmente confiáveis (`['10.0.0.0/8', '172.16.0.1']`), ou pela variável `PAM_TRUSTED_PROXIES`
+(separada por vírgula, somada à opção). Headers encaminhados por peers não confiáveis são
+ignorados. Com o peer confiável, o cliente é a entrada de `X-Forwarded-For` mais à direita que não
+é um proxy confiável: o que estiver à esquerda foi escrito pelo próprio cliente. Entradas que não
+são IP param a busca no último proxy confiável. `*` confia em qualquer peer e gera um aviso no boot.
 
 Certificado e chave são relidos somente quando um novo worker inicia. Após renovar
 arquivos, envie SIGHUP ao master.
@@ -372,6 +376,13 @@ O control plane do master não chama PHP:
 - `/ready`: todos os workers desejados estão Ready/Busy e dentro do deadline;
 - `/metrics`: agrega métricas dos workers e identifica PID/geração/estado.
 - `/diagnostics`: snapshot JSON versionado e limitado por worker.
+
+No listener da aplicação, cada worker também responde `metricsPath` (padrão `/metrics`), mas só
+para peers de loopback sem `X-Forwarded-For`, `Forwarded` ou `X-Real-IP` (um proxy reverso na
+mesma máquina não conta como acesso local). Para um Prometheus em outra máquina, configure `metricsToken` (ou
+`PAM_METRICS_TOKEN`) e envie `Authorization: Bearer <token>`; `metricsPublic => true` (ou
+`PAM_METRICS_PUBLIC=1`) volta ao comportamento antigo, aberto a qualquer peer. Sem permissão, o
+caminho segue para a aplicação como qualquer outra rota.
 
 Os três probes preservam os campos históricos `healthy`, `generation`,
 `desiredWorkers`, `readyWorkers` e `workers`, agora com `schemaVersion: 1`,
@@ -643,12 +654,20 @@ RSS e memória PHP agregados por `pool`.
   quando houver mais de um worker/nó.
 - Configure `websocketResumeSecret` por secret manager, com pelo menos 32 bytes;
   rotacionar o segredo invalida tokens de retomada existentes.
+- O upgrade de `/ws` com `Origin` de outro site recebe `403` (proteção contra Cross-Site
+  WebSocket Hijacking). São aceitos o próprio host, as origens de `websocketOrigins` (ou
+  `PAM_WEBSOCKET_ORIGINS`, separado por vírgula; vazio usa `corsOrigins`; `*` libera todas) e
+  clientes sem `Origin`, que não são navegadores.
 - Mova CPU e chamadas bloqueantes para `ProcessPool`; acompanhe event-loop lag.
 - Mantenha `exposeErrors => false`, ajuste `gcCollectCyclesEvery` e
   `gcMemCachesEvery` a partir de um soak test, e use
   `--max-requests` como segunda barreira contra fragmentação de terceiros.
 - Limite Fibers em voo com `maxConcurrentRequests` e memória de streaming com
   `responseStreamQueueCapacity`; não dimensione essas filas como cache.
+- Todas as requisições de um worker dividem o mesmo `memory_limit`, e estourá-lo recicla o worker
+  com tudo o que está em voo. `maxInflightBodyBytes` (padrão: um quarto do `memory_limit`;
+  `PAM_MAX_INFLIGHT_BODY_BYTES` sobrescreve, `0` desliga) limita os bytes de corpo que o PHP segura
+  ao mesmo tempo; acima disso a requisição espera até `requestTimeoutMs` e recebe `503`.
 - Defina `maxResponseBytes` e `maxResponseChunkBytes` conforme os maiores downloads
   legítimos. O chunk não pode ser maior que o total. Streams acima do teto falham
   no transporte e desconexões cancelam a Fiber/cleanup.

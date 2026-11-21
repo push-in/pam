@@ -132,6 +132,20 @@ final class WebFlowTest extends TestCase
         $client->withCookies(['nimbus_session' => (string) $before])->get('/form')->assertSee('guest');
     }
 
+    public function testABearerHeaderDoesNotLetTheSessionCookieSkipCsrf(): void
+    {
+        $client = $this->client();
+        $form = $client->get('/form');
+        $token = self::token($form);
+        $login = $client->withCookiesFrom($form)->post('/login', ['_token' => $token]);
+        $browser = $client->withCookiesFrom($login);
+
+        // A cross-site request carries the victim's cookie; an invented bearer token must not
+        // turn the CSRF check off and then authenticate through that cookie.
+        $browser->withToken('forged')->post('/account/delete', [])->assertStatus(401);
+        $browser->post('/account/delete', [])->assertStatus(419);
+    }
+
     public function testMethodOverrideAndEncryptedCookies(): void
     {
         $client = $this->client();
@@ -217,6 +231,7 @@ final class WebFlowTest extends TestCase
             return Redirect::to('/dashboard');
         });
         $app->get('/me', static fn (Principal $principal, Response $response): Response => $response->json(['id' => $principal->identifier()]))->auth();
+        $app->post('/account/delete', static fn (Principal $principal): string => 'deleted ' . $principal->identifier())->auth();
         $app->put('/items/{id}', static fn (Request $request): string => 'put ' . $request->route('id'));
         $app->get('/cookie/set', static function (CookieJar $cookies): string {
             $cookies->make('theme', 'dark', 3600);
