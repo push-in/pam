@@ -44,8 +44,8 @@ final class MemoryStore implements Store
         }
         unset($this->entries[$key]);
         $this->entries[$key] = [$value, $seconds === null ? null : $this->now() + $seconds];
-        while (count($this->entries) > $this->maximumEntries) {
-            unset($this->entries[array_key_first($this->entries)]);
+        while (count($this->entries) > $this->maximumEntries && ($oldest = array_key_first($this->entries)) !== null) {
+            unset($this->entries[$oldest]);
         }
     }
 

@@ -125,8 +125,8 @@ final class DebugRecorder implements RequestLifecycleObserver
     {
         $entry = new DebugEntry(bin2hex(random_bytes(8)), $type, $token ?? $this->profiler->currentToken(), microtime(true), $data);
         $this->entries[$entry->id] = $entry;
-        while (count($this->entries) > $this->maximumEntries) {
-            unset($this->entries[array_key_first($this->entries)]);
+        while (count($this->entries) > $this->maximumEntries && ($oldest = array_key_first($this->entries)) !== null) {
+            unset($this->entries[$oldest]);
         }
         return $entry;
     }
