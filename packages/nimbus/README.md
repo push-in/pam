@@ -306,6 +306,20 @@ additions:
 composer docs:generate
 ```
 
+### PHPStan extension
+
+`phpstan/extension.neon` (registered for `phpstan/extension-installer`, or include
+`vendor/pushinbr/nimbus/phpstan/extension.neon`) teaches PHPStan about Nimbus and Arcano:
+
+- `$container->get(Foo::class)` is a `Foo`.
+- `$arcano->repository(Product::class)` is `RepositoryInterface<Product>` and
+  `$arcano->select(Product::class)` is `Select<Product>`, so fetched entities and their properties
+  are typed.
+- A FormRequest's `input('field')` and `validated()` are typed from its `rules()` (`required` +
+  `integer` is `int`; an optional `string` is `string|null`; `validated()` is an array shape).
+- Rule `nimbus.routeParameter`: a required scalar parameter of a route closure must match a
+  `{placeholder}` of the path, and placeholders are strings (`nimbus.routeParameterType`).
+
 See the [Nimbus design and delivery contract](docs/API-2.md) for the complete
 15-track implementation plan and current delivery status.
 
@@ -857,6 +871,140 @@ $notifications->assertSentLaterTo($user, InvoicePaid::class);
 $notifications->assertNothingSent();
 ```
 
+## HTTP client
+
+`Nimbus\Http\Client\Http` is a fluent client for outgoing HTTP calls. Inside the PAM runtime it
+sends through `Pam\Http\Client`, so a request suspends only its request Fiber and the worker keeps
+serving other requests; elsewhere (CLI, tests) it uses `symfony/http-client` (suggested).
+
+```php
+use Nimbus\Http\Client\Http;
+use Nimbus\Http\Client\Pool;
+
+$user = Http::withToken($token)
+    ->timeout(5)
+    ->retry(3, [100, 500])               // connection failures, 5xx and 429; throws when exhausted
+    ->get('https://api.example.com/users/1', ['expand' => 'teams'])
+    ->throw()                             // RequestException on 4xx/5xx
+    ->json('data');
+
+Http::asForm()->post('https://auth.example.com/token', ['grant_type' => 'client_credentials']);
+
+$responses = Http::pool(fn (Pool $pool) => [
+    $pool->as('orders')->get('https://api.example.com/orders'),
+    $pool->as('stock')->with(fn ($request) => $request->withToken($other))->get('https://stock.example.com/'),
+]);
+```
+
+Requests in a pool run in sibling Fibers inside PAM (`Pam\Async\async()`) and are multiplexed by
+Symfony elsewhere; a pooled request that gets no response yields its `ConnectionException`.
+`PendingRequest` is immutable, so a configured builder (`Http::baseUrl(...)->withToken(...)`) can be
+kept in a service. Inject a `Factory` (or bind your own transport) instead of the facade when you
+prefer constructor injection.
+
+## Events, queued listeners and broadcasting
+
+`SyncEventDispatcher` calls listeners in order. A listener class that implements
+`Nimbus\Events\ShouldQueue` is pushed to the bound `Jobs\JobDispatcher` as a `CallQueuedListener`
+job instead; optional `public int $tries`, `public int $delay` and `shouldQueue($event): bool` tune
+it. The event must survive the queue: implement `SerializableJob`, or keep scalar, array and null
+public properties that the constructor accepts by name. Register `CallQueuedListener` (and
+`BroadcastEvent`) in the `JobCodec` and run them with `InvokableJobHandler($container)`; the
+worker only calls listeners still registered for the event.
+
+```php
+$events = (new SyncEventDispatcher($container))
+    ->listen(OrderShipped::class, SendShipmentEmail::class);   // implements ShouldQueue
+$container->instance(EventDispatcher::class, $events);
+```
+
+An event that implements `Nimbus\Broadcasting\ShouldBroadcast` is also pushed to WebSocket
+channels by the bound `BroadcastManager` (queued as a `BroadcastEvent` job when a dispatcher is
+bound, immediately for `ShouldBroadcastNow`). `broadcastAs()`, `broadcastWith()` and
+`broadcastWhen()` are optional; a public `$socket` property excludes the sender.
+
+```php
+final readonly class OrderStatusChanged implements ShouldBroadcast
+{
+    public function __construct(public int $orderId, public string $status) {}
+
+    public function broadcastOn(): array
+    {
+        return [new PrivateChannel('orders.' . $this->orderId)];
+    }
+}
+
+$broadcasts = new BroadcastManager(PusherBroadcaster::fromEnvironment());
+$container->instance(BroadcastManager::class, $broadcasts);
+$broadcasts->channel('orders.{order}', fn (User $user, string $order) => $user->owns((int) $order));
+$broadcasts->channel('room.{id}', fn (User $user, string $id) => ['name' => $user->name]); // presence
+$broadcasts->routes($app);   // POST /broadcasting/auth, principal from the bound Authenticator
+```
+
+Drivers:
+
+- `PamSocketBroadcaster`: PAM's native WebSocket server. A channel is a room; authorizing a private
+  or presence channel joins the PAM socket (`socket_id`) to the room server-side. Fan-out across
+  workers and nodes comes from the socket server's Redis Streams or NATS adapter.
+- `PusherBroadcaster`: the Pusher protocol through `pusher/pusher-php-server` (suggested), for
+  Pusher Channels or a compatible server (Soketi, Reverb) with pusher-js / Laravel Echo clients.
+  `fromEnvironment()` reads `PUSHER_APP_ID`, `PUSHER_APP_KEY`, `PUSHER_APP_SECRET`, `PUSHER_HOST`,
+  `PUSHER_PORT`, `PUSHER_SCHEME` and `PUSHER_APP_CLUSTER`.
+- `RedisBroadcaster`: `PUBLISH` of `{"event", "data", "socket"}` on Redis pub/sub (Laravel Echo
+  Server format) through a `Nimbus\Redis\Connection`.
+
+## Cache and tags
+
+`Nimbus\Cache\Repository` is the application cache over a `Store`: `MemoryStore` (per worker,
+bounded) or `Redis\RedisCacheStore` (integers as Redis integers, other values serialized; objects
+restored only for the classes you allow). `Cache` is a static facade over the worker's default
+repository (`Cache::useRepository()`).
+
+```php
+$cache = new Repository(new RedisCacheStore($redis));
+$page = $cache->tags(['products'])->remember('page:1', 300, fn () => $products->page(1));
+$cache->tags(['products'])->flush();        // only the keys stored with the products tag
+
+Cache::tags(['users', "user:{$id}"])->put("profile:{$id}", $profile, 600);
+```
+
+Tags work on every store: each tag has a version kept in the store and a tagged key lives under the
+versions of its tags, so flushing a tag makes its keys unreachable at once. Give tagged entries a
+TTL so the orphaned values expire.
+
+## Tinker
+
+`bin/nimbus tinker` (installed as `vendor/bin/nimbus`) opens a PsySH shell (`psy/psysh`, suggested)
+with the booted application in scope: `$app`, `$container` and, with Arcano, `$arcano` and `$orm`.
+The application comes from `bootstrap/app.php` (or `app.php`), a file that returns the `App` (or a
+closure building it) without calling `listen()`; pass `--bootstrap=path` for another file and
+`--execute='code'` to run one expression non-interactively.
+
+```bash
+vendor/bin/nimbus tinker
+>>> $orm->getRepository(App\Models\Product::class)->findByPK(1)
+```
+
+## Debug panel
+
+`Profiler\DebugPanel` is a development panel in the spirit of Laravel Telescope, built on the
+`MemoryProfiler`. It records requests (with secrets masked), queries, exceptions, mails, jobs and
+outgoing HTTP calls in a bounded in-memory ring per worker, each linked to its request, and serves
+them at `/_debug` (HTML) and `/_debug/entries[?type=query&request=token]` (JSON).
+
+```php
+$debug = DebugPanel::register($app);                  // null unless APP_ENV/PAM_ENV is local, development, dev or testing
+$app->gate()->define('viewDebugPanel', fn (User $user) => $user->isDeveloper);
+$jobs = $debug?->jobs($jobs) ?? $jobs;                 // dispatched jobs
+$handler = $debug?->jobHandler($handler) ?? $handler;  // processed and failed jobs
+$mailer = $debug ? $mailer->withTransport($debug->mailTransport($mailer->transport())) : $mailer;
+$debug?->recordHttpFacade();                           // Http:: calls
+```
+
+It is disabled in production by default (`APP_DEBUG=false` also disables it); the routes require an
+`Auth\Authenticator` and the `viewDebugPanel` ability, which stays closed until the application
+defines it. Queries are recorded when `ArcanoServiceProvider` is registered before the panel.
+
 ## Request lifecycle observers
 
 Register a `RequestLifecycleObserver` with `$app->observe()` to build profilers,
@@ -959,6 +1107,43 @@ Without the base class, `TestClient` offers the same requests over any `App`:
     ->assertSuccessful()
     ->assertJsonPath('data.status', 1);
 ```
+
+### Fakes
+
+The `Nimbus\Testing` facades bind recording fakes into the test's application (fake before the
+services that receive them are resolved); `TestCase` also offers them as `fakeQueue()`,
+`fakeEvents()`, `fakeMail()`, `fakeStorage()`, `fakeBroadcasts()` and `fakeHttp()`.
+
+```php
+use Nimbus\Http\Client\Http;
+use Nimbus\Testing\{Broadcast, Event, Mail, Queue, Storage};
+
+Queue::fake();
+Event::fake([OrderShipped::class]);          // other events still reach their listeners
+Mail::fake();
+Storage::fake('invoices');
+$http = Http::fake([
+    'erp.example.com/*' => ['status' => 'synced'],
+    'flaky.example.com/*' => Http::sequence()->pushStatus(503)->push(['ok' => true]),
+]);
+
+$this->postJson('/orders', $payload)->assertCreated();
+
+Queue::assertPushed(SyncOrder::class, fn (SyncOrder $job) => $job->orderId === 12);
+Queue::assertListenerQueued(SendShipmentEmail::class);
+Event::assertDispatched(OrderShipped::class, 1);
+Mail::assertSentTo('ana@example.com', 'Order 12');
+Storage::disk('invoices')->assertExists('12.pdf');
+$http->assertSent(fn (OutgoingRequest $request) => $request->hasHeader('authorization'));
+Broadcast::fake(); // then Broadcast::assertBroadcast('order.status', 'private-orders.12')
+```
+
+`Queue::fake()` replaces the `JobDispatcher`, `Event::fake()` the `EventDispatcher`,
+`Mail::fake()` the symfony/mailer `TransportInterface` and `Mail\Mailer` (send mail with
+`$mailer->to($address)->send(MailMessage::make()->...)` or a Symfony `Email`), `Storage::fake()`
+the disk (an empty temporary local disk) and `Http::fake()` the transport of the `Http` facade
+(`preventStrayRequests()` rejects unmatched URLs). Faked disks and the facades are reset after
+each test.
 
 ### Factories and seeders
 

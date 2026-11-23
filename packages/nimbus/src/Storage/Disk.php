@@ -102,6 +102,46 @@ final readonly class Disk
         return $this->uploads->temporaryUploadUrl($path, self::expiresAt($ttl), $maxBytes, $contentType);
     }
 
+    /**
+     * Test assertion: every path exists, and holds `$contents` when given.
+     *
+     * @param string|list<string> $paths
+     */
+    public function assertExists(string|array $paths, ?string $contents = null): self
+    {
+        foreach (is_string($paths) ? [$paths] : $paths as $path) {
+            self::assert($this->exists($path), "Unable to find a file at path [{$path}] on disk {$this->name}.");
+            if ($contents !== null) {
+                self::assert($this->get($path) === $contents, "File [{$path}] on disk {$this->name} does not hold the expected contents.");
+            }
+        }
+        return $this;
+    }
+
+    /**
+     * Test assertion: no path exists.
+     *
+     * @param string|list<string> $paths
+     */
+    public function assertMissing(string|array $paths): self
+    {
+        foreach (is_string($paths) ? [$paths] : $paths as $path) {
+            self::assert(!$this->exists($path), "Found an unexpected file at path [{$path}] on disk {$this->name}.");
+        }
+        return $this;
+    }
+
+    private static function assert(bool $condition, string $message): void
+    {
+        if (class_exists(\PHPUnit\Framework\Assert::class)) {
+            \PHPUnit\Framework\Assert::assertTrue($condition, $message);
+            return;
+        }
+        if (!$condition) {
+            throw new \LogicException($message);
+        }
+    }
+
     private static function expiresAt(int $ttl): \DateTimeImmutable
     {
         if ($ttl < 1) {

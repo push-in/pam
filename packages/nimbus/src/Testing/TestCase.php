@@ -14,11 +14,22 @@ use Nimbus\Database\DatabaseConfig;
 use Nimbus\Database\Factory;
 use Nimbus\Database\Seeder;
 use Nimbus\Database\SeederRunner;
+use Nimbus\Events\EventFake;
+use Nimbus\Http\Client\ConnectionException;
+use Nimbus\Http\Client\Http;
+use Nimbus\Http\Client\HttpFake;
+use Nimbus\Http\Client\Response as HttpResponse;
+use Nimbus\Http\Client\ResponseSequence;
+use Nimbus\Jobs\QueueFake;
+use Nimbus\Mail\MailFake;
+use Nimbus\Broadcasting\BroadcastFake;
+use Nimbus\Storage\Disk;
 
 /**
  * PHPUnit base for application tests: a fresh, booted application per test, JSON request
- * helpers and database assertions. Add the RefreshDatabase trait to migrate and roll each
- * test back.
+ * helpers, database assertions and fakes. Add the RefreshDatabase trait to migrate and roll
+ * each test back. The `Queue`, `Event`, `Mail`, `Storage` and `Broadcast` facades of this
+ * namespace (and `Http::fake()`) bind their fakes into the test's application.
  *
  * Requires phpunit/phpunit.
  */
@@ -41,6 +52,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
         parent::setUp();
         $this->app = $this->createApplication()->boot();
         $this->client = new TestClient($this->app);
+        Fakes::begin($this->app);
         if ($this->app->container()->has(ArcanoManager::class)) {
             Factory::useManager($this->arcano());
         }
@@ -63,6 +75,7 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
             }
             Factory::useManager(null);
         }
+        Fakes::end();
         $this->databasePinned = false;
         $this->client = null;
         $this->app = null;
@@ -120,6 +133,50 @@ abstract class TestCase extends \PHPUnit\Framework\TestCase
             throw new \LogicException('The application has no ArcanoManager; register ArcanoServiceProvider.');
         }
         return $arcano;
+    }
+
+    protected function fakeQueue(): QueueFake
+    {
+        return Queue::fake();
+    }
+
+    /** @param list<class-string> $only Events to fake; others still reach their listeners. */
+    protected function fakeEvents(array $only = []): EventFake
+    {
+        return Event::fake($only);
+    }
+
+    protected function fakeMail(): MailFake
+    {
+        return Mail::fake();
+    }
+
+    protected function fakeStorage(?string $disk = null): Disk
+    {
+        return Storage::fake($disk);
+    }
+
+    protected function fakeBroadcasts(): BroadcastFake
+    {
+        return Broadcast::fake();
+    }
+
+    /**
+     * Fakes the `Http` facade and, when bound, the container's HTTP client factory.
+     *
+     * @param array<string, HttpResponse|ResponseSequence|ConnectionException|\Closure|array<array-key, mixed>|string>|\Closure $stubs
+     */
+    protected function fakeHttp(array|\Closure $stubs = []): HttpFake
+    {
+        $fake = Http::fake($stubs);
+        $container = $this->application()->container();
+        if ($container->has(\Nimbus\Http\Client\Factory::class)) {
+            $factory = $container->get(\Nimbus\Http\Client\Factory::class);
+            if ($factory instanceof \Nimbus\Http\Client\Factory && $factory !== Http::factory()) {
+                $container->instance(\Nimbus\Http\Client\Factory::class, Http::factory());
+            }
+        }
+        return $fake;
     }
 
     /** @param array<string, string> $headers Sent with the following requests of this test. */

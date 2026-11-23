@@ -269,3 +269,37 @@ namespace Pam\Internal {
         }
     }
 }
+
+namespace Pam\WS {
+    final class RoomEmitter
+    {
+        public function __construct(private readonly string $room)
+        {
+        }
+
+        public function emit(string $event, mixed $data = null): self
+        {
+            throw new \LogicException("Room {$this->room} needs the PAM WebSocket server.");
+        }
+    }
+
+    final class Server
+    {
+        public function to(string $room): RoomEmitter
+        {
+            return new RoomEmitter($room);
+        }
+    }
+
+    final class Socket
+    {
+        public function __construct(public readonly string $id)
+        {
+        }
+
+        public function join(string $room): self
+        {
+            throw new \LogicException('Sockets need the PAM WebSocket server.');
+        }
+    }
+}

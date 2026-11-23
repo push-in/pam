@@ -4,8 +4,12 @@ parameters:
         - benchmarks/router.php
         - bin/api-compat
         - bin/api-reference
+        - bin/nimbus
         - bin/nimbus-views
+        - phpstan/src
         - src
         - tests
+    excludePaths:
+        - tests/PHPStan/data/*
     tmpDir: .build/phpstan
     treatPhpDocTypesAsCertain: true

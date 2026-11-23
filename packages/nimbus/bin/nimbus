@@ -1,0 +1,44 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Usage: nimbus tinker [--bootstrap=bootstrap/app.php] [--execute=code]
+
+$root = getcwd() ?: '.';
+$autoloaders = [
+    $GLOBALS['_composer_autoload_path'] ?? null,
+    $root . '/vendor/autoload.php',
+    dirname(__DIR__) . '/vendor/autoload.php',
+    dirname(__DIR__, 3) . '/autoload.php',
+];
+foreach ($autoloaders as $autoloader) {
+    if (is_string($autoloader) && is_file($autoloader)) {
+        require $autoloader;
+        break;
+    }
+}
+if (!class_exists(\Nimbus\Console\Tinker::class)) {
+    fwrite(STDERR, "Composer dependencies are missing; run composer install.\n");
+    exit(2);
+}
+
+$arguments = array_values(array_filter(is_array($argv ?? null) ? $argv : [], is_string(...)));
+$command = $arguments[1] ?? 'help';
+try {
+    $status = match ($command) {
+        'tinker' => \Nimbus\Console\Tinker::main(array_slice($arguments, 2), $root),
+        'help', '--help', '-h' => (static function (): int {
+            fwrite(STDOUT, "Usage: nimbus tinker [--bootstrap=bootstrap/app.php] [--execute=code]\n");
+            return 0;
+        })(),
+        default => (static function () use ($command): int {
+            fwrite(STDERR, "Unknown command {$command}. Usage: nimbus tinker [--bootstrap=path] [--execute=code]\n");
+            return 2;
+        })(),
+    };
+} catch (\Throwable $error) {
+    fwrite(STDERR, $error->getMessage() . "\n");
+    $status = 1;
+}
+exit($status);
