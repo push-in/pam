@@ -1,0 +1,68 @@
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '41 2 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: CodeQL ${{ matrix.language }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # native/ is compiled by build.rs, so the C analysis traces a build.
+          - language: c-cpp
+            build-mode: manual
+          - language: rust
+            build-mode: none
+          - language: actions
+            build-mode: none
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          queries: security-extended
+      - uses: dtolnay/rust-toolchain@1.88.0
+        if: matrix.build-mode == 'manual'
+      - name: Install PHP Embed development package
+        if: matrix.build-mode == 'manual'
+        run: |
+          .github/scripts/add-ondrej-php-ppa.sh
+          timeout 120s sudo apt-get update -o Acquire::Retries=3
+          timeout 300s sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libphp8.5-embed php8.5-dev
+      - uses: Swatinem/rust-cache@v2
+        if: matrix.build-mode == 'manual'
+        with:
+          key: codeql
+      - name: Build the native sources
+        if: matrix.build-mode == 'manual'
+        run: |
+          # Force build.rs to compile native/ even when the cache restored it.
+          touch native/pam_php.c
+          cargo build --locked
+      - uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

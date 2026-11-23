@@ -1,0 +1,6 @@
+GET /a?b=1 HTTP/1.1
+Host: a
+X-Forwarded-For: 6.6.6.6, 10.0.0.1
+X-Forwarded_For: 1.1.1.1
+Cookie: a=b
+

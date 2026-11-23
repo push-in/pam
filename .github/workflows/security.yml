@@ -1,39 +1,53 @@
-name: Security and soak
+name: Security
+
+# Every PR and push to main: dependency audits, short coverage-guided fuzzing
+# of every parser at the network and C boundaries, and the native/FFI tests
+# under AddressSanitizer + UndefinedBehaviorSanitizer. Nightly: the same
+# fuzzers for 30 minutes each, plus Valgrind on the server path.
 
 on:
+  pull_request:
+  push:
+    branches:
+      - main
   schedule:
-    - cron: '17 4 * * 1'
+    - cron: '17 3 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NIGHTLY: nightly-2026-07-25
+  CARGO_TERM_COLOR: always
+
 jobs:
-  audit:
+  dependencies:
+    name: Dependency audit
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
-      # cargo-fuzz instruments with -Zsanitizer, which only a nightly accepts.
-      - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: nightly-2026-07-25
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deny@0.22.0
+      - name: cargo deny (advisories, licenses, bans, sources)
+        run: |
+          cargo deny --locked check
+          cargo deny --locked --manifest-path fuzz/Cargo.toml check advisories sources
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.5'
           tools: composer:v2
-      - name: Install PHP Embed development package
-        run: |
-          .github/scripts/add-ondrej-php-ppa.sh
-          sudo apt-get update
-          sudo apt-get install -y libphp8.5-embed php8.5-dev valgrind
-      - uses: Swatinem/rust-cache@v2
-      - name: Audit Rust lockfile
-        run: |
-          cargo install cargo-audit --locked
-          cargo audit
-      - name: Audit Composer lockfile
+          coverage: none
+      - name: composer audit
         run: |
           audit_with_retry() {
             for attempt in 1 2 3; do
@@ -42,28 +56,148 @@ jobs:
               fi
               test "${attempt}" -lt 3 || return 1
               echo "Composer advisory audit attempt ${attempt} failed; retrying."
+              sleep 5
             done
           }
-          # This fixture intentionally installs the two abandoned legacy names
-          # to prove their migration bridges. Vulnerabilities still fail; only
-          # the expected abandonment is reported here.
+          # composer-smoke installs the two abandoned legacy names on purpose
+          # to prove their migration bridges: vulnerabilities still fail.
           audit_with_retry --working-dir=compat/composer-smoke --locked --abandoned=report
           audit_with_retry --working-dir=compat/laravel-smoke --locked
-          composer install --working-dir=packages/nimbus --no-interaction --prefer-dist --dry-run
-          composer install --working-dir=packages/nimbus --no-interaction --prefer-dist
-          audit_with_retry --working-dir=packages/nimbus --locked
-          composer install --working-dir=packages/octane --no-interaction --prefer-dist --dry-run
-          composer install --working-dir=packages/octane --no-interaction --prefer-dist
-          audit_with_retry --working-dir=packages/octane
-      - name: Coverage-guided dispatch protocol fuzzing
+          for package in packages/nimbus packages/http-psr packages/http-testing; do
+            audit_with_retry --working-dir="${package}" --locked --abandoned=report
+          done
+          # No lock committed for the Octane bridge: audit what it resolves to today.
+          composer update --working-dir=packages/octane --no-interaction --no-install --no-scripts --quiet
+          audit_with_retry --working-dir=packages/octane --locked --abandoned=report
+
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ github.event_name == 'schedule' && 50 || 15 }}
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - http_request
+          - multipart
+          - native_headers
+          - dispatch_envelope
+          - page_cache_policy
+          - shared_table
+    env:
+      FUZZ_SECONDS: ${{ github.event_name == 'schedule' && 1800 || 120 }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-25
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+          key: fuzz
+      - name: Install cargo-fuzz
+        run: cargo +"${NIGHTLY}" install cargo-fuzz --version 0.13.2 --locked
+      - name: Restore corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+      - name: Fuzz for ${{ env.FUZZ_SECONDS }} s
         run: |
-          cargo +nightly-2026-07-25 install cargo-fuzz --version 0.13.2 --locked
-          cargo +nightly-2026-07-25 fuzz run dispatch_envelope -- \
-            -max_total_time=120 -timeout=5 -rss_limit_mb=2048
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          cargo +"${NIGHTLY}" fuzz run -O "${{ matrix.target }}" -- \
+            -max_total_time="${FUZZ_SECONDS}" -timeout=10 -rss_limit_mb=2048 -print_final_stats=1
+      - name: Minimize corpus
+        if: github.event_name != 'pull_request'
+        run: cargo +"${NIGHTLY}" fuzz cmin -O "${{ matrix.target }}"
+      - name: Save corpus
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+      - name: Upload crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-${{ matrix.target }}-${{ github.run_id }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
+          retention-days: 14
+
+  sanitizers:
+    name: ASan + UBSan (native and FFI)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-07-25
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+      - name: Install PHP Embed development package
+        timeout-minutes: 12
+        run: |
+          .github/scripts/add-ondrej-php-ppa.sh
+          timeout 120s sudo apt-get update -o Acquire::Retries=3
+          timeout 300s sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            -o Dpkg::Options::=--force-confnew libphp8.5-embed php8.5-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: asan
+      - name: Install locked Composer test dependencies
+        run: composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
+      - name: Integration tests under ASan + UBSan
+        env:
+          # Rust code and native/ are instrumented; the distro libphp is not,
+          # but USE_ZEND_ALLOC=0 routes every Zend allocation through the
+          # ASan allocator. UBSan traps, so it needs no runtime library.
+          RUSTFLAGS: -Zsanitizer=address -Cforce-frame-pointers=yes
+          PAM_NATIVE_CFLAGS: -fsanitize=address,undefined -fsanitize-undefined-trap-on-error -fno-omit-frame-pointer
+          USE_ZEND_ALLOC: '0'
+          ZEND_DONT_UNLOAD_MODULES: '1'
+          PAM_FIBER_STACK_POOL: '0'
+          # Boot-time allocations of PHP are never freed; per-request leaks
+          # are covered by the nightly Valgrind run and the RSS soak.
+          ASAN_OPTIONS: detect_leaks=0:abort_on_error=1:detect_stack_use_after_return=0
+        run: |
+          cargo +"${NIGHTLY}" test --locked --target x86_64-unknown-linux-gnu \
+            --test server --test memory --test page_cache -- --test-threads=1
+          cargo +"${NIGHTLY}" test --locked --target x86_64-unknown-linux-gnu \
+            --test cli -- dispatch_protocol_errors --test-threads=1
+
+  valgrind:
+    name: Valgrind (server path)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+      - name: Install PHP Embed development package
+        run: |
+          .github/scripts/add-ondrej-php-ppa.sh
+          sudo apt-get update
+          sudo apt-get install -y libphp8.5-embed php8.5-dev valgrind
+      - uses: Swatinem/rust-cache@v2
       - name: Install locked Composer test dependencies
         run: |
-          composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist --dry-run
-          composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist --dry-run
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
           composer install --working-dir=compat/laravel-smoke --no-interaction --prefer-dist
       - name: Memory soak contracts
@@ -82,3 +216,30 @@ jobs:
               --leak-check=full \
               --suppressions=.github/valgrind/php-embed.supp \
               ./target/debug/pam tests/fixtures/hello.php
+      - name: Server requests under Valgrind
+        run: |
+          PAM_TEST_PORT=18095 PAM_TEST_RATE_LIMIT=0 PAM_FIBER_STACK_POOL=0 USE_ZEND_ALLOC=0 \
+            valgrind --error-exitcode=1 --errors-for-leak-kinds=definite,indirect \
+              --leak-check=full --suppressions=.github/valgrind/php-embed.supp \
+              --log-file="${RUNNER_TEMP}/valgrind-server.log" \
+              ./target/debug/pam tests/fixtures/server.php &
+          server=$!
+          for _ in $(seq 240); do
+            curl -fsS -o /dev/null http://127.0.0.1:18095/ping && break
+            sleep 0.5
+          done
+          for index in $(seq 500); do
+            curl -fsS -o /dev/null "http://127.0.0.1:18095/ping?query=${index}"
+            curl -fsS -o /dev/null -H "X-Request-Id: same" -H "X-Custom-${index}: 1" http://127.0.0.1:18095/server-headers
+            curl -fsS -o /dev/null -X POST -H 'Content-Type: application/json' -d '{"a":1}' http://127.0.0.1:18095/echo
+            curl -fsS -o /dev/null -X POST -d 'x' http://127.0.0.1:18095/async-body
+            curl -fsS -o /dev/null -F "file=@README.md" http://127.0.0.1:18095/upload || true
+          done
+          kill -TERM "${server}"
+          status=0
+          wait "${server}" || status=$?
+          cat "${RUNNER_TEMP}/valgrind-server.log" | tail -60
+          if grep -qE 'ERROR SUMMARY: [1-9]' "${RUNNER_TEMP}/valgrind-server.log"; then
+            exit 1
+          fi
+          test "${status}" -ne 1

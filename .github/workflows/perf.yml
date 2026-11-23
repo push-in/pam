@@ -1,0 +1,86 @@
+name: Performance gate
+
+# Builds the PR's base and head on the same runner and benchmarks them in
+# alternating rounds (scripts/perf-gate.sh); fails when the head's median
+# throughput is more than 5% below the base's. Shared GitHub runners are
+# noisy, so the job is advisory (continue-on-error) until its spread on them
+# is known: read the job summary for the numbers.
+
+on:
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'native/**'
+      - 'runtime/**'
+      - 'build.rs'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'benchmarks/soak/**'
+      - 'scripts/perf-gate.sh'
+      - '.github/workflows/perf.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  throughput:
+    name: Throughput vs base
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    continue-on-error: true
+    env:
+      # Same profile for both builds; thin LTO keeps the two builds short.
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+      CARGO_TARGET_DIR: ${{ github.workspace }}/../perf-target
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Check out the base
+        run: |
+          base="${{ github.event.pull_request.base.sha || 'origin/main' }}"
+          git worktree add --detach "${RUNNER_TEMP}/base" "${base}"
+      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+      - name: Install PHP Embed and wrk
+        timeout-minutes: 12
+        run: |
+          .github/scripts/add-ondrej-php-ppa.sh
+          timeout 120s sudo apt-get update -o Acquire::Retries=3
+          timeout 300s sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libphp8.5-embed php8.5-dev wrk
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: perf
+      - name: Build base and head
+        run: |
+          mkdir -p "${RUNNER_TEMP}/bin"
+          (cd "${RUNNER_TEMP}/base" && cargo build --locked --release)
+          cp "${CARGO_TARGET_DIR}/release/pam" "${RUNNER_TEMP}/bin/pam-base"
+          cargo build --locked --release
+          cp "${CARGO_TARGET_DIR}/release/pam" "${RUNNER_TEMP}/bin/pam-head"
+      - name: Install the benchmark application's dependencies
+        run: composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
+      - name: Benchmark
+        env:
+          SERVER_CPUS: '0-1'
+          LOAD_CPUS: '2-3'
+          OUT: ${{ runner.temp }}/perf-out
+        run: scripts/perf-gate.sh "${RUNNER_TEMP}/bin/pam-base" "${RUNNER_TEMP}/bin/pam-head"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: perf-gate-${{ github.run_id }}
+          path: ${{ runner.temp }}/perf-out
+          if-no-files-found: ignore
+          retention-days: 7
