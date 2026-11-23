@@ -1632,12 +1632,20 @@ fn underscore_header_names_never_reach_server_variables() {
         let response = server.http_request(&format!(
             "GET /server-headers HTTP/1.1\r\nHost: 127.0.0.1\r\n{name}: 1\r\nConnection: close\r\n\r\n"
         ));
-        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+        assert!(
+            response.starts_with("HTTP/1.1 200 OK"),
+            "unexpected status line ({} response bytes)",
+            response.len()
+        );
     }
     let response = server.http_request(
         "GET /server-headers HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Forwarded-For: 203.0.113.9\r\nX-Forwarded_For: 6.6.6.6\r\nX-Custom-Trace: abc\r\nUser-Agent: probe\r\nConnection: close\r\n\r\n",
     );
-    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "unexpected status line ({} response bytes)",
+        response.len()
+    );
     let body = response_json(&response);
     assert_eq!(body["forwardedFor"], "203.0.113.9");
     assert_eq!(body["custom"], "abc");
@@ -1675,5 +1683,9 @@ fn pauses_accepting_past_the_connection_limit() {
         .unwrap();
     let mut response = String::new();
     waiting.read_to_string(&mut response).unwrap();
-    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    assert!(
+        response.starts_with("HTTP/1.1 200 OK"),
+        "unexpected status line ({} response bytes)",
+        response.len()
+    );
 }

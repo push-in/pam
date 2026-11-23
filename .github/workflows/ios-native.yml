@@ -49,65 +49,65 @@ jobs:
       PAM_FOUNDATION_EXTENSIONS: ${{ matrix.foundation_extensions }}
       PAM_EXTENSIONKIT_EXTENSIONS: ${{ matrix.extensionkit_extensions }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native
           ref: 2f33d0c44707b9a527cd458f12f51138934ddc44
           path: pam-native
           persist-credentials: false
       - name: Check out the iOS capability certification plugins
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-share-extension
           ref: 0e0bd470f7a0895d8850b3b852f70c684d201501
           path: certification-plugins/share-extension
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-health
           ref: 733616e6fca526d2f37cffc4aaa54159628956be
           path: certification-plugins/health
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-media
           ref: aa3cf50035f4e36b9418bc5cea52588291c9b6eb
           path: certification-plugins/media
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-widgets
           ref: 9acb893820faf977a92023ea0dda16aeb6e0de9a
           path: certification-plugins/widgets
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-intents
           ref: 6024fdb793e5e6616f7c8b0796c65d710cf0ebaa
           path: certification-plugins/intents
           persist-credentials: false
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-live-activities
           ref: 6458c5cf41861d23b69359de0baba56c6027e612
           path: certification-plugins/live-activities
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: pam-native-ios-runtime
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: ${{ matrix.php }}
           tools: composer:v2
           coverage: none
       - name: Restore verified PHP/XCFramework runtime
         id: runtime-cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             runtime/ios/${{ matrix.runtime_id }}
@@ -125,7 +125,7 @@ jobs:
           test -f "runtime/ios/${{ matrix.runtime_id }}/runtime.json"
       - name: Save verified PHP/XCFramework runtime immediately
         if: steps.runtime-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             runtime/ios/${{ matrix.runtime_id }}
@@ -321,7 +321,7 @@ jobs:
           fi
           ! grep -E 'Pam Native failed to start|PHP (fatal|parse) error' \
             "${RUNNER_TEMP}/pam-ios-fixture/simulator.log"
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         if: always()
         with:
           name: pam-native-ios-generated-host-${{ matrix.profile }}

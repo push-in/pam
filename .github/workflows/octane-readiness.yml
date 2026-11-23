@@ -40,9 +40,9 @@ jobs:
       SMOKE_SOFTWARE_GL: '1'   # hosted runners have no GPU
       CHROME_BIN: /usr/bin/google-chrome
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           coverage: none
@@ -52,7 +52,7 @@ jobs:
           .github/scripts/add-ondrej-php-ppa.sh
           sudo apt-get update
           sudo apt-get install -y libphp8.5-embed php8.5-dev php8.5-sqlite3 wrk
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Build PAM from this revision
         env:
           CARGO_PROFILE_RELEASE_LTO: 'false'
@@ -72,14 +72,14 @@ jobs:
           "$runtime/bin/pam-run" -r 'exit(function_exists("pcntl_async_signals") ? 0 : 1);'
       - name: Lossless SO_REUSEPORT hand-over (recommended production setting)
         run: sudo sysctl -w net.ipv4.tcp_migrate_req=1
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
         with:
           node-version: '22'
       - name: Run readiness stages
         run: packages/octane/readiness/run-local.sh ${{ github.event.inputs.stages || 'suite matrix ecosystem' }}
       - name: Upload results
         if: always()
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: pam-octane-readiness
           path: .readiness/results

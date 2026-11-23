@@ -48,27 +48,27 @@ jobs:
       PAM_PRODUCT_APPLICATION_ID: app.pam.productvisual
       PAM_PRODUCT_PACKAGE: app.pam.productvisual.debug
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Check out the PAM Native UI geometry and golden tools
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-ui
           ref: ${{ env.PAM_NATIVE_UI_REF }}
           path: pam-native-ui
           persist-credentials: false
-      - uses: actions/setup-java@v5
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v4
-      - uses: shivammathur/setup-php@v2
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           coverage: none
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - uses: Swatinem/rust-cache@v2
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: android-product-visual
       - name: Install Android build dependencies
@@ -133,7 +133,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
       - name: Capture, measure and compare the real Product app
         # v2.38.0, pinned to the verified release commit.
-        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         env:
           RECORD_GOLDENS: ${{ inputs.record_goldens && '1' || '' }}
         with:
@@ -155,7 +155,7 @@ jobs:
           if ! test -s "${fixture}/artifacts/android-logcat.txt"; then
             echo 'no emulator log was captured' >"${fixture}/artifacts/android-logcat.txt"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: pam-product-android-visual-${{ github.sha }}

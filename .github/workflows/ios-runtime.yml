@@ -34,7 +34,7 @@ jobs:
     outputs:
       runtimes: ${{ steps.plan.outputs.runtimes }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       - id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -65,17 +65,17 @@ jobs:
       matrix:
         runtime: ${{ fromJSON(needs.plan.outputs.runtimes) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
       # build.sh links the engine too; only PamPhp.xcframework is published
       # (pam-native releases ship their own prebuilt engine).
       - name: Check out PAM Native for the engine slices
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native
           ref: main
           path: pam-native
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
         with:
           targets: aarch64-apple-ios,aarch64-apple-ios-sim,x86_64-apple-ios
       - name: Build the verified PHP XCFramework

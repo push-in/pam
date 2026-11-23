@@ -61,9 +61,9 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           tools: composer:v2
@@ -85,7 +85,7 @@ jobs:
             php8.5-mysql \
             php8.5-pgsql \
             php8.5-redis
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: laravel-${{ matrix.laravel }}
       - name: Build PAM for Composer and Artisan lifecycle hooks

@@ -19,8 +19,8 @@ jobs:
     name: Required CI
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
         with:
           components: rustfmt
       - name: Validate locked Rust graph
@@ -38,8 +38,8 @@ jobs:
       run:
         working-directory: packages/octane
     steps:
-      - uses: actions/checkout@v5
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           tools: composer:v2
@@ -62,8 +62,8 @@ jobs:
       run:
         working-directory: packages/nimbus
     steps:
-      - uses: actions/checkout@v5
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           tools: composer:v2
@@ -89,10 +89,10 @@ jobs:
     name: Required Composer packages
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           tools: composer:v2
@@ -112,9 +112,9 @@ jobs:
     name: Required security
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - uses: shivammathur/setup-php@v2
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           tools: composer:v2

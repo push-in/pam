@@ -25,23 +25,23 @@ jobs:
       PAM_DESKTOP_COMMIT: c89ea15a78eb3509a8611e42302c867c3c09bbbf
       PAM_DESKTOP_BINARY: ${{ github.workspace }}/pam-desktop/target/debug/pam-desktop
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Check out the pinned PAM Desktop host
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-desktop
           ref: ${{ env.PAM_DESKTOP_COMMIT }}
           path: pam-desktop
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
-      - uses: shivammathur/setup-php@v2
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           coverage: none
           tools: composer:v2
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: desktop-product-visual
       - name: Install pinned host and capture prerequisites
@@ -149,7 +149,7 @@ jobs:
           if test -n "${PAM_XVFB_PID:-}"; then
             kill -TERM "${PAM_XVFB_PID}" 2>/dev/null || true
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: pam-product-desktop-visual-${{ github.sha }}

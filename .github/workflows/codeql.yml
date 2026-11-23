@@ -37,15 +37,15 @@ jobs:
           - language: actions
             build-mode: none
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: github/codeql-action/init@v3
+      - uses: github/codeql-action/init@d2aacf54c2fbc910db8d7ec338fdb54ea48c692d # v3.39.4
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
           queries: security-extended
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
         if: matrix.build-mode == 'manual'
       - name: Install PHP Embed development package
         if: matrix.build-mode == 'manual'
@@ -53,7 +53,7 @@ jobs:
           .github/scripts/add-ondrej-php-ppa.sh
           timeout 120s sudo apt-get update -o Acquire::Retries=3
           timeout 300s sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libphp8.5-embed php8.5-dev
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: matrix.build-mode == 'manual'
         with:
           key: codeql
@@ -63,6 +63,6 @@ jobs:
           # Force build.rs to compile native/ even when the cache restored it.
           touch native/pam_php.c
           cargo build --locked
-      - uses: github/codeql-action/analyze@v3
+      - uses: github/codeql-action/analyze@d2aacf54c2fbc910db8d7ec338fdb54ea48c692d # v3.39.4
         with:
           category: /language:${{ matrix.language }}
