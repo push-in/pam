@@ -25,7 +25,6 @@ use Nimbus\Redis\Connection;
 use Nimbus\Testing\TestClient;
 use Nimbus\Tests\Events\Fixtures\OrderStatusChanged;
 use Nimbus\Tests\Events\Fixtures\PriceTicked;
-use Pam\Http\Request;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Pusher\Pusher;
@@ -163,28 +162,5 @@ final class BroadcastingTest extends TestCase
             ['join', 'sock-1', 'presence-room'],
             ['emit', 'presence-room', 'presence:joined', ['user_id' => '7', 'user_info' => ['n' => 'A']]],
         ], $log);
-    }
-}
-
-final class HeaderAuthenticator implements Authenticator
-{
-    public function authenticate(Request $request): ?Principal
-    {
-        $id = $request->getHeader('x-user');
-        return $id === null ? null : new class ($id) implements Principal {
-            public function __construct(private readonly string $id)
-            {
-            }
-
-            public function identifier(): string
-            {
-                return $this->id;
-            }
-
-            public function can(string $ability): bool
-            {
-                return false;
-            }
-        };
     }
 }
