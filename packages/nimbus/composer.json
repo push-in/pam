@@ -35,11 +35,15 @@
         "league/flysystem": "Required by Nimbus\\Storage (StorageManager, Disk, local disks).",
         "league/flysystem-aws-s3-v3": "S3 disks and presigned uploads in Nimbus\\Storage.",
         "league/oauth2-client": "Social login (Nimbus\\Auth\\OAuth\\SocialLogin); add provider packages such as league/oauth2-google or league/oauth2-github.",
+        "phpstan/phpstan": "Nimbus and Arcano types through phpstan/extension.neon (auto-installed by phpstan/extension-installer).",
         "psr/http-client": "Send push and webhook notifications through any PSR-18 client (Psr18HttpClient).",
         "psr/log": "PSR-3 logging; LoggerInterface resolves to the PAM runtime structured log.",
+        "psy/psysh": "The nimbus tinker REPL (bin/nimbus tinker).",
+        "pusher/pusher-php-server": "Pusher protocol broadcasting (Pusher, Soketi, Reverb) in Nimbus\\Broadcasting\\PusherBroadcaster.",
         "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
         "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
         "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets.",
+        "symfony/http-client": "Nimbus\\Http\\Client outside the PAM runtime (inside PAM it uses the non-blocking runtime client).",
         "symfony/mailer": "Required by the mail notification channel (Nimbus\\Notifications\\Mail\\MailChannel).",
         "symfony/translation": "Translations from lang/ directories (Nimbus\\Translation\\Translator, __() and trans())."
     },
@@ -48,7 +52,8 @@
     },
     "autoload": {
         "psr-4": {
-            "Nimbus\\": "src/"
+            "Nimbus\\": "src/",
+            "Nimbus\\PHPStan\\": "phpstan/src/"
         },
         "files": [
             "src/helpers.php"
@@ -63,6 +68,7 @@
         ]
     },
     "bin": [
+        "bin/nimbus",
         "bin/nimbus-views"
     ],
     "scripts": {
@@ -95,9 +101,19 @@
         "psr/http-client": "^1.0",
         "psr/http-factory": "^1.1",
         "psr/http-message": "^2.0",
+        "psy/psysh": "^0.12",
+        "pusher/pusher-php-server": "^7.2",
         "pushinbr/arcano": "^0.2.8",
+        "symfony/http-client": "^7.3",
         "symfony/mailer": "^7.3",
         "symfony/mime": "^7.3",
         "symfony/translation": "^7.3"
+    },
+    "extra": {
+        "phpstan": {
+            "includes": [
+                "phpstan/extension.neon"
+            ]
+        }
     }
 }

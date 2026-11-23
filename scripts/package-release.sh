@@ -210,7 +210,7 @@ verify_split() (
     local package_name=$1
     local split_ref=$2
     local expected_files
-    expected_files='^(LICENSE|README\.md|CHANGELOG\.md|UPGRADE\.md|RELEASE\.md|CONTRIBUTING\.md|CODE_OF_CONDUCT\.md|SECURITY\.md|PROTOCOL\.md|api-surface\.json|composer\.json|composer\.lock|config/|app/|routes\.php|database/|docs/|src/|tests/|benchmarks/|resources/|bin/|\.github/|phpstan\.neon|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
+    expected_files='^(LICENSE|README\.md|CHANGELOG\.md|UPGRADE\.md|RELEASE\.md|CONTRIBUTING\.md|CODE_OF_CONDUCT\.md|SECURITY\.md|PROTOCOL\.md|api-surface\.json|composer\.json|composer\.lock|config/|app/|routes\.php|database/|docs/|src/|tests/|benchmarks/|resources/|bin/|\.github/|phpstan\.neon|phpstan/|index\.php|phpunit\.xml|\.env\.example|\.gitignore)'
 
     local temporary_directory
     temporary_directory=$(mktemp -d "${TMPDIR:-/tmp}/pam-package.XXXXXX")

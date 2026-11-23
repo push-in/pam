@@ -71,6 +71,13 @@ final class MemoryProfiler implements RequestLifecycleObserver
         }
     }
 
+    /** The token of the request profiled in the current Fiber (or main scope), if any. */
+    public function currentToken(): ?string
+    {
+        $fiber = \Fiber::getCurrent();
+        return ($fiber === null ? $this->mainStart : ($this->fiberStarts[$fiber] ?? null))?->token;
+    }
+
     public function find(string $token): ?RequestProfile
     {
         return $this->profiles[$token] ?? null;

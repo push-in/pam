@@ -1,0 +1,20 @@
+# Nimbus and Arcano types for PHPStan. Installed automatically with
+# phpstan/extension-installer, or include it:
+#   includes:
+#       - vendor/pushinbr/nimbus/phpstan/extension.neon
+services:
+    -
+        class: Nimbus\PHPStan\ContainerGetReturnTypeExtension
+        tags:
+            - phpstan.broker.dynamicMethodReturnTypeExtension
+    -
+        class: Nimbus\PHPStan\ArcanoManagerReturnTypeExtension
+        tags:
+            - phpstan.broker.dynamicMethodReturnTypeExtension
+    -
+        class: Nimbus\PHPStan\FormRequestReturnTypeExtension
+        tags:
+            - phpstan.broker.dynamicMethodReturnTypeExtension
+
+rules:
+    - Nimbus\PHPStan\RouteParameterRule

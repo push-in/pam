@@ -57,9 +57,11 @@
         "phpstan/phpstan": "^2.2",
         "phpunit/phpunit": "12.5.30",
         "psr/http-client": "^1.0",
+        "psy/psysh": "^0.12",
         "pushinbr/arcano": "^0.2.8",
         "pushinbr/pam-http-testing": "^1.0",
         "pushinbr/pam-testing": "^2.0",
+        "symfony/http-client": "^7.3",
         "symfony/mailer": "^7.3",
         "symfony/mime": "^7.3",
         "symfony/translation": "^8.1"
