@@ -37,7 +37,6 @@ jobs:
       # Same profile for both builds; thin LTO keeps the two builds short.
       CARGO_PROFILE_RELEASE_LTO: thin
       CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
-      CARGO_TARGET_DIR: ${{ github.workspace }}/../perf-target
     steps:
       - uses: actions/checkout@v5
         with:
@@ -64,11 +63,13 @@ jobs:
           key: perf
       - name: Build base and head
         run: |
+          # Separate target directories: build.rs output (the native library)
+          # of one tree must never be reused for the other.
           mkdir -p "${RUNNER_TEMP}/bin"
           (cd "${RUNNER_TEMP}/base" && cargo build --locked --release)
-          cp "${CARGO_TARGET_DIR}/release/pam" "${RUNNER_TEMP}/bin/pam-base"
+          cp "${RUNNER_TEMP}/base/target/release/pam" "${RUNNER_TEMP}/bin/pam-base"
           cargo build --locked --release
-          cp "${CARGO_TARGET_DIR}/release/pam" "${RUNNER_TEMP}/bin/pam-head"
+          cp target/release/pam "${RUNNER_TEMP}/bin/pam-head"
       - name: Install the benchmark application's dependencies
         run: composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
       - name: Benchmark

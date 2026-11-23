@@ -104,7 +104,8 @@ final readonly class PasswordResets
             // The same throttle lookup and token hashing as a real user, so the time spent does
             // not tell the two apart.
             $this->tokens->createdWithin(self::PURPOSE, 'unknown:' . hash('sha256', strtolower($email)), $this->throttleSeconds);
-            AuthDatabase::hash(AuthDatabase::secret());
+            $decoy = AuthDatabase::hash(AuthDatabase::secret());
+            unset($decoy);
             return false;
         }
         $subject = $user->authIdentifier();
