@@ -615,18 +615,19 @@ fn serve_handed_off(
         let Ok(remote) = stream.peer_addr() else {
             return;
         };
-        let _registration = crate::inline_serve::Registration::new(
+        let registration = crate::inline_serve::Registration::new(
             remote,
             std::os::fd::AsRawFd::as_raw_fd(&stream),
         );
-        crate::http_serve::serve_connection(
-            TrackedStream::new(stream, guard),
-            remote,
-            app,
-            drain,
-            http,
-        )
-        .await;
+        registration
+            .scope(crate::http_serve::serve_connection(
+                TrackedStream::new(stream, guard),
+                remote,
+                app,
+                drain,
+                http,
+            ))
+            .await;
     });
 }
 
@@ -783,6 +784,7 @@ mod tests {
             HandOffHttp {
                 header_read_timeout: std::time::Duration::from_secs(5),
                 graceful_timeout: std::time::Duration::from_secs(5),
+                max_connections: 64,
             },
             tracker.clone(),
         );

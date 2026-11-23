@@ -1619,3 +1619,61 @@ fn rejects_cross_origin_websocket_upgrades() {
     );
     assert_eq!(upgrade(None), 101);
 }
+
+#[test]
+fn underscore_header_names_never_reach_server_variables() {
+    // x-forwarded_for would become HTTP_X_FORWARDED_FOR too and overwrite the
+    // value the proxy set (audit M13). Names outside the fixed cache list
+    // still map normally (audit B1), and server mode hides PHP errors (B4).
+    let server = ServerProcess::start();
+    for index in 0..80 {
+        // Invented names must not take over the key cache.
+        let name = format!("x-junk-{index}");
+        let response = server.http_request(&format!(
+            "GET /server-headers HTTP/1.1\r\nHost: 127.0.0.1\r\n{name}: 1\r\nConnection: close\r\n\r\n"
+        ));
+        assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    }
+    let response = server.http_request(
+        "GET /server-headers HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Forwarded-For: 203.0.113.9\r\nX-Forwarded_For: 6.6.6.6\r\nX-Custom-Trace: abc\r\nUser-Agent: probe\r\nConnection: close\r\n\r\n",
+    );
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    let body = response_json(&response);
+    assert_eq!(body["forwardedFor"], "203.0.113.9");
+    assert_eq!(body["custom"], "abc");
+    assert_eq!(body["userAgent"], "probe");
+    assert_eq!(body["displayErrors"], "0");
+}
+
+#[test]
+fn pauses_accepting_past_the_connection_limit() {
+    // Idle connections must not run a worker out of descriptors: past the
+    // limit new connections wait in the kernel queue (audit B2).
+    let server = ServerProcess::start_with_env(&[("PAM_TEST_MAX_CONNECTIONS", "2")]);
+    let port = server.port;
+    let idle: Vec<TcpStream> = (0..2)
+        .map(|_| TcpStream::connect(("127.0.0.1", port)).unwrap())
+        .collect();
+    thread::sleep(Duration::from_millis(200));
+
+    let mut waiting = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    waiting
+        .write_all(b"GET /client-ip HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .unwrap();
+    waiting
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    let mut byte = [0_u8; 1];
+    assert!(
+        waiting.read(&mut byte).is_err(),
+        "a third connection was served past the limit"
+    );
+
+    drop(idle);
+    waiting
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    let mut response = String::new();
+    waiting.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+}
