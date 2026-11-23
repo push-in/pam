@@ -95,7 +95,7 @@
         "psr/http-client": "^1.0",
         "psr/http-factory": "^1.1",
         "psr/http-message": "^2.0",
-        "pushinbr/arcano": "^0.2.6",
+        "pushinbr/arcano": "^0.2.8",
         "symfony/mailer": "^7.3",
         "symfony/mime": "^7.3",
         "symfony/translation": "^7.3"

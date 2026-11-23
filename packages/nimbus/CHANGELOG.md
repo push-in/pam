@@ -5,6 +5,10 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.6.0 - 2026-11-21
+
+Security hardening; requires `pushinbr/arcano` `^0.2.8`.
+
 ### Security
 
 - `ClientIpResolver` takes the client from the right of `X-Forwarded-For`: the rightmost entry
