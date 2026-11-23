@@ -10,8 +10,10 @@ use Nimbus\App;
 use Nimbus\Auth\Abilities;
 use Nimbus\Auth\AuthInput;
 use Nimbus\Auth\LoginTokenIssuer;
+use Nimbus\Http\Cookie;
 use Nimbus\Http\HttpException;
 use Nimbus\Http\ProblemCode;
+use Nimbus\Http\RequestCookies;
 use Pam\Contracts\Http\MiddlewareInterface;
 use Pam\Http\Request;
 use Pam\Http\Response;
@@ -24,6 +26,12 @@ use Pam\Http\Response;
  * the state and verifier stay on the server in an `OAuthStateStore`. `callback()` spends the
  * state, exchanges the code, lets the application's `SocialUserResolver` find or create the
  * user and returns a Nimbus token from the `LoginTokenIssuer`.
+ *
+ * The state is bound to the client that started the flow: the start route sets an HttpOnly,
+ * SameSite=Lax cookie with a random secret whose hash is stored with the state, and the callback
+ * refuses a state presented without it. Someone who starts a login with their own account cannot
+ * make a victim finish it (login CSRF). `bindStateToClient: false` turns this off for clients
+ * that cannot keep cookies between the two calls.
  */
 final readonly class SocialLogin
 {
@@ -35,6 +43,8 @@ final readonly class SocialLogin
 
     /** @var \Closure(): int */
     private \Closure $clock;
+
+    public const string BINDING_COOKIE = 'nimbus_oauth_state';
 
     /**
      * @param array<string, AbstractProvider|\Closure(): AbstractProvider> $providers By name, e.g. `google`.
@@ -49,6 +59,8 @@ final readonly class SocialLogin
         array $abilities = ['*'],
         private int $stateTtlSeconds = 600,
         ?\Closure $clock = null,
+        private bool $bindStateToClient = true,
+        private bool $secureCookie = true,
     ) {
         if (!class_exists(AbstractProvider::class)) {
             throw new \LogicException('Social login requires league/oauth2-client: composer require league/oauth2-client');
@@ -74,9 +86,10 @@ final readonly class SocialLogin
 
     /**
      * @param list<string> $scopes Provider scopes; the provider's defaults when empty.
+     * @param string|null $binding Secret the callback must present again (the binding cookie).
      * @return array{authorization_url: string, state: string, expires_in: int}
      */
-    public function authorizationUrl(string $provider, array $scopes = []): array
+    public function authorizationUrl(string $provider, array $scopes = [], #[\SensitiveParameter] ?string $binding = null): array
     {
         $client = $this->provider($provider);
         $state = bin2hex(random_bytes(32));
@@ -95,7 +108,11 @@ final readonly class SocialLogin
         if (is_string($own) && $own !== '') {
             $verifier = $own;
         }
-        $this->states->put($state, ['provider' => $provider, 'verifier' => $verifier], ($this->clock)() + $this->stateTtlSeconds);
+        $data = ['provider' => $provider, 'verifier' => $verifier];
+        if ($binding !== null) {
+            $data['binding'] = hash('sha256', $binding);
+        }
+        $this->states->put($state, $data, ($this->clock)() + $this->stateTtlSeconds);
         return ['authorization_url' => $url, 'state' => $state, 'expires_in' => $this->stateTtlSeconds];
     }
 
@@ -103,11 +120,17 @@ final readonly class SocialLogin
      * @return array<string, mixed> The token response of the `LoginTokenIssuer`.
      * @throws HttpException 404 for an unknown provider, 422 for an invalid state, 401 when the provider refuses the code.
      */
-    public function callback(string $provider, string $state, #[\SensitiveParameter] string $code): array
-    {
+    public function callback(
+        string $provider,
+        string $state,
+        #[\SensitiveParameter] string $code,
+        #[\SensitiveParameter] ?string $binding = null,
+    ): array {
         $client = $this->provider($provider);
         $pending = $this->states->pull($state, ($this->clock)());
-        if ($pending === null || !hash_equals($pending['provider'] ?? '', $provider)) {
+        $bound = !isset($pending['binding'])
+            || ($binding !== null && hash_equals($pending['binding'], hash('sha256', $binding)));
+        if ($pending === null || !hash_equals($pending['provider'] ?? '', $provider) || !$bound) {
             throw new HttpException(422, ProblemCode::ValidationFailed, 'The OAuth state is invalid or expired.', [
                 'errors' => ['state' => ['The OAuth state is invalid or expired.']],
             ]);
@@ -140,15 +163,33 @@ final readonly class SocialLogin
     public function routes(App $app, string $path = '/auth/oauth', array $middleware = []): void
     {
         $path = rtrim('/' . trim($path, '/'), '/');
-        $redirect = $app->get($path . '/{provider}', function (Request $request, Response $response): Response {
-            return $response->json($this->authorizationUrl((string) $request->route('provider')));
+        $cookiePath = $path . '/';
+        $redirect = $app->get($path . '/{provider}', function (Request $request, Response $response) use ($cookiePath): Response {
+            $binding = null;
+            if ($this->bindStateToClient) {
+                $binding = bin2hex(random_bytes(32));
+                $response->addHeader('set-cookie', (new Cookie(
+                    self::BINDING_COOKIE,
+                    $binding,
+                    $this->stateTtlSeconds,
+                    $cookiePath,
+                    secure: $this->secureCookie,
+                ))->toHeader());
+            }
+            return $response->json($this->authorizationUrl((string) $request->route('provider'), binding: $binding));
         })->summary('Start a social login')->tags(['auth']);
-        $callback = function (Request $request, Response $response): Response {
-            return $response->json($this->callback(
+        $callback = function (Request $request, Response $response) use ($cookiePath): Response {
+            $binding = RequestCookies::fromRequest($request)->get(self::BINDING_COOKIE);
+            $result = $this->callback(
                 (string) $request->route('provider'),
                 AuthInput::string($request, 'state', 256),
                 AuthInput::string($request, 'code', 2_048),
-            ));
+                $binding,
+            );
+            if ($binding !== null) {
+                $response->addHeader('set-cookie', Cookie::forget(self::BINDING_COOKIE, $cookiePath)->toHeader());
+            }
+            return $response->json($result);
         };
         $post = $app->post($path . '/{provider}/callback', $callback)->summary('Finish a social login')->tags(['auth']);
         $get = $app->get($path . '/{provider}/callback', $callback)->summary('Finish a social login (redirect)')->tags(['auth']);

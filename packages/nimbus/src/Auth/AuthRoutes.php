@@ -10,7 +10,9 @@ use Nimbus\Http\ClientIpResolver;
 use Nimbus\Http\HttpException;
 use Nimbus\Http\ProblemCode;
 use Nimbus\Middleware\RateLimitMiddleware;
+use Nimbus\RateLimit\MemoryRateLimitStore;
 use Nimbus\RateLimit\RateLimitStore;
+use Nimbus\RateLimit\SharedTableRateLimitStore;
 use Nimbus\Validation\ValidationException;
 use Pam\Http\Request;
 use Pam\Http\Response;
@@ -23,9 +25,16 @@ use Pam\Http\Response;
  * - `POST /token/refresh` and `POST /token/revoke` (`refresh_token`);
  * - `GET /oauth/{provider}` and `/oauth/{provider}/callback` of a `SocialLogin`.
  *
- * Every route is throttled per client IP through a `RateLimitMiddleware` (pass a
- * `RedisRateLimitStore` to share the limit across workers); the reset and verification flows also
- * throttle each user's e-mails.
+ * Every route is throttled per client IP through a `RateLimitMiddleware`. Without a
+ * `$throttleStore`, the limit lives in a PAM shared table, which every worker of the server
+ * shares; outside PAM it falls back to one in-memory store per process and, in production, warns
+ * once (pass a `RedisRateLimitStore` to share the limit across machines). The reset and
+ * verification flows also throttle each user's e-mails.
+ *
+ * `POST /password/forgot` answers the same 202 whether or not the address exists, and never
+ * sooner than `$forgotPasswordMinimumMilliseconds`: with `PasswordResets(queue: ...)` the e-mail
+ * leaves the request entirely, and the floor hides the account lookup; without a queue it also
+ * hides the mail transport up to that time.
  */
 final readonly class AuthRoutes
 {
@@ -37,10 +46,33 @@ final readonly class AuthRoutes
         private ?RateLimitStore $throttleStore = null,
         private int $throttleBurst = 10,
         private ClientIpResolver $clientIp = new ClientIpResolver(),
+        private int $forgotPasswordMinimumMilliseconds = 250,
     ) {
         if ($throttleBurst < 1) {
             throw new \InvalidArgumentException('The auth throttle burst must be positive.');
         }
+        if ($forgotPasswordMinimumMilliseconds < 0 || $forgotPasswordMinimumMilliseconds > 10_000) {
+            throw new \InvalidArgumentException('The forgot-password response floor must be 0 to 10,000 ms.');
+        }
+    }
+
+    /**
+     * The throttle store used when none is given: the PAM shared table, shared by every worker,
+     * or a per-process memory store with a production warning.
+     */
+    public static function defaultThrottleStore(): RateLimitStore
+    {
+        if (SharedTableRateLimitStore::available()) {
+            return new SharedTableRateLimitStore(name: 'nimbus_auth_throttle');
+        }
+        static $warned = false;
+        $environment = getenv('APP_ENV') ?: getenv('PAM_ENV') ?: '';
+        if (!$warned && strtolower($environment) === 'production') {
+            $warned = true;
+            error_log('Nimbus AuthRoutes: the auth throttle is per process (no PAM shared table); '
+                . 'pass a RedisRateLimitStore as $throttleStore so every worker shares the limit.');
+        }
+        return new MemoryRateLimitStore();
     }
 
     public function register(App $app, string $path = '/auth'): void
@@ -49,7 +81,7 @@ final readonly class AuthRoutes
         $throttle = new RateLimitMiddleware(
             requestsPerSecond: 1,
             burst: $this->throttleBurst,
-            store: $this->throttleStore,
+            store: $this->throttleStore ?? self::defaultThrottleStore(),
             keyResolver: fn (Request $request): string => 'auth:' . $this->clientIp->resolve($request),
         );
         if ($this->passwords !== null) {
@@ -75,7 +107,15 @@ final readonly class AuthRoutes
 
     public function forgotPassword(Request $request, Response $response): Response
     {
-        $this->passwordResets()->sendResetLink(AuthInput::string($request, 'email', 254));
+        $started = hrtime(true);
+        $email = AuthInput::string($request, 'email', 254);
+        try {
+            $this->passwordResets()->requestResetLink($email);
+        } catch (\Throwable $error) {
+            // A failing mail transport or queue must not reveal that the address exists.
+            error_log('Nimbus AuthRoutes: the password reset link could not be sent (' . $error::class . ').');
+        }
+        self::waitUntil($started, $this->forgotPasswordMinimumMilliseconds);
         // The same answer whether or not the address exists.
         return $response->json(['message' => 'If the address belongs to an account, a reset link was sent.'], 202);
     }
@@ -123,6 +163,20 @@ final readonly class AuthRoutes
     {
         $this->tokenPairs()->revoke(AuthInput::string($request, 'refresh_token', 256));
         return $response->status(204);
+    }
+
+    /** Pads the response to at least `$milliseconds` after `$started`, yielding the Fiber under PAM. */
+    private static function waitUntil(int|float $started, int $milliseconds): void
+    {
+        $remaining = $milliseconds / 1_000 - (hrtime(true) - $started) / 1e9;
+        if ($remaining <= 0) {
+            return;
+        }
+        if (\Fiber::getCurrent() !== null && function_exists('Pam\\Async\\delay')) {
+            \Pam\Async\delay($remaining);
+            return;
+        }
+        usleep((int) ($remaining * 1_000_000));
     }
 
     private function passwordResets(): PasswordResets

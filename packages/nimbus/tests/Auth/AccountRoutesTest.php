@@ -13,6 +13,10 @@ use Nimbus\Auth\OneTimeTokens;
 use Nimbus\Auth\PasswordResets;
 use Nimbus\Auth\RefreshTokens;
 use Nimbus\Auth\ResetPasswordNotification;
+use Nimbus\Auth\SendPasswordResetLink;
+use Nimbus\Jobs\MemoryJobDispatcher;
+use Nimbus\RateLimit\MemoryRateLimitStore;
+use Nimbus\RateLimit\SharedTableRateLimitStore;
 use Nimbus\Auth\TokenPairIssuer;
 use Nimbus\Auth\TokenPrincipal;
 use Nimbus\Auth\VerifyEmailNotification;
@@ -29,6 +33,7 @@ use PHPUnit\Framework\TestCase;
 #[CoversClass(OneTimeTokens::class)]
 #[CoversClass(ResetPasswordNotification::class)]
 #[CoversClass(VerifyEmailNotification::class)]
+#[CoversClass(SendPasswordResetLink::class)]
 final class AccountRoutesTest extends TestCase
 {
     private AuthTestDatabase $database;
@@ -155,6 +160,99 @@ final class AccountRoutesTest extends TestCase
         $client->postJson('/auth/password/forgot', ['email' => 'x@example.com'])->assertStatus(202);
         $client->postJson('/auth/password/forgot', ['email' => 'x@example.com'])->assertStatus(202);
         $client->postJson('/auth/password/forgot', ['email' => 'x@example.com'])->assertStatus(429);
+    }
+
+    public function testForgotPasswordAnswersAlikeForKnownAndUnknownAddresses(): void
+    {
+        $passwords = new PasswordResets($this->users, $this->tokens, $this->mail, 'https://app.test/{token}', revoke: []);
+        $client = new TestClient($this->app(new AuthRoutes(passwords: $passwords, forgotPasswordMinimumMilliseconds: 50)));
+
+        $started = hrtime(true);
+        $unknown = $client->postJson('/auth/password/forgot', ['email' => 'nobody@example.com'])->assertStatus(202);
+        self::assertGreaterThanOrEqual(50.0, (hrtime(true) - $started) / 1e6, 'The response is padded to the floor.');
+        $known = $client->postJson('/auth/password/forgot', ['email' => 'ada@example.com'])->assertStatus(202);
+        self::assertSame($unknown->body(), $known->body());
+        self::assertSame($unknown->header('content-type'), $known->header('content-type'));
+        self::assertCount(1, $this->mail->sent(ResetPasswordNotification::class));
+
+        // A failing mail transport is not a 500 that only known addresses would get.
+        $failing = new PasswordResets(
+            $this->users,
+            $this->tokens,
+            new class implements \Nimbus\Notifications\NotificationDispatcher {
+                public function send(
+                    \Nimbus\Notifications\Notifiable|iterable $notifiables,
+                    \Nimbus\Notifications\Notification $notification,
+                ): void {
+                    throw new \RuntimeException('SMTP down');
+                }
+
+                public function sendLater(
+                    \Nimbus\Notifications\Notifiable|iterable $notifiables,
+                    \Nimbus\Notifications\Notification $notification,
+                    ?int $delaySeconds = null,
+                ): array {
+                    throw new \RuntimeException('SMTP down');
+                }
+            },
+            'https://app.test/{token}',
+            throttleSeconds: 0,
+            revoke: [],
+        );
+        $this->clock->now += 120;
+        $client = new TestClient($this->app(new AuthRoutes(passwords: $failing, forgotPasswordMinimumMilliseconds: 0)));
+        self::assertSame($unknown->body(), $client->postJson('/auth/password/forgot', ['email' => 'ada@example.com'])->assertStatus(202)->body());
+    }
+
+    public function testQueuedForgotPasswordSendsNothingInTheRequest(): void
+    {
+        $queue = new MemoryJobDispatcher();
+        $passwords = new PasswordResets($this->users, $this->tokens, $this->mail, 'https://app.test/{token}', revoke: [], queue: $queue);
+        $client = new TestClient($this->app(new AuthRoutes(passwords: $passwords, forgotPasswordMinimumMilliseconds: 0)));
+
+        $client->postJson('/auth/password/forgot', ['email' => 'ada@example.com'])->assertStatus(202);
+        $client->postJson('/auth/password/forgot', ['email' => 'nobody@example.com'])->assertStatus(202);
+        self::assertSame([], $this->mail->sent(), 'No mail I/O or user lookup happens in the request.');
+
+        $jobs = $queue->pending();
+        self::assertCount(2, $jobs);
+        foreach ($jobs as $envelope) {
+            $job = $envelope->job;
+            self::assertInstanceOf(SendPasswordResetLink::class, $job);
+            self::assertSame(['email'], array_keys($job->toJobPayload()), 'The token never enters the payload.');
+            SendPasswordResetLink::fromJobPayload($job->toJobPayload())->handle($passwords);
+        }
+        self::assertCount(1, $this->mail->sent(ResetPasswordNotification::class));
+    }
+
+    public function testAVerificationLinkOnlyVerifiesTheAddressItWasSentTo(): void
+    {
+        $verification = new EmailVerification($this->users, $this->tokens, $this->mail, 'https://app.test/verify/{token}');
+        self::assertTrue($verification->send($this->user()));
+        $sent = $this->mail->sent(VerifyEmailNotification::class);
+        $token = rawurldecode(substr($sent[0]->url, strlen('https://app.test/verify/')));
+
+        $this->user()->email = 'ceo@example.com';
+        self::assertFalse($verification->verify($token), 'The link of the old address does not verify the new one.');
+        self::assertFalse($this->user()->verified);
+
+        $this->clock->now += 120;
+        self::assertTrue($verification->send($this->user()));
+        $sent = $this->mail->sent(VerifyEmailNotification::class);
+        $token = rawurldecode(substr($sent[1]->url, strlen('https://app.test/verify/')));
+        self::assertTrue($verification->verify($token));
+        self::assertTrue($this->user()->verified);
+    }
+
+    public function testTheAuthThrottleIsSharedByEveryWorkerUnderPam(): void
+    {
+        self::assertInstanceOf(MemoryRateLimitStore::class, AuthRoutes::defaultThrottleStore());
+        \Pam\Shared\Table::$runtime = true;
+        try {
+            self::assertInstanceOf(SharedTableRateLimitStore::class, AuthRoutes::defaultThrottleStore());
+        } finally {
+            \Pam\Shared\Table::$runtime = false;
+        }
     }
 
     private static function text(mixed $value): string

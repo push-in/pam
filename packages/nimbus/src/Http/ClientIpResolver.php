@@ -56,7 +56,8 @@ final readonly class ClientIpResolver
         return $client;
     }
 
-    private function trusts(string $address): bool
+    /** Whether the address is one of the trusted proxies. */
+    public function trusts(string $address): bool
     {
         $packed = @inet_pton($address);
         if ($packed === false) {

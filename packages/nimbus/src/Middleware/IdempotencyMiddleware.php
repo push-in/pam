@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nimbus\Middleware;
 
+use Nimbus\Auth\AuthContext;
+use Nimbus\Container\Container;
 use Nimbus\Http\HttpException;
 use Nimbus\Http\ProblemCode;
 use Nimbus\Http\ResponseSnapshot;
@@ -14,12 +16,19 @@ use Pam\Contracts\Http\RequestHandlerInterface;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
+/**
+ * Replays the stored response of a repeated `Idempotency-Key`. Keys are scoped by the caller:
+ * the authenticated principal when the container knows it, otherwise the `Authorization`
+ * header, so one client cannot read another's stored response by guessing or reusing its key.
+ * Anonymous requests share one scope.
+ */
 final readonly class IdempotencyMiddleware implements MiddlewareInterface
 {
     public function __construct(
         private IdempotencyStore $store,
         private int $ttlSeconds = 86_400,
         private bool $required = true,
+        private ?Container $container = null,
     ) {
         if ($ttlSeconds < 1) {
             throw new \InvalidArgumentException('Idempotency TTL must be positive.');
@@ -39,6 +48,10 @@ final readonly class IdempotencyMiddleware implements MiddlewareInterface
             throw new HttpException(422, ProblemCode::ValidationFailed, 'Idempotency-Key is invalid.');
         }
 
+        $scope = $this->scope($request);
+        if ($scope !== '') {
+            $key = substr(hash('sha256', $scope), 0, 32) . ':' . $key;
+        }
         $fingerprint = hash('sha256', $request->method . "\n" . $request->path . "\n" . $request->body());
         $now = time();
         $existing = $this->store->get($key, $now);
@@ -57,5 +70,14 @@ final readonly class IdempotencyMiddleware implements MiddlewareInterface
         ));
         return $result;
     }
-}
 
+    private function scope(Request $request): string
+    {
+        $auth = $this->container?->scopedValue(AuthContext::class);
+        if ($auth instanceof AuthContext) {
+            return 'principal:' . $auth->principal->identifier();
+        }
+        $authorization = $request->getHeader('authorization');
+        return $authorization === null || $authorization === '' ? '' : 'authorization:' . $authorization;
+    }
+}

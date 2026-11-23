@@ -50,6 +50,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Auth\RefreshTokens`](#nimbusauthrefreshtokens)
 - [`Nimbus\Auth\ResetPasswordNotification`](#nimbusauthresetpasswordnotification)
 - [`Nimbus\Auth\RevokesCredentials`](#nimbusauthrevokescredentials)
+- [`Nimbus\Auth\SendPasswordResetLink`](#nimbusauthsendpasswordresetlink)
 - [`Nimbus\Auth\SessionAuthenticator`](#nimbusauthsessionauthenticator)
 - [`Nimbus\Auth\SessionRevocations`](#nimbusauthsessionrevocations)
 - [`Nimbus\Auth\TokenPair`](#nimbusauthtokenpair)
@@ -205,6 +206,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RateLimit\MemoryRateLimitStore`](#nimbusratelimitmemoryratelimitstore)
 - [`Nimbus\RateLimit\RateLimitDecision`](#nimbusratelimitratelimitdecision)
 - [`Nimbus\RateLimit\RateLimitStore`](#nimbusratelimitratelimitstore)
+- [`Nimbus\RateLimit\SharedTableRateLimitStore`](#nimbusratelimitsharedtableratelimitstore)
 - [`Nimbus\Redis\Connection`](#nimbusredisconnection)
 - [`Nimbus\Redis\PamConnection`](#nimbusredispamconnection)
 - [`Nimbus\Redis\RedisIdempotencyStore`](#nimbusredisredisidempotencystore)
@@ -527,7 +529,8 @@ final readonly class Nimbus\Auth\AuthRoutes
 
 ### Methods
 
-- `public __construct(?Nimbus\Auth\PasswordResets $passwords = null, ?Nimbus\Auth\EmailVerification $verification = null, ?Nimbus\Auth\TokenPairIssuer $tokens = null, ?Nimbus\Auth\OAuth\SocialLogin $social = null, ?Nimbus\RateLimit\RateLimitStore $throttleStore = null, int $throttleBurst = 10, Nimbus\Http\ClientIpResolver $clientIp = {"@object":"Nimbus\\Http\\ClientIpResolver","properties":[]}): mixed`
+- `public __construct(?Nimbus\Auth\PasswordResets $passwords = null, ?Nimbus\Auth\EmailVerification $verification = null, ?Nimbus\Auth\TokenPairIssuer $tokens = null, ?Nimbus\Auth\OAuth\SocialLogin $social = null, ?Nimbus\RateLimit\RateLimitStore $throttleStore = null, int $throttleBurst = 10, Nimbus\Http\ClientIpResolver $clientIp = {"@object":"Nimbus\\Http\\ClientIpResolver","properties":[]}, int $forgotPasswordMinimumMilliseconds = 250): mixed`
+- `public static defaultThrottleStore(): Nimbus\RateLimit\RateLimitStore`
 - `public forgotPassword(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 - `public refresh(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 - `public register(Nimbus\App $app, string $path = "/auth"): void`
@@ -809,11 +812,15 @@ final readonly class Nimbus\Auth\OAuth\SocialIdentity
 final readonly class Nimbus\Auth\OAuth\SocialLogin
 ```
 
+### Constants
+
+- `BINDING_COOKIE = "nimbus_oauth_state"`
+
 ### Methods
 
-- `public __construct(array $providers, Nimbus\Auth\OAuth\OAuthStateStore $states, Nimbus\Auth\OAuth\SocialUserResolver $users, Nimbus\Auth\LoginTokenIssuer $tokens, array $abilities = ["*"], int $stateTtlSeconds = 600, ?Closure $clock = null): mixed`
-- `public authorizationUrl(string $provider, array $scopes = []): array`
-- `public callback(string $provider, string $state, string $code): array`
+- `public __construct(array $providers, Nimbus\Auth\OAuth\OAuthStateStore $states, Nimbus\Auth\OAuth\SocialUserResolver $users, Nimbus\Auth\LoginTokenIssuer $tokens, array $abilities = ["*"], int $stateTtlSeconds = 600, ?Closure $clock = null, bool $bindStateToClient = true, bool $secureCookie = true): mixed`
+- `public authorizationUrl(string $provider, array $scopes = [], ?string $binding = null): array`
+- `public callback(string $provider, string $state, string $code, ?string $binding = null): array`
 - `public providers(): array`
 - `public routes(Nimbus\App $app, string $path = "/auth/oauth", array $middleware = []): void`
 
@@ -855,8 +862,9 @@ final readonly class Nimbus\Auth\PasswordResets
 
 ### Methods
 
-- `public __construct(Nimbus\Auth\AuthUserProvider $users, Nimbus\Auth\OneTimeTokens $tokens, Nimbus\Notifications\NotificationDispatcher $notifications, string $resetUrl, int $ttlSeconds = 3600, int $throttleSeconds = 60, int $minimumPasswordLength = 8, ?Closure $notification = null, ?Closure $afterReset = null, ?array $revoke = null): mixed`
+- `public __construct(Nimbus\Auth\AuthUserProvider $users, Nimbus\Auth\OneTimeTokens $tokens, Nimbus\Notifications\NotificationDispatcher $notifications, string $resetUrl, int $ttlSeconds = 3600, int $throttleSeconds = 60, int $minimumPasswordLength = 8, ?Closure $notification = null, ?Closure $afterReset = null, ?array $revoke = null, ?Nimbus\Jobs\JobDispatcher $queue = null): mixed`
 - `public assertPassword(string $password): void`
+- `public requestResetLink(string $email): void`
 - `public reset(string $token, string $password): bool`
 - `public sendResetLink(string $email): bool`
 
@@ -963,7 +971,7 @@ final readonly class Nimbus\Auth\RefreshTokens implements Nimbus\Auth\RevokesCre
 
 ### Methods
 
-- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, int $ttlSeconds = 2592000, string $prefix = "nbr_", ?string $connection = null, ?Closure $clock = null): mixed`
+- `public __construct(Arcano\Database\DatabaseInterface|Nimbus\Database\ArcanoDatabaseProvider $database, int $ttlSeconds = 2592000, string $prefix = "nbr_", ?string $connection = null, ?Closure $clock = null, ?int $familyLifetimeSeconds = 2592000): mixed`
 - `public issue(string $subject, array $abilities = ["*"]): Nimbus\Auth\NewRefreshToken`
 - `public prune(int $graceSeconds = 86400): int`
 - `public revoke(string $plainTextToken): bool`
@@ -997,6 +1005,24 @@ abstract interface Nimbus\Auth\RevokesCredentials
 ### Methods
 
 - `public revokeAll(string $subject): int`
+
+## `Nimbus\Auth\SendPasswordResetLink`
+
+```php
+final readonly class Nimbus\Auth\SendPasswordResetLink implements Nimbus\Jobs\SerializableJob
+```
+
+### Properties
+
+- `public readonly string $email`
+
+### Methods
+
+- `public __construct(string $email): mixed`
+- `public static fromJobPayload(array $payload): self`
+- `public handle(Nimbus\Auth\PasswordResets $passwords): void`
+- `public static jobName(): string`
+- `public toJobPayload(): array`
 
 ## `Nimbus\Auth\SessionAuthenticator`
 
@@ -1730,6 +1756,7 @@ final readonly class Nimbus\Http\ClientIpResolver
 
 - `public __construct(array $trustedProxies = []): mixed`
 - `public resolve(Pam\Http\Request $request): string`
+- `public trusts(string $address): bool`
 
 ## `Nimbus\Http\Cookie`
 
@@ -2381,7 +2408,7 @@ final readonly class Nimbus\Middleware\IdempotencyMiddleware implements Pam\Cont
 
 ### Methods
 
-- `public __construct(Nimbus\Idempotency\IdempotencyStore $store, int $ttlSeconds = 86400, bool $required = true): mixed`
+- `public __construct(Nimbus\Idempotency\IdempotencyStore $store, int $ttlSeconds = 86400, bool $required = true, ?Nimbus\Container\Container $container = null): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Middleware\MethodOverrideMiddleware`
@@ -2455,9 +2482,13 @@ final readonly class Nimbus\Middleware\ResponseCacheMiddleware implements Pam\Co
 final readonly class Nimbus\Middleware\SecurityHeadersMiddleware implements Pam\Contracts\Http\MiddlewareInterface
 ```
 
+### Constants
+
+- `DEFAULT_CSP = "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"`
+
 ### Methods
 
-- `public __construct(bool $hsts = true): mixed`
+- `public __construct(bool $hsts = true, array $trustedProxies = [], ?string $contentSecurityPolicy = null, bool $trustForwardedProto = false): mixed`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Middleware\StartSessionMiddleware`
@@ -3370,6 +3401,22 @@ abstract interface Nimbus\RateLimit\RateLimitStore
 
 - `public consume(string $key, int $requestsPerSecond, int $capacity, float $now): Nimbus\RateLimit\RateLimitDecision`
 
+## `Nimbus\RateLimit\SharedTableRateLimitStore`
+
+```php
+final class Nimbus\RateLimit\SharedTableRateLimitStore implements Nimbus\RateLimit\RateLimitStore
+```
+
+### Constants
+
+- `DEFAULT_TABLE = "nimbus_rate_limit"`
+
+### Methods
+
+- `public __construct(?Pam\Shared\Table $table = null, int $rows = 65536, float $idleTtlSeconds = 300, string $name = "nimbus_rate_limit"): mixed`
+- `public static available(): bool`
+- `public consume(string $key, int $requestsPerSecond, int $capacity, float $now): Nimbus\RateLimit\RateLimitDecision`
+
 ## `Nimbus\Redis\Connection`
 
 ```php
@@ -3839,12 +3886,13 @@ final readonly class Nimbus\Security\Crypt
 
 ### Methods
 
-- `public __construct(string $key): mixed`
+- `public __construct(string $key, array $previousKeys = []): mixed`
 - `public decrypt(string $payload): string`
 - `public encrypt(string $plaintext): string`
 - `public static fromEnvironment(): self`
 - `public static generateKey(): string`
 - `public static keyFromEnvironment(): string`
+- `public static previousKeysFromEnvironment(): array`
 
 ## `Nimbus\Security\DecryptException`
 
@@ -4149,9 +4197,13 @@ final class Nimbus\Storage\StorageManager
 final readonly class Nimbus\Storage\StorageRoutes
 ```
 
+### Constants
+
+- `DEFAULT_INLINE_TYPES = ["image/png","image/jpeg","image/gif","image/webp","image/avif","application/pdf","audio/mpeg","audio/ogg","video/mp4","video/webm","text/plain"]`
+
 ### Methods
 
-- `public __construct(Nimbus\Storage\StorageManager $storage): mixed`
+- `public __construct(Nimbus\Storage\StorageManager $storage, array $inlineTypes = ["image/png","image/jpeg","image/gif","image/webp","image/avif","application/pdf","audio/mpeg","audio/ogg","video/mp4","video/webm","text/plain"], bool $allowActiveContent = false): mixed`
 - `public download(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 - `public static downloadPath(string $path): string`
 - `public register(Nimbus\App $app, string $path): void`
@@ -4753,6 +4805,7 @@ final class Nimbus\View\ViewFactory
 ### Constants
 
 - `EXTENSION = ".nim.php"`
+- `INLINE_CACHE_LIMIT = 256`
 
 ### Methods
 
@@ -4764,6 +4817,7 @@ final class Nimbus\View\ViewFactory
 - `public static default(): self`
 - `public static evaluate(string $code, string $template): Closure`
 - `public exists(string $view): bool`
+- `public inlineCacheSize(): int`
 - `public make(string $view, array $data = []): Nimbus\View\View`
 - `public path(string $view): string`
 - `public render(string $view, array $data = []): string`

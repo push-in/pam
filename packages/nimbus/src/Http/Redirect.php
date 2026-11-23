@@ -39,7 +39,12 @@ final readonly class Redirect implements Responsable
             $parts = parse_url($referer);
             if (is_array($parts) && ($parts['host'] ?? null) !== null
                 && strtolower(($parts['host']) . (isset($parts['port']) ? ':' . $parts['port'] : '')) === strtolower($host)) {
-                return new self(($parts['path'] ?? '/') . (isset($parts['query']) ? '?' . $parts['query'] : ''), $status);
+                $path = $parts['path'] ?? '/';
+                // `//evil.test` or `/\evil.test` would be read by the browser as another host.
+                if ($path === '' || $path[0] !== '/' || (isset($path[1]) && ($path[1] === '/' || $path[1] === '\\'))) {
+                    return new self($fallback, $status);
+                }
+                return new self($path . (isset($parts['query']) ? '?' . $parts['query'] : ''), $status);
             }
         }
         return new self($fallback, $status);

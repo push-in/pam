@@ -12,6 +12,11 @@ use Nimbus\Database\ArcanoDatabaseProvider;
  * `rotate()` spends the presented token and issues the next one of the same family; presenting
  * a spent token again revokes the family (reuse detection), which logs out a thief and the
  * victim alike. Only the SHA-256 of each 256-bit secret is stored.
+ *
+ * A family also has an absolute lifetime (`$familyLifetimeSeconds`, 30 days by default, null for
+ * none): rotation never extends a token past it, so a stolen token that keeps being rotated
+ * still dies and the user signs in again. The family identifier records when it started;
+ * families issued before this limit existed keep rotating without it.
  */
 final readonly class RefreshTokens implements RevokesCredentials
 {
@@ -31,9 +36,13 @@ final readonly class RefreshTokens implements RevokesCredentials
         private string $prefix = 'nbr_',
         ?string $connection = null,
         ?\Closure $clock = null,
+        private ?int $familyLifetimeSeconds = 2_592_000,
     ) {
         if ($ttlSeconds < 60 || $ttlSeconds > 31_536_000 || preg_match('/^[A-Za-z0-9_-]{0,16}$/D', $prefix) !== 1) {
             throw new \InvalidArgumentException('Refresh token TTL must be one minute to one year, with a short prefix.');
+        }
+        if ($familyLifetimeSeconds !== null && ($familyLifetimeSeconds < 60 || $familyLifetimeSeconds > 31_536_000)) {
+            throw new \InvalidArgumentException('The refresh token family lifetime must be one minute to one year.');
         }
         $this->database = new AuthDatabase($database, $connection, $clock);
     }
@@ -48,7 +57,9 @@ final readonly class RefreshTokens implements RevokesCredentials
         if ($subject === '' || strlen($subject) > 191) {
             throw new \InvalidArgumentException('Refresh token subject must have 1 to 191 characters.');
         }
-        return $this->insert($this->database->db(), AuthDatabase::identifier(), $subject, Abilities::normalize($abilities));
+        // `t` + the start time in hex + 48 random bits: 23 characters, like the 24-character column.
+        $family = sprintf('t%010x', $this->database->now()) . bin2hex(random_bytes(6));
+        return $this->insert($this->database->db(), $family, $subject, Abilities::normalize($abilities));
     }
 
     /**
@@ -66,7 +77,7 @@ final readonly class RefreshTokens implements RevokesCredentials
             $this->reused($row);
         }
         $now = $this->database->now();
-        if ($row['expires_at'] <= $now) {
+        if ($row['expires_at'] <= $now || $this->familyEndsAt($row['family_id']) <= $now) {
             return null;
         }
         $db = $this->database->db();
@@ -145,6 +156,15 @@ final readonly class RefreshTokens implements RevokesCredentials
         ];
     }
 
+    /** When the family stops rotating: its start plus the family lifetime (PHP_INT_MAX without one). */
+    private function familyEndsAt(string $familyId): int
+    {
+        if ($this->familyLifetimeSeconds === null || preg_match('/^t([0-9a-f]{10})[0-9a-f]{12}$/D', $familyId, $match) !== 1) {
+            return PHP_INT_MAX;
+        }
+        return (int) hexdec($match[1]) + $this->familyLifetimeSeconds;
+    }
+
     /**
      * @param array{family_id: string, subject: string} $row
      * @return never
@@ -161,7 +181,7 @@ final readonly class RefreshTokens implements RevokesCredentials
         $id = AuthDatabase::identifier();
         $secret = AuthDatabase::secret();
         $now = $this->database->now();
-        $expiresAt = $now + $this->ttlSeconds;
+        $expiresAt = min($now + $this->ttlSeconds, $this->familyEndsAt($familyId));
         $db->insert(self::TABLE)->values([
             'id' => $id,
             'family_id' => $familyId,

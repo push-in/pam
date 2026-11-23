@@ -29,6 +29,12 @@ final class ViewFactory
     /** @var array<string, array{string, \Closure(Renderer, array<string, mixed>): string, int}> */
     private array $compiled = [];
 
+    /** Compiled renderString() sources kept at once. */
+    public const int INLINE_CACHE_LIMIT = 256;
+
+    /** @var array<string, true> Keys of inline sources in `$compiled`, least recently used first. */
+    private array $inline = [];
+
     /** @var array<string, array{'class'|'view', string}> */
     private array $components = [];
 
@@ -112,15 +118,33 @@ final class ViewFactory
     /**
      * Renders template source that is not in a file (tests, e-mails built at runtime).
      *
+     * The source is compiled to PHP and evaluated: it must come from the application, never from
+     * users (a user-editable template is remote code execution). Compiled sources are kept in an
+     * LRU of INLINE_CACHE_LIMIT entries, so varying sources cannot grow the worker's memory.
+     *
      * @param array<string, mixed> $data
      */
     public function renderString(string $source, array $data = []): string
     {
         $key = 'string:' . hash('xxh128', $source);
-        if (!isset($this->compiled[$key])) {
+        if (isset($this->compiled[$key])) {
+            // Most recently used last.
+            unset($this->inline[$key]);
+        } else {
             $this->compiled[$key] = ['inline', self::evaluate(Compiler::compile($source, 'inline')->code, 'inline'), 0];
+            while (count($this->inline) >= self::INLINE_CACHE_LIMIT) {
+                $oldest = array_key_first($this->inline);
+                unset($this->inline[$oldest], $this->compiled[$oldest]);
+            }
         }
+        $this->inline[$key] = true;
         return (new Renderer($this, $this->container))->render($key, $data);
+    }
+
+    /** How many compiled inline sources are cached. */
+    public function inlineCacheSize(): int
+    {
+        return count($this->inline);
     }
 
     public function exists(string $view): bool
