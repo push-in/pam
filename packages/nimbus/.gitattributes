@@ -1,0 +1,11 @@
+# Kept out of the Composer dist archive and out of the copy a Composer path repository
+# makes with "symlink": false (Composer honors export-ignore there; composer.json
+# "archive.exclude" lists the same paths for `composer archive`).
+/.build          export-ignore
+/.gitattributes  export-ignore
+/.github       export-ignore
+/benchmarks    export-ignore
+/phpstan.neon  export-ignore
+/phpunit.xml   export-ignore
+/tests         export-ignore
+/vendor        export-ignore

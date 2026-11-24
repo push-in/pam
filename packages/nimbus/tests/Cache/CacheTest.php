@@ -10,7 +10,6 @@ use Nimbus\Cache\Repository;
 use Nimbus\Cache\Store;
 use Nimbus\Cache\TaggedCache;
 use Nimbus\Cache\TagSet;
-use Nimbus\Redis\Connection;
 use Nimbus\Redis\RedisCacheStore;
 use Nimbus\Tests\Redis\SocketConnection;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -142,48 +141,5 @@ final class CacheTest extends TestCase
         self::assertSame(2, Cache::increment('plain'));
         Cache::forget('plain');
         self::assertFalse(Cache::has('plain'));
-    }
-}
-
-/** Enough of Redis for the cache store: strings with expiry, NX, INCRBY, DEL/UNLINK and SCAN. */
-final class FakeRedis implements Connection
-{
-    /** @var array<string, string> */
-    private array $values = [];
-
-    public function command(array $arguments): mixed
-    {
-        $command = strtoupper((string) $arguments[0]);
-        $key = (string) ($arguments[1] ?? '');
-        switch ($command) {
-            case 'GET':
-                return $this->values[$key] ?? null;
-            case 'SET':
-                if (in_array('NX', $arguments, true) && isset($this->values[$key])) {
-                    return null;
-                }
-                $this->values[$key] = (string) $arguments[2];
-                return 'OK';
-            case 'INCRBY':
-                $value = (int) ($this->values[$key] ?? 0) + (int) $arguments[2];
-                $this->values[$key] = (string) $value;
-                return $value;
-            case 'DEL':
-            case 'UNLINK':
-                $deleted = 0;
-                foreach (array_slice($arguments, 1) as $name) {
-                    if (isset($this->values[(string) $name])) {
-                        unset($this->values[(string) $name]);
-                        ++$deleted;
-                    }
-                }
-                return $deleted;
-            case 'SCAN':
-                $prefix = rtrim((string) $arguments[3], '*');
-                $keys = array_values(array_filter(array_map('strval', array_keys($this->values)), static fn (string $name): bool => str_starts_with($name, $prefix)));
-                return ['0', $keys];
-            default:
-                throw new \LogicException("Unsupported command {$command}.");
-        }
     }
 }

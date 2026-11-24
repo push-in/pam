@@ -64,12 +64,19 @@ final readonly class PendingRoute
         return $this;
     }
 
-    /** @param MiddlewareInterface|callable|class-string<MiddlewareInterface> $middleware */
+    /**
+     * @param MiddlewareInterface|callable|class-string<MiddlewareInterface>|non-empty-string $middleware
+     *        A middleware, its class, or Laravel's `throttle:name` / `throttle:3,1` alias.
+     */
     public function middleware(object|callable|string $middleware): self
     {
         if (is_string($middleware)) {
-            if (is_a($middleware, MiddlewareInterface::class, true)) {
+            if (str_starts_with($middleware, 'throttle:')) {
+                $middleware = Middleware\ThrottleRequestsMiddleware::fromAlias($this->container(), $middleware);
+            } elseif (is_a($middleware, MiddlewareInterface::class, true)) {
                 $middleware = new ContainerMiddleware($this->container(), $middleware);
+            } elseif (!is_callable($middleware)) {
+                throw new \InvalidArgumentException("Route middleware {$middleware} is not a middleware class or alias.");
             }
         }
         if (is_object($middleware) && !$middleware instanceof MiddlewareInterface && !method_exists($middleware, '__invoke')) {
@@ -102,6 +109,20 @@ final readonly class PendingRoute
     public function signed(): self
     {
         return $this->middleware(Middleware\ValidateSignatureMiddleware::class);
+    }
+
+    /** Applies the named limiter registered with `RateLimiter::for()` (Laravel `throttle:name`). */
+    public function rateLimit(string $limiter): self
+    {
+        return $this->middleware(Middleware\ThrottleRequestsMiddleware::named($this->container(), $limiter));
+    }
+
+    /**
+     * `$maxAttempts` requests per `$decayMinutes` per principal or client IP (Laravel `throttle:3,1`).
+     */
+    public function throttle(int $maxAttempts, int $decayMinutes = 1): self
+    {
+        return $this->middleware(Middleware\ThrottleRequestsMiddleware::perMinutes($this->container(), $maxAttempts, $decayMinutes));
     }
 
     private function authenticates(): bool

@@ -9,6 +9,24 @@ $router->get('health', fn (Request $request, Response $response) => $response->j
 $router->post('events', fn (Request $request, Response $response) => $response->json(['queued' => true], 202));
 ```
 
+Uma action que devolve array (ou `JsonSerializable`) responde JSON com o status que ela ou um middleware definiu (200 por padrão):
+
+```php
+$router->get('health', fn () => ['ok' => true]);
+```
+
+### Codificação do JSON
+
+O Nimbus escreve JSON com `JSON_UNESCAPED_UNICODE`, o padrão do runtime. Um app portado do Laravel, cujos clientes ou caches comparam bytes, troca para as flags do `JsonResponse` do Laravel uma vez no `bootstrap/app.php`:
+
+```php
+use Nimbus\Http\JsonEncoding;
+
+$app->jsonEncoding(JsonEncoding::LARAVEL); // "S\u00e3o Paulo", "https:\/\/..."
+```
+
+A configuração vale para arrays devolvidos pelas actions, `JsonResource`, coleções e corpos de erro. `JsonEncoding::respond($response, $dados, 201)` escreve uma resposta com as mesmas flags; `$response->json()` do runtime mantém as flags dele.
+
 ## `JsonResource`
 
 Um recurso transforma um objeto (normalmente uma entidade Arcano) no JSON da API e embrulha o resultado em `data`:

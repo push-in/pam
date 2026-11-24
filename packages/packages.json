@@ -56,6 +56,13 @@
             "repository": "nimbus-skeleton",
             "deploySecret": "NIMBUS_SKELETON_DEPLOY_KEY",
             "description": "Starter API application for Nimbus on the PAM runtime."
+        },
+        {
+            "name": "pushinbr/nimbus-rector",
+            "path": "packages/nimbus-rector",
+            "repository": "nimbus-rector",
+            "deploySecret": "NIMBUS_RECTOR_DEPLOY_KEY",
+            "description": "Rector rules that rewrite the mechanical parts of a Laravel application for Nimbus."
         }
     ]
 }

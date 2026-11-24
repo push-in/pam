@@ -30,11 +30,17 @@ final class RouteRegistrar
         return $clone;
     }
 
-    /** @param MiddlewareInterface|callable|class-string<MiddlewareInterface>|list<MiddlewareInterface|callable|class-string<MiddlewareInterface>> $middleware */
+    /**
+     * @param MiddlewareInterface|callable|class-string<MiddlewareInterface>|non-empty-string|list<MiddlewareInterface|callable|class-string<MiddlewareInterface>|non-empty-string> $middleware
+     *        Middleware, their classes, or Laravel's `throttle:name` / `throttle:3,1` alias.
+     */
     public function middleware(MiddlewareInterface|callable|string|array $middleware): self
     {
         $clone = clone $this;
         foreach (is_array($middleware) ? $middleware : [$middleware] as $layer) {
+            if (is_string($layer) && str_starts_with($layer, 'throttle:')) {
+                $layer = Middleware\ThrottleRequestsMiddleware::fromAlias($this->app->container(), $layer);
+            }
             if (is_string($layer) && is_a($layer, MiddlewareInterface::class, true)) {
                 $layer = new ContainerMiddleware($this->app->container(), $layer);
             }
@@ -56,6 +62,18 @@ final class RouteRegistrar
     public function can(string $ability, ?string $subject = null): self
     {
         return $this->auth()->middleware(new Middleware\AuthorizeMiddleware($this->app->container(), $ability, $subject));
+    }
+
+    /** Routes registered through the returned registrar use the named limiter (see `PendingRoute::rateLimit()`). */
+    public function rateLimit(string $limiter): self
+    {
+        return $this->middleware(Middleware\ThrottleRequestsMiddleware::named($this->app->container(), $limiter));
+    }
+
+    /** Each route registered through the returned registrar allows `$maxAttempts` per `$decayMinutes`. */
+    public function throttle(int $maxAttempts, int $decayMinutes = 1): self
+    {
+        return $this->middleware(Middleware\ThrottleRequestsMiddleware::perMinutes($this->app->container(), $maxAttempts, $decayMinutes));
     }
 
     /** Routes registered through the returned registrar require a valid URL signature. */

@@ -8,6 +8,56 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 Productivity parity with Laravel. Every addition is optional: the production dependency set is
 still `php` and `pushinbr/pam-contracts`.
 
+### Added: gaps found porting `buck-log-intelligence` (#213 to #223)
+
+- `Http\JsonEncoding` and `App::jsonEncoding()`: the `json_encode()` flags of every JSON body
+  Nimbus writes (`JsonEncoding::LARAVEL` for the bytes of Laravel's `JsonResponse`;
+  `JSON_UNESCAPED_UNICODE` stays the default). Actions may return arrays or `JsonSerializable`,
+  answered as JSON with the status already set on the response (#213).
+- `App::renderErrorsWith(Http\ErrorRenderer)`: one renderer for every `HttpException`, the router
+  404/405, validation 422 and the 500 of unhandled exceptions without `onError()`;
+  `ProblemDetailsRenderer` (default) and `LaravelErrorRenderer` (`{"message"}`, `{"message",
+  "errors"}`, `Server Error`). The renderer is bound as `ErrorRenderer::class` (#214).
+- `timezone` connection option, from `DB_TIMEZONE` or `APP_TIMEZONE` in
+  `DatabaseConfig::fromEnvironment()`: the pgsql session `TimeZone` (set at connect), the mysql
+  `time_zone`, and the zone the Arcano `datetime` typecast reads naive timestamps in (#215).
+- `RateLimit\RateLimiter` and `RateLimit\Limit`: named limiters (`for('buck', fn ($request) =>
+  Limit::perMinute(120)->by($id))`), fixed windows per second/minute/hour/day, `attempt()`,
+  `hit()`, `tooManyAttempts()`, `availableIn()`, `clear()`; `ThrottleRequestsMiddleware` with
+  `PendingRoute::rateLimit('name')`, `throttle(3, 1)`, the `throttle:name` and `throttle:3,1`
+  aliases, the same on `RouteRegistrar`, and Laravel's `X-RateLimit-Limit`/`-Remaining`,
+  `Retry-After` and `X-RateLimit-Reset` headers. Counters live in the bound cache repository (#216).
+- `ArcanoManager::firstOrCreate()`, `updateOrCreate()` and `createOrFirst()`: race-safe under a
+  unique index (the losing insert fails inside a savepoint and the winner's row is returned) (#217).
+- `Cache::lock()`/`Repository::lock()` and `restoreLock()`: `Cache\Lock` with `get(fn)`,
+  `block($seconds, fn)` (`LockTimeoutException`), `release()`, `forceRelease()` and owner tokens;
+  `RedisLock` (`SET NX EX`, Lua compare-and-delete) for `RedisCacheStore`, `CacheLock` over `add()`
+  for other stores. `Scheduling\CacheSchedulerLock` schedules over the same locks and
+  `RedisSchedulerLock` now uses `RedisLock` (#218).
+- `Http\RequestContext`: request-scoped values from middleware to actions (`put($account)` typed,
+  `set('key', $value)` keyed). An instance in the request scope wins over a route segment of the
+  same name when resolving an action parameter (#219).
+- `bin/nimbus` on `symfony/console` (suggested): `migrate`, `migrate:status`, `migrate:rollback`,
+  `db:seed`, `schema:cache`, `schema:clear`, `schedule:list` and `tinker` over
+  `bootstrap/app.php` (#220); application commands as `Console\Command` with Laravel
+  `$signature`/`handle()` injection, discovered in `app/Console/Commands` or registered with
+  `App::commands()`; `Console\Kernel::call()`; `Schedule::command('name --flag')` (#221).
+- `Validation\Validator` behind `FormRequest`: pipe-string rules, `nullable`, `sometimes`, `bail`,
+  `required_if`/`_unless`/`_with`/`_without`, `numeric`, `date`, `date_format`, `after`/`before`,
+  `min`/`max`/`between`/`size`, `in`/`not_in`, `regex`, `confirmed`, `url`, `uuid` and more,
+  `exists`/`unique` over Arcano (`ArcanoPresenceVerifier`, `Rule::exists()`, `Rule::unique()->ignore()`),
+  `Rule::in()`, dot paths and `items.*` wildcards, `messages()` and `attributes()`, with Laravel's
+  English messages. The PHPStan extension reads pipe rules and `nullable` (#222).
+- `packages/nimbus/.gitattributes` and `archive.exclude`: a Composer path repository with
+  `symlink: false` no longer copies `vendor/`, `.build/` or `tests/` into the app (#223).
+
+### Changed
+
+- `FormRequest` validates the query string together with the body (the body wins), as Laravel;
+  `integer`, `numeric` and `boolean` accept string values and `validated()` returns them cast.
+  Non-implicit rules skip missing fields and empty strings, as in Laravel.
+- `RateLimitMiddleware` stays the per-second token bucket; use `throttle()` for Laravel windows.
+
 ### Added
 
 - `Nimbus\Http\Client`: a fluent HTTP client (`Http::withToken()->timeout()->retry()->get()`,

@@ -95,7 +95,7 @@ Cada tag tem uma versão aleatória guardada no próprio store (`tag:<nome>:vers
 
 ## Fachada `Cache`
 
-`Nimbus\Cache\Cache` expõe os mesmos métodos de forma estática (`get`, `has`, `put`, `forever`, `add`, `remember`, `pull`, `increment`, `forget`, `flush`, `tags`) sobre o repositório de `Cache::useRepository()`. Sem repositório configurado, usa um `MemoryStore` do worker.
+`Nimbus\Cache\Cache` expõe os mesmos métodos de forma estática (`get`, `has`, `put`, `forever`, `add`, `remember`, `pull`, `increment`, `forget`, `flush`, `tags`, `lock`, `restoreLock`) sobre o repositório de `Cache::useRepository()`. Sem repositório configurado, usa um `MemoryStore` do worker.
 
 ```php
 use Nimbus\Cache\Cache;
@@ -105,6 +105,33 @@ Cache::tags(['user:' . $id])->flush();
 ```
 
 Em serviços, prefira injetar `Repository`: a dependência fica visível e o teste troca o store pelo construtor.
+
+## Locks
+
+`lock()` dá um lock atômico com dono, como o `Cache::lock()` do Laravel. No `RedisCacheStore` é `SET NX EX` com liberação por Lua (só o dono libera), compartilhado entre workers e servidores; nos outros stores usa o `add()` do store (o `MemoryStore` vale para um worker).
+
+```php
+use Nimbus\Cache\Cache;
+use Nimbus\Cache\LockTimeoutException;
+
+// roda sob o lock e libera no fim; false se outro dono tem o lock
+Cache::lock('ask:' . $accountId, 30)->get(fn () => $this->ask($accountId));
+
+// espera até 5 s pelo lock
+try {
+    Cache::lock('heartbeat', 10)->block(5, fn () => $this->beat());
+} catch (LockTimeoutException) {
+    // outro processo segurou o lock por mais de 5 s
+}
+
+// liberar em outro processo (um job)
+$lock = $cache->lock('report', 120);
+$lock->get();
+$queue->dispatch(new BuildReport($lock->owner()));
+// no job: $cache->restoreLock('report', $owner)->release();
+```
+
+`$seconds = 0` mantém o lock até `release()`. `block()` espera com `Pam\Async\delay()` dentro do PAM, sem travar as outras requisições do worker. O agendador usa o mesmo mecanismo com `CacheSchedulerLock($repository)`; o `RedisSchedulerLock` usa `RedisLock`.
 
 ## Testes
 

@@ -60,6 +60,26 @@ Assinatura: `new HttpException(int $status, ProblemCode $problemCode, string $me
 
 Em apps web com sessão, uma `ValidationException` numa requisição HTML vira redirect de volta com os erros e o input antigo na sessão (veja [Sessão](./sessao.md)).
 
+## Formato do Laravel
+
+Clientes escritos contra uma API Laravel esperam `{"message": "..."}`. `renderErrorsWith()` troca o formato de todos os erros HTTP, incluindo o 404 e o 405 do roteador, o 422 de validação, o 429 do `throttle` e o 500 de exceções sem `onError()`:
+
+```php
+use Nimbus\Http\JsonEncoding;
+use Nimbus\Http\LaravelErrorRenderer;
+
+$app->renderErrorsWith(new LaravelErrorRenderer());
+$app->jsonEncoding(JsonEncoding::LARAVEL); // mesmos bytes do JsonResponse: unicode e / escapados
+```
+
+```json
+{"message": "Not Found"}
+{"message": "The name field is required. (and 1 more error)", "errors": {"name": ["The name field is required."], "email": ["The email field must be a valid email address."]}}
+{"message": "Server Error"}
+```
+
+O problem+json continua o padrão (`ProblemDetailsRenderer`). Um formato próprio implementa `Nimbus\Http\ErrorRenderer::render(HttpException $error, Request $request, Response $response): Response`; o renderer atual fica no container como `ErrorRenderer::class`.
+
 ## Tratador próprio
 
 `$app->onError()` substitui o tratamento das exceções que não são `HttpException`. Veja [Controllers](./controllers.md#tratamento-de-erros).

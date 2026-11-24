@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "9a99354ee1f365fba86cb693251b3402",
+    "content-hash": "abe304c2e9d2b61e32e0382083fcd8e6",
     "packages": [
         {
             "name": "pushinbr/pam-contracts",

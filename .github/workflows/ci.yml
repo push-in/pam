@@ -68,6 +68,7 @@ jobs:
           scripts/package-release.sh validate
           scripts/package-release.sh validate-package-tag pushinbr/nimbus v0.1.0
           scripts/package-release.sh validate-package-tag pushinbr/nimbus-skeleton v0.1.0
+          scripts/package-release.sh validate-package-tag pushinbr/nimbus-rector v0.1.0
       - name: Install locked Composer dependencies
         run: |
           composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist

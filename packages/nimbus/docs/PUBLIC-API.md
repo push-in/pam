@@ -70,7 +70,11 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Broadcasting\ShouldBroadcast`](#nimbusbroadcastingshouldbroadcast)
 - [`Nimbus\Broadcasting\ShouldBroadcastNow`](#nimbusbroadcastingshouldbroadcastnow)
 - [`Nimbus\Cache\Cache`](#nimbuscachecache)
+- [`Nimbus\Cache\CacheLock`](#nimbuscachecachelock)
 - [`Nimbus\Cache\CacheRecord`](#nimbuscachecacherecord)
+- [`Nimbus\Cache\Lock`](#nimbuscachelock)
+- [`Nimbus\Cache\LockProvider`](#nimbuscachelockprovider)
+- [`Nimbus\Cache\LockTimeoutException`](#nimbuscachelocktimeoutexception)
 - [`Nimbus\Cache\MemoryResponseCacheStore`](#nimbuscachememoryresponsecachestore)
 - [`Nimbus\Cache\MemoryStore`](#nimbuscachememorystore)
 - [`Nimbus\Cache\Repository`](#nimbuscacherepository)
@@ -82,6 +86,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Config\ConfigType`](#nimbusconfigconfigtype)
 - [`Nimbus\Config\Configuration`](#nimbusconfigconfiguration)
 - [`Nimbus\Config\ConfigurationException`](#nimbusconfigconfigurationexception)
+- [`Nimbus\Console\Command`](#nimbusconsolecommand)
+- [`Nimbus\Console\Kernel`](#nimbusconsolekernel)
 - [`Nimbus\Console\Tinker`](#nimbusconsoletinker)
 - [`Nimbus\Container\Binding`](#nimbuscontainerbinding)
 - [`Nimbus\Container\BindingLifetime`](#nimbuscontainerbindinglifetime)
@@ -89,6 +95,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Container\ContainerState`](#nimbuscontainercontainerstate)
 - [`Nimbus\Database\ArcanoManager`](#nimbusdatabasearcanomanager)
 - [`Nimbus\Database\ArcanoMigrationManager`](#nimbusdatabasearcanomigrationmanager)
+- [`Nimbus\Database\ArcanoPresenceVerifier`](#nimbusdatabasearcanopresenceverifier)
 - [`Nimbus\Database\ArcanoSchemaCompiler`](#nimbusdatabasearcanoschemacompiler)
 - [`Nimbus\Database\ArcanoServiceProvider`](#nimbusdatabasearcanoserviceprovider)
 - [`Nimbus\Database\ArcanoTenantMapper`](#nimbusdatabasearcanotenantmapper)
@@ -131,11 +138,16 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Http\Cookie`](#nimbushttpcookie)
 - [`Nimbus\Http\CookieCodec`](#nimbushttpcookiecodec)
 - [`Nimbus\Http\CookieJar`](#nimbushttpcookiejar)
+- [`Nimbus\Http\ErrorRenderer`](#nimbushttperrorrenderer)
 - [`Nimbus\Http\FormData`](#nimbushttpformdata)
 - [`Nimbus\Http\HttpException`](#nimbushttphttpexception)
+- [`Nimbus\Http\JsonEncoding`](#nimbushttpjsonencoding)
 - [`Nimbus\Http\JsonResource`](#nimbushttpjsonresource)
+- [`Nimbus\Http\LaravelErrorRenderer`](#nimbushttplaravelerrorrenderer)
 - [`Nimbus\Http\ProblemCode`](#nimbushttpproblemcode)
+- [`Nimbus\Http\ProblemDetailsRenderer`](#nimbushttpproblemdetailsrenderer)
 - [`Nimbus\Http\Redirect`](#nimbushttpredirect)
+- [`Nimbus\Http\RequestContext`](#nimbushttprequestcontext)
 - [`Nimbus\Http\RequestCookies`](#nimbushttprequestcookies)
 - [`Nimbus\Http\RequestData`](#nimbushttprequestdata)
 - [`Nimbus\Http\ResourceCollection`](#nimbushttpresourcecollection)
@@ -183,6 +195,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Middleware\ResponseCacheMiddleware`](#nimbusmiddlewareresponsecachemiddleware)
 - [`Nimbus\Middleware\SecurityHeadersMiddleware`](#nimbusmiddlewaresecurityheadersmiddleware)
 - [`Nimbus\Middleware\StartSessionMiddleware`](#nimbusmiddlewarestartsessionmiddleware)
+- [`Nimbus\Middleware\ThrottleRequestsMiddleware`](#nimbusmiddlewarethrottlerequestsmiddleware)
 - [`Nimbus\Middleware\TransactionalMiddleware`](#nimbusmiddlewaretransactionalmiddleware)
 - [`Nimbus\Middleware\ValidateSignatureMiddleware`](#nimbusmiddlewarevalidatesignaturemiddleware)
 - [`Nimbus\Middleware\VerifyCsrfTokenMiddleware`](#nimbusmiddlewareverifycsrftokenmiddleware)
@@ -240,13 +253,16 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Profiler\MemoryProfiler`](#nimbusprofilermemoryprofiler)
 - [`Nimbus\Profiler\ProfilerMode`](#nimbusprofilerprofilermode)
 - [`Nimbus\Profiler\RequestProfile`](#nimbusprofilerrequestprofile)
+- [`Nimbus\RateLimit\Limit`](#nimbusratelimitlimit)
 - [`Nimbus\RateLimit\MemoryRateLimitStore`](#nimbusratelimitmemoryratelimitstore)
 - [`Nimbus\RateLimit\RateLimitDecision`](#nimbusratelimitratelimitdecision)
 - [`Nimbus\RateLimit\RateLimitStore`](#nimbusratelimitratelimitstore)
+- [`Nimbus\RateLimit\RateLimiter`](#nimbusratelimitratelimiter)
 - [`Nimbus\Redis\Connection`](#nimbusredisconnection)
 - [`Nimbus\Redis\PamConnection`](#nimbusredispamconnection)
 - [`Nimbus\Redis\RedisCacheStore`](#nimbusredisrediscachestore)
 - [`Nimbus\Redis\RedisIdempotencyStore`](#nimbusredisredisidempotencystore)
+- [`Nimbus\Redis\RedisLock`](#nimbusredisredislock)
 - [`Nimbus\Redis\RedisOAuthStateStore`](#nimbusredisredisoauthstatestore)
 - [`Nimbus\Redis\RedisPool`](#nimbusredisredispool)
 - [`Nimbus\Redis\RedisRateLimitStore`](#nimbusredisredisratelimitstore)
@@ -266,6 +282,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Routing\RouteBindable`](#nimbusroutingroutebindable)
 - [`Nimbus\Runtime\Background`](#nimbusruntimebackground)
 - [`Nimbus\Runtime\Deadline`](#nimbusruntimedeadline)
+- [`Nimbus\Scheduling\CacheSchedulerLock`](#nimbusschedulingcacheschedulerlock)
 - [`Nimbus\Scheduling\DatabaseSchedulerLock`](#nimbusschedulingdatabaseschedulerlock)
 - [`Nimbus\Scheduling\MemorySchedulerLock`](#nimbusschedulingmemoryschedulerlock)
 - [`Nimbus\Scheduling\RedisSchedulerLock`](#nimbusschedulingredisschedulerlock)
@@ -323,11 +340,16 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Validation\Attributes\Url`](#nimbusvalidationattributesurl)
 - [`Nimbus\Validation\Attributes\Uuid`](#nimbusvalidationattributesuuid)
 - [`Nimbus\Validation\EnumRule`](#nimbusvalidationenumrule)
+- [`Nimbus\Validation\ExistsRule`](#nimbusvalidationexistsrule)
 - [`Nimbus\Validation\FormRequest`](#nimbusvalidationformrequest)
+- [`Nimbus\Validation\InRule`](#nimbusvalidationinrule)
 - [`Nimbus\Validation\Input`](#nimbusvalidationinput)
+- [`Nimbus\Validation\PresenceVerifier`](#nimbusvalidationpresenceverifier)
 - [`Nimbus\Validation\Rule`](#nimbusvalidationrule)
+- [`Nimbus\Validation\UniqueRule`](#nimbusvalidationuniquerule)
 - [`Nimbus\Validation\ValidationException`](#nimbusvalidationvalidationexception)
 - [`Nimbus\Validation\ValidationRule`](#nimbusvalidationvalidationrule)
+- [`Nimbus\Validation\Validator`](#nimbusvalidationvalidator)
 - [`Nimbus\View\AttributeBag`](#nimbusviewattributebag)
 - [`Nimbus\View\Component`](#nimbusviewcomponent)
 - [`Nimbus\View\HtmlString`](#nimbusviewhtmlstring)
@@ -488,6 +510,8 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public __construct(bool $discoverPackages = true, ?Nimbus\Container\Container $container = null): mixed`
 - `public background(): Nimbus\Runtime\Background`
 - `public boot(): self`
+- `public commandClasses(): array`
+- `public commands(array $commands): self`
 - `public container(): Nimbus\Container\Container`
 - `public controller(string $controller, callable $routes): void`
 - `public delete(string $path, array|callable|string $handler): Nimbus\PendingRoute`
@@ -498,6 +522,7 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 - `public handler(callable|object $handler): self`
 - `public head(string $path, array|callable|string $handler): Nimbus\PendingRoute`
+- `public jsonEncoding(int $flags): self`
 - `public listen(int $port, string $host = "127.0.0.1", array $options = []): void`
 - `public middleware(callable|object|string $middleware): self`
 - `public observe(Nimbus\Lifecycle\RequestLifecycleObserver $observer): self`
@@ -509,6 +534,8 @@ final class Nimbus\App implements Pam\Contracts\Http\ApplicationInterface
 - `public prefix(string $prefix): Nimbus\RouteRegistrar`
 - `public provider(Pam\Contracts\Package\ServiceProviderInterface $provider): self`
 - `public put(string $path, array|callable|string $handler): Nimbus\PendingRoute`
+- `public rateLimiter(): Nimbus\RateLimit\RateLimiter`
+- `public renderErrorsWith(Nimbus\Http\ErrorRenderer $renderer): self`
 - `public resource(string $path, string $controller, ?callable $routes = null): void`
 - `public route(string $method, string $path, array|callable|string $handler): self`
 - `public routes(string $file): self`
@@ -1315,12 +1342,27 @@ final class Nimbus\Cache\Cache
 - `public static get(string $key, mixed $default = null): mixed`
 - `public static has(string $key): bool`
 - `public static increment(string $key, int $by = 1): int`
+- `public static lock(string $name, int $seconds = 0, ?string $owner = null): Nimbus\Cache\Lock`
 - `public static pull(string $key, mixed $default = null): mixed`
 - `public static put(string $key, mixed $value, DateTimeInterface|int|null $ttl = null): void`
 - `public static remember(string $key, DateTimeInterface|int|null $ttl, Closure $callback): mixed`
 - `public static repository(): Nimbus\Cache\Repository`
+- `public static restoreLock(string $name, string $owner): Nimbus\Cache\Lock`
 - `public static tags(array|string $tags): Nimbus\Cache\TaggedCache`
 - `public static useRepository(?Nimbus\Cache\Repository $repository): void`
+
+## `Nimbus\Cache\CacheLock`
+
+```php
+final class Nimbus\Cache\CacheLock extends Nimbus\Cache\Lock
+```
+
+### Methods
+
+- `public __construct(Nimbus\Cache\Store $store, string $name, int $seconds = 0, ?string $owner = null): mixed`
+- `public acquire(): bool`
+- `public forceRelease(): void`
+- `public release(): bool`
 
 ## `Nimbus\Cache\CacheRecord`
 
@@ -1336,6 +1378,43 @@ final readonly class Nimbus\Cache\CacheRecord
 ### Methods
 
 - `public __construct(Nimbus\Http\ResponseSnapshot $response, int $expiresAt): mixed`
+
+## `Nimbus\Cache\Lock`
+
+```php
+abstract class Nimbus\Cache\Lock
+```
+
+### Methods
+
+- `public __construct(string $name, int $seconds = 0, ?string $owner = null): mixed`
+- `public acquire(): bool`
+- `public betweenBlockedAttemptsSleepFor(int $milliseconds): static`
+- `public block(int $seconds, ?Closure $callback = null): mixed`
+- `public forceRelease(): void`
+- `public get(?Closure $callback = null): mixed`
+- `public isOwnedBy(?string $owner): bool`
+- `public isOwnedByCurrentProcess(): bool`
+- `public name(): string`
+- `public owner(): string`
+- `public release(): bool`
+
+## `Nimbus\Cache\LockProvider`
+
+```php
+abstract interface Nimbus\Cache\LockProvider
+```
+
+### Methods
+
+- `public lock(string $name, int $seconds = 0, ?string $owner = null): Nimbus\Cache\Lock`
+- `public restoreLock(string $name, string $owner): Nimbus\Cache\Lock`
+
+## `Nimbus\Cache\LockTimeoutException`
+
+```php
+final class Nimbus\Cache\LockTimeoutException extends RuntimeException implements Stringable, Throwable
+```
 
 ## `Nimbus\Cache\MemoryResponseCacheStore`
 
@@ -1383,10 +1462,12 @@ class Nimbus\Cache\Repository
 - `public get(string $key, mixed $default = null): mixed`
 - `public has(string $key): bool`
 - `public increment(string $key, int $by = 1): int`
+- `public lock(string $name, int $seconds = 0, ?string $owner = null): Nimbus\Cache\Lock`
 - `public pull(string $key, mixed $default = null): mixed`
 - `public put(string $key, mixed $value, DateTimeInterface|int|null $ttl = null): void`
 - `public remember(string $key, DateTimeInterface|int|null $ttl, Closure $callback): mixed`
 - `public rememberForever(string $key, Closure $callback): mixed`
+- `public restoreLock(string $name, string $owner): Nimbus\Cache\Lock`
 - `public store(): Nimbus\Cache\Store`
 - `public tags(array|string $tags): Nimbus\Cache\TaggedCache`
 
@@ -1522,6 +1603,38 @@ final class Nimbus\Config\ConfigurationException extends RuntimeException implem
 
 - `public __construct(array $errors): mixed`
 
+## `Nimbus\Console\Command`
+
+```php
+abstract class Nimbus\Console\Command extends Symfony\Component\Console\Command\Command implements Symfony\Component\Console\Command\SignalableCommandInterface
+```
+
+### Methods
+
+- `public __construct(): mixed`
+- `public withApp(?Nimbus\App $app): static`
+
+## `Nimbus\Console\Kernel`
+
+```php
+final class Nimbus\Console\Kernel
+```
+
+### Constants
+
+- `COMMANDS_DIRECTORY = "app/Console/Commands"`
+- `COMMANDS_NAMESPACE = "App\\Console\\Commands\\"`
+
+### Methods
+
+- `public __construct(?Nimbus\App $app, string $root): mixed`
+- `public app(): Nimbus\App`
+- `public call(string $command, array $parameters = [], ?Symfony\Component\Console\Output\OutputInterface $output = null): int`
+- `public console(): Symfony\Component\Console\Application`
+- `public static main(array $arguments, string $root): int`
+- `public output(): string`
+- `public root(): string`
+
 ## `Nimbus\Console\Tinker`
 
 ```php
@@ -1644,14 +1757,17 @@ final class Nimbus\Database\ArcanoManager implements Nimbus\Transactions\Transac
 ### Methods
 
 - `public __construct(Nimbus\Database\ArcanoDatabaseProvider $databases, Arcano\ORM\SchemaInterface|array $schema, ?Nimbus\Container\Container $container = null): mixed`
+- `public createOrFirst(string $role, array $attributes, array $values = []): object`
 - `public database(UnitEnum|null|string $name = null): Arcano\Database\DatabaseInterface`
 - `public entityManager(): Arcano\ORM\EntityManagerInterface`
+- `public firstOrCreate(string $role, array $attributes, array $values = []): object`
 - `public orm(): Arcano\ORM\ORMInterface`
 - `public protectTenant(string $role, string $column = "tenant_id"): void`
 - `public releaseCurrentRequest(): void`
 - `public repository(string $role): Arcano\ORM\RepositoryInterface`
 - `public select(string $role): Arcano\ORM\Select`
 - `public transaction(callable $operation): mixed`
+- `public updateOrCreate(string $role, array $attributes, array $values = []): object`
 
 ## `Nimbus\Database\ArcanoMigrationManager`
 
@@ -1668,6 +1784,17 @@ final class Nimbus\Database\ArcanoMigrationManager
 - `public rollback(int $steps = 1): array`
 - `public status(): array`
 
+## `Nimbus\Database\ArcanoPresenceVerifier`
+
+```php
+final readonly class Nimbus\Database\ArcanoPresenceVerifier implements Nimbus\Validation\PresenceVerifier
+```
+
+### Methods
+
+- `public __construct(Nimbus\Database\ArcanoManager $arcano): mixed`
+- `public count(string $table, string $column, array $values, array $wheres = [], ?string $ignoreColumn = null, int|null|string $ignoreValue = null, ?string $connection = null): int`
+
 ## `Nimbus\Database\ArcanoSchemaCompiler`
 
 ```php
@@ -1677,6 +1804,7 @@ final readonly class Nimbus\Database\ArcanoSchemaCompiler
 ### Methods
 
 - `public __construct(array|string $directories, ?string $cacheFile = null, bool $refresh = true): mixed`
+- `public cacheFile(): ?string`
 - `public clear(): void`
 - `public compile(Arcano\Database\DatabaseProviderInterface $databases, array $generators = []): array`
 - `public schema(Arcano\Database\DatabaseProviderInterface $databases): array`
@@ -2346,6 +2474,16 @@ final class Nimbus\Http\CookieJar
 - `public queue(Nimbus\Http\Cookie $cookie): self`
 - `public queued(): array`
 
+## `Nimbus\Http\ErrorRenderer`
+
+```php
+abstract interface Nimbus\Http\ErrorRenderer
+```
+
+### Methods
+
+- `public render(Nimbus\Http\HttpException $error, Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+
 ## `Nimbus\Http\FormData`
 
 ```php
@@ -2373,6 +2511,24 @@ class Nimbus\Http\HttpException extends RuntimeException implements Stringable, 
 
 - `public __construct(int $status, Nimbus\Http\ProblemCode $problemCode, string $message, array $details = [], ?Throwable $previous = null): mixed`
 
+## `Nimbus\Http\JsonEncoding`
+
+```php
+final class Nimbus\Http\JsonEncoding
+```
+
+### Constants
+
+- `DEFAULT = 256`
+- `LARAVEL = 0`
+
+### Methods
+
+- `public static encode(mixed $data, ?int $flags = null): string`
+- `public static flags(): int`
+- `public static respond(Pam\Http\Response $response, mixed $data, int $status = 200, ?int $flags = null, string $contentType = "application/json; charset=utf-8"): Pam\Http\Response`
+- `public static use(int $flags): void`
+
 ## `Nimbus\Http\JsonResource`
 
 ```php
@@ -2385,6 +2541,16 @@ abstract readonly class Nimbus\Http\JsonResource implements Nimbus\Http\Responsa
 - `public static collection(Nimbus\Pagination\Page|Traversable|array $resources): Nimbus\Http\ResourceCollection`
 - `public toArray(Pam\Http\Request $request): array`
 - `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+
+## `Nimbus\Http\LaravelErrorRenderer`
+
+```php
+final readonly class Nimbus\Http\LaravelErrorRenderer implements Nimbus\Http\ErrorRenderer
+```
+
+### Methods
+
+- `public render(Nimbus\Http\HttpException $error, Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 
 ## `Nimbus\Http\ProblemCode`
 
@@ -2435,6 +2601,16 @@ final enum Nimbus\Http\ProblemCode implements BackedEnum, UnitEnum: int
 - `public static from(int|string $value): static`
 - `public static tryFrom(int|string $value): ?static`
 
+## `Nimbus\Http\ProblemDetailsRenderer`
+
+```php
+final readonly class Nimbus\Http\ProblemDetailsRenderer implements Nimbus\Http\ErrorRenderer
+```
+
+### Methods
+
+- `public render(Nimbus\Http\HttpException $error, Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+
 ## `Nimbus\Http\Redirect`
 
 ```php
@@ -2452,6 +2628,23 @@ final readonly class Nimbus\Http\Redirect implements Nimbus\Http\Responsable
 - `public static back(Pam\Http\Request $request, string $fallback = "/", int $status = 302): self`
 - `public static to(string $location, int $status = 302): self`
 - `public toResponse(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+
+## `Nimbus\Http\RequestContext`
+
+```php
+final class Nimbus\Http\RequestContext
+```
+
+### Methods
+
+- `public __construct(Nimbus\Container\Container $container): mixed`
+- `public all(): array`
+- `public forget(string $key): void`
+- `public get(string $key, mixed $default = null): mixed`
+- `public has(string $key): bool`
+- `public put(object $value, ?string $as = null): self`
+- `public set(string $key, mixed $value): self`
+- `public typed(string $class): ?object`
 
 ## `Nimbus\Http\RequestCookies`
 
@@ -3109,6 +3302,20 @@ final readonly class Nimbus\Middleware\StartSessionMiddleware implements Pam\Con
 ### Methods
 
 - `public __construct(Nimbus\Container\Container $container, Nimbus\Session\SessionStore $store, Nimbus\Session\SessionConfig $config = {"@object":"Nimbus\\Session\\SessionConfig","properties":{"cookie":"nimbus_session","domain":null,"expireOnClose":false,"lifetime":7200,"lottery":[2,100],"path":"/","sameSite":"Lax","secure":true}}, bool $redirectValidationErrors = true): mixed`
+- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
+
+## `Nimbus\Middleware\ThrottleRequestsMiddleware`
+
+```php
+final readonly class Nimbus\Middleware\ThrottleRequestsMiddleware implements Pam\Contracts\Http\MiddlewareInterface
+```
+
+### Methods
+
+- `public static fromAlias(Nimbus\Container\Container $container, string $alias): self`
+- `public static named(Nimbus\Container\Container $container, string $name): self`
+- `public static perMinutes(Nimbus\Container\Container $container, int $maxAttempts, int $decayMinutes = 1, string $prefix = ""): self`
+- `public static perSeconds(Nimbus\Container\Container $container, int $maxAttempts, int $decaySeconds, string $prefix = ""): self`
 - `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
 
 ## `Nimbus\Middleware\TransactionalMiddleware`
@@ -3883,9 +4090,11 @@ final readonly class Nimbus\PendingRoute
 - `public patch(string $path, array|callable|string $handler): self`
 - `public post(string $path, array|callable|string $handler): self`
 - `public put(string $path, array|callable|string $handler): self`
+- `public rateLimit(string $limiter): self`
 - `public signed(): self`
 - `public summary(string $summary): self`
 - `public tags(array $tags): self`
+- `public throttle(int $maxAttempts, int $decayMinutes = 1): self`
 - `public where(string $parameter, Nimbus\RouteConstraint|string $constraint): self`
 
 ## `Nimbus\Profiler\DebugEntry`
@@ -4049,6 +4258,32 @@ final readonly class Nimbus\Profiler\RequestProfile
 
 - `public __construct(string $token, string $method, string $path, int $statusCode, float $durationMilliseconds, int $memoryDeltaBytes, ?string $failureClass): mixed`
 
+## `Nimbus\RateLimit\Limit`
+
+```php
+final readonly class Nimbus\RateLimit\Limit
+```
+
+### Properties
+
+- `public readonly int $decaySeconds`
+- `public readonly string $key`
+- `public readonly int $maxAttempts`
+- `public readonly ?Closure $responseCallback`
+
+### Methods
+
+- `public __construct(string $key = "", int $maxAttempts = 60, int $decaySeconds = 60, ?Closure $responseCallback = null): mixed`
+- `public by(int|string $key): self`
+- `public isUnlimited(): bool`
+- `public static none(): self`
+- `public static perDay(int $maxAttempts, int $decayDays = 1): self`
+- `public static perHour(int $maxAttempts, int $decayHours = 1): self`
+- `public static perMinute(int $maxAttempts, int $decayMinutes = 1): self`
+- `public static perMinutes(int $decayMinutes, int $maxAttempts): self`
+- `public static perSecond(int $maxAttempts, int $decaySeconds = 1): self`
+- `public response(Closure $callback): self`
+
 ## `Nimbus\RateLimit\MemoryRateLimitStore`
 
 ```php
@@ -4087,6 +4322,28 @@ abstract interface Nimbus\RateLimit\RateLimitStore
 
 - `public consume(string $key, int $requestsPerSecond, int $capacity, float $now): Nimbus\RateLimit\RateLimitDecision`
 
+## `Nimbus\RateLimit\RateLimiter`
+
+```php
+final class Nimbus\RateLimit\RateLimiter
+```
+
+### Methods
+
+- `public __construct(Nimbus\Cache\Repository $cache, string $prefix = "rate-limit:"): mixed`
+- `public attempt(string $key, int $maxAttempts, Closure $callback, int $decaySeconds = 60): mixed`
+- `public attempts(string $key): int`
+- `public availableIn(string $key): int`
+- `public clear(string $key): void`
+- `public for(string $name, Closure $callback): self`
+- `public hit(string $key, int $decaySeconds = 60): int`
+- `public increment(string $key, int $decaySeconds = 60, int $amount = 1): int`
+- `public limiter(string $name): ?Closure`
+- `public remaining(string $key, int $maxAttempts): int`
+- `public resetAttempts(string $key): void`
+- `public resetsAt(string $key): int`
+- `public tooManyAttempts(string $key, int $maxAttempts): bool`
+
 ## `Nimbus\Redis\Connection`
 
 ```php
@@ -4111,7 +4368,7 @@ final readonly class Nimbus\Redis\PamConnection implements Nimbus\Redis\Connecti
 ## `Nimbus\Redis\RedisCacheStore`
 
 ```php
-final readonly class Nimbus\Redis\RedisCacheStore implements Nimbus\Cache\Store
+final readonly class Nimbus\Redis\RedisCacheStore implements Nimbus\Cache\LockProvider, Nimbus\Cache\Store
 ```
 
 ### Methods
@@ -4122,7 +4379,9 @@ final readonly class Nimbus\Redis\RedisCacheStore implements Nimbus\Cache\Store
 - `public forget(string $key): void`
 - `public get(string $key): mixed`
 - `public increment(string $key, int $by = 1): int`
+- `public lock(string $name, int $seconds = 0, ?string $owner = null): Nimbus\Cache\Lock`
 - `public put(string $key, mixed $value, ?int $seconds = null): void`
+- `public restoreLock(string $name, string $owner): Nimbus\Cache\Lock`
 
 ## `Nimbus\Redis\RedisIdempotencyStore`
 
@@ -4135,6 +4394,19 @@ final readonly class Nimbus\Redis\RedisIdempotencyStore implements Nimbus\Idempo
 - `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:idempotency:"): mixed`
 - `public get(string $key, int $now): ?Nimbus\Idempotency\IdempotencyRecord`
 - `public put(string $key, Nimbus\Idempotency\IdempotencyRecord $record): void`
+
+## `Nimbus\Redis\RedisLock`
+
+```php
+final class Nimbus\Redis\RedisLock extends Nimbus\Cache\Lock
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $name, int $seconds = 0, ?string $owner = null, string $prefix = "nimbus:lock:"): mixed`
+- `public acquire(): bool`
+- `public forceRelease(): void`
+- `public release(): bool`
 
 ## `Nimbus\Redis\RedisOAuthStateStore`
 
@@ -4353,8 +4625,10 @@ final class Nimbus\RouteRegistrar
 - `public post(string $path, array|callable|string $handler): Nimbus\PendingRoute`
 - `public prefix(string $prefix): self`
 - `public put(string $path, array|callable|string $handler): Nimbus\PendingRoute`
+- `public rateLimit(string $limiter): self`
 - `public resource(string $path, string $controller, ?callable $routes = null): void`
 - `public signed(): self`
+- `public throttle(int $maxAttempts, int $decayMinutes = 1): self`
 
 ## `Nimbus\Router`
 
@@ -4458,6 +4732,18 @@ final readonly class Nimbus\Runtime\Deadline
 - `public expired(): bool`
 - `public throwIfExpired(): void`
 
+## `Nimbus\Scheduling\CacheSchedulerLock`
+
+```php
+final class Nimbus\Scheduling\CacheSchedulerLock implements Nimbus\Scheduling\SchedulerLock
+```
+
+### Methods
+
+- `public __construct(Nimbus\Cache\Repository $cache, string $prefix = "schedule:"): mixed`
+- `public acquire(string $key, int $seconds): bool`
+- `public release(string $key): void`
+
 ## `Nimbus\Scheduling\DatabaseSchedulerLock`
 
 ```php
@@ -4504,6 +4790,7 @@ final class Nimbus\Scheduling\Schedule
 
 - `public __construct(?Nimbus\Jobs\JobDispatcher $dispatcher = null, DateTimeZone|null|string $timezone = null, ?Nimbus\Container\Container $container = null): mixed`
 - `public call(callable $callback): Nimbus\Scheduling\ScheduledTask`
+- `public command(string $command, array $parameters = []): Nimbus\Scheduling\ScheduledTask`
 - `public dueTasks(DateTimeInterface $now): array`
 - `public job(object|string $job, int $maximumAttempts = 3): Nimbus\Scheduling\ScheduledTask`
 - `public tasks(): array`
@@ -5313,6 +5600,19 @@ final readonly class Nimbus\Validation\EnumRule implements Nimbus\Validation\Val
 - `public __construct(string $enum): mixed`
 - `public validate(string $field, mixed $value): ?string`
 
+## `Nimbus\Validation\ExistsRule`
+
+```php
+final readonly class Nimbus\Validation\ExistsRule implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public __construct(string $table, string $column, array $wheres = []): mixed`
+- `public passes(mixed $value): bool`
+- `public validate(string $field, mixed $value): ?string`
+- `public where(string $column, bool|float|int|null|string $value): self`
+
 ## `Nimbus\Validation\FormRequest`
 
 ```php
@@ -5322,11 +5622,24 @@ abstract class Nimbus\Validation\FormRequest
 ### Methods
 
 - `public __construct(Pam\Http\Request $request): mixed`
+- `public attributes(): array`
 - `public authorize(): bool`
 - `public dto(string $class): object`
 - `public input(string $key, mixed $default = null): mixed`
+- `public messages(): array`
 - `public rules(): array`
 - `public validated(): array`
+
+## `Nimbus\Validation\InRule`
+
+```php
+final readonly class Nimbus\Validation\InRule implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public __construct(array $values, bool $negate = false): mixed`
+- `public validate(string $field, mixed $value): ?string`
 
 ## `Nimbus\Validation\Input`
 
@@ -5343,6 +5656,16 @@ abstract class Nimbus\Validation\Input
 - `public static schema(): array`
 - `public toArray(): array`
 
+## `Nimbus\Validation\PresenceVerifier`
+
+```php
+abstract interface Nimbus\Validation\PresenceVerifier
+```
+
+### Methods
+
+- `public count(string $table, string $column, array $values, array $wheres = [], ?string $ignoreColumn = null, int|null|string $ignoreValue = null, ?string $connection = null): int`
+
 ## `Nimbus\Validation\Rule`
 
 ```php
@@ -5352,6 +5675,24 @@ final class Nimbus\Validation\Rule
 ### Methods
 
 - `public static enum(string $enum): Nimbus\Validation\EnumRule`
+- `public static exists(string $table, string $column): Nimbus\Validation\ExistsRule`
+- `public static in(array $values): Nimbus\Validation\InRule`
+- `public static notIn(array $values): Nimbus\Validation\InRule`
+- `public static unique(string $table, string $column): Nimbus\Validation\UniqueRule`
+
+## `Nimbus\Validation\UniqueRule`
+
+```php
+final readonly class Nimbus\Validation\UniqueRule implements Nimbus\Validation\ValidationRule
+```
+
+### Methods
+
+- `public __construct(string $table, string $column, int|null|string $ignore = null, string $idColumn = "id", array $wheres = []): mixed`
+- `public ignore(int|null|string $id, string $idColumn = "id"): self`
+- `public passes(mixed $value): bool`
+- `public validate(string $field, mixed $value): ?string`
+- `public where(string $column, bool|float|int|null|string $value): self`
 
 ## `Nimbus\Validation\ValidationException`
 
@@ -5376,6 +5717,25 @@ abstract interface Nimbus\Validation\ValidationRule
 ### Methods
 
 - `public validate(string $field, mixed $value): ?string`
+
+## `Nimbus\Validation\Validator`
+
+```php
+final class Nimbus\Validation\Validator
+```
+
+### Methods
+
+- `public __construct(array $data, array $rules, array $messages = [], array $attributes = []): mixed`
+- `public errors(): array`
+- `public fails(): bool`
+- `public static make(array $data, array $rules, array $messages = [], array $attributes = []): self`
+- `public static parse(array|string $rules): array`
+- `public passes(): bool`
+- `public static presenceVerifier(): Nimbus\Validation\PresenceVerifier`
+- `public static usePresenceVerifier(?Nimbus\Validation\PresenceVerifier $verifier): void`
+- `public validate(): array`
+- `public validated(): array`
 
 ## `Nimbus\View\AttributeBag`
 

@@ -98,6 +98,113 @@ final class ArcanoManager implements TransactionManager
         return new EntityManager($this->orm());
     }
 
+    /**
+     * The entity matching `$attributes`, or a new one with `$attributes + $values` inserted
+     * now (Laravel `firstOrCreate`). Keys are entity field names.
+     *
+     * Concurrent callers are safe when a unique index covers `$attributes`: the insert that
+     * loses the race fails on the index (inside a savepoint when a transaction is open) and the
+     * row the winner wrote is returned, as Laravel's `createOrFirst()` does.
+     *
+     * @template T of object
+     * @param class-string<T>|non-empty-string $role
+     * @param non-empty-array<string, mixed> $attributes
+     * @param array<string, mixed> $values
+     * @return ($role is class-string<T> ? T : object)
+     */
+    public function firstOrCreate(string $role, array $attributes, array $values = []): object
+    {
+        return $this->first($role, $attributes) ?? $this->createOrFirst($role, $attributes, $values);
+    }
+
+    /**
+     * Inserts `$attributes + $values`; when a unique index rejects it, returns the existing
+     * row matching `$attributes` instead (Laravel `createOrFirst`).
+     *
+     * @template T of object
+     * @param class-string<T>|non-empty-string $role
+     * @param non-empty-array<string, mixed> $attributes
+     * @param array<string, mixed> $values
+     * @return ($role is class-string<T> ? T : object)
+     */
+    public function createOrFirst(string $role, array $attributes, array $values = []): object
+    {
+        $orm = $this->orm();
+        $entity = $orm->make($role, [...$attributes, ...$values]);
+        try {
+            $this->entityManager()->persist($entity)->run();
+            return $entity;
+        } catch (\Throwable $error) {
+            if (!self::violatesConstraint($error)) {
+                throw $error;
+            }
+            $orm->getHeap()->detach($entity);
+            return $this->first($role, $attributes) ?? throw $error;
+        }
+    }
+
+    /**
+     * Updates the entity matching `$attributes` with `$values`, or inserts both (Laravel
+     * `updateOrCreate`); race-safe under a unique index on `$attributes` like `firstOrCreate()`.
+     *
+     * @template T of object
+     * @param class-string<T>|non-empty-string $role
+     * @param non-empty-array<string, mixed> $attributes
+     * @param array<string, mixed> $values
+     * @return ($role is class-string<T> ? T : object)
+     */
+    public function updateOrCreate(string $role, array $attributes, array $values = []): object
+    {
+        $entity = $this->first($role, $attributes);
+        if ($entity === null) {
+            $entity = $this->createOrFirst($role, $attributes, $values);
+            // A row another worker inserted first still receives the values.
+            if ($this->matches($entity, $values)) {
+                return $entity;
+            }
+        }
+        if ($values === []) {
+            return $entity;
+        }
+        $this->orm()->getMapper($entity)->hydrate($entity, $values);
+        $this->entityManager()->persist($entity)->run();
+        return $entity;
+    }
+
+    /**
+     * @param class-string|non-empty-string $role
+     * @param array<string, mixed> $attributes
+     */
+    private function first(string $role, array $attributes): ?object
+    {
+        if ($attributes === []) {
+            throw new \InvalidArgumentException('firstOrCreate and updateOrCreate need the attributes to match.');
+        }
+        return $this->select($role)->where($attributes)->fetchOne();
+    }
+
+    /** @param array<string, mixed> $values */
+    private function matches(object $entity, array $values): bool
+    {
+        $current = $this->orm()->getMapper($entity)->extract($entity);
+        foreach ($values as $field => $value) {
+            if (!array_key_exists($field, $current) || $current[$field] != $value) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static function violatesConstraint(\Throwable $error): bool
+    {
+        for ($cause = $error; $cause !== null; $cause = $cause->getPrevious()) {
+            if ($cause instanceof \Arcano\Database\Exception\StatementException\ConstrainException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public function transaction(callable $operation): mixed
     {
         return $this->database()->transaction(static fn (): mixed => $operation());

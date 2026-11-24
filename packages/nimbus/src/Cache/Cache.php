@@ -86,6 +86,17 @@ final class Cache
         self::repository()->flush();
     }
 
+    /** An atomic lock (see `Lock`): `Cache::lock('report', 60)->get(fn () => ...)`. */
+    public static function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return self::repository()->lock($name, $seconds, $owner);
+    }
+
+    public static function restoreLock(string $name, string $owner): Lock
+    {
+        return self::repository()->restoreLock($name, $owner);
+    }
+
     /** @param string|list<string> $tags */
     public static function tags(string|array $tags): TaggedCache
     {

@@ -76,6 +76,41 @@ final class Schedule
         }, $name, $this->timezone));
     }
 
+    /**
+     * Runs a console command of the application in the worker when due, as Laravel's
+     * `$schedule->command('buck:sync --force')->hourly()->withoutOverlapping()`. A non-zero
+     * exit code fails the task with the command output. Requires a container on the Schedule.
+     *
+     * @param string|class-string $command A command line or a command class.
+     * @param array<string, mixed>|list<string> $parameters
+     */
+    public function command(string $command, array $parameters = []): ScheduledTask
+    {
+        $container = $this->container
+            ?? throw new \LogicException('Scheduling commands requires the application container on the Schedule.');
+        if (trim($command) === '') {
+            throw new \InvalidArgumentException('A scheduled command needs a name.');
+        }
+        $name = substr('command:' . trim($command . ' ' . (array_is_list($parameters)
+            ? implode(' ', array_map(static fn (mixed $value): string => is_scalar($value) ? (string) $value : '', $parameters))
+            : '')), 0, 255);
+        return $this->add(new ScheduledTask(static function () use ($container, $command, $parameters): void {
+            $kernel = $container->get(\Nimbus\Console\Kernel::class);
+            if (!$kernel instanceof \Nimbus\Console\Kernel) {
+                throw new \LogicException('The container binds another console Kernel.');
+            }
+            $status = $kernel->call($command, $parameters);
+            if ($status !== 0) {
+                throw new \RuntimeException(sprintf(
+                    'Scheduled command %s exited with %d: %s',
+                    $command,
+                    $status,
+                    trim(substr($kernel->output(), 0, 2_000)),
+                ));
+            }
+        }, $name, $this->timezone));
+    }
+
     /** @return list<ScheduledTask> */
     public function tasks(): array
     {

@@ -24,7 +24,7 @@ abstract readonly class JsonResource implements Responsable
 
     public function toResponse(Request $request, Response $response): Response
     {
-        return $response->json(['data' => $this->toArray($request)], $this->status);
+        return JsonEncoding::respond($response, ['data' => $this->toArray($request)], $this->status);
     }
 
     /**

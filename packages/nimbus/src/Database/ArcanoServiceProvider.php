@@ -50,6 +50,10 @@ final readonly class ArcanoServiceProvider implements ServiceProviderInterface
             ->instance(ArcanoManager::class, $arcano)
             ->instance(QueryMonitor::class, QueryMonitor::forArcano($databases))
             ->instance(TransactionManager::class, $arcano);
+        if ($this->schema instanceof ArcanoSchemaCompiler) {
+            // bin/nimbus schema:cache and schema:clear rebuild this compiler's cache.
+            $container->instance(ArcanoSchemaCompiler::class, $this->schema);
+        }
         if ($this->migrations !== null) {
             $container->instance(ArcanoMigrationManager::class, new ArcanoMigrationManager(
                 $databases,
@@ -57,6 +61,8 @@ final readonly class ArcanoServiceProvider implements ServiceProviderInterface
                 entities: $this->schema instanceof ArcanoSchemaCompiler ? $this->schema : null,
             ));
         }
+        // `exists` and `unique` validation rules count rows on these connections.
+        \Nimbus\Validation\Validator::usePresenceVerifier(new ArcanoPresenceVerifier($arcano));
         $application->middleware(new ArcanoLifecycleMiddleware($arcano));
     }
 

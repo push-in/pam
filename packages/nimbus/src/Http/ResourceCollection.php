@@ -40,6 +40,6 @@ final readonly class ResourceCollection implements Responsable
         if ($this->links !== []) {
             $payload['links'] = $this->links;
         }
-        return $response->json($payload);
+        return JsonEncoding::respond($response, $payload);
     }
 }

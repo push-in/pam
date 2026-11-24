@@ -129,6 +129,25 @@ class Repository
         return new TaggedCache($this->store, new TagSet($this->store, $tags));
     }
 
+    /**
+     * An atomic lock: `Cache::lock('name', 10)->get(fn () => ...)`. Stores that implement
+     * `LockProvider` (Redis) use their own; others lock through `add()`.
+     */
+    public function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return $this->store instanceof LockProvider
+            ? $this->store->lock($name, $seconds, $owner)
+            : new CacheLock($this->store, $name, $seconds, $owner);
+    }
+
+    /** The lock held by `$owner` (`Lock::owner()`), to release it from another process. */
+    public function restoreLock(string $name, string $owner): Lock
+    {
+        return $this->store instanceof LockProvider
+            ? $this->store->restoreLock($name, $owner)
+            : new CacheLock($this->store, $name, 0, $owner);
+    }
+
     protected function key(string $key): string
     {
         if ($key === '') {
