@@ -103,7 +103,8 @@ jobs:
           fi
       - name: Composer audit
         run: |
-          if ! test -f composer.lock; then
+          if ! test -f composer.lock ||
+            test "$(jq '(.packages | length) + (."packages-dev" | length)' composer.lock)" -eq 0; then
             echo "No dependencies to audit."
             exit 0
           fi
