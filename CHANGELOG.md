@@ -23,6 +23,8 @@ Security hardening, second part (audit of 2026-11-20).
 - The Fiber stack pool only reuses stacks whose guard page the kernel applied, so a foreign
   `MAP_STACK` mapping of the same size can never reach a Fiber without a guard.
   `PAM_FIBER_STACK_POOL_SCRUB=1` zeroes and releases pooled stacks.
+- Multipart bodies stop with `400` past PHP's `max_multipart_body_parts` (default `max_input_vars` +
+  `max_file_uploads`): thousands of empty file inputs no longer each cost a `$_FILES` entry.
 - `url` 2.5.9 (RUSTSEC-2026-0592).
 - The `Dockerfile` pins its base images by digest and PHP by package version.
 - CI: `cargo deny`, `composer audit`, six fuzz targets (HTTP request path, multipart, C header
