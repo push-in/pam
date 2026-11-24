@@ -427,7 +427,7 @@ $ws->on('connection', static function (Socket $socket) use ($ws): void {
 
 $options = [
     'corsOrigins' => ['https://app.example'],
-    'bodyReadTimeoutMs' => 100,
+    'bodyReadTimeoutMs' => (int) (getenv('PAM_TEST_BODY_READ_TIMEOUT') ?: 100),
     'headerReadTimeoutMs' => 100,
     'maxBodyBytes' => 1024,
     'maxHeaders' => 16,

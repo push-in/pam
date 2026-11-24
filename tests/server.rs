@@ -1526,6 +1526,9 @@ fn bounds_request_bodies_held_by_php_to_the_worker_memory_limit() {
     const BODY: usize = 2 * 1024 * 1024;
     let server = ServerProcess::start_with_env(&[
         ("PAM_TEST_MAX_BODY_BYTES", "2097152"),
+        // 30 concurrent 2 MiB uploads take longer than the fixture's 100 ms
+        // body timeout on a slow (or sanitized) build.
+        ("PAM_TEST_BODY_READ_TIMEOUT", "10000"),
         ("PAM_INI_ENTRIES", "memory_limit=48M\n"),
     ]);
     let port = server.port;
