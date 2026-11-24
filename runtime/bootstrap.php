@@ -783,7 +783,18 @@ namespace Pam\Internal {
             }
         }
 
-        /** @return array{enabled: bool, maxFileBytes: int, maxPostBytes: int, maxFiles: int, temporaryDirectory: string} */
+        /** PHP's max_multipart_body_parts; -1 (the default) means max_input_vars + max_file_uploads. */
+        private static function multipartPartLimit(): int
+        {
+            $configured = ini_get('max_multipart_body_parts');
+            $parts = is_string($configured) && trim($configured) !== '' ? (int) $configured : -1;
+            if ($parts < 0) {
+                $parts = max(0, (int) ini_get('max_input_vars')) + max(0, (int) ini_get('max_file_uploads'));
+            }
+            return $parts;
+        }
+
+        /** @return array{enabled: bool, maxFileBytes: int, maxPostBytes: int, maxFiles: int, maxParts: int, temporaryDirectory: string} */
         private static function uploadLimits(): array
         {
             $bytes = static function (string $name): int {
@@ -801,6 +812,7 @@ namespace Pam\Internal {
                 'maxFileBytes' => $bytes('upload_max_filesize'),
                 'maxPostBytes' => $bytes('post_max_size'),
                 'maxFiles' => max(0, (int) ini_get('max_file_uploads')),
+                'maxParts' => self::multipartPartLimit(),
                 'temporaryDirectory' => is_string($directory) && $directory !== ''
                     ? $directory
                     : sys_get_temp_dir(),

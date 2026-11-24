@@ -55,6 +55,7 @@ fuzz_target!(|data: &[u8]| {
         max_file_bytes: 4 * 1024,
         max_post_bytes: 64 * 1024,
         max_files: 3,
+        max_parts: 16,
         temporary_directory: Some(directory().to_string_lossy().into_owned()),
     };
     let chunks: Vec<Result<bytes::Bytes, std::io::Error>> = body
@@ -70,7 +71,14 @@ fuzz_target!(|data: &[u8]| {
         Duration::from_secs(1),
     ));
     if let Ok(parsed) = parsed {
-        assert!(parsed.files.len() <= limits.max_files + 1);
+        // Empty file inputs do not count as uploads, but every part counts.
+        assert!(parsed.files.len() <= limits.max_parts);
+        let uploaded = parsed
+            .files
+            .iter()
+            .filter(|file| file.size > 0 || !file.tmp_name.is_empty())
+            .count();
+        assert!(uploaded <= limits.max_files);
         assert!(parsed.fields.len() as u64 <= limits.max_post_bytes.max(length) * 3);
         drop(parsed);
     }
