@@ -1,6 +1,6 @@
 # Notificações
 
-`Nimbus\Notifications` envia uma `Notification` pelos canais que o método `via()` devolve: `mail`, `push`, `database` e `webhook`, ou canais próprios (`NotificationChannel`).
+`Nimbus\Notifications` envia uma `Notification` pelos canais que o método `via()` devolve: `mail`, `push`, `database` e `webhook`, ou canais próprios (`NotificationChannel`). Para um e-mail avulso, sem notificação, use o [`Mailer`](./email.md).
 
 O destinatário implementa `Notifiable`. O trait `RoutesNotifications` lê métodos `routeNotificationFor<Canal>()`, a propriedade `email` para e-mail e a propriedade `id` para a chave gravada.
 

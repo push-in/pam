@@ -86,6 +86,66 @@ $profiler->find($debugToken);   // pelo cabeçalho X-Debug-Token
 
 Guarda só método, caminho, status, duração, variação de memória e classe da falha; corpos e cabeçalhos nunca são retidos. O modo padrão, `Disabled`, não emite nada.
 
+## Painel de debug
+
+`Nimbus\Profiler\DebugPanel` mostra, da mais nova para a mais antiga, as requisições, queries, jobs, exceções, e-mails e chamadas HTTP de saída do worker, cada uma ligada à requisição em que aconteceu. Fica em `/_debug` (HTML) e `/_debug/entries` (JSON).
+
+```php
+use Nimbus\Http\Client\Http;
+use Nimbus\Mail\Mailer;
+use Nimbus\Profiler\DebugPanel;
+
+$debug = DebugPanel::register($app);   // null fora de desenvolvimento
+
+$app->gate()->define('viewDebugPanel', static fn (User $user): bool => $user->isDeveloper);
+
+$jobs = $debug?->jobs($jobs) ?? $jobs;                                      // jobs despachados
+$handler = $debug?->jobHandler($handler) ?? $handler;                       // jobs executados pelo worker
+$mailer = $debug !== null ? $mailer->withTransport($debug->mailTransport($mailer->transport())) : $mailer;
+$debug?->recordHttpFacade();                                                // chamadas pela fachada Http
+```
+
+Registre o painel depois do `ArcanoServiceProvider`: o `register()` liga o gravador de queries ao `ArcanoDatabaseProvider` quando ele já está no container. Para um cliente HTTP injetado, `$debug->httpTransport($transport)` devolve o transporte que grava as chamadas.
+
+Regras de acesso:
+
+- `register()` devolve `null` e não registra nada, a não ser que `APP_ENV` (ou `PAM_ENV`) seja `local`, `development`, `dev` ou `testing` e `APP_DEBUG` não seja `false`. O terceiro argumento, `enabled`, força ligado ou desligado.
+- As rotas exigem um `Nimbus\Auth\Authenticator` no container e a habilidade `viewDebugPanel`, que fica fechada até o app defini-la ([Autorização](./autorizacao.md)).
+- Os registros ficam só na memória do worker, num anel de 1 000 entradas (quarto argumento, `maximumEntries`). Cada worker tem o seu painel.
+- Cabeçalhos sensíveis (`authorization`, `cookie`, `x-api-key`...) e campos JSON com nomes como `password`, `token`, `secret` e `card` são mascarados; corpos longos são truncados.
+
+`/_debug/entries` aceita `type` (`request`, `query`, `job`, `exception`, `mail`, `http`), `request` (o token da requisição) e `limit` (padrão 100). `/_debug/entries/{id}` devolve uma entrada. O prefixo muda no segundo argumento de `register()`, e as rotas do próprio painel não são gravadas.
+
+## Métricas por requisição
+
+`Nimbus\Middleware\ObserveRequestMiddleware` mede cada requisição e entrega um `Nimbus\Observability\RequestObservation` (método, padrão da rota, status, duração em segundos e classe da exceção) a um `RequestObserver`. Serve para alimentar Prometheus, StatsD ou um log de acesso:
+
+```php
+use Nimbus\Middleware\ObserveRequestMiddleware;
+use Nimbus\Observability\RequestObservation;
+use Nimbus\Observability\RequestObserver;
+
+final readonly class AccessLog implements RequestObserver
+{
+    public function __construct(private LoggerInterface $log) {}
+
+    public function record(RequestObservation $observation): void
+    {
+        $this->log->info('http.request', [
+            'method' => $observation->method,
+            'route' => $observation->route,             // padrão da rota, com {id}, não a URL com o id
+            'status' => $observation->status,
+            'ms' => (int) ($observation->durationSeconds * 1000),
+            'exception' => $observation->exceptionClass,
+        ]);
+    }
+}
+
+$app->middleware(new ObserveRequestMiddleware(new AccessLog($logger), $app->container()));
+```
+
+Com o container, `route` é o padrão da rota casada, o que mantém baixa a cardinalidade das métricas; sem ele, é o caminho da requisição. Uma exceção não tratada é registrada com status `500` e continua subindo.
+
 ## Health checks
 
 ```php

@@ -22,7 +22,7 @@ abstract class TestCase extends \Nimbus\Testing\TestCase
 }
 ```
 
-Sem `bootstrap/app.php` (template api), monte a aplicação no próprio método:
+Os templates `api` e `web` já trazem esse `TestCase` e o `bootstrap/app.php` ([Primeiros passos](./primeiros-passos.md)). Num projeto sem `bootstrap/app.php`, monte a aplicação no próprio método:
 
 ```php
 protected function createApplication(): App
@@ -124,7 +124,42 @@ $browser->post('/login', ['email' => 'ana@example.com', 'password' => 'password'
 $browser->get('/dashboard')->assertOk()->assertSee('Ana Souza');
 ```
 
-## Notificações e filas
+## Fakes
+
+As fachadas de `Nimbus\Testing` trocam um serviço do container por uma versão que grava o que aconteceu, com asserções. O `TestCase` as liga à aplicação do teste e as desfaz no fim de cada teste. Chame o `fake()` antes da requisição, e antes de resolver serviços que recebem o serviço falsificado no construtor.
+
+```php
+use App\Jobs\SendInvoice;
+use Nimbus\Testing\Mail;
+use Nimbus\Testing\Queue;
+use Nimbus\Testing\Storage;
+
+public function test_checkout(): void
+{
+    Queue::fake();
+    Mail::fake();
+    $disk = Storage::fake('invoices');
+
+    $this->actingAs($user)->postJson('/api/checkout', ['cart' => 7])->assertCreated();
+
+    Queue::assertPushed(SendInvoice::class, fn (SendInvoice $job) => $job->invoiceId === 1);
+    Mail::assertSentTo('ana@example.com');
+    $disk->assertExists('2026/11/1.pdf');
+}
+```
+
+| Fachada | Método do `TestCase` | Troca | Asserções |
+| --- | --- | --- | --- |
+| `Queue::fake()` | `fakeQueue()` | `JobDispatcher` | `assertPushed($job, $callback ou $vezes)`, `assertPushedTimes`, `assertNotPushed`, `assertNothingPushed`, `assertListenerQueued` |
+| `Event::fake($only)` | `fakeEvents($only)` | `EventDispatcher` | `assertDispatched`, `assertDispatchedTimes`, `assertNotDispatched`, `assertNothingDispatched`, `assertListening` ([Eventos](./eventos.md#testes)) |
+| `Broadcast::fake()` | `fakeBroadcasts()` | driver do `BroadcastManager` | `assertBroadcast`, `assertNotBroadcast`, `assertNothingBroadcast` |
+| `Mail::fake()` | `fakeMail()` | `Mailer` e `TransportInterface` | `assertSent`, `assertSentTo`, `assertNotSent`, `assertSentCount`, `assertNothingSent` ([E-mail](./email.md#testes)) |
+| `Storage::fake($disco)` | `fakeStorage($disco)` | o disco, por um diretório temporário apagado no fim | `Disk::assertExists($caminhos, $conteúdo)`, `Disk::assertMissing` |
+| `Http::fake($stubs)` | `fakeHttp($stubs)` | transporte do cliente HTTP | `assertSent`, `assertNotSent`, `assertSentCount`, `assertNothingSent` ([Cliente HTTP](./http-client.md#testes)) |
+
+Fora do `TestCase`, chame `Nimbus\Testing\Fakes::begin($app)` antes e `Fakes::end()` depois.
+
+## Notificações e jobs
 
 - `Notifier::fake()` grava as notificações em vez de enviar ([Notificações](./notificacoes.md#testes)).
-- `MemoryJobDispatcher` substitui a fila; `JobWorker::runOne()` processa um job no teste.
+- Para rodar o job de verdade no teste, use uma `MemoryJobDispatcher` como fila e processe com `JobWorker::runOne()`.

@@ -8,6 +8,8 @@ namespace Nimbus\View;
  * Compiles a `.nim.php` template into the body of a PHP closure. Output is appended to a
  * string (never `echo`/output buffering, which fibers would interleave), and every source
  * line stays on the same line of the compiled code, so PHP errors point at the template line.
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
  */
 final class Compiler
 {

@@ -9,6 +9,11 @@ use Pam\Contracts\Http\RequestHandlerInterface;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
+/**
+ * Wraps a callable as the request handler of the pipeline.
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
+ */
 final readonly class CallableRequestHandler implements RequestHandlerInterface
 {
     private \Closure $handler;

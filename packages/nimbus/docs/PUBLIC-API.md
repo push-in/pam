@@ -78,18 +78,15 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Cache\Store`](#nimbuscachestore)
 - [`Nimbus\Cache\TagSet`](#nimbuscachetagset)
 - [`Nimbus\Cache\TaggedCache`](#nimbuscachetaggedcache)
-- [`Nimbus\CallableRequestHandler`](#nimbuscallablerequesthandler)
 - [`Nimbus\Config\ConfigDefinition`](#nimbusconfigconfigdefinition)
 - [`Nimbus\Config\ConfigType`](#nimbusconfigconfigtype)
 - [`Nimbus\Config\Configuration`](#nimbusconfigconfiguration)
 - [`Nimbus\Config\ConfigurationException`](#nimbusconfigconfigurationexception)
 - [`Nimbus\Console\Tinker`](#nimbusconsoletinker)
-- [`Nimbus\ContainerMiddleware`](#nimbuscontainermiddleware)
 - [`Nimbus\Container\Binding`](#nimbuscontainerbinding)
 - [`Nimbus\Container\BindingLifetime`](#nimbuscontainerbindinglifetime)
 - [`Nimbus\Container\Container`](#nimbuscontainercontainer)
 - [`Nimbus\Container\ContainerState`](#nimbuscontainercontainerstate)
-- [`Nimbus\ControllerHandler`](#nimbuscontrollerhandler)
 - [`Nimbus\Database\ArcanoManager`](#nimbusdatabasearcanomanager)
 - [`Nimbus\Database\ArcanoMigrationManager`](#nimbusdatabasearcanomigrationmanager)
 - [`Nimbus\Database\ArcanoSchemaCompiler`](#nimbusdatabasearcanoschemacompiler)
@@ -113,7 +110,6 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Events\EventFake`](#nimbuseventseventfake)
 - [`Nimbus\Events\ShouldQueue`](#nimbuseventsshouldqueue)
 - [`Nimbus\Events\SyncEventDispatcher`](#nimbuseventssynceventdispatcher)
-- [`Nimbus\HandlerResolver`](#nimbushandlerresolver)
 - [`Nimbus\Health\HealthCheck`](#nimbushealthhealthcheck)
 - [`Nimbus\Health\HealthRegistry`](#nimbushealthhealthregistry)
 - [`Nimbus\Health\HealthResult`](#nimbushealthhealthresult)
@@ -141,6 +137,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Http\ProblemCode`](#nimbushttpproblemcode)
 - [`Nimbus\Http\Redirect`](#nimbushttpredirect)
 - [`Nimbus\Http\RequestCookies`](#nimbushttprequestcookies)
+- [`Nimbus\Http\RequestData`](#nimbushttprequestdata)
 - [`Nimbus\Http\ResourceCollection`](#nimbushttpresourcecollection)
 - [`Nimbus\Http\Responsable`](#nimbushttpresponsable)
 - [`Nimbus\Http\ResponseSnapshot`](#nimbushttpresponsesnapshot)
@@ -233,11 +230,9 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\OpenApi\CompatibilityChangeCode`](#nimbusopenapicompatibilitychangecode)
 - [`Nimbus\OpenApi\CompatibilityChecker`](#nimbusopenapicompatibilitychecker)
 - [`Nimbus\OpenApi\OpenApiGenerator`](#nimbusopenapiopenapigenerator)
-- [`Nimbus\PackageDiscovery`](#nimbuspackagediscovery)
 - [`Nimbus\Pagination\Page`](#nimbuspaginationpage)
 - [`Nimbus\Pagination\Paginator`](#nimbuspaginationpaginator)
 - [`Nimbus\PendingRoute`](#nimbuspendingroute)
-- [`Nimbus\Pipeline`](#nimbuspipeline)
 - [`Nimbus\Profiler\DebugEntry`](#nimbusprofilerdebugentry)
 - [`Nimbus\Profiler\DebugEntryType`](#nimbusprofilerdebugentrytype)
 - [`Nimbus\Profiler\DebugPanel`](#nimbusprofilerdebugpanel)
@@ -327,7 +322,6 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Validation\Attributes\Regex`](#nimbusvalidationattributesregex)
 - [`Nimbus\Validation\Attributes\Url`](#nimbusvalidationattributesurl)
 - [`Nimbus\Validation\Attributes\Uuid`](#nimbusvalidationattributesuuid)
-- [`Nimbus\Validation\DtoHydrator`](#nimbusvalidationdtohydrator)
 - [`Nimbus\Validation\EnumRule`](#nimbusvalidationenumrule)
 - [`Nimbus\Validation\FormRequest`](#nimbusvalidationformrequest)
 - [`Nimbus\Validation\Input`](#nimbusvalidationinput)
@@ -335,8 +329,6 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Validation\ValidationException`](#nimbusvalidationvalidationexception)
 - [`Nimbus\Validation\ValidationRule`](#nimbusvalidationvalidationrule)
 - [`Nimbus\View\AttributeBag`](#nimbusviewattributebag)
-- [`Nimbus\View\CompiledTemplate`](#nimbusviewcompiledtemplate)
-- [`Nimbus\View\Compiler`](#nimbusviewcompiler)
 - [`Nimbus\View\Component`](#nimbusviewcomponent)
 - [`Nimbus\View\HtmlString`](#nimbusviewhtmlstring)
 - [`Nimbus\View\Htmlable`](#nimbusviewhtmlable)
@@ -1450,17 +1442,6 @@ final class Nimbus\Cache\TaggedCache extends Nimbus\Cache\Repository
 - `public flush(): void`
 - `public tags(array|string $tags): Nimbus\Cache\TaggedCache`
 
-## `Nimbus\CallableRequestHandler`
-
-```php
-final readonly class Nimbus\CallableRequestHandler implements Pam\Contracts\Http\RequestHandlerInterface
-```
-
-### Methods
-
-- `public __construct(callable $handler): mixed`
-- `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
-
 ## `Nimbus\Config\ConfigDefinition`
 
 ```php
@@ -1558,18 +1539,6 @@ final class Nimbus\Console\Tinker
 - `public static scope(Nimbus\App $app): array`
 - `public static shell(Nimbus\App $app, bool $interactive = true): Psy\Shell`
 
-## `Nimbus\ContainerMiddleware`
-
-```php
-final readonly class Nimbus\ContainerMiddleware implements Pam\Contracts\Http\MiddlewareInterface
-```
-
-### Methods
-
-- `public __construct(Nimbus\Container\Container $container, string $middleware): mixed`
-- `public is(string $middleware): bool`
-- `public process(Pam\Http\Request $request, Pam\Http\Response $response, Pam\Contracts\Http\RequestHandlerInterface $next): Pam\Http\Response`
-
 ## `Nimbus\Container\Binding`
 
 ```php
@@ -1665,17 +1634,6 @@ final enum Nimbus\Container\ContainerState implements BackedEnum, UnitEnum: int
 - `public static cases(): array`
 - `public static from(int|string $value): static`
 - `public static tryFrom(int|string $value): ?static`
-
-## `Nimbus\ControllerHandler`
-
-```php
-final readonly class Nimbus\ControllerHandler
-```
-
-### Methods
-
-- `public __construct(Nimbus\Container\Container $container, string $controller, string $method): mixed`
-- `public __invoke(Pam\Http\Request $request, Pam\Http\Response $response): mixed`
 
 ## `Nimbus\Database\ArcanoManager`
 
@@ -2011,17 +1969,6 @@ final class Nimbus\Events\SyncEventDispatcher implements Nimbus\Events\EventDisp
 - `public hasListener(string $event, string $listener): bool`
 - `public listen(string $event, callable|string $listener): self`
 - `public listeners(string $event): array`
-
-## `Nimbus\HandlerResolver`
-
-```php
-final readonly class Nimbus\HandlerResolver
-```
-
-### Methods
-
-- `public __construct(Nimbus\Container\Container $container): mixed`
-- `public resolve(array|callable|string $handler): Closure`
 
 ## `Nimbus\Health\HealthCheck`
 
@@ -2520,6 +2467,21 @@ final readonly class Nimbus\Http\RequestCookies
 - `public get(string $name, ?string $default = null): ?string`
 - `public has(string $name): bool`
 - `public static parse(string $header): array`
+
+## `Nimbus\Http\RequestData`
+
+```php
+final class Nimbus\Http\RequestData
+```
+
+### Methods
+
+- `public static all(Pam\Http\Request $request): array`
+- `public static bearerToken(Pam\Http\Request $request): ?string`
+- `public static filled(Pam\Http\Request $request, string $key): bool`
+- `public static has(Pam\Http\Request $request, array|string $keys): bool`
+- `public static input(Pam\Http\Request $request, ?string $key = null, mixed $default = null): mixed`
+- `public static only(Pam\Http\Request $request, array|string ...$keys): array`
 
 ## `Nimbus\Http\ResourceCollection`
 
@@ -3868,16 +3830,6 @@ final readonly class Nimbus\OpenApi\OpenApiGenerator
 - `public generate(): array`
 - `public toJson(): string`
 
-## `Nimbus\PackageDiscovery`
-
-```php
-final class Nimbus\PackageDiscovery
-```
-
-### Methods
-
-- `public static providers(string $projectRoot): array`
-
 ## `Nimbus\Pagination\Page`
 
 ```php
@@ -3935,17 +3887,6 @@ final readonly class Nimbus\PendingRoute
 - `public summary(string $summary): self`
 - `public tags(array $tags): self`
 - `public where(string $parameter, Nimbus\RouteConstraint|string $constraint): self`
-
-## `Nimbus\Pipeline`
-
-```php
-final class Nimbus\Pipeline implements Pam\Contracts\Http\RequestHandlerInterface
-```
-
-### Methods
-
-- `public __construct(array $middleware, Pam\Contracts\Http\RequestHandlerInterface $destination): mixed`
-- `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 
 ## `Nimbus\Profiler\DebugEntry`
 
@@ -5361,16 +5302,6 @@ final readonly class Nimbus\Validation\Attributes\Uuid implements Nimbus\Validat
 
 - `public validate(string $field, mixed $value): ?string`
 
-## `Nimbus\Validation\DtoHydrator`
-
-```php
-final class Nimbus\Validation\DtoHydrator
-```
-
-### Methods
-
-- `public hydrate(string $class, array $data): object`
-
 ## `Nimbus\Validation\EnumRule`
 
 ```php
@@ -5469,31 +5400,6 @@ final readonly class Nimbus\View\AttributeBag implements Countable, IteratorAggr
 - `public only(array|string $names): self`
 - `public toHtml(): string`
 - `public whereStartsWith(string $prefix): self`
-
-## `Nimbus\View\CompiledTemplate`
-
-```php
-final readonly class Nimbus\View\CompiledTemplate
-```
-
-### Properties
-
-- `public readonly string $code`
-- `public readonly array $references`
-
-### Methods
-
-- `public __construct(string $code, array $references = []): mixed`
-
-## `Nimbus\View\Compiler`
-
-```php
-final class Nimbus\View\Compiler
-```
-
-### Methods
-
-- `public static compile(string $source, string $template = "inline"): Nimbus\View\CompiledTemplate`
 
 ## `Nimbus\View\Component`
 

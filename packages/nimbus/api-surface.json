@@ -9101,65 +9101,6 @@
                 }
             }
         },
-        "Nimbus\\CallableRequestHandler": {
-            "kind": "class",
-            "final": true,
-            "readonly": true,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [
-                "Pam\\Contracts\\Http\\RequestHandlerInterface"
-            ],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "__construct": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": null,
-                    "parameters": [
-                        {
-                            "name": "handler",
-                            "type": "callable",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                },
-                "handle": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "Pam\\Http\\Response",
-                    "parameters": [
-                        {
-                            "name": "request",
-                            "type": "Pam\\Http\\Request",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "response",
-                            "type": "Pam\\Http\\Response",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                }
-            }
-        },
         "Nimbus\\Config\\ConfigDefinition": {
             "kind": "class",
             "final": true,
@@ -9635,101 +9576,6 @@
                             "optional": true,
                             "default": true,
                             "hasDefault": true
-                        }
-                    ]
-                }
-            }
-        },
-        "Nimbus\\ContainerMiddleware": {
-            "kind": "class",
-            "final": true,
-            "readonly": true,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [
-                "Pam\\Contracts\\Http\\MiddlewareInterface"
-            ],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "__construct": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": null,
-                    "parameters": [
-                        {
-                            "name": "container",
-                            "type": "Nimbus\\Container\\Container",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "middleware",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                },
-                "is": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "bool",
-                    "parameters": [
-                        {
-                            "name": "middleware",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                },
-                "process": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "Pam\\Http\\Response",
-                    "parameters": [
-                        {
-                            "name": "request",
-                            "type": "Pam\\Http\\Request",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "response",
-                            "type": "Pam\\Http\\Response",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "next",
-                            "type": "Pam\\Contracts\\Http\\RequestHandlerInterface",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
                         }
                     ]
                 }
@@ -10310,81 +10156,6 @@
             "cases": {
                 "Idle": 1,
                 "RequestActive": 2
-            }
-        },
-        "Nimbus\\ControllerHandler": {
-            "kind": "class",
-            "final": true,
-            "readonly": true,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "__construct": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": null,
-                    "parameters": [
-                        {
-                            "name": "container",
-                            "type": "Nimbus\\Container\\Container",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "controller",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "method",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                },
-                "__invoke": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "mixed",
-                    "parameters": [
-                        {
-                            "name": "request",
-                            "type": "Pam\\Http\\Request",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "response",
-                            "type": "Pam\\Http\\Response",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                }
             }
         },
         "Nimbus\\Database\\ArcanoManager": {
@@ -12434,54 +12205,6 @@
                         {
                             "name": "event",
                             "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                }
-            }
-        },
-        "Nimbus\\HandlerResolver": {
-            "kind": "class",
-            "final": true,
-            "readonly": true,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "__construct": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": null,
-                    "parameters": [
-                        {
-                            "name": "container",
-                            "type": "Nimbus\\Container\\Container",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                },
-                "resolve": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "Closure",
-                    "parameters": [
-                        {
-                            "name": "handler",
-                            "type": "array|callable|string",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -16256,6 +15979,171 @@
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
+        "Nimbus\\Http\\RequestData": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "all": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "bearerToken": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "?string",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "filled": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "has": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "keys",
+                            "type": "array|string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "input": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "mixed",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "key",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "default",
+                            "type": "mixed",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "only": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": [
+                        {
+                            "name": "request",
+                            "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "keys",
+                            "type": "array|string",
+                            "byReference": false,
+                            "variadic": true,
+                            "optional": true,
                             "default": null,
                             "hasDefault": false
                         }
@@ -25281,36 +25169,6 @@
                 }
             }
         },
-        "Nimbus\\PackageDiscovery": {
-            "kind": "class",
-            "final": true,
-            "readonly": false,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "providers": {
-                    "static": true,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "array",
-                    "parameters": [
-                        {
-                            "name": "projectRoot",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                }
-            }
-        },
         "Nimbus\\Pagination\\Page": {
             "kind": "class",
             "final": true,
@@ -25874,74 +25732,6 @@
                         {
                             "name": "constraint",
                             "type": "Nimbus\\RouteConstraint|string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                }
-            }
-        },
-        "Nimbus\\Pipeline": {
-            "kind": "class",
-            "final": true,
-            "readonly": false,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [
-                "Pam\\Contracts\\Http\\RequestHandlerInterface"
-            ],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "__construct": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": null,
-                    "parameters": [
-                        {
-                            "name": "middleware",
-                            "type": "array",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "destination",
-                            "type": "Pam\\Contracts\\Http\\RequestHandlerInterface",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                },
-                "handle": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "Pam\\Http\\Response",
-                    "parameters": [
-                        {
-                            "name": "request",
-                            "type": "Pam\\Http\\Request",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "response",
-                            "type": "Pam\\Http\\Response",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -36368,45 +36158,6 @@
                 }
             }
         },
-        "Nimbus\\Validation\\DtoHydrator": {
-            "kind": "class",
-            "final": true,
-            "readonly": false,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "hydrate": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "object",
-                    "parameters": [
-                        {
-                            "name": "class",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "data",
-                            "type": "array",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        }
-                    ]
-                }
-            }
-        },
         "Nimbus\\Validation\\EnumRule": {
             "kind": "class",
             "final": true,
@@ -37023,95 +36774,6 @@
                             "optional": false,
                             "default": null,
                             "hasDefault": false
-                        }
-                    ]
-                }
-            }
-        },
-        "Nimbus\\View\\CompiledTemplate": {
-            "kind": "class",
-            "final": true,
-            "readonly": true,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [],
-            "constants": [],
-            "properties": {
-                "code": {
-                    "static": false,
-                    "readonly": true,
-                    "type": "string"
-                },
-                "references": {
-                    "static": false,
-                    "readonly": true,
-                    "type": "array"
-                }
-            },
-            "methods": {
-                "__construct": {
-                    "static": false,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": null,
-                    "parameters": [
-                        {
-                            "name": "code",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "references",
-                            "type": "array",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": true,
-                            "default": [],
-                            "hasDefault": true
-                        }
-                    ]
-                }
-            }
-        },
-        "Nimbus\\View\\Compiler": {
-            "kind": "class",
-            "final": true,
-            "readonly": false,
-            "abstract": false,
-            "parent": null,
-            "interfaces": [],
-            "constants": [],
-            "properties": [],
-            "methods": {
-                "compile": {
-                    "static": true,
-                    "final": false,
-                    "abstract": false,
-                    "returnsReference": false,
-                    "return": "Nimbus\\View\\CompiledTemplate",
-                    "parameters": [
-                        {
-                            "name": "source",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": false,
-                            "default": null,
-                            "hasDefault": false
-                        },
-                        {
-                            "name": "template",
-                            "type": "string",
-                            "byReference": false,
-                            "variadic": false,
-                            "optional": true,
-                            "default": "inline",
-                            "hasDefault": true
                         }
                     ]
                 }

@@ -6,6 +6,11 @@ namespace Nimbus;
 
 use Pam\Contracts\Package\ServiceProviderInterface;
 
+/**
+ * Reads the service providers that installed packages declare.
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
+ */
 final class PackageDiscovery
 {
     /** @return list<class-string<ServiceProviderInterface>> */
