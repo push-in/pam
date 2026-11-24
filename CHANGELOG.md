@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+## 2.2.27 - 2026-11-24
+
+- `pam init` requires `pushinbr/arcano` `^0.2.9` and `pushinbr/nimbus` `^0.7`.
+
 - `pam init --template api` writes `bootstrap/app.php` (builds and returns the `Nimbus\App`
   without listening) and `bin/nimbus`; `index.php` and `tests/TestCase.php` require the bootstrap,
   so `bin/nimbus tinker` opens a shell over the same application. The api and web templates add

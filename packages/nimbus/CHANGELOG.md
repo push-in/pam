@@ -5,6 +5,8 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-24
+
 Second round of fixes from the 2026-11-20 security audit.
 
 ### Security

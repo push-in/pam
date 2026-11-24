@@ -4143,10 +4143,10 @@ fn initializes_a_project_without_overwriting_files() {
         "A PHP application powered by the PAM runtime."
     );
     assert_eq!(manifest_json["license"], "proprietary");
-    assert_eq!(manifest_json["require"]["pushinbr/nimbus"], "^0.6");
+    assert_eq!(manifest_json["require"]["pushinbr/nimbus"], "^0.7");
     assert_eq!(manifest_json["require-dev"]["laravel/pint"], "^1.30");
     assert_eq!(manifest_json["require-dev"]["fakerphp/faker"], "^1.24");
-    assert_eq!(manifest_json["require"]["pushinbr/arcano"], "^0.2.8");
+    assert_eq!(manifest_json["require"]["pushinbr/arcano"], "^0.2.9");
     assert!(directory.join("routes.php").is_file());
     assert!(
         directory
@@ -4224,7 +4224,7 @@ fn initializes_the_web_starter_with_login_views_and_tests() {
     let manifest: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(directory.join("composer.json")).unwrap())
             .unwrap();
-    assert_eq!(manifest["require"]["pushinbr/nimbus"], "^0.6");
+    assert_eq!(manifest["require"]["pushinbr/nimbus"], "^0.7");
     assert_eq!(manifest["require"]["symfony/translation"], "^7.3");
     assert_eq!(manifest["require"]["symfony/mailer"], "^7.3");
     let environment = fs::read_to_string(directory.join(".env")).unwrap();
@@ -4304,7 +4304,7 @@ fn initializes_raw_and_socket_presets_without_composer() {
     let manifest = fs::read_to_string(api.join("composer.json")).unwrap();
     assert!(manifest.contains("pushinbr/pam-socket"));
     let manifest_json: serde_json::Value = serde_json::from_str(&manifest).unwrap();
-    assert_eq!(manifest_json["require"]["pushinbr/nimbus"], "^0.6");
+    assert_eq!(manifest_json["require"]["pushinbr/nimbus"], "^0.7");
     assert_eq!(manifest_json["require"]["pushinbr/pam-socket"], "^1.1");
 
     fs::remove_dir_all(raw).unwrap();
