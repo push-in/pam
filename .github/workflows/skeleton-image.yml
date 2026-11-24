@@ -1,0 +1,172 @@
+name: Nimbus image and Helm chart
+
+# Builds the official image of the Nimbus skeleton (packages/skeleton/Dockerfile)
+# and checks the Helm chart in deploy/helm/nimbus.
+#
+# - Pull requests: amd64 build, then a smoke test of the real container
+#   (read-only root, /health, /ready, Docker health check, graceful SIGTERM).
+# - Published releases: multi-arch (amd64 + arm64) build with buildx, pushed to
+#   ghcr.io/push-in/nimbus-skeleton with buildx SBOM and provenance.
+
+on:
+  pull_request:
+    paths:
+      - packages/skeleton/**
+      - packages/nimbus/src/**
+      - packages/nimbus/composer.json
+      - packages/nimbus/CHANGELOG.md
+      - deploy/helm/**
+      - scripts/stage-skeleton-image.py
+      - .github/workflows/skeleton-image.yml
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      pam_version:
+        description: PAM release the image is built on (for example v2.2.26)
+        required: true
+        type: string
+      push:
+        description: Push the image to ghcr.io
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: skeleton-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  IMAGE: ghcr.io/push-in/nimbus-skeleton
+
+jobs:
+  helm:
+    name: Helm chart lint and render
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.4
+      - name: Lint and render every optional resource
+        run: |
+          helm lint deploy/helm/nimbus --strict
+          helm template smoke deploy/helm/nimbus \
+            --set autoscaling.enabled=true \
+            --set podDisruptionBudget.enabled=true \
+            --set metrics.serviceMonitor.enabled=true \
+            --set migrations.enabled=true \
+            --set ingress.enabled=true \
+            --set 'ingress.hosts[0].host=api.example.com' \
+            --set secretEnv.DB_PASSWORD=example > /tmp/rendered.yaml
+          grep -q 'kind: HorizontalPodAutoscaler' /tmp/rendered.yaml
+          grep -q 'kind: PodDisruptionBudget' /tmp/rendered.yaml
+          grep -q 'path: /ready' /tmp/rendered.yaml
+          grep -q 'preStop' /tmp/rendered.yaml
+
+  image:
+    name: Build ${{ github.event_name == 'pull_request' && 'and smoke-test' || 'and publish' }} the image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Resolve the PAM release and image tags
+        id: meta
+        env:
+          EVENT: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          INPUT_VERSION: ${{ inputs.pam_version }}
+          INPUT_PUSH: ${{ inputs.push }}
+        run: |
+          case "${EVENT}" in
+            release) version="${RELEASE_TAG}"; push=true ;;
+            workflow_dispatch) version="${INPUT_VERSION}"; push="${INPUT_PUSH}" ;;
+            *) version=$(sed -n 's/^ARG PAM_VERSION=//p' packages/skeleton/Dockerfile); push=false ;;
+          esac
+          if ! printf '%s' "${version}" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "not a PAM release tag: ${version}" >&2
+            exit 1
+          fi
+          {
+            echo "pam_version=${version}"
+            echo "push=${push}"
+            echo "tags=${IMAGE}:${version#v},${IMAGE}:latest"
+          } >> "${GITHUB_OUTPUT}"
+      - name: Stage the build context from this commit
+        run: python3 scripts/stage-skeleton-image.py build/skeleton-image
+      - uses: docker/setup-qemu-action@v3
+        if: steps.meta.outputs.push == 'true'
+      - uses: docker/setup-buildx-action@v3
+      - name: Build for the smoke test (amd64)
+        if: steps.meta.outputs.push != 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: build/skeleton-image
+          platforms: linux/amd64
+          build-args: PAM_VERSION=${{ steps.meta.outputs.pam_version }}
+          load: true
+          tags: nimbus-skeleton:smoke
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke-test the container
+        if: steps.meta.outputs.push != 'true'
+        run: |
+          set -eu
+          docker run -d --name nimbus --read-only --tmpfs /tmp \
+            --tmpfs /app/storage:uid=65532,gid=65532 \
+            -e DB_CONNECTION=sqlite -e DB_DATABASE=/app/storage/database.sqlite \
+            -e NIMBUS_METRICS=1 -p 3000:3000 nimbus-skeleton:smoke
+          trap 'docker logs nimbus; docker rm -f nimbus >/dev/null 2>&1 || true' EXIT
+          for attempt in $(seq 1 60); do
+            curl -fsS http://127.0.0.1:3000/health >/dev/null 2>&1 && break
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:3000/health
+          curl -fsS http://127.0.0.1:3000/ready
+          curl -fsS http://127.0.0.1:3000/api/ping
+          test "$(docker exec nimbus /opt/pam/bin/pam -r 'echo posix_geteuid();')" = 65532
+          for attempt in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' nimbus)
+            test "${status}" = healthy && break
+            sleep 2
+          done
+          test "${status}" = healthy
+          docker stop --time 30 nimbus
+          test "$(docker inspect -f '{{.State.ExitCode}}' nimbus)" = 0
+          docker images nimbus-skeleton:smoke --format 'image size: {{.Size}}'
+      - uses: docker/login-action@v3
+        if: steps.meta.outputs.push == 'true'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push (amd64 + arm64)
+        id: push
+        if: steps.meta.outputs.push == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: build/skeleton-image
+          platforms: linux/amd64,linux/arm64
+          build-args: PAM_VERSION=${{ steps.meta.outputs.pam_version }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=Nimbus skeleton API on the PAM runtime
+            org.opencontainers.image.licenses=Apache-2.0
+            org.opencontainers.image.version=${{ steps.meta.outputs.pam_version }}
+          provenance: mode=max
+          sbom: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

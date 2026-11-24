@@ -60,6 +60,7 @@ Requisitos: PAM instalado (`curl -fsSL https://push-in.github.io/pam/install.sh 
 - [Logs e observabilidade](./observabilidade.md): observadores, profiler, painel de debug, health checks.
 - [Retentativas, circuit breaker, transações e prazos](./resiliencia.md)
 - [Deploy com `pam deploy:remote`](./deploy.md)
+- [Operação em produção](./operacao.md): reload sem downtime, `/health` e `/ready`, dimensionamento, proxy, métricas, OpenTelemetry, Sentry, Docker, Helm, backups e runbooks.
 - [Desempenho: números do benchmark](./desempenho.md)
 - [Migração do Laravel](./migracao-laravel.md)
 

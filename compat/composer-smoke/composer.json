@@ -61,6 +61,7 @@
         "pushinbr/arcano": "^0.2.8",
         "pushinbr/pam-http-testing": "^1.0",
         "pushinbr/pam-testing": "^2.0",
+        "sentry/sentry": "^4.0",
         "symfony/http-client": "^7.3",
         "symfony/mailer": "^7.3",
         "symfony/mime": "^7.3",

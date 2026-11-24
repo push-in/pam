@@ -843,7 +843,13 @@ Conexões WebSocket antigas são drenadas/encerradas com a geração antiga. Cli
 devem usar reconexão e reenviar `sessionId` e `resumeToken`; eventos que exigem garantia precisam
 de persistência/ack no domínio, não apenas do socket em memória.
 
-Os workers usam sockets separados com `SO_REUSEPORT`. A janela de quiescência drena
-conexões já enfileiradas, mas o kernel ainda pode resetar uma conexão que coincida
-com o fechamento do listener antigo. Uma garantia estrita exige retry no edge ou
-uma futura arquitetura em que o master possua e compartilhe um único listener.
+Os listeners `SO_REUSEPORT` pertencem ao master e passam de uma geração à seguinte
+(veja [Reciclagem sem perda](#reciclagem-sem-perda-make-before-break)), então o
+reload não reseta conexões na fila do kernel. `tests/cluster.rs`
+(`reloads_under_load_without_failed_requests`) recarrega o cluster três vezes sob
+carga sem retry e exige zero falhas.
+
+Durante o drain, PHP vê `pam_draining() === true`: a readiness da aplicação
+(`Nimbus\Health\HealthEndpoints`) responde 503 enquanto as requisições em andamento
+terminam. Imagem Docker do skeleton, chart Helm, dimensionamento e runbooks estão em
+[Operação em produção do Nimbus](nimbus/operacao.md).

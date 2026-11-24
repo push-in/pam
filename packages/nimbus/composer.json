@@ -36,6 +36,8 @@
         "league/flysystem-aws-s3-v3": "S3 disks and presigned uploads in Nimbus\\Storage.",
         "league/oauth2-client": "Social login (Nimbus\\Auth\\OAuth\\SocialLogin); add provider packages such as league/oauth2-google or league/oauth2-github.",
         "phpstan/phpstan": "Nimbus and Arcano types through phpstan/extension.neon (auto-installed by phpstan/extension-installer).",
+        "open-telemetry/exporter-otlp": "OTLP exporter of the OpenTelemetry SDK used by Nimbus\\Telemetry.",
+        "open-telemetry/sdk": "OpenTelemetry traces and metrics (Nimbus\\Telemetry\\Telemetry); add open-telemetry/exporter-otlp to export them over OTLP.",
         "psr/http-client": "Send push and webhook notifications through any PSR-18 client (Psr18HttpClient).",
         "psr/log": "PSR-3 logging; LoggerInterface resolves to the PAM runtime structured log.",
         "psy/psysh": "The nimbus tinker REPL (bin/nimbus tinker).",
@@ -46,6 +48,7 @@
         "symfony/console": "Application console commands and the migrate, db:seed and schema:cache commands of bin/nimbus (Nimbus\\Console\\Command, Kernel).",
         "symfony/deprecation-contracts": "Deprecation notices of Nimbus through trigger_deprecation() (otherwise E_USER_DEPRECATED with the same message).",
         "symfony/http-client": "Nimbus\\Http\\Client outside the PAM runtime (inside PAM it uses the non-blocking runtime client).",
+        "sentry/sentry": "Exception reporting with worker-safe scopes (Nimbus\\Sentry\\SentryReporter).",
         "symfony/mailer": "Required by the mail notification channel (Nimbus\\Notifications\\Mail\\MailChannel).",
         "symfony/translation": "Translations from lang/ directories (Nimbus\\Translation\\Translator, __() and trans())."
     },
@@ -109,6 +112,7 @@
         "firebase/php-jwt": "^7.0",
         "league/flysystem": "^3.29",
         "league/oauth2-client": "^2.8",
+        "open-telemetry/sdk": "^1.0",
         "phpstan/phpstan": "^2.1",
         "phpunit/phpunit": "^11.5",
         "psr/http-client": "^1.0",
@@ -119,6 +123,7 @@
         "pushinbr/arcano": "^0.2.8",
         "symfony/console": "^7.4 || ^8.0",
         "symfony/http-client": "^7.3",
+        "sentry/sentry": "^4.0",
         "symfony/mailer": "^7.3",
         "symfony/mime": "^7.3",
         "symfony/translation": "^7.3"

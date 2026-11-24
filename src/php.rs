@@ -126,6 +126,7 @@ unsafe extern "C" {
     fn pam_php_cancel_http(request_id: *const c_char, request_id_length: usize) -> c_int;
     fn pam_php_register_upload(path: *const c_char, path_length: usize) -> c_int;
     fn pam_php_set_cache_purge_handler(handler: Option<CachePurgeHandler>);
+    fn pam_php_set_draining(draining: c_int);
     fn pam_php_release_upload(path: *const c_char, path_length: usize) -> c_int;
     fn pam_php_dispatch_ws(
         event_kind: c_int,
@@ -852,6 +853,14 @@ pub fn register_cache_purge_handler(handler: CachePurgeHandler) {
     // SAFETY: stores a function pointer with static lifetime; the C side
     // reads it only on the PHP thread when `pam_cache_purge()` is called.
     unsafe { pam_php_set_cache_purge_handler(Some(handler)) };
+}
+
+/// Makes PHP's `pam_draining()` report that this worker is draining, so
+/// application readiness endpoints answer 503 while in-flight work finishes.
+pub fn set_draining(draining: bool) {
+    // SAFETY: stores one aligned int that the C side reads on the PHP thread;
+    // either value is a valid answer for a concurrent reader.
+    unsafe { pam_php_set_draining(c_int::from(draining)) };
 }
 
 pub fn register_upload(path: &str) -> Result<(), String> {

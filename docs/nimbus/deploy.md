@@ -66,6 +66,7 @@ O servidor resolve os pacotes Composer sozinho, então repositórios `path` que 
 - Stores compartilhados (Redis ou banco) para rate limit, sessão, idempotência, revogação de token e lock do agendador quando houver mais de um worker.
 - `--task-workers 1` (ou mais) se o app usa fila ou agendador.
 - Número de workers × `maxIdleConnections` abaixo do `max_connections` do banco.
-- Rota de health e `--health-check-url` para o deploy só trocar quando a release nova responde.
+- `HealthEndpoints` (`/health` e `/ready`) e `--health-check-url` apontando para `/ready`, para o deploy só trocar quando a release nova responde.
+- Container ou Kubernetes: a imagem do skeleton e o chart Helm estão em [Operação em produção](./operacao.md#imagem-docker).
 - `pam doctor` e `pam test` antes da release.
 - Estado mutável sempre no escopo da requisição: `singleton` sobrevive entre requisições.

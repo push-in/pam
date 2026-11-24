@@ -13,6 +13,13 @@
   `packages/nimbus/CHANGELOG.md`.
 - CI: `Nimbus backward compatibility` runs `roave/backward-compatibility-check` against the newest
   tag of `push-in/nimbus`; `Nimbus Rector` runs the rule fixtures.
+- `pam_draining()` tells PHP that its worker started draining (SIGTERM, reload, `--max-requests`
+  recycle or a wedged request), so application readiness endpoints answer 503 while in-flight
+  requests finish. Nimbus `HealthEndpoints` uses it for `/ready`.
+- New cluster tests: SIGTERM finishes an in-flight request and exits 0; three reloads under load
+  without client retries drop no request.
+- Official Nimbus skeleton image (`ghcr.io/push-in/nimbus-skeleton`, amd64 and arm64, built on
+  each release) and a Helm chart in `deploy/helm/nimbus` with probes, preStop, HPA and PDB.
 
 ## 2.2.26 - 2026-11-21
 

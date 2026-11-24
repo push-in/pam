@@ -82,6 +82,7 @@ export default defineConfig({
           { text: 'Logs e observabilidade', link: '/observabilidade' },
           { text: 'Resiliência e transações', link: '/resiliencia' },
           { text: 'Deploy', link: '/deploy' },
+          { text: 'Operação em produção', link: '/operacao' },
           { text: 'Desempenho', link: '/desempenho' },
           { text: 'Migração do Laravel', link: '/migracao-laravel' },
           { text: 'Regras Rector', link: 'https://github.com/push-in/pam/tree/main/packages/nimbus-rector' },

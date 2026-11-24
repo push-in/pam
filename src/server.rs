@@ -257,6 +257,7 @@ impl ServerState {
         // worker, new connections it accepts are handed to them, and HTTP/1
         // connections close after their current response.
         self.drain.start();
+        crate::php::set_draining(true);
         self.request_recycle();
     }
 
@@ -1526,6 +1527,7 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
             // From here on responses close their HTTP/1 connections and the
             // balancer stops routing connections to this worker.
             state.drain.start();
+            crate::php::set_draining(true);
             // With SO_REUSEPORT a connection may already be queued on this
             // listener when the replacement becomes ready. Keep accepting
             // briefly so those are served (or handed to a live sibling)

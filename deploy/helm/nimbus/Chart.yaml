@@ -1,0 +1,17 @@
+apiVersion: v2
+name: nimbus
+description: A Nimbus API on the PAM runtime, with zero-downtime rollouts, health probes, autoscaling and Prometheus metrics.
+type: application
+version: 0.1.0
+appVersion: "2.2.26"
+kubeVersion: ">=1.30.0-0"
+home: https://github.com/push-in/pam
+sources:
+  - https://github.com/push-in/pam/tree/main/deploy/helm/nimbus
+keywords:
+  - php
+  - pam
+  - nimbus
+maintainers:
+  - name: Pushin
+    url: https://github.com/push-in

@@ -46,6 +46,21 @@ statuses are sequential integer-backed enum values (`1` active, `2` archived).
 Creation returns `201 Created`; resources may select any valid HTTP status while
 retaining Nimbus' consistent `data` envelope.
 
+`GET /health` answers while the process is up; `GET /ready` checks the
+database and answers 503 while a worker drains (SIGTERM, reload), so load
+balancers stop sending it traffic. Metrics, OpenTelemetry and Sentry stay off
+until `NIMBUS_METRICS=1`, the `OTEL_*` variables or `SENTRY_DSN` are set.
+
+The `Dockerfile` builds a production image on the official PAM release:
+dependencies without dev packages, warmed caches, and a distroless runtime that
+runs as an unprivileged user with a health check:
+
+```bash
+docker build -t my-api .
+docker run --read-only --tmpfs /tmp -p 3000:3000 \
+    -e DB_CONNECTION=sqlite -e DB_DATABASE=/tmp/database.sqlite my-api
+```
+
 Run the in-memory application test inside Pam's Embed SAPI:
 
 ```bash
