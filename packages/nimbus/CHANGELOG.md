@@ -40,6 +40,46 @@ Second round of fixes from the 2026-11-20 security audit.
   no longer `/webhooksX` (B7).
 - `Crypt` (and `CookieCodec::fromEnvironment()`) decrypt with `APP_PREVIOUS_KEYS`, so `APP_KEY`
   can be rotated without invalidating encrypted values (B7).
+Productivity parity with Laravel. Every addition is optional: the production dependency set is
+still `php` and `pushinbr/pam-contracts`.
+
+### Added
+
+- `Nimbus\Http\Client`: a fluent HTTP client (`Http::withToken()->timeout()->retry()->get()`,
+  `asForm()`, `withBody()`, `baseUrl()`, `pool()`, `Response::throw()`/`json('a.b')`). Inside PAM
+  it sends through `Pam\Http\Client`, suspending only the request Fiber, and pools run in sibling
+  Fibers; elsewhere it uses `symfony/http-client` (suggested). Retry waits use `Pam\Async\delay()`.
+- Test fakes with Laravel-style assertions, bound into the test's application by the
+  `Nimbus\Testing` facades and `TestCase::fake*()` helpers: `Queue::fake()` (`Jobs\QueueFake`,
+  `assertPushed`), `Event::fake()` (`Events\EventFake`, `assertDispatched`), `Mail::fake()`
+  (`Mail\MailFake`, `assertSent`/`assertSentTo`), `Storage::fake()` (temporary local disk with
+  `Disk::assertExists()`/`assertMissing()`), `Broadcast::fake()` and `Http::fake()` (URL pattern
+  stubs, `Http::sequence()`, `assertSent`, `preventStrayRequests()`).
+- `Mail\Mailer`: sends a `MailMessage` or a Symfony `Email` outside notifications
+  (`$mailer->to($address)->send(...)`); `channel()` builds the notification mail channel over it.
+- Queued event listeners: listeners implementing `Events\ShouldQueue` are pushed to the bound
+  `JobDispatcher` as `CallQueuedListener` jobs (`$tries`, `$delay`, `shouldQueue()`).
+- Broadcasting: events implementing `Broadcasting\ShouldBroadcast` (or `ShouldBroadcastNow`) go
+  to public, private and presence channels through `BroadcastManager`, queued as `BroadcastEvent`
+  jobs when a dispatcher is bound. Drivers for PAM's native WebSocket rooms
+  (`PamSocketBroadcaster`), the Pusher protocol (`PusherBroadcaster` over
+  `pusher/pusher-php-server`: Pusher, Soketi, Reverb) and Redis pub/sub (`RedisBroadcaster`).
+  `BroadcastManager::channel()` authorizes subscriptions and `routes()` registers
+  `POST /broadcasting/auth`.
+- Cache: `Cache\Repository` (`get`, `put`, `add`, `remember`, `increment`, `pull`, `flush`) over
+  `MemoryStore` or `Redis\RedisCacheStore`, with tags on every store
+  (`Cache::tags(['products'])->put()`/`flush()`) and a static `Cache` facade.
+- `bin/nimbus tinker`: a PsySH REPL (`psy/psysh`, suggested) with the booted application from
+  `bootstrap/app.php` and `$app`, `$container`, `$arcano`, `$orm` in scope.
+- `Profiler\DebugPanel`: a development panel recording requests, queries, exceptions, jobs, mails
+  and outgoing HTTP calls per worker, at `/_debug`. Disabled unless `APP_ENV`/`PAM_ENV` is a
+  development environment, and guarded by an `Authenticator` and the `viewDebugPanel` ability.
+  `MemoryProfiler::currentToken()` exposes the token of the request being profiled.
+- PHPStan extension (`phpstan/extension.neon`, registered for `phpstan/extension-installer`):
+  `Container::get(Foo::class)` is a `Foo`, `ArcanoManager::repository()`/`select()` are generic
+  over the entity, FormRequest `input()`/`validated()` are typed from `rules()`, and a rule checks
+  route closure parameters against the path placeholders. `composer analyse` (level 9, in CI)
+  covers the extension.
 
 ## 0.6.0 - 2026-11-21
 

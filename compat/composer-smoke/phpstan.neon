@@ -3,6 +3,10 @@ parameters:
     ignoreErrors:
         -
             identifier: trait.unused
+        -
+            # pusher/pusher-php-server needs Guzzle 7; this fixture installs Guzzle 8.
+            identifier: class.notFound
+            path: ../../packages/nimbus/src/Broadcasting/PusherBroadcaster.php
     scanFiles:
         - native-shared-stubs.php
     excludePaths:

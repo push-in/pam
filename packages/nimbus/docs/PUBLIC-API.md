@@ -58,14 +58,33 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Auth\TokenPrincipal`](#nimbusauthtokenprincipal)
 - [`Nimbus\Auth\TokenRevocationStore`](#nimbusauthtokenrevocationstore)
 - [`Nimbus\Auth\VerifyEmailNotification`](#nimbusauthverifyemailnotification)
+- [`Nimbus\Broadcasting\BroadcastEvent`](#nimbusbroadcastingbroadcastevent)
+- [`Nimbus\Broadcasting\BroadcastFake`](#nimbusbroadcastingbroadcastfake)
+- [`Nimbus\Broadcasting\BroadcastManager`](#nimbusbroadcastingbroadcastmanager)
+- [`Nimbus\Broadcasting\Broadcaster`](#nimbusbroadcastingbroadcaster)
+- [`Nimbus\Broadcasting\Channel`](#nimbusbroadcastingchannel)
+- [`Nimbus\Broadcasting\PamSocketBroadcaster`](#nimbusbroadcastingpamsocketbroadcaster)
+- [`Nimbus\Broadcasting\PresenceChannel`](#nimbusbroadcastingpresencechannel)
+- [`Nimbus\Broadcasting\PrivateChannel`](#nimbusbroadcastingprivatechannel)
+- [`Nimbus\Broadcasting\PusherBroadcaster`](#nimbusbroadcastingpusherbroadcaster)
+- [`Nimbus\Broadcasting\RedisBroadcaster`](#nimbusbroadcastingredisbroadcaster)
+- [`Nimbus\Broadcasting\ShouldBroadcast`](#nimbusbroadcastingshouldbroadcast)
+- [`Nimbus\Broadcasting\ShouldBroadcastNow`](#nimbusbroadcastingshouldbroadcastnow)
+- [`Nimbus\Cache\Cache`](#nimbuscachecache)
 - [`Nimbus\Cache\CacheRecord`](#nimbuscachecacherecord)
 - [`Nimbus\Cache\MemoryResponseCacheStore`](#nimbuscachememoryresponsecachestore)
+- [`Nimbus\Cache\MemoryStore`](#nimbuscachememorystore)
+- [`Nimbus\Cache\Repository`](#nimbuscacherepository)
 - [`Nimbus\Cache\ResponseCacheStore`](#nimbuscacheresponsecachestore)
+- [`Nimbus\Cache\Store`](#nimbuscachestore)
+- [`Nimbus\Cache\TagSet`](#nimbuscachetagset)
+- [`Nimbus\Cache\TaggedCache`](#nimbuscachetaggedcache)
 - [`Nimbus\CallableRequestHandler`](#nimbuscallablerequesthandler)
 - [`Nimbus\Config\ConfigDefinition`](#nimbusconfigconfigdefinition)
 - [`Nimbus\Config\ConfigType`](#nimbusconfigconfigtype)
 - [`Nimbus\Config\Configuration`](#nimbusconfigconfiguration)
 - [`Nimbus\Config\ConfigurationException`](#nimbusconfigconfigurationexception)
+- [`Nimbus\Console\Tinker`](#nimbusconsoletinker)
 - [`Nimbus\ContainerMiddleware`](#nimbuscontainermiddleware)
 - [`Nimbus\Container\Binding`](#nimbuscontainerbinding)
 - [`Nimbus\Container\BindingLifetime`](#nimbuscontainerbindinglifetime)
@@ -90,7 +109,10 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\QueryReport`](#nimbusdatabasequeryreport)
 - [`Nimbus\Database\Seeder`](#nimbusdatabaseseeder)
 - [`Nimbus\Database\SeederRunner`](#nimbusdatabaseseederrunner)
+- [`Nimbus\Events\CallQueuedListener`](#nimbuseventscallqueuedlistener)
 - [`Nimbus\Events\EventDispatcher`](#nimbuseventseventdispatcher)
+- [`Nimbus\Events\EventFake`](#nimbuseventseventfake)
+- [`Nimbus\Events\ShouldQueue`](#nimbuseventsshouldqueue)
 - [`Nimbus\Events\SyncEventDispatcher`](#nimbuseventssynceventdispatcher)
 - [`Nimbus\HandlerResolver`](#nimbushandlerresolver)
 - [`Nimbus\Health\HealthCheck`](#nimbushealthhealthcheck)
@@ -98,6 +120,19 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Health\HealthResult`](#nimbushealthhealthresult)
 - [`Nimbus\Health\HealthState`](#nimbushealthhealthstate)
 - [`Nimbus\Http\ClientIpResolver`](#nimbushttpclientipresolver)
+- [`Nimbus\Http\Client\ConnectionException`](#nimbushttpclientconnectionexception)
+- [`Nimbus\Http\Client\Factory`](#nimbushttpclientfactory)
+- [`Nimbus\Http\Client\Http`](#nimbushttpclienthttp)
+- [`Nimbus\Http\Client\HttpFake`](#nimbushttpclienthttpfake)
+- [`Nimbus\Http\Client\OutgoingRequest`](#nimbushttpclientoutgoingrequest)
+- [`Nimbus\Http\Client\PamTransport`](#nimbushttpclientpamtransport)
+- [`Nimbus\Http\Client\PendingRequest`](#nimbushttpclientpendingrequest)
+- [`Nimbus\Http\Client\Pool`](#nimbushttpclientpool)
+- [`Nimbus\Http\Client\RequestException`](#nimbushttpclientrequestexception)
+- [`Nimbus\Http\Client\Response`](#nimbushttpclientresponse)
+- [`Nimbus\Http\Client\ResponseSequence`](#nimbushttpclientresponsesequence)
+- [`Nimbus\Http\Client\SymfonyTransport`](#nimbushttpclientsymfonytransport)
+- [`Nimbus\Http\Client\Transport`](#nimbushttpclienttransport)
 - [`Nimbus\Http\Cookie`](#nimbushttpcookie)
 - [`Nimbus\Http\CookieCodec`](#nimbushttpcookiecodec)
 - [`Nimbus\Http\CookieJar`](#nimbushttpcookiejar)
@@ -128,11 +163,15 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Jobs\JobState`](#nimbusjobsjobstate)
 - [`Nimbus\Jobs\JobWorker`](#nimbusjobsjobworker)
 - [`Nimbus\Jobs\MemoryJobDispatcher`](#nimbusjobsmemoryjobdispatcher)
+- [`Nimbus\Jobs\QueueFake`](#nimbusjobsqueuefake)
 - [`Nimbus\Jobs\QueueTablesMigration`](#nimbusjobsqueuetablesmigration)
 - [`Nimbus\Jobs\RedisJobQueue`](#nimbusjobsredisjobqueue)
 - [`Nimbus\Jobs\RetryPolicy`](#nimbusjobsretrypolicy)
 - [`Nimbus\Jobs\SerializableJob`](#nimbusjobsserializablejob)
 - [`Nimbus\Lifecycle\RequestLifecycleObserver`](#nimbuslifecyclerequestlifecycleobserver)
+- [`Nimbus\Mail\MailFake`](#nimbusmailmailfake)
+- [`Nimbus\Mail\Mailer`](#nimbusmailmailer)
+- [`Nimbus\Mail\PendingMail`](#nimbusmailpendingmail)
 - [`Nimbus\Middleware\ArcanoLifecycleMiddleware`](#nimbusmiddlewarearcanolifecyclemiddleware)
 - [`Nimbus\Middleware\AuthenticateMiddleware`](#nimbusmiddlewareauthenticatemiddleware)
 - [`Nimbus\Middleware\AuthorizeMiddleware`](#nimbusmiddlewareauthorizemiddleware)
@@ -200,6 +239,10 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Pagination\Paginator`](#nimbuspaginationpaginator)
 - [`Nimbus\PendingRoute`](#nimbuspendingroute)
 - [`Nimbus\Pipeline`](#nimbuspipeline)
+- [`Nimbus\Profiler\DebugEntry`](#nimbusprofilerdebugentry)
+- [`Nimbus\Profiler\DebugEntryType`](#nimbusprofilerdebugentrytype)
+- [`Nimbus\Profiler\DebugPanel`](#nimbusprofilerdebugpanel)
+- [`Nimbus\Profiler\DebugRecorder`](#nimbusprofilerdebugrecorder)
 - [`Nimbus\Profiler\MemoryProfiler`](#nimbusprofilermemoryprofiler)
 - [`Nimbus\Profiler\ProfilerMode`](#nimbusprofilerprofilermode)
 - [`Nimbus\Profiler\RequestProfile`](#nimbusprofilerrequestprofile)
@@ -209,6 +252,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\RateLimit\SharedTableRateLimitStore`](#nimbusratelimitsharedtableratelimitstore)
 - [`Nimbus\Redis\Connection`](#nimbusredisconnection)
 - [`Nimbus\Redis\PamConnection`](#nimbusredispamconnection)
+- [`Nimbus\Redis\RedisCacheStore`](#nimbusredisrediscachestore)
 - [`Nimbus\Redis\RedisIdempotencyStore`](#nimbusredisredisidempotencystore)
 - [`Nimbus\Redis\RedisOAuthStateStore`](#nimbusredisredisoauthstatestore)
 - [`Nimbus\Redis\RedisPool`](#nimbusredisredispool)
@@ -262,6 +306,12 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Tenancy\TenantContext`](#nimbustenancytenantcontext)
 - [`Nimbus\Tenancy\TenantResolver`](#nimbustenancytenantresolver)
 - [`Nimbus\Testing\ActingAsAuthenticator`](#nimbustestingactingasauthenticator)
+- [`Nimbus\Testing\Broadcast`](#nimbustestingbroadcast)
+- [`Nimbus\Testing\Event`](#nimbustestingevent)
+- [`Nimbus\Testing\Fakes`](#nimbustestingfakes)
+- [`Nimbus\Testing\Mail`](#nimbustestingmail)
+- [`Nimbus\Testing\Queue`](#nimbustestingqueue)
+- [`Nimbus\Testing\Storage`](#nimbustestingstorage)
 - [`Nimbus\Testing\TestCase`](#nimbustestingtestcase)
 - [`Nimbus\Testing\TestClient`](#nimbustestingtestclient)
 - [`Nimbus\Testing\TestResponse`](#nimbustestingtestresponse)
@@ -1131,6 +1181,181 @@ final class Nimbus\Auth\VerifyEmailNotification extends Nimbus\Notifications\Not
 - `public toMail(Nimbus\Notifications\Notifiable $notifiable): Nimbus\Notifications\Mail\MailMessage`
 - `public via(Nimbus\Notifications\Notifiable $notifiable): array`
 
+## `Nimbus\Broadcasting\BroadcastEvent`
+
+```php
+final readonly class Nimbus\Broadcasting\BroadcastEvent implements Nimbus\Jobs\SerializableJob
+```
+
+### Properties
+
+- `public readonly array $channels`
+- `public readonly string $event`
+- `public readonly ?string $exceptSocketId`
+- `public readonly array $payload`
+
+### Methods
+
+- `public __construct(array $channels, string $event, array $payload, ?string $exceptSocketId = null): mixed`
+- `public static fromJobPayload(array $payload): self`
+- `public handle(Nimbus\Broadcasting\BroadcastManager $broadcasts): void`
+- `public static jobName(): string`
+- `public toJobPayload(): array`
+
+## `Nimbus\Broadcasting\BroadcastFake`
+
+```php
+final class Nimbus\Broadcasting\BroadcastFake implements Nimbus\Broadcasting\Broadcaster
+```
+
+### Methods
+
+- `public assertBroadcast(string $event, ?string $channel = null, ?Closure $callback = null): void`
+- `public assertNotBroadcast(string $event, ?string $channel = null): void`
+- `public assertNothingBroadcast(): void`
+- `public authorizeSocket(string $channel, string $socketId, ?array $presence = null): array`
+- `public broadcast(array $channels, string $event, array $payload, ?string $exceptSocketId = null): void`
+- `public broadcasts(?string $event = null, ?string $channel = null, ?Closure $callback = null): array`
+
+## `Nimbus\Broadcasting\BroadcastManager`
+
+```php
+final class Nimbus\Broadcasting\BroadcastManager
+```
+
+### Methods
+
+- `public __construct(Nimbus\Broadcasting\Broadcaster $broadcaster): mixed`
+- `public authorize(Nimbus\Auth\Principal $principal, string $channel, string $socketId): array`
+- `public broadcaster(): Nimbus\Broadcasting\Broadcaster`
+- `public channel(string $pattern, Closure $callback): self`
+- `public dispatch(Nimbus\Broadcasting\ShouldBroadcast $event, ?Nimbus\Jobs\JobDispatcher $jobs = null): void`
+- `public static job(Nimbus\Broadcasting\ShouldBroadcast $event): Nimbus\Broadcasting\BroadcastEvent`
+- `public routes(Nimbus\App $app, string $path = "/broadcasting/auth"): void`
+- `public send(Nimbus\Broadcasting\Channel|array|string $channels, string $event, array $payload = [], ?string $exceptSocketId = null): void`
+- `public swap(Nimbus\Broadcasting\Broadcaster $broadcaster): self`
+
+## `Nimbus\Broadcasting\Broadcaster`
+
+```php
+abstract interface Nimbus\Broadcasting\Broadcaster
+```
+
+### Methods
+
+- `public authorizeSocket(string $channel, string $socketId, ?array $presence = null): array`
+- `public broadcast(array $channels, string $event, array $payload, ?string $exceptSocketId = null): void`
+
+## `Nimbus\Broadcasting\Channel`
+
+```php
+class Nimbus\Broadcasting\Channel implements Stringable
+```
+
+### Properties
+
+- `public readonly string $name`
+
+### Methods
+
+- `public __construct(string $name): mixed`
+- `public __toString(): string`
+
+## `Nimbus\Broadcasting\PamSocketBroadcaster`
+
+```php
+final readonly class Nimbus\Broadcasting\PamSocketBroadcaster implements Nimbus\Broadcasting\Broadcaster
+```
+
+### Methods
+
+- `public __construct(?Closure $emit = null, ?Closure $join = null): mixed`
+- `public authorizeSocket(string $channel, string $socketId, ?array $presence = null): array`
+- `public broadcast(array $channels, string $event, array $payload, ?string $exceptSocketId = null): void`
+
+## `Nimbus\Broadcasting\PresenceChannel`
+
+```php
+class Nimbus\Broadcasting\PresenceChannel extends Nimbus\Broadcasting\Channel implements Stringable
+```
+
+### Methods
+
+- `public __construct(string $name): mixed`
+
+## `Nimbus\Broadcasting\PrivateChannel`
+
+```php
+class Nimbus\Broadcasting\PrivateChannel extends Nimbus\Broadcasting\Channel implements Stringable
+```
+
+### Methods
+
+- `public __construct(string $name): mixed`
+
+## `Nimbus\Broadcasting\PusherBroadcaster`
+
+```php
+final readonly class Nimbus\Broadcasting\PusherBroadcaster implements Nimbus\Broadcasting\Broadcaster
+```
+
+### Methods
+
+- `public __construct(Pusher\Pusher $pusher): mixed`
+- `public authorizeSocket(string $channel, string $socketId, ?array $presence = null): array`
+- `public broadcast(array $channels, string $event, array $payload, ?string $exceptSocketId = null): void`
+- `public static fromEnvironment(?array $environment = null): self`
+
+## `Nimbus\Broadcasting\RedisBroadcaster`
+
+```php
+final readonly class Nimbus\Broadcasting\RedisBroadcaster implements Nimbus\Broadcasting\Broadcaster
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = ""): mixed`
+- `public authorizeSocket(string $channel, string $socketId, ?array $presence = null): array`
+- `public broadcast(array $channels, string $event, array $payload, ?string $exceptSocketId = null): void`
+
+## `Nimbus\Broadcasting\ShouldBroadcast`
+
+```php
+abstract interface Nimbus\Broadcasting\ShouldBroadcast
+```
+
+### Methods
+
+- `public broadcastOn(): Nimbus\Broadcasting\Channel|array|string`
+
+## `Nimbus\Broadcasting\ShouldBroadcastNow`
+
+```php
+abstract interface Nimbus\Broadcasting\ShouldBroadcastNow implements Nimbus\Broadcasting\ShouldBroadcast
+```
+
+## `Nimbus\Cache\Cache`
+
+```php
+final class Nimbus\Cache\Cache
+```
+
+### Methods
+
+- `public static add(string $key, mixed $value, DateTimeInterface|int|null $ttl = null): bool`
+- `public static flush(): void`
+- `public static forever(string $key, mixed $value): void`
+- `public static forget(string $key): void`
+- `public static get(string $key, mixed $default = null): mixed`
+- `public static has(string $key): bool`
+- `public static increment(string $key, int $by = 1): int`
+- `public static pull(string $key, mixed $default = null): mixed`
+- `public static put(string $key, mixed $value, DateTimeInterface|int|null $ttl = null): void`
+- `public static remember(string $key, DateTimeInterface|int|null $ttl, Closure $callback): mixed`
+- `public static repository(): Nimbus\Cache\Repository`
+- `public static tags(array|string $tags): Nimbus\Cache\TaggedCache`
+- `public static useRepository(?Nimbus\Cache\Repository $repository): void`
+
 ## `Nimbus\Cache\CacheRecord`
 
 ```php
@@ -1159,6 +1384,46 @@ final class Nimbus\Cache\MemoryResponseCacheStore implements Nimbus\Cache\Respon
 - `public get(string $key, int $now): ?Nimbus\Cache\CacheRecord`
 - `public put(string $key, Nimbus\Cache\CacheRecord $record): void`
 
+## `Nimbus\Cache\MemoryStore`
+
+```php
+final class Nimbus\Cache\MemoryStore implements Nimbus\Cache\Store
+```
+
+### Methods
+
+- `public __construct(int $maximumEntries = 10000, ?Closure $clock = null): mixed`
+- `public add(string $key, mixed $value, ?int $seconds = null): bool`
+- `public flush(): void`
+- `public forget(string $key): void`
+- `public get(string $key): mixed`
+- `public increment(string $key, int $by = 1): int`
+- `public put(string $key, mixed $value, ?int $seconds = null): void`
+
+## `Nimbus\Cache\Repository`
+
+```php
+class Nimbus\Cache\Repository
+```
+
+### Methods
+
+- `public __construct(Nimbus\Cache\Store $store): mixed`
+- `public add(string $key, mixed $value, DateTimeInterface|int|null $ttl = null): bool`
+- `public decrement(string $key, int $by = 1): int`
+- `public flush(): void`
+- `public forever(string $key, mixed $value): void`
+- `public forget(string $key): void`
+- `public get(string $key, mixed $default = null): mixed`
+- `public has(string $key): bool`
+- `public increment(string $key, int $by = 1): int`
+- `public pull(string $key, mixed $default = null): mixed`
+- `public put(string $key, mixed $value, DateTimeInterface|int|null $ttl = null): void`
+- `public remember(string $key, DateTimeInterface|int|null $ttl, Closure $callback): mixed`
+- `public rememberForever(string $key, Closure $callback): mixed`
+- `public store(): Nimbus\Cache\Store`
+- `public tags(array|string $tags): Nimbus\Cache\TaggedCache`
+
 ## `Nimbus\Cache\ResponseCacheStore`
 
 ```php
@@ -1170,6 +1435,46 @@ abstract interface Nimbus\Cache\ResponseCacheStore
 - `public forget(string $key): void`
 - `public get(string $key, int $now): ?Nimbus\Cache\CacheRecord`
 - `public put(string $key, Nimbus\Cache\CacheRecord $record): void`
+
+## `Nimbus\Cache\Store`
+
+```php
+abstract interface Nimbus\Cache\Store
+```
+
+### Methods
+
+- `public add(string $key, mixed $value, ?int $seconds = null): bool`
+- `public flush(): void`
+- `public forget(string $key): void`
+- `public get(string $key): mixed`
+- `public increment(string $key, int $by = 1): int`
+- `public put(string $key, mixed $value, ?int $seconds = null): void`
+
+## `Nimbus\Cache\TagSet`
+
+```php
+final readonly class Nimbus\Cache\TagSet
+```
+
+### Methods
+
+- `public __construct(Nimbus\Cache\Store $store, array $names): mixed`
+- `public flush(): void`
+- `public names(): array`
+- `public namespace(): string`
+
+## `Nimbus\Cache\TaggedCache`
+
+```php
+final class Nimbus\Cache\TaggedCache extends Nimbus\Cache\Repository
+```
+
+### Methods
+
+- `public __construct(Nimbus\Cache\Store $store, Nimbus\Cache\TagSet $tags): mixed`
+- `public flush(): void`
+- `public tags(array|string $tags): Nimbus\Cache\TaggedCache`
 
 ## `Nimbus\CallableRequestHandler`
 
@@ -1261,6 +1566,23 @@ final class Nimbus\Config\ConfigurationException extends RuntimeException implem
 ### Methods
 
 - `public __construct(array $errors): mixed`
+
+## `Nimbus\Console\Tinker`
+
+```php
+final class Nimbus\Console\Tinker
+```
+
+### Constants
+
+- `BOOTSTRAP_FILES = ["bootstrap/app.php","app.php"]`
+
+### Methods
+
+- `public static application(?string $bootstrap, string $root): Nimbus\App`
+- `public static main(array $arguments, string $root): int`
+- `public static scope(Nimbus\App $app): array`
+- `public static shell(Nimbus\App $app, bool $interactive = true): Psy\Shell`
 
 ## `Nimbus\ContainerMiddleware`
 
@@ -1648,6 +1970,26 @@ final readonly class Nimbus\Database\SeederRunner
 - `public __construct(Nimbus\App $app): mixed`
 - `public run(string $seeder): array`
 
+## `Nimbus\Events\CallQueuedListener`
+
+```php
+final readonly class Nimbus\Events\CallQueuedListener implements Nimbus\Jobs\SerializableJob
+```
+
+### Properties
+
+- `public readonly array $data`
+- `public readonly string $event`
+- `public readonly string $listener`
+
+### Methods
+
+- `public __construct(string $listener, string $event, array $data): mixed`
+- `public static fromJobPayload(array $payload): self`
+- `public handle(Nimbus\Container\Container $container): void`
+- `public static jobName(): string`
+- `public toJobPayload(): array`
+
 ## `Nimbus\Events\EventDispatcher`
 
 ```php
@@ -1657,6 +1999,30 @@ abstract interface Nimbus\Events\EventDispatcher
 ### Methods
 
 - `public dispatch(object $event): object`
+
+## `Nimbus\Events\EventFake`
+
+```php
+final class Nimbus\Events\EventFake implements Nimbus\Events\EventDispatcher
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Events\EventDispatcher $inner = null, array $only = []): mixed`
+- `public assertDispatched(string $event, Closure|int|null $callback = null): void`
+- `public assertDispatchedTimes(string $event, int $times): void`
+- `public assertListening(string $event, string $listener): void`
+- `public assertNotDispatched(string $event, ?Closure $callback = null): void`
+- `public assertNothingDispatched(): void`
+- `public dispatch(object $event): object`
+- `public dispatched(string $event, ?Closure $callback = null): array`
+- `public inner(): ?Nimbus\Events\EventDispatcher`
+
+## `Nimbus\Events\ShouldQueue`
+
+```php
+interface Nimbus\Events\ShouldQueue
+```
 
 ## `Nimbus\Events\SyncEventDispatcher`
 
@@ -1668,7 +2034,9 @@ final class Nimbus\Events\SyncEventDispatcher implements Nimbus\Events\EventDisp
 
 - `public __construct(Nimbus\Container\Container $container): mixed`
 - `public dispatch(object $event): object`
+- `public hasListener(string $event, string $listener): bool`
 - `public listen(string $event, callable|string $listener): self`
+- `public listeners(string $event): array`
 
 ## `Nimbus\HandlerResolver`
 
@@ -1757,6 +2125,254 @@ final readonly class Nimbus\Http\ClientIpResolver
 - `public __construct(array $trustedProxies = []): mixed`
 - `public resolve(Pam\Http\Request $request): string`
 - `public trusts(string $address): bool`
+
+## `Nimbus\Http\Client\ConnectionException`
+
+```php
+class Nimbus\Http\Client\ConnectionException extends RuntimeException implements Stringable, Throwable
+```
+
+## `Nimbus\Http\Client\Factory`
+
+```php
+final class Nimbus\Http\Client\Factory
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Http\Client\Transport $transport = null): mixed`
+- `public static detectTransport(): Nimbus\Http\Client\Transport`
+- `public fake(Closure|array $stubs = []): Nimbus\Http\Client\HttpFake`
+- `public request(): Nimbus\Http\Client\PendingRequest`
+- `public transport(): Nimbus\Http\Client\Transport`
+
+## `Nimbus\Http\Client\Http`
+
+```php
+final class Nimbus\Http\Client\Http
+```
+
+### Methods
+
+- `public static acceptJson(): Nimbus\Http\Client\PendingRequest`
+- `public static asForm(): Nimbus\Http\Client\PendingRequest`
+- `public static asJson(): Nimbus\Http\Client\PendingRequest`
+- `public static baseUrl(string $url): Nimbus\Http\Client\PendingRequest`
+- `public static delete(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public static factory(): Nimbus\Http\Client\Factory`
+- `public static failedConnection(string $message = "Connection refused."): Nimbus\Http\Client\ConnectionException`
+- `public static fake(Closure|array $stubs = []): Nimbus\Http\Client\HttpFake`
+- `public static get(string $url, array $query = []): Nimbus\Http\Client\Response`
+- `public static head(string $url, array $query = []): Nimbus\Http\Client\Response`
+- `public static patch(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public static pool(callable $requests): array`
+- `public static post(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public static put(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public static request(): Nimbus\Http\Client\PendingRequest`
+- `public static response(array|null|string $body = null, int $status = 200, array $headers = []): Nimbus\Http\Client\Response`
+- `public static retry(int $times, Closure|array|int $sleepMilliseconds = 0, ?Closure $when = null, bool $throw = true): Nimbus\Http\Client\PendingRequest`
+- `public static sequence(): Nimbus\Http\Client\ResponseSequence`
+- `public static swap(?Nimbus\Http\Client\Factory $factory): void`
+- `public static timeout(float $seconds): Nimbus\Http\Client\PendingRequest`
+- `public static withBasicAuth(string $username, string $password): Nimbus\Http\Client\PendingRequest`
+- `public static withBody(string $body, string $contentType = "application/json"): Nimbus\Http\Client\PendingRequest`
+- `public static withHeaders(array $headers): Nimbus\Http\Client\PendingRequest`
+- `public static withToken(string $token, string $type = "Bearer"): Nimbus\Http\Client\PendingRequest`
+
+## `Nimbus\Http\Client\HttpFake`
+
+```php
+final class Nimbus\Http\Client\HttpFake implements Nimbus\Http\Client\Transport
+```
+
+### Methods
+
+- `public __construct(Closure|array $stubs = []): mixed`
+- `public assertNotSent(Closure $callback): void`
+- `public assertNothingSent(): void`
+- `public assertSent(Closure $callback): void`
+- `public assertSentCount(int $count): void`
+- `public preventStrayRequests(bool $prevent = true): self`
+- `public recorded(?Closure $callback = null): array`
+- `public send(Nimbus\Http\Client\OutgoingRequest $request): Nimbus\Http\Client\Response`
+- `public sendConcurrently(array $requests): array`
+- `public stub(Closure|array $stubs): self`
+
+## `Nimbus\Http\Client\OutgoingRequest`
+
+```php
+final readonly class Nimbus\Http\Client\OutgoingRequest
+```
+
+### Properties
+
+- `public readonly string $body`
+- `public readonly array $headers`
+- `public readonly int $maxRedirects`
+- `public readonly string $method`
+- `public readonly float $timeout`
+- `public readonly string $url`
+- `public readonly bool $verifyTls`
+
+### Methods
+
+- `public __construct(string $method, string $url, array $headers = [], string $body = "", float $timeout = 30, bool $verifyTls = true, int $maxRedirects = 5): mixed`
+- `public body(): string`
+- `public data(): array`
+- `public hasHeader(string $name, ?string $value = null): bool`
+- `public header(string $name): ?string`
+- `public method(): string`
+- `public url(): string`
+
+## `Nimbus\Http\Client\PamTransport`
+
+```php
+final class Nimbus\Http\Client\PamTransport implements Nimbus\Http\Client\Transport
+```
+
+### Methods
+
+- `public __construct(int $maxResponseBytes = 16777216): mixed`
+- `public static available(): bool`
+- `public send(Nimbus\Http\Client\OutgoingRequest $request): Nimbus\Http\Client\Response`
+- `public sendConcurrently(array $requests): array`
+
+## `Nimbus\Http\Client\PendingRequest`
+
+```php
+final class Nimbus\Http\Client\PendingRequest
+```
+
+### Methods
+
+- `public __construct(Nimbus\Http\Client\Transport $transport): mixed`
+- `public accept(string $contentType): self`
+- `public acceptJson(): self`
+- `public asForm(): self`
+- `public asJson(): self`
+- `public baseUrl(string $url): self`
+- `public build(string $method, string $url, array $data = [], array $query = []): Nimbus\Http\Client\OutgoingRequest`
+- `public delete(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public get(string $url, array $query = []): Nimbus\Http\Client\Response`
+- `public head(string $url, array $query = []): Nimbus\Http\Client\Response`
+- `public maxRedirects(int $redirects): self`
+- `public patch(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public pool(callable $requests): array`
+- `public post(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public put(string $url, array $data = []): Nimbus\Http\Client\Response`
+- `public retry(int $times, Closure|array|int $sleepMilliseconds = 0, ?Closure $when = null, bool $throw = true): self`
+- `public send(string $method, string $url, array $data = [], array $query = []): Nimbus\Http\Client\Response`
+- `public throw(): self`
+- `public timeout(float $seconds): self`
+- `public withBasicAuth(string $username, string $password): self`
+- `public withBody(string $body, string $contentType = "application/json"): self`
+- `public withHeader(string $name, string $value): self`
+- `public withHeaders(array $headers): self`
+- `public withQueryParameters(array $query): self`
+- `public withToken(string $token, string $type = "Bearer"): self`
+- `public withUserAgent(string $userAgent): self`
+- `public withoutRedirecting(): self`
+- `public withoutVerifying(): self`
+
+## `Nimbus\Http\Client\Pool`
+
+```php
+final class Nimbus\Http\Client\Pool
+```
+
+### Methods
+
+- `public __construct(Nimbus\Http\Client\PendingRequest $request): mixed`
+- `public add(Nimbus\Http\Client\PendingRequest $request, string $method, string $url, array $data = [], array $query = []): self`
+- `public as(string $key): self`
+- `public delete(string $url, array $data = []): self`
+- `public entries(): array`
+- `public get(string $url, array $query = []): self`
+- `public patch(string $url, array $data = []): self`
+- `public post(string $url, array $data = []): self`
+- `public put(string $url, array $data = []): self`
+- `public with(Closure $configure): self`
+
+## `Nimbus\Http\Client\RequestException`
+
+```php
+class Nimbus\Http\Client\RequestException extends RuntimeException implements Stringable, Throwable
+```
+
+### Properties
+
+- `public readonly Nimbus\Http\Client\Response $response`
+
+### Methods
+
+- `public __construct(Nimbus\Http\Client\Response $response): mixed`
+
+## `Nimbus\Http\Client\Response`
+
+```php
+final class Nimbus\Http\Client\Response
+```
+
+### Properties
+
+- `public readonly ?Nimbus\Http\Client\OutgoingRequest $request`
+
+### Methods
+
+- `public __construct(int $status, string $body = "", array $headers = [], ?Nimbus\Http\Client\OutgoingRequest $request = null): mixed`
+- `public array(): array`
+- `public body(): string`
+- `public clientError(): bool`
+- `public failed(): bool`
+- `public header(string $name): ?string`
+- `public headers(): array`
+- `public json(?string $key = null, mixed $default = null): mixed`
+- `public ok(): bool`
+- `public redirect(): bool`
+- `public serverError(): bool`
+- `public status(): int`
+- `public successful(): bool`
+- `public throw(): self`
+- `public withRequest(Nimbus\Http\Client\OutgoingRequest $request): self`
+
+## `Nimbus\Http\Client\ResponseSequence`
+
+```php
+final class Nimbus\Http\Client\ResponseSequence
+```
+
+### Methods
+
+- `public isEmpty(): bool`
+- `public next(): Nimbus\Http\Client\Response`
+- `public push(array|null|string $body = null, int $status = 200, array $headers = []): self`
+- `public pushFailedConnection(string $message = "Connection refused."): self`
+- `public pushResponse(Nimbus\Http\Client\ConnectionException|Nimbus\Http\Client\Response $response): self`
+- `public pushStatus(int $status): self`
+- `public whenEmpty(Nimbus\Http\Client\ConnectionException|Nimbus\Http\Client\Response $response): self`
+
+## `Nimbus\Http\Client\SymfonyTransport`
+
+```php
+final readonly class Nimbus\Http\Client\SymfonyTransport implements Nimbus\Http\Client\Transport
+```
+
+### Methods
+
+- `public __construct(?Symfony\Contracts\HttpClient\HttpClientInterface $client = null): mixed`
+- `public send(Nimbus\Http\Client\OutgoingRequest $request): Nimbus\Http\Client\Response`
+- `public sendConcurrently(array $requests): array`
+
+## `Nimbus\Http\Client\Transport`
+
+```php
+abstract interface Nimbus\Http\Client\Transport
+```
+
+### Methods
+
+- `public send(Nimbus\Http\Client\OutgoingRequest $request): Nimbus\Http\Client\Response`
+- `public sendConcurrently(array $requests): array`
 
 ## `Nimbus\Http\Cookie`
 
@@ -2271,6 +2887,23 @@ final class Nimbus\Jobs\MemoryJobDispatcher implements Nimbus\Jobs\JobDispatcher
 - `public release(Nimbus\Jobs\JobEnvelope $envelope, int $availableAt, ?Throwable $failure = null): void`
 - `public reserve(int $now, int $leaseSeconds): ?Nimbus\Jobs\JobEnvelope`
 
+## `Nimbus\Jobs\QueueFake`
+
+```php
+final class Nimbus\Jobs\QueueFake implements Nimbus\Jobs\JobDispatcher
+```
+
+### Methods
+
+- `public assertListenerQueued(string $listener, ?string $event = null): void`
+- `public assertNotPushed(string $job, ?Closure $callback = null): void`
+- `public assertNothingPushed(): void`
+- `public assertPushed(string $job, Closure|int|null $callback = null): void`
+- `public assertPushedTimes(string $job, int $times): void`
+- `public dispatch(object $job, int $maximumAttempts = 3, int $delaySeconds = 0): Nimbus\Jobs\JobEnvelope`
+- `public envelopes(): array`
+- `public pushed(string $job, ?Closure $callback = null): array`
+
 ## `Nimbus\Jobs\QueueTablesMigration`
 
 ```php
@@ -2333,6 +2966,51 @@ abstract interface Nimbus\Lifecycle\RequestLifecycleObserver
 
 - `public finished(Pam\Http\Request $request, Pam\Http\Response $response, ?Throwable $failure): void`
 - `public starting(Pam\Http\Request $request): void`
+
+## `Nimbus\Mail\MailFake`
+
+```php
+final class Nimbus\Mail\MailFake implements Stringable, Symfony\Component\Mailer\Transport\TransportInterface
+```
+
+### Methods
+
+- `public __toString(): string`
+- `public static addresses(Symfony\Component\Mime\Email $email): array`
+- `public assertNotSent(?Closure $callback = null): void`
+- `public assertNothingSent(): void`
+- `public assertSent(?Closure $callback = null, ?int $times = null): void`
+- `public assertSentCount(int $count): void`
+- `public assertSentTo(string $address, ?string $subject = null): void`
+- `public send(Symfony\Component\Mime\RawMessage $message, ?Symfony\Component\Mailer\Envelope $envelope = null): Symfony\Component\Mailer\SentMessage`
+- `public sent(?Closure $callback = null): array`
+
+## `Nimbus\Mail\Mailer`
+
+```php
+final readonly class Nimbus\Mail\Mailer
+```
+
+### Methods
+
+- `public __construct(Symfony\Component\Mailer\Transport\TransportInterface $transport, string $fromAddress, string $fromName = ""): mixed`
+- `public channel(): Nimbus\Notifications\Mail\MailChannel`
+- `public static fromEnvironment(?array $environment = null): self`
+- `public send(Nimbus\Notifications\Mail\MailMessage|Symfony\Component\Mime\Email $message, array $to = []): void`
+- `public to(array|string $addresses): Nimbus\Mail\PendingMail`
+- `public transport(): Symfony\Component\Mailer\Transport\TransportInterface`
+- `public withTransport(Symfony\Component\Mailer\Transport\TransportInterface $transport): self`
+
+## `Nimbus\Mail\PendingMail`
+
+```php
+final readonly class Nimbus\Mail\PendingMail
+```
+
+### Methods
+
+- `public __construct(Nimbus\Mail\Mailer $mailer, array $to): mixed`
+- `public send(Nimbus\Notifications\Mail\MailMessage|Symfony\Component\Mime\Email $message): void`
 
 ## `Nimbus\Middleware\ArcanoLifecycleMiddleware`
 
@@ -3300,6 +3978,103 @@ final class Nimbus\Pipeline implements Pam\Contracts\Http\RequestHandlerInterfac
 - `public __construct(array $middleware, Pam\Contracts\Http\RequestHandlerInterface $destination): mixed`
 - `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
 
+## `Nimbus\Profiler\DebugEntry`
+
+```php
+final readonly class Nimbus\Profiler\DebugEntry
+```
+
+### Properties
+
+- `public readonly array $data`
+- `public readonly string $id`
+- `public readonly float $recordedAt`
+- `public readonly ?string $requestToken`
+- `public readonly Nimbus\Profiler\DebugEntryType $type`
+
+### Methods
+
+- `public __construct(string $id, Nimbus\Profiler\DebugEntryType $type, ?string $requestToken, float $recordedAt, array $data): mixed`
+- `public toArray(): array`
+
+## `Nimbus\Profiler\DebugEntryType`
+
+```php
+final enum Nimbus\Profiler\DebugEntryType implements BackedEnum, UnitEnum: string
+```
+
+### Enum cases
+
+- `Request = "request"`
+- `Query = "query"`
+- `Job = "job"`
+- `Exception = "exception"`
+- `Mail = "mail"`
+- `Http = "http"`
+
+### Constants
+
+- `Exception = "exception"`
+- `Http = "http"`
+- `Job = "job"`
+- `Mail = "mail"`
+- `Query = "query"`
+- `Request = "request"`
+
+### Properties
+
+- `public readonly string $name`
+- `public readonly string $value`
+
+### Methods
+
+- `public static cases(): array`
+- `public static from(int|string $value): static`
+- `public static tryFrom(int|string $value): ?static`
+
+## `Nimbus\Profiler\DebugPanel`
+
+```php
+final readonly class Nimbus\Profiler\DebugPanel
+```
+
+### Methods
+
+- `public static enabledByDefault(?array $environment = null): bool`
+- `public httpTransport(Nimbus\Http\Client\Transport $transport): Nimbus\Http\Client\Transport`
+- `public jobHandler(Nimbus\Jobs\JobHandler $handler): Nimbus\Jobs\JobHandler`
+- `public jobs(Nimbus\Jobs\JobDispatcher $jobs): Nimbus\Jobs\JobDispatcher`
+- `public list(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public mailTransport(Symfony\Component\Mailer\Transport\TransportInterface $transport): Symfony\Component\Mailer\Transport\TransportInterface`
+- `public page(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public recordHttpFacade(): self`
+- `public recorder(): Nimbus\Profiler\DebugRecorder`
+- `public static register(Nimbus\App $app, string $prefix = "/_debug", ?bool $enabled = null, int $maximumEntries = 1000): ?self`
+- `public show(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+
+## `Nimbus\Profiler\DebugRecorder`
+
+```php
+final class Nimbus\Profiler\DebugRecorder implements Nimbus\Lifecycle\RequestLifecycleObserver
+```
+
+### Methods
+
+- `public __construct(int $maximumEntries = 1000, array $ignoredPrefixes = []): mixed`
+- `public clear(): void`
+- `public entries(?Nimbus\Profiler\DebugEntryType $type = null, ?string $requestToken = null, int $limit = 100): array`
+- `public exception(Throwable $error): void`
+- `public find(string $id): ?Nimbus\Profiler\DebugEntry`
+- `public finished(Pam\Http\Request $request, Pam\Http\Response $response, ?Throwable $failure): void`
+- `public http(array $data): void`
+- `public ignore(string $prefix): self`
+- `public job(string $event, object $job, array $data = []): void`
+- `public mail(string $subject, array $to, ?string $text): void`
+- `public profiler(): Nimbus\Profiler\MemoryProfiler`
+- `public query(string $sql, float $milliseconds): void`
+- `public record(Nimbus\Profiler\DebugEntryType $type, array $data, ?string $token = null): Nimbus\Profiler\DebugEntry`
+- `public starting(Pam\Http\Request $request): void`
+
 ## `Nimbus\Profiler\MemoryProfiler`
 
 ```php
@@ -3309,6 +4084,7 @@ final class Nimbus\Profiler\MemoryProfiler implements Nimbus\Lifecycle\RequestLi
 ### Methods
 
 - `public __construct(Nimbus\Profiler\ProfilerMode $mode = 1, int $maximumProfiles = 500): mixed`
+- `public currentToken(): ?string`
 - `public find(string $token): ?Nimbus\Profiler\RequestProfile`
 - `public finished(Pam\Http\Request $request, Pam\Http\Response $response, ?Throwable $failure): void`
 - `public recent(int $limit = 50): array`
@@ -3437,6 +4213,22 @@ final readonly class Nimbus\Redis\PamConnection implements Nimbus\Redis\Connecti
 
 - `public __construct(Pam\Redis\Client $client): mixed`
 - `public command(array $arguments): mixed`
+
+## `Nimbus\Redis\RedisCacheStore`
+
+```php
+final readonly class Nimbus\Redis\RedisCacheStore implements Nimbus\Cache\Store
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis, string $prefix = "nimbus:cache:", array|bool $allowedClasses = false): mixed`
+- `public add(string $key, mixed $value, ?int $seconds = null): bool`
+- `public flush(): void`
+- `public forget(string $key): void`
+- `public get(string $key): mixed`
+- `public increment(string $key, int $by = 1): int`
+- `public put(string $key, mixed $value, ?int $seconds = null): void`
 
 ## `Nimbus\Redis\RedisIdempotencyStore`
 
@@ -4123,6 +4915,8 @@ final readonly class Nimbus\Storage\Disk
 ### Methods
 
 - `public __construct(string $name, League\Flysystem\FilesystemOperator $filesystem, ?Nimbus\Storage\UploadUrlGenerator $uploads = null): mixed`
+- `public assertExists(array|string $paths, ?string $contents = null): self`
+- `public assertMissing(array|string $paths): self`
 - `public delete(string $path): void`
 - `public exists(string $path): bool`
 - `public filesystem(): League\Flysystem\FilesystemOperator`
@@ -4280,6 +5074,90 @@ final readonly class Nimbus\Testing\ActingAsAuthenticator implements Nimbus\Auth
 
 - `public __construct(Nimbus\Auth\Principal $principal): mixed`
 - `public authenticate(Pam\Http\Request $request): Nimbus\Auth\Principal`
+
+## `Nimbus\Testing\Broadcast`
+
+```php
+final class Nimbus\Testing\Broadcast
+```
+
+### Methods
+
+- `public static assertBroadcast(string $event, ?string $channel = null, ?Closure $callback = null): void`
+- `public static assertNotBroadcast(string $event, ?string $channel = null): void`
+- `public static assertNothingBroadcast(): void`
+- `public static fake(): Nimbus\Broadcasting\BroadcastFake`
+
+## `Nimbus\Testing\Event`
+
+```php
+final class Nimbus\Testing\Event
+```
+
+### Methods
+
+- `public static assertDispatched(string $event, Closure|int|null $callback = null): void`
+- `public static assertDispatchedTimes(string $event, int $times): void`
+- `public static assertListening(string $event, string $listener): void`
+- `public static assertNotDispatched(string $event, ?Closure $callback = null): void`
+- `public static assertNothingDispatched(): void`
+- `public static fake(array $only = []): Nimbus\Events\EventFake`
+
+## `Nimbus\Testing\Fakes`
+
+```php
+final class Nimbus\Testing\Fakes
+```
+
+### Methods
+
+- `public static app(): Nimbus\App`
+- `public static begin(Nimbus\App $app): void`
+- `public static end(): void`
+- `public static get(string $class, string $facade): object`
+- `public static remember(object $fake): object`
+- `public static temporaryDirectory(): string`
+
+## `Nimbus\Testing\Mail`
+
+```php
+final class Nimbus\Testing\Mail
+```
+
+### Methods
+
+- `public static assertNotSent(?Closure $callback = null): void`
+- `public static assertNothingSent(): void`
+- `public static assertSent(?Closure $callback = null, ?int $times = null): void`
+- `public static assertSentCount(int $count): void`
+- `public static assertSentTo(string $address, ?string $subject = null): void`
+- `public static fake(): Nimbus\Mail\MailFake`
+
+## `Nimbus\Testing\Queue`
+
+```php
+final class Nimbus\Testing\Queue
+```
+
+### Methods
+
+- `public static assertListenerQueued(string $listener, ?string $event = null): void`
+- `public static assertNotPushed(string $job, ?Closure $callback = null): void`
+- `public static assertNothingPushed(): void`
+- `public static assertPushed(string $job, Closure|int|null $callback = null): void`
+- `public static assertPushedTimes(string $job, int $times): void`
+- `public static fake(): Nimbus\Jobs\QueueFake`
+
+## `Nimbus\Testing\Storage`
+
+```php
+final class Nimbus\Testing\Storage
+```
+
+### Methods
+
+- `public static disk(?string $name = null): Nimbus\Storage\Disk`
+- `public static fake(?string $disk = null): Nimbus\Storage\Disk`
 
 ## `Nimbus\Testing\TestCase`
 
