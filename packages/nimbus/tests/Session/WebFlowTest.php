@@ -195,6 +195,30 @@ final class WebFlowTest extends TestCase
         self::assertSame('/a?b=1', Redirect::back($local)->location);
     }
 
+    public function testRedirectBackNeverLeavesTheHostThroughAProtocolRelativePath(): void
+    {
+        foreach (['https://app.test//evil.test/a', 'https://app.test/\\evil.test/a'] as $referer) {
+            $request = new Request('POST', '/x', [], ['referer' => [$referer], 'host' => ['app.test']], '');
+            self::assertSame('/fallback', Redirect::back($request, '/fallback')->location, $referer);
+        }
+    }
+
+    public function testCsrfExceptionsMatchWholePathSegments(): void
+    {
+        $app = new App(discoverPackages: false);
+        $app->provider(new SessionServiceProvider($this->store, cookies: $this->codec, csrfExcept: ['/webhooks*', '/hooks/*']));
+        foreach (['/webhooks', '/webhooks/stripe', '/webhooksX', '/hooks/a', '/hooks'] as $path) {
+            $app->post($path, static fn (): string => 'hook');
+        }
+        $client = new TestClient($app);
+
+        $client->postJson('/webhooks', [])->assertOk();
+        $client->postJson('/webhooks/stripe', [])->assertOk();
+        $client->postJson('/hooks/a', [])->assertOk();
+        $client->postJson('/webhooksX', [])->assertStatus(419);
+        $client->postJson('/hooks', [])->assertStatus(419);
+    }
+
     public function testMultipartFormFields(): void
     {
         $body = "--B\r\nContent-Disposition: form-data; name=\"_token\"\r\n\r\nabc\r\n"

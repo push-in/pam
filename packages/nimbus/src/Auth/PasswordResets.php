@@ -4,15 +4,21 @@ declare(strict_types=1);
 
 namespace Nimbus\Auth;
 
+use Nimbus\Jobs\JobDispatcher;
 use Nimbus\Notifications\Notification;
 use Nimbus\Notifications\NotificationDispatcher;
 use Nimbus\Security\Hash;
 
 /**
  * Password reset by API: `sendResetLink()` mails a single-use link (the reset URL with the
- * token in `{token}`), `reset()` spends the token and stores the new hash. The e-mail is sent
- * synchronously so the token never enters a job payload; unknown addresses and throttled
- * requests are silent, so the response does not reveal which e-mails exist.
+ * token in `{token}`), `reset()` spends the token and stores the new hash. Unknown addresses and
+ * throttled requests are silent and do the same database and hashing work, so neither the
+ * response nor its timing reveals which e-mails exist.
+ *
+ * `requestResetLink()` (used by AuthRoutes) hands the whole lookup-and-send to `$queue` when one
+ * is given, as a `SendPasswordResetLink` job that carries only the address: the token is created
+ * by the job worker and never enters a job payload, and the request does no mail I/O. Without a
+ * queue the link is sent in the request.
  *
  * A reset signs the user out everywhere through `$revoke` (refresh tokens, personal access
  * tokens, `SessionRevocations`): whoever had the account keeps no access. Passing neither
@@ -37,6 +43,7 @@ final readonly class PasswordResets
      * @param (\Closure(AuthUser, string): Notification)|null $notification Builds the message from the user and the link.
      * @param (\Closure(AuthUser): void)|null $afterReset Runs after a reset and the revocations.
      * @param list<RevokesCredentials>|null $revoke Credentials revoked on reset (sessions and tokens).
+     * @param JobDispatcher|null $queue Sends the links off the request path (register SendPasswordResetLink).
      */
     public function __construct(
         private AuthUserProvider $users,
@@ -49,6 +56,7 @@ final readonly class PasswordResets
         ?\Closure $notification = null,
         ?\Closure $afterReset = null,
         ?array $revoke = null,
+        private ?JobDispatcher $queue = null,
     ) {
         if (!str_contains($resetUrl, '{token}')) {
             throw new \InvalidArgumentException('The reset URL must contain the {token} placeholder.');
@@ -67,6 +75,23 @@ final readonly class PasswordResets
         $this->revoke = $revoke ?? [];
     }
 
+    /**
+     * Sends a reset link for the address: through the queue when there is one (nothing about the
+     * address is looked up in the request), otherwise right away.
+     */
+    public function requestResetLink(string $email): void
+    {
+        $email = trim($email);
+        if ($email === '' || strlen($email) > 254) {
+            return;
+        }
+        if ($this->queue !== null) {
+            $this->queue->dispatch(new SendPasswordResetLink($email));
+            return;
+        }
+        $this->sendResetLink($email);
+    }
+
     /** Mails a reset link when the address belongs to a user and no link was sent in the throttle window. */
     public function sendResetLink(string $email): bool
     {
@@ -76,6 +101,11 @@ final readonly class PasswordResets
         }
         $user = $this->users->findByEmail($email);
         if ($user === null) {
+            // The same throttle lookup and token hashing as a real user, so the time spent does
+            // not tell the two apart.
+            $this->tokens->createdWithin(self::PURPOSE, 'unknown:' . hash('sha256', strtolower($email)), $this->throttleSeconds);
+            $decoy = AuthDatabase::hash(AuthDatabase::secret());
+            unset($decoy);
             return false;
         }
         $subject = $user->authIdentifier();

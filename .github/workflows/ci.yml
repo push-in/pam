@@ -15,27 +15,27 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
       - name: Check out the pinned PAM Native SDK
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native
           ref: 2f33d0c44707b9a527cd458f12f51138934ddc44
           path: pam-native
           persist-credentials: false
       - name: Check out the pinned PAM Native plugin kit
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           repository: push-in/pam-native-plugin-kit
           ref: 14413700c1379eb48cdacec8f35fe60f1c45b631
           path: ecosystem/pam-native-plugin-kit
           persist-credentials: false
-      - uses: dtolnay/rust-toolchain@1.88.0
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
         with:
           components: clippy,rustfmt
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.5'
           tools: composer:v2
@@ -55,7 +55,7 @@ jobs:
             libphp8.5-embed php8.5-dev php8.5-bcmath php8.5-curl php8.5-gd \
             php8.5-intl php8.5-mbstring php8.5-mysql php8.5-pgsql \
             php8.5-sqlite3 php8.5-xml php8.5-zip patchelf
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Validate locked Composer dependencies
         run: |
           composer validate --strict --working-dir=compat/composer-smoke
@@ -183,7 +183,7 @@ jobs:
               compatibility.json schema.json verification.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pam-cli-catalog-contract-${{ github.sha }}
           path: artifacts/cli-catalog/
@@ -295,7 +295,7 @@ jobs:
               support-runtime.json support-manager.json >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pam-doctor-contract-${{ github.sha }}
           path: artifacts/doctor/

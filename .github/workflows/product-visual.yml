@@ -27,14 +27,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: pam-product-android-visual-${{ github.sha }}
           path: visual/android
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: pam-product-desktop-visual-${{ github.sha }}
           path: visual/desktop
@@ -102,7 +102,7 @@ jobs:
               | xargs -0 sha256sum >SHA256SUMS
             sha256sum --check --strict SHA256SUMS
           )
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pam-product-visual-certified-${{ github.sha }}
           path: product-visual-evidence/

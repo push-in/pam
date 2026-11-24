@@ -21,6 +21,36 @@
 - Official Nimbus skeleton image (`ghcr.io/push-in/nimbus-skeleton`, amd64 and arm64, built on
   each release) and a Helm chart in `deploy/helm/nimbus` with probes, preStop, HPA and PDB.
 
+Security hardening, second part (audit of 2026-11-20).
+
+- A dispatch protocol error (empty, duplicate or unknown request id, malformed resume payload) now
+  answers `500` instead of throwing past the C boundary, and only a real bailout of the engine
+  (fatal error, `memory_limit`, `exit`) marks the worker as failed and recycles it.
+- **Behaviour change:** request headers with `_` in the name stay out of `$_SERVER`, so
+  `X-Forwarded_For` can no longer overwrite the `HTTP_X_FORWARDED_FOR` a proxy set (as nginx's
+  `underscores_in_headers off`). They are still in the request's header list.
+- The `$_SERVER` key cache holds a fixed list of common header names instead of the first 64 names
+  the process sees, which a client could fill with invented names right after boot.
+- **Behaviour change:** in server mode `display_errors` is off and `log_errors` on unless
+  `exposeErrors` is set; without a php.ini PHP used to print warnings, with file paths, into
+  responses. `expose_php` defaults to off.
+- `maxConnections` (default: the open file limit minus 256 descriptors kept for PHP) bounds the
+  connections a worker serves; past it the worker stops accepting until one closes, instead of
+  running out of descriptors.
+- The inline watchdog finds the connection of a wedged request by connection id instead of peer
+  address, which two connections can share.
+- The Fiber stack pool only reuses stacks whose guard page the kernel applied, so a foreign
+  `MAP_STACK` mapping of the same size can never reach a Fiber without a guard.
+  `PAM_FIBER_STACK_POOL_SCRUB=1` zeroes and releases pooled stacks.
+- Multipart bodies stop with `400` past PHP's `max_multipart_body_parts` (default `max_input_vars` +
+  `max_file_uploads`): thousands of empty file inputs no longer each cost a `$_FILES` entry.
+- `url` 2.5.9 (RUSTSEC-2026-0592).
+- The `Dockerfile` pins its base images by digest and PHP by package version.
+- CI: `cargo deny`, `composer audit`, six fuzz targets (HTTP request path, multipart, C header
+  reader, dispatch envelope, page cache policy, shared table) and ASan + UBSan integration tests on
+  every PR; CodeQL for C/C++, Rust and workflows; an advisory throughput gate against the base
+  branch; a nightly RSS soak and Valgrind run. See `docs/security-checklist.md`.
+
 ## 2.2.26 - 2026-11-21
 
 Security hardening. `pam init` requires `pushinbr/arcano` `^0.2.8` and `pushinbr/nimbus` `^0.6`.

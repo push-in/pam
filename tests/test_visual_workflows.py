@@ -1,3 +1,4 @@
+import re
 import unittest
 from pathlib import Path
 
@@ -96,7 +97,7 @@ class VisualWorkflowContractTest(unittest.TestCase):
         self.assertIn("uses: ./.github/workflows/android-visual.yml", workflow)
         self.assertIn("uses: ./.github/workflows/desktop-visual.yml", workflow)
         self.assertIn("needs: [android, desktop]", workflow)
-        self.assertEqual(workflow.count("actions/download-artifact@v4"), 2)
+        self.assertEqual(len(re.findall(r"actions/download-artifact@(?:v4\b|[0-9a-f]{40} # v4\.)", workflow)), 2)
         self.assertIn("cmp \\", workflow)
         self.assertEqual(workflow.count("scripts/product-visual-evidence.py"), 2)
         self.assertIn("--mode-code 1", workflow)

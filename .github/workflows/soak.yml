@@ -1,0 +1,67 @@
+name: Memory soak
+
+# Nightly RSS soak (scripts/soak.sh): millions of mixed requests against a
+# release build; fails when a worker's RSS + swap grows more than the limit
+# after the warmup, a worker is replaced, or any response is not 2xx.
+
+on:
+  schedule:
+    - cron: '43 1 * * *'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Requests to serve
+        default: '5000000'
+      max_growth_kib:
+        description: Allowed RSS + swap growth per worker after the warmup (KiB)
+        default: '4096'
+
+permissions:
+  contents: read
+
+jobs:
+  soak:
+    name: RSS soak
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      CARGO_PROFILE_RELEASE_LTO: thin
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@5445741acf05630efa19e221cc588ebe0842b13d # 1.88.0
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+      - name: Install PHP Embed and wrk
+        timeout-minutes: 12
+        run: |
+          .github/scripts/add-ondrej-php-ppa.sh
+          timeout 120s sudo apt-get update -o Acquire::Retries=3
+          timeout 300s sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libphp8.5-embed php8.5-dev wrk
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: soak
+      - run: cargo build --locked --release
+      - name: Install the soak application's dependencies
+        run: composer install --working-dir=compat/composer-smoke --no-interaction --prefer-dist
+      - name: Soak
+        env:
+          TARGET: ${{ inputs.target || '5000000' }}
+          MAX_GROWTH_KIB: ${{ inputs.max_growth_kib || '4096' }}
+          WORKERS: '2'
+          SERVER_CPUS: '0-1'
+          LOAD_CPUS: '2-3'
+          OUT: ${{ runner.temp }}/soak-out
+        run: scripts/soak.sh target/release/pam
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        with:
+          name: memory-soak-${{ github.run_id }}
+          path: ${{ runner.temp }}/soak-out
+          if-no-files-found: ignore
+          retention-days: 14

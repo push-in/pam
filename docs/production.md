@@ -306,15 +306,21 @@ worker cai e vai esperar backoff antes de reiniciar, e no shutdown.
 
 ### Threads e pilhas por worker
 
-- Cada worker tem uma thread PHP e `PAM_IO_THREADS` threads de I/O (padrão 1,
-  máximo 16) que aceitam conexões, leem e escrevem HTTP. Uma thread basta para
-  vários workers por CPU; aumente só com um worker e muito TLS ou compressão.
+- Por padrão (`PAM_IO_THREADS=0`) cada worker serve HTTP e roda o PHP na mesma
+  thread. `PAM_IO_THREADS=1..16` traz de volta threads de I/O separadas, que
+  continuam aceitando e respondendo conexões enquanto o PHP está bloqueado; use
+  em aplicações com chamadas bloqueantes (veja o
+  [modo inline](security-checklist.md#modo-inline-pam_io_threads0)). Listeners
+  TLS sempre usam threads de I/O.
 - Toda requisição roda numa Fiber. No Linux o Pam guarda até
   `PAM_FIBER_STACK_POOL_CAPACITY` (padrão 8) pilhas C de Fiber liberadas e as
   devolve à próxima Fiber do mesmo tamanho, já com guard page: sem `mmap`,
   `mprotect`, `madvise`, `prctl`, `munmap` nem page faults por requisição. Só a
-  memória da pilha é reaproveitada (nenhum objeto Fiber ou estado PHP).
-  `PAM_FIBER_STACK_POOL=0` desliga. Detalhes em `native/fiber_stack_pool.c`.
+  memória da pilha é reaproveitada (nenhum objeto Fiber ou estado PHP), e só
+  volta ao pool uma pilha cuja guard page o kernel aplicou.
+  `PAM_FIBER_STACK_POOL=0` desliga; `PAM_FIBER_STACK_POOL_SCRUB=1` zera e libera
+  as páginas de cada pilha devolvida (menos RSS, um syscall e page faults a mais
+  por Fiber). Detalhes em `native/fiber_stack_pool.c`.
 - `DateTime::format()`/`DateTimeImmutable::format()` com `DATE_ATOM` (ou
   `DATE_RFC3339`) de horários em UTC ou em offset fixo são escritos em C, com os
   mesmos bytes do PHP; outros formatos e fusos seguem para o PHP.
@@ -646,6 +652,13 @@ RSS e memória PHP agregados por `pool`.
 
 ## Capacidade e segurança
 
+O [checklist de produção](security-checklist.md) lista todos os defaults de
+segurança e o que configurar antes de expor a aplicação.
+
+- Cada worker aceita até `maxConnections` conexões (padrão: `ulimit -n` menos 256
+  descritores reservados ao PHP). Acima disso ele para de aceitar e as conexões
+  novas esperam na fila do kernel ou vão para outro worker, em vez de esgotar os
+  descritores.
 - Defina body, headers, tempo de leitura e mensagens WebSocket conforme o produto.
 - Rate limiting usa token bucket local por worker; para política global, aplique-a
   no edge ou em um middleware com storage distribuído.

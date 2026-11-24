@@ -21,9 +21,17 @@
  *
  * Only C stack memory is reused: no Fiber object, VM stack or PHP state
  * survives (zend_fiber_stack and the Fiber's VM stack are reallocated by
- * PHP as usual). Stacks are not zeroed, like any C stack. The pool holds at
- * most PAM_FIBER_STACK_POOL_CAPACITY stacks (default 8, 0 disables);
- * PAM_FIBER_STACK_POOL=0 turns the whole mechanism off.
+ * PHP as usual). Stacks are not zeroed, like any C stack, unless
+ * PAM_FIBER_STACK_POOL_SCRUB=1 (MADV_DONTNEED on return: zero pages and less
+ * RSS, at the cost of a syscall and fresh page faults per Fiber). The pool
+ * holds at most PAM_FIBER_STACK_POOL_CAPACITY stacks (default 8, 0
+ * disables); PAM_FIBER_STACK_POOL=0 turns the whole mechanism off.
+ *
+ * A stack is pooled only if its guard page was really applied: the kernel
+ * accepted PHP's mprotect(PROT_NONE) on the stack's first page. Another
+ * library mapping a MAP_STACK region of the same length never gets that
+ * call, so it is unmapped normally and can never come back to a Fiber
+ * without a guard (audit M16).
  */
 #define _GNU_SOURCE
 
@@ -54,7 +62,11 @@ enum {
     PAM_PENDING_MADVISE = 1,
     PAM_PENDING_NAME = 2,
     PAM_PENDING_GUARD = 4,
+    /* Not pending work: the guard page of this stack is in place. */
+    PAM_GUARDED = 8,
 };
+
+#define PAM_PENDING_ALL (PAM_PENDING_MADVISE | PAM_PENDING_NAME | PAM_PENDING_GUARD)
 
 typedef struct pam_fiber_region {
     void *base;
@@ -65,6 +77,7 @@ typedef struct pam_fiber_region {
 static atomic_flag pam_fiber_lock = ATOMIC_FLAG_INIT;
 /* -1 unknown, 0 disabled, otherwise the pool capacity. */
 static int pam_fiber_capacity = -1;
+static bool pam_fiber_scrub = false;
 static pam_fiber_region pam_fiber_pool[PAM_FIBER_POOL_MAX];
 static int pam_fiber_pool_count = 0;
 /* Live stacks handed to PHP (fresh or reused). */
@@ -101,6 +114,8 @@ static int pam_fiber_configured_capacity(void)
         if (value > PAM_FIBER_POOL_MAX) {
             value = PAM_FIBER_POOL_MAX;
         }
+        const char *scrub = getenv("PAM_FIBER_STACK_POOL_SCRUB");
+        pam_fiber_scrub = scrub != NULL && scrub[0] == '1' && scrub[1] == '\0';
         pam_fiber_capacity = value;
     }
     return pam_fiber_capacity;
@@ -173,7 +188,7 @@ void *mmap(void *address, size_t length, int protection, int flags, int descript
             }
         }
         if (reused != NULL) {
-            pam_fiber_track(reused, length, PAM_PENDING_MADVISE | PAM_PENDING_NAME | PAM_PENDING_GUARD);
+            pam_fiber_track(reused, length, PAM_PENDING_ALL | PAM_GUARDED);
             pam_fiber_release();
             atomic_fetch_add_explicit(&pam_fiber_reuses, 1, memory_order_relaxed);
             return reused;
@@ -198,12 +213,17 @@ int munmap(void *address, size_t length)
         if (region != NULL && region->length == length) {
             /* A stack whose configuration calls did not all happen (PHP
              * failed between mmap and mprotect) is not pooled. */
-            bool poolable = region->pending == 0
+            bool poolable = region->pending == PAM_GUARDED
                 && pam_fiber_pool_count < pam_fiber_configured_capacity();
             region->base = NULL;
             region->length = 0;
             region->pending = 0;
             atomic_fetch_sub_explicit(&pam_fiber_live_count, 1, memory_order_relaxed);
+            if (poolable && pam_fiber_scrub) {
+                /* Drops the pages: the next Fiber gets zeroed memory. The
+                 * guard page keeps its protection. */
+                poolable = syscall(SYS_madvise, address, length, MADV_DONTNEED) == 0;
+            }
             if (poolable) {
                 pam_fiber_pool[pam_fiber_pool_count].base = address;
                 pam_fiber_pool[pam_fiber_pool_count].length = length;
@@ -224,12 +244,30 @@ int munmap(void *address, size_t length)
     return (int) syscall(SYS_munmap, address, length);
 }
 
+/* Records that the kernel applied the guard page of a fresh stack. */
+static void pam_fiber_mark_guarded(void *address)
+{
+    if (atomic_load_explicit(&pam_fiber_live_count, memory_order_relaxed) == 0) {
+        return;
+    }
+    pam_fiber_acquire();
+    pam_fiber_region *region = pam_fiber_find(address);
+    if (region != NULL && (region->pending & PAM_PENDING_ALL) == 0) {
+        region->pending |= PAM_GUARDED;
+    }
+    pam_fiber_release();
+}
+
 int mprotect(void *address, size_t length, int protection)
 {
     if (protection == PROT_NONE && pam_fiber_consume_pending(address, length, PAM_PENDING_GUARD)) {
         return 0;
     }
-    return (int) syscall(SYS_mprotect, address, length, protection);
+    int result = (int) syscall(SYS_mprotect, address, length, protection);
+    if (result == 0 && protection == PROT_NONE) {
+        pam_fiber_mark_guarded(address);
+    }
+    return result;
 }
 
 int madvise(void *address, size_t length, int advice)

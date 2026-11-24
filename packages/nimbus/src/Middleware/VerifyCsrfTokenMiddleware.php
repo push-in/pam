@@ -23,7 +23,7 @@ use Pam\Http\Response;
  * do requests with a bearer token (not ambient credentials) and paths in `$except`. A request
  * that skipped the check for its bearer token can then only be authenticated by that token:
  * the session authenticator ignores its session cookie, which a cross-site request carries
- * (`/webhooks/*` matches by prefix). Runs after StartSessionMiddleware; when the session has
+ * (`/webhooks/*` matches below `/webhooks/`, `/webhooks*` also `/webhooks` itself). Runs after StartSessionMiddleware; when the session has
  * a token, its value is sent in the `XSRF-TOKEN` cookie for JavaScript clients.
  */
 final readonly class VerifyCsrfTokenMiddleware implements MiddlewareInterface
@@ -71,12 +71,23 @@ final readonly class VerifyCsrfTokenMiddleware implements MiddlewareInterface
             return true;
         }
         foreach ($this->except as $pattern) {
-            if ($pattern === $request->path
-                || (str_ends_with($pattern, '*') && str_starts_with($request->path, substr($pattern, 0, -1)))) {
+            if ($pattern === $request->path || (str_ends_with($pattern, '*') && self::underPrefix($request->path, substr($pattern, 0, -1)))) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * `/webhooks/*` matches below `/webhooks/`; `/webhooks*` matches `/webhooks` and below it,
+     * never a sibling such as `/webhooksX`.
+     */
+    private static function underPrefix(string $path, string $prefix): bool
+    {
+        if ($prefix === '' || str_ends_with($prefix, '/')) {
+            return str_starts_with($path, $prefix);
+        }
+        return $path === $prefix || str_starts_with($path, $prefix . '/');
     }
 
     private function matches(Request $request, Session $session): bool

@@ -179,6 +179,53 @@ final class StorageTest extends TestCase
         (new TestClient($app))->request('GET', $path, $query)->assertStatus(404);
     }
 
+    public function testDownloadsNeverRunAsActiveContentOfTheOrigin(): void
+    {
+        $app = $this->app();
+        $disk = $app->storage()->disk();
+        $disk->put('evil.html', '<script>alert(1)</script>');
+        $disk->put('photo.png', (string) base64_decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==', true));
+
+        [$path, $query] = self::split($disk->temporaryUrl('evil.html', 60));
+        $html = $app->handle(new Request('GET', $path, $query, [], ''), new Response())->export();
+        self::assertSame(200, $html['status']);
+        self::assertSame(['application/octet-stream'], $html['headers']['content-type']);
+        self::assertSame(['nosniff'], $html['headers']['x-content-type-options']);
+        self::assertStringStartsWith('attachment;', $html['headers']['content-disposition'][0] ?? '');
+        self::assertStringContainsString('sandbox', $html['headers']['content-security-policy'][0] ?? '');
+
+        [$path, $query] = self::split($disk->temporaryUrl('photo.png', 60));
+        $png = $app->handle(new Request('GET', $path, $query, [], ''), new Response())->export();
+        self::assertSame(['image/png'], $png['headers']['content-type']);
+        self::assertStringStartsWith('inline;', $png['headers']['content-disposition'][0] ?? '');
+    }
+
+    public function testUploadsOfActiveContentAreRefused(): void
+    {
+        $app = $this->app();
+        $disk = $app->storage()->disk();
+
+        $this->send($app, 'PUT', $disk->temporaryUploadUrl('a.html', 60, 64), '<script>', 'application/octet-stream')
+            ->assertStatus(415);
+        $this->send($app, 'PUT', $disk->temporaryUploadUrl('a.bin', 60, 64), '<svg/>', 'image/svg+xml')
+            ->assertStatus(415);
+        $this->send($app, 'PUT', $disk->temporaryUploadUrl('a.bin', 60, 64, 'text/html'), '<p>', 'text/html')
+            ->assertStatus(415);
+        self::assertFileDoesNotExist($this->root . '/a.html');
+        self::assertFileDoesNotExist($this->root . '/a.bin');
+        $this->send($app, 'PUT', $disk->temporaryUploadUrl('a.bin', 60, 64), 'bytes', 'application/octet-stream')
+            ->assertStatus(201);
+    }
+
+    public function testTheDeclaredLengthIsCheckedBeforeTheBody(): void
+    {
+        $app = $this->app();
+        $url = $app->storage()->disk()->temporaryUploadUrl('big.bin', 60, 4);
+        [$path, $query] = self::split($url);
+        (new TestClient($app))->request('PUT', $path, $query, ['content-length' => '999999999'], 'x')
+            ->assertStatus(413);
+    }
+
     public function testMissingAppKeyIsReportedForSignedRoutes(): void
     {
         $previous = getenv('APP_KEY');

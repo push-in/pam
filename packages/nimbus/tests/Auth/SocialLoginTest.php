@@ -116,10 +116,11 @@ final class SocialLoginTest extends TestCase
             $start = $client->getJson('/auth/oauth/github')->assertOk();
             $state = $start->json('state');
             self::assertIsString($state);
+            $browser = $client->withCookiesFrom($start);
             $this->exchange(['id' => 'abc']);
-            $client->postJson('/auth/oauth/github/callback', ['state' => $state, 'code' => 'c'])
+            $browser->postJson('/auth/oauth/github/callback', ['state' => $state, 'code' => 'c'])
                 ->assertOk()->assertJsonPath('subject', 'user-abc');
-            $client->postJson('/auth/oauth/github/callback', ['state' => $state, 'code' => 'c'])->assertUnprocessableEntity();
+            $browser->postJson('/auth/oauth/github/callback', ['state' => $state, 'code' => 'c'])->assertUnprocessableEntity();
             $client->postJson('/auth/oauth/github/callback', ['code' => 'c'])->assertJsonValidationErrors('state');
             $client->getJson('/auth/oauth/nope')->assertNotFound();
 
@@ -132,6 +133,39 @@ final class SocialLoginTest extends TestCase
             self::assertSame(1, $states->prune());
         } finally {
             $database->drop();
+        }
+    }
+
+    public function testTheCallbackOnlyWorksInTheBrowserThatStartedTheLogin(): void
+    {
+        $app = new App(discoverPackages: false);
+        $this->login(new MemoryOAuthStateStore())->routes($app);
+        $attacker = new TestClient($app);
+        $start = $attacker->getJson('/auth/oauth/github')->assertOk();
+        $cookie = $start->header('set-cookie');
+        self::assertIsString($cookie);
+        self::assertStringContainsString('nimbus_oauth_state=', $cookie);
+        self::assertStringContainsStringIgnoringCase('httponly', $cookie);
+        self::assertStringContainsStringIgnoringCase('samesite=lax', $cookie);
+        $state = $start->json('state');
+        self::assertIsString($state);
+
+        // The victim opens the attacker's callback link: no binding cookie, no login.
+        $victim = new TestClient($app);
+        $victim->getJson('/auth/oauth/github/callback?state=' . $state . '&code=attacker-code')->assertUnprocessableEntity();
+        $victim->withCookies(['nimbus_oauth_state' => str_repeat('0', 64)])
+            ->getJson('/auth/oauth/github/callback?state=' . $state . '&code=attacker-code')->assertUnprocessableEntity();
+        self::assertSame([], $this->identities);
+
+        $state = $attacker->getJson('/auth/oauth/github')->json('state');
+        self::assertIsString($state);
+        $login = $this->login(new MemoryOAuthStateStore());
+        $bound = $login->authorizationUrl('github', binding: 'secret');
+        try {
+            $login->callback('github', $bound['state'], 'code', 'other');
+            self::fail('A state bound to another client is refused.');
+        } catch (HttpException $error) {
+            self::assertSame(422, $error->status);
         }
     }
 

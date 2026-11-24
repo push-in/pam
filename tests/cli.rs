@@ -5279,3 +5279,44 @@ fn main_script_is_the_first_included_file_after_composer_preload() {
     );
     fs::remove_dir_all(project).unwrap();
 }
+
+#[test]
+fn dispatch_protocol_errors_answer_500_instead_of_throwing_past_the_engine() {
+    let output = run_pam(&[fixture("dispatch_protocol_errors.php").to_str().unwrap()]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(stdout.trim(), r#"{"empty-id":500,"unknown-resume":500}"#);
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_reused_fiber_stack_keeps_its_guard_page_and_stack_limit() {
+    for pool in ["1", "0"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_pam"))
+            .arg(fixture("fiber_stack_overflow.php"))
+            .env("PAM_FIBER_STACK_POOL", pool)
+            .output()
+            .expect("pam should start");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "pool={pool}: {stdout}{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // Builds with sanitizers leave the pool out; then nothing is reused.
+        let reuses = if pool == "1" && !stdout.contains("reuses=0") {
+            "reuses=1"
+        } else {
+            "reuses=0"
+        };
+        assert_eq!(
+            stdout.trim(),
+            format!("{reuses} guarded=1\nstopped"),
+            "pool={pool}"
+        );
+    }
+}

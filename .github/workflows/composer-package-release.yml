@@ -37,22 +37,27 @@ jobs:
       matrix: ${{ steps.package.outputs.matrix }}
       source_sha: ${{ steps.source.outputs.sha }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ inputs.source_ref }}
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           tools: composer:v2
       - name: Require a source commit integrated into main
         id: source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
+          # Only a commit already on main is checked out: the input is
+          # resolved and verified before any of its files are used.
           git fetch --no-tags origin main
-          source_sha=$(git rev-parse --verify 'HEAD^{commit}')
+          git fetch --tags origin
+          source_sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
           git merge-base --is-ancestor "${source_sha}" origin/main
+          git checkout --quiet --detach "${source_sha}"
           printf 'sha=%s\n' "${source_sha}" >>"${GITHUB_OUTPUT}"
       - name: Validate package metadata and version
         env:
@@ -80,12 +85,19 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.source_sha }}
-      - uses: shivammathur/setup-php@v2
+      - name: Check out the verified source commit
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${SOURCE_SHA}" origin/main
+          git checkout --quiet --detach "${SOURCE_SHA}"
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           tools: composer:v2
@@ -123,7 +135,7 @@ jobs:
             --arg composerLockSha256 "${lock_sha}" \
             '{schemaVersion: 1, package: $package, tag: $tag, sourceSha: $sourceSha, splitSha: $splitSha, composerJsonSha256: $composerJsonSha256, composerLockSha256: (if $composerLockSha256 == "" then null else $composerLockSha256 end)}' \
             > independent-package-release.json
-      - uses: actions/upload-artifact@v5
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: composer-package-${{ matrix.repository }}-${{ inputs.package_tag }}
           path: independent-package-release.json
@@ -141,12 +153,19 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.source_sha }}
-      - uses: shivammathur/setup-php@v2
+      - name: Check out the verified source commit
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${SOURCE_SHA}" origin/main
+          git checkout --quiet --detach "${SOURCE_SHA}"
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           tools: composer:v2
@@ -217,7 +236,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.prepare.outputs.matrix) }}
     steps:
-      - uses: shivammathur/setup-php@v2
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           # PHP 8.5 is PAM's default runtime and is required by the official
           # application skeleton. Package CI separately retains the 8.4

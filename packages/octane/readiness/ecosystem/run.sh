@@ -13,7 +13,13 @@ bash "$READINESS_DIR/ecosystem/provision.sh"
 
 if [ ! -x "$FRANKENPHP" ]; then
     mkdir -p "$(dirname "$FRANKENPHP")"
-    version=$(curl -fsSL https://api.github.com/repos/php/frankenphp/releases/latest | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')
+    # Pinned: FrankenPHP 1.14.0 runs a PHP whose create_sid() deprecation
+    # fails Laravel's FileSessionHandler at worker boot. "latest" follows
+    # upstream again.
+    version="${FRANKENPHP_VERSION:-v1.13.6}"
+    if [ "$version" = latest ]; then
+        version=$(curl -fsSL https://api.github.com/repos/php/frankenphp/releases/latest | python3 -c 'import json,sys;print(json.load(sys.stdin)["tag_name"])')
+    fi
     curl -fsSL -o "$FRANKENPHP" "https://github.com/php/frankenphp/releases/download/$version/frankenphp-linux-x86_64"
     chmod +x "$FRANKENPHP"
 fi

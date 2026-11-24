@@ -1438,6 +1438,7 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
     }
     let address = format!("{}:{}", config.host, config.port);
     let header_read_timeout = config.header_read_timeout_ms;
+    let max_connections = config.max_connections;
     let tls_files = match (&config.tls_cert, &config.tls_key) {
         (Some(certificate), Some(key)) => Some((certificate.clone(), key.clone())),
         (None, None) => None,
@@ -1514,6 +1515,7 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
     let http_settings = crate::http_serve::HttpSettings {
         header_read_timeout: Duration::from_millis(header_read_timeout),
         graceful_timeout: Duration::from_secs(30),
+        max_connections: crate::http_serve::connection_limit(max_connections),
     };
     let tracker = crate::http_serve::ConnectionTracker::default();
     let (stop_accepting, stop_accepting_receiver) = watch::channel(false);
@@ -2859,37 +2861,6 @@ async fn invoke_php_http(
         .await
 }
 
-/// Request headers for `pam_php_dispatch_http_native`: native-endian u32
-/// name count, then per name its length and bytes, value count and each
-/// value's length and bytes. Names are lowercase (`http` normalizes them);
-/// values that are not visible ASCII are skipped, as the JSON envelope did.
-fn encode_php_request_headers(headers: &HeaderMap) -> Vec<u8> {
-    fn push_bytes(output: &mut Vec<u8>, bytes: &[u8]) {
-        output.extend_from_slice(&u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_ne_bytes());
-        output.extend_from_slice(bytes);
-    }
-    let mut output = Vec::with_capacity(512);
-    output.extend_from_slice(
-        &u32::try_from(headers.keys_len())
-            .unwrap_or(u32::MAX)
-            .to_ne_bytes(),
-    );
-    for name in headers.keys() {
-        push_bytes(&mut output, name.as_str().as_bytes());
-        let count_offset = output.len();
-        output.extend_from_slice(&0u32.to_ne_bytes());
-        let mut count = 0u32;
-        for value in headers.get_all(name) {
-            if let Ok(value) = value.to_str() {
-                push_bytes(&mut output, value.as_bytes());
-                count += 1;
-            }
-        }
-        output[count_offset..count_offset + 4].copy_from_slice(&count.to_ne_bytes());
-    }
-    output
-}
-
 /// `websocketOrigins`, `PAM_WEBSOCKET_ORIGINS` (comma separated) or, when
 /// neither lists any, `corsOrigins`.
 fn websocket_origins(config: &ServerConfig) -> Vec<String> {
@@ -3095,7 +3066,7 @@ async fn invoke_php_http_local(
         Ok(permit) => permit,
         Err(response) => return (response, 0),
     };
-    let encoded_headers = encode_php_request_headers(headers);
+    let encoded_headers = crate::protocol::encode_php_request_headers(headers);
     let multipart_json = match request.upload.as_deref() {
         Some(multipart) => match serde_json::to_string(multipart) {
             Ok(json) => json,

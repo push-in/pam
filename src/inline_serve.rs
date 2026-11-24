@@ -15,17 +15,27 @@
 //! reports the worker wedged so it is replaced, as with I/O threads.
 
 use std::collections::HashMap;
+use std::future::Future;
 use std::net::SocketAddr;
 use std::os::fd::RawFd;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 
 static ENABLED: AtomicBool = AtomicBool::new(false);
+static NEXT_CONNECTION: AtomicU64 = AtomicU64::new(1);
 
-/// Plain TCP connections this worker serves, by peer address.
-static CONNECTIONS: LazyLock<Mutex<HashMap<SocketAddr, RawFd>>> =
+/// Plain TCP connections this worker serves, by connection id. A peer
+/// address is not unique: the same peer can reach two listeners, and a port
+/// can come back before the old connection's registration is dropped
+/// (audit B3).
+static CONNECTIONS: LazyLock<Mutex<HashMap<u64, (SocketAddr, RawFd)>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
+
+tokio::task_local! {
+    /// The connection whose task is running (HTTP/1 requests run inside it).
+    static CONNECTION: u64;
+}
 
 /// The request whose PHP code is running right now, if any.
 static CALL: Mutex<Option<RunningCall>> = Mutex::new(None);
@@ -34,6 +44,7 @@ const REQUEST_ID_BYTES: usize = 96;
 
 struct RunningCall {
     deadline_millis: u64,
+    connection: Option<u64>,
     remote: SocketAddr,
     http10: bool,
     http1: bool,
@@ -50,24 +61,51 @@ pub fn enabled() -> bool {
 }
 
 /// Keeps a connection's descriptor known to the watchdog while it is served.
-pub struct Registration(Option<SocketAddr>);
+pub struct Registration(Option<u64>);
 
 impl Registration {
     pub fn new(remote: SocketAddr, fd: RawFd) -> Self {
         if !enabled() {
             return Self(None);
         }
-        lock(&CONNECTIONS).insert(remote, fd);
-        Self(Some(remote))
+        let id = NEXT_CONNECTION.fetch_add(1, Ordering::Relaxed);
+        lock(&CONNECTIONS).insert(id, (remote, fd));
+        Self(Some(id))
+    }
+
+    /// Runs the connection's future with its id visible to [`PhpCall`].
+    pub async fn scope<F: Future>(self, future: F) -> F::Output {
+        match self.0 {
+            Some(id) => CONNECTION.scope(id, future).await,
+            None => future.await,
+        }
     }
 }
 
 impl Drop for Registration {
     fn drop(&mut self) {
-        if let Some(remote) = self.0 {
-            lock(&CONNECTIONS).remove(&remote);
+        if let Some(id) = self.0 {
+            lock(&CONNECTIONS).remove(&id);
         }
     }
+}
+
+/// The descriptor of a running call's connection: by id when the call ran
+/// inside its connection's task, else by peer address when exactly one
+/// connection has it (an HTTP/2 stream runs in a task of its own).
+fn connection_fd(call: &RunningCall) -> Option<RawFd> {
+    let connections = lock(&CONNECTIONS);
+    if let Some(id) = call.connection {
+        return connections.get(&id).map(|(_, fd)| *fd);
+    }
+    let mut matches = connections
+        .values()
+        .filter(|(remote, _)| *remote == call.remote);
+    let first = matches.next().map(|(_, fd)| *fd);
+    if matches.next().is_some() {
+        return None;
+    }
+    first
 }
 
 /// Marks PHP code of a request running synchronously on the worker thread.
@@ -88,6 +126,7 @@ impl PhpCall {
         id[..len].copy_from_slice(&request_id.as_bytes()[..len]);
         *lock(&CALL) = Some(RunningCall {
             deadline_millis,
+            connection: CONNECTION.try_with(|id| *id).ok(),
             remote,
             http10: version == http::Version::HTTP_10,
             http1: matches!(version, http::Version::HTTP_10 | http::Version::HTTP_11),
@@ -128,7 +167,7 @@ pub fn spawn_watchdog(grace_millis: u64, wedged: impl Fn(&str) + Send + 'static)
                     // `CALL` is still locked, so the PHP call has not
                     // returned and its connection (owned by the blocked
                     // thread) is still open.
-                    if let Some(fd) = lock(&CONNECTIONS).get(&expired.remote).copied() {
+                    if let Some(fd) = connection_fd(&expired) {
                         if expired.http1 {
                             write_gateway_timeout(fd, expired.http10);
                         }
@@ -179,4 +218,57 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn call(connection: Option<u64>, remote: SocketAddr) -> RunningCall {
+        RunningCall {
+            deadline_millis: 0,
+            connection,
+            remote,
+            http10: false,
+            http1: true,
+            request_id: [0; REQUEST_ID_BYTES],
+            request_id_len: 0,
+        }
+    }
+
+    #[test]
+    fn connections_with_the_same_peer_never_overwrite_each_other() {
+        enable();
+        let remote: SocketAddr = "192.0.2.10:40000".parse().unwrap();
+        let first = Registration::new(remote, 1_001);
+        let second = Registration::new(remote, 1_002);
+        let (Some(first_id), Some(second_id)) = (first.0, second.0) else {
+            panic!("registrations are enabled");
+        };
+        assert_ne!(first_id, second_id);
+        assert_eq!(connection_fd(&call(Some(first_id), remote)), Some(1_001));
+        assert_eq!(connection_fd(&call(Some(second_id), remote)), Some(1_002));
+        // Without a task id two connections of one peer are ambiguous:
+        // nothing is shut down rather than the wrong socket.
+        assert_eq!(connection_fd(&call(None, remote)), None);
+
+        // The old connection going away keeps the new one known.
+        drop(first);
+        assert_eq!(connection_fd(&call(Some(second_id), remote)), Some(1_002));
+        assert_eq!(connection_fd(&call(None, remote)), Some(1_002));
+        drop(second);
+        assert_eq!(connection_fd(&call(Some(second_id), remote)), None);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn calls_inside_a_connection_task_carry_its_id() {
+        enable();
+        let remote: SocketAddr = "192.0.2.11:40001".parse().unwrap();
+        let registration = Registration::new(remote, 1_003);
+        let expected = registration.0;
+        let seen = registration
+            .scope(async { CONNECTION.try_with(|id| *id).ok() })
+            .await;
+        assert_eq!(seen, expected);
+    }
 }

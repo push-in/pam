@@ -43,6 +43,30 @@ final class RefreshTokensTest extends TestCase
         $this->database->drop();
     }
 
+    public function testAFamilyCannotBeRotatedPastItsAbsoluteLifetime(): void
+    {
+        $tokens = new RefreshTokens($this->database->databases, 3_600, clock: $this->clock->closure(), familyLifetimeSeconds: 7_200);
+        $current = $tokens->issue('user-1');
+        $started = $this->clock->now;
+        $this->clock->now += 3_000;
+        $current = $tokens->rotate($current->plainTextToken);
+        self::assertNotNull($current);
+        $this->clock->now += 3_000;
+        $current = $tokens->rotate($current->plainTextToken);
+        self::assertNotNull($current);
+        self::assertSame($started + 7_200, $current->token->expiresAt, 'The successor never outlives the family.');
+        $this->clock->now = $started + 7_200;
+        self::assertNull($tokens->rotate($current->plainTextToken), 'The family has ended: sign in again.');
+
+        $endless = new RefreshTokens($this->database->databases, 3_600, clock: $this->clock->closure(), familyLifetimeSeconds: null);
+        $token = $endless->issue('user-1');
+        for ($i = 0; $i < 4; ++$i) {
+            $this->clock->now += 3_000;
+            $token = $endless->rotate($token->plainTextToken);
+            self::assertNotNull($token);
+        }
+    }
+
     public function testRotationSpendsTheTokenAndKeepsTheFamily(): void
     {
         $first = $this->tokens->issue('user-1', ['orders:read']);

@@ -617,6 +617,9 @@ static void pam_ini_defaults(HashTable *configuration_hash)
 {
     char zone[128];
     zval value;
+    /* No X-Powered-By version banner unless php.ini asks for it (audit B4). */
+    ZVAL_NEW_STR(&value, zend_string_init("0", 1, 1));
+    zend_hash_str_update(configuration_hash, "expose_php", sizeof("expose_php") - 1, &value);
     if (!pam_system_timezone(zone, sizeof(zone))) {
         return;
     }
@@ -1238,6 +1241,18 @@ static php_stream *pam_request_body_stream(zend_string *body)
 #endif
 }
 
+/* Set when an HTTP dispatch left the engine through a bailout (fatal error,
+ * memory limit, exit, uncaught exception without a PHP frame). Only then is
+ * the Zend state untrustworthy; a dispatch that merely failed (a protocol
+ * error answered with 500, an allocation failure on the C side) leaves the
+ * engine intact and must not recycle the worker (audit A1). */
+static bool pam_engine_bailed_out = false;
+
+int pam_php_engine_bailed_out(void)
+{
+    return pam_engine_bailed_out ? 1 : 0;
+}
+
 static int pam_begin_http_dispatch(
     zval *parameters,
     uint32_t parameter_count,
@@ -1274,6 +1289,7 @@ static int pam_begin_http_dispatch(
         }
     } zend_catch {
         status = FAILURE;
+        pam_engine_bailed_out = true;
     } zend_end_try();
 
     if (SG(request_info).request_body != NULL) {
@@ -1320,31 +1336,8 @@ int pam_php_dispatch_http(
     return pam_begin_http_dispatch(parameters, 6, Z_STR(parameters[3]), output, output_length);
 }
 
-typedef struct pam_header_reader {
-    const unsigned char *cursor;
-    const unsigned char *end;
-} pam_header_reader;
-
-static bool pam_header_read_u32(pam_header_reader *reader, uint32_t *value)
-{
-    if ((size_t) (reader->end - reader->cursor) < sizeof(uint32_t)) {
-        return false;
-    }
-    memcpy(value, reader->cursor, sizeof(uint32_t));
-    reader->cursor += sizeof(uint32_t);
-    return true;
-}
-
-static bool pam_header_read_bytes(pam_header_reader *reader, const char **bytes, uint32_t *length)
-{
-    if (!pam_header_read_u32(reader, length)
-        || (size_t) (reader->end - reader->cursor) < (size_t) *length) {
-        return false;
-    }
-    *bytes = (const char *) reader->cursor;
-    reader->cursor += *length;
-    return true;
-}
+/* pam_header_read_u32() and pam_header_read_bytes(). */
+#include "pam_header_reader.h"
 
 /*
  * Keys of the per-request arrays ($_SERVER, the request context, header
@@ -1415,24 +1408,59 @@ static zend_string *pam_server_header_name(const char *name, size_t length)
     return server_name;
 }
 
-/* The cached keys of a header name; NULL once the cache is full. */
+/*
+ * Header names whose keys are cached for the life of the process. The list is
+ * fixed: learning names from traffic let the first 64 names a client invented
+ * take every slot right after boot (audit B1). Other names still work, they
+ * just allocate their keys per request.
+ */
+static const char *const pam_common_header_names[] = {
+    "accept", "accept-encoding", "accept-language", "authorization",
+    "cache-control", "connection", "content-encoding", "content-length",
+    "content-type", "cookie", "dnt", "forwarded", "host", "if-match",
+    "if-modified-since", "if-none-match", "if-range", "if-unmodified-since",
+    "keep-alive", "origin", "pragma", "priority", "range", "referer",
+    "sec-ch-ua", "sec-ch-ua-mobile", "sec-ch-ua-platform", "sec-fetch-dest",
+    "sec-fetch-mode", "sec-fetch-site", "sec-fetch-user",
+    "sec-websocket-extensions", "sec-websocket-key", "sec-websocket-protocol",
+    "sec-websocket-version", "te", "traceparent", "tracestate",
+    "transfer-encoding", "upgrade", "upgrade-insecure-requests", "user-agent",
+    "via", "x-api-key", "x-csrf-token", "x-forwarded-for", "x-forwarded-host",
+    "x-forwarded-port", "x-forwarded-proto", "x-real-ip", "x-request-id",
+    "x-requested-with", "x-xsrf-token", "idempotency-key", "baggage",
+};
+
+static void pam_header_keys_init(void)
+{
+    size_t count = sizeof(pam_common_header_names) / sizeof(pam_common_header_names[0]);
+    if (count > PAM_HEADER_KEY_CAPACITY) {
+        count = PAM_HEADER_KEY_CAPACITY;
+    }
+    for (size_t index = 0; index < count; index++) {
+        const char *name = pam_common_header_names[index];
+        size_t length = strlen(name);
+        zend_string *server_name = pam_server_header_name(name, length);
+        pam_header_key *key = &pam_header_keys[index];
+        key->name = pam_permanent_key(name, length);
+        key->server_name = pam_permanent_key(ZSTR_VAL(server_name), ZSTR_LEN(server_name));
+        zend_string_release(server_name);
+    }
+    pam_header_key_count = count;
+}
+
+/* The cached keys of a common header name; NULL for any other name. */
 static const pam_header_key *pam_header_key_find(const char *name, size_t length)
 {
+    if (UNEXPECTED(pam_header_key_count == 0)) {
+        pam_header_keys_init();
+    }
     for (size_t index = 0; index < pam_header_key_count; index++) {
         const pam_header_key *key = &pam_header_keys[index];
         if (ZSTR_LEN(key->name) == length && memcmp(ZSTR_VAL(key->name), name, length) == 0) {
             return key;
         }
     }
-    if (pam_header_key_count == PAM_HEADER_KEY_CAPACITY || length > 128) {
-        return NULL;
-    }
-    zend_string *server_name = pam_server_header_name(name, length);
-    pam_header_key *key = &pam_header_keys[pam_header_key_count++];
-    key->name = pam_permanent_key(name, length);
-    key->server_name = pam_permanent_key(ZSTR_VAL(server_name), ZSTR_LEN(server_name));
-    zend_string_release(server_name);
-    return key;
+    return NULL;
 }
 
 /*
@@ -1456,7 +1484,7 @@ static bool pam_build_request_headers(
         array_init(headers);
         return true;
     }
-    if (!pam_header_read_u32(&reader, &name_count) || name_count > 65535) {
+    if (!pam_header_read_u32(&reader, &name_count) || name_count > PAM_HEADER_MAX_COUNT) {
         return false;
     }
     array_init_size(headers, name_count);
@@ -1470,7 +1498,7 @@ static bool pam_build_request_headers(
 
         if (!pam_header_read_bytes(&reader, &name, &name_length)
             || !pam_header_read_u32(&reader, &value_count)
-            || value_count > 65535) {
+            || value_count > PAM_HEADER_MAX_COUNT) {
             return false;
         }
         array_init_size(&values, value_count);
@@ -1505,6 +1533,14 @@ static bool pam_build_request_headers(
         if (key != NULL) {
             zend_hash_update(server, key->server_name, &joined_value);
             zend_hash_update(Z_ARRVAL_P(headers), key->name, &values);
+        } else if (memchr(name, '_', name_length) != NULL) {
+            /* x-forwarded_for and x-forwarded-for would both become
+             * HTTP_X_FORWARDED_FOR, letting a client overwrite what the proxy
+             * set. Like nginx (underscores_in_headers off) and the CGI
+             * spoofing fixes, such names stay out of $_SERVER; the header
+             * list still has them (audit M13). */
+            zval_ptr_dtor(&joined_value);
+            zend_hash_str_update(Z_ARRVAL_P(headers), name, name_length, &values);
         } else {
             zend_string *server_name = pam_server_header_name(name, name_length);
             zend_hash_update(server, server_name, &joined_value);
@@ -1698,6 +1734,7 @@ int pam_php_resume_http(
         }
     } zend_catch {
         status = FAILURE;
+        pam_engine_bailed_out = true;
     } zend_end_try();
 
     if (SG(request_info).request_body != NULL) {

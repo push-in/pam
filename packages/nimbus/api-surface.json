@@ -2216,8 +2216,25 @@
                                 "properties": []
                             },
                             "hasDefault": true
+                        },
+                        {
+                            "name": "forgotPasswordMinimumMilliseconds",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 250,
+                            "hasDefault": true
                         }
                     ]
+                },
+                "defaultThrottleStore": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\RateLimit\\RateLimitStore",
+                    "parameters": []
                 },
                 "forgotPassword": {
                     "static": false,
@@ -4411,7 +4428,9 @@
             "abstract": false,
             "parent": null,
             "interfaces": [],
-            "constants": [],
+            "constants": {
+                "BINDING_COOKIE": "nimbus_oauth_state"
+            },
             "properties": [],
             "methods": {
                 "__construct": {
@@ -4485,6 +4504,24 @@
                             "optional": true,
                             "default": null,
                             "hasDefault": true
+                        },
+                        {
+                            "name": "bindStateToClient",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "secureCookie",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": true,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -4511,6 +4548,15 @@
                             "variadic": false,
                             "optional": true,
                             "default": [],
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "binding",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
                             "hasDefault": true
                         }
                     ]
@@ -4548,6 +4594,15 @@
                             "optional": false,
                             "default": null,
                             "hasDefault": false
+                        },
+                        {
+                            "name": "binding",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -4944,6 +4999,15 @@
                             "optional": true,
                             "default": null,
                             "hasDefault": true
+                        },
+                        {
+                            "name": "queue",
+                            "type": "?Nimbus\\Jobs\\JobDispatcher",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -4956,6 +5020,24 @@
                     "parameters": [
                         {
                             "name": "password",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "requestResetLink": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "email",
                             "type": "string",
                             "byReference": false,
                             "variadic": false,
@@ -5694,6 +5776,15 @@
                             "optional": true,
                             "default": null,
                             "hasDefault": true
+                        },
+                        {
+                            "name": "familyLifetimeSeconds",
+                            "type": "?int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 2592000,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -5931,6 +6022,96 @@
                             "hasDefault": false
                         }
                     ]
+                }
+            }
+        },
+        "Nimbus\\Auth\\SendPasswordResetLink": {
+            "kind": "class",
+            "final": true,
+            "readonly": true,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\Jobs\\SerializableJob"
+            ],
+            "constants": [],
+            "properties": {
+                "email": {
+                    "static": false,
+                    "readonly": true,
+                    "type": "string"
+                }
+            },
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "email",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "fromJobPayload": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "self",
+                    "parameters": [
+                        {
+                            "name": "payload",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "handle": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "void",
+                    "parameters": [
+                        {
+                            "name": "passwords",
+                            "type": "Nimbus\\Auth\\PasswordResets",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "jobName": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "string",
+                    "parameters": []
+                },
+                "toJobPayload": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": []
                 }
             }
         },
@@ -13586,6 +13767,24 @@
                         {
                             "name": "request",
                             "type": "Pam\\Http\\Request",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                },
+                "trusts": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": [
+                        {
+                            "name": "address",
+                            "type": "string",
                             "byReference": false,
                             "variadic": false,
                             "optional": false,
@@ -22568,6 +22767,15 @@
                             "optional": true,
                             "default": true,
                             "hasDefault": true
+                        },
+                        {
+                            "name": "container",
+                            "type": "?Nimbus\\Container\\Container",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -23123,7 +23331,9 @@
             "interfaces": [
                 "Pam\\Contracts\\Http\\MiddlewareInterface"
             ],
-            "constants": [],
+            "constants": {
+                "DEFAULT_CSP": "default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; object-src 'none'"
+            },
             "properties": [],
             "methods": {
                 "__construct": {
@@ -23140,6 +23350,33 @@
                             "variadic": false,
                             "optional": true,
                             "default": true,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "trustedProxies",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "contentSecurityPolicy",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "trustForwardedProto",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": false,
                             "hasDefault": true
                         }
                     ]
@@ -30795,6 +31032,120 @@
                 }
             }
         },
+        "Nimbus\\RateLimit\\SharedTableRateLimitStore": {
+            "kind": "class",
+            "final": true,
+            "readonly": false,
+            "abstract": false,
+            "parent": null,
+            "interfaces": [
+                "Nimbus\\RateLimit\\RateLimitStore"
+            ],
+            "constants": {
+                "DEFAULT_TABLE": "nimbus_rate_limit"
+            },
+            "properties": [],
+            "methods": {
+                "__construct": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": null,
+                    "parameters": [
+                        {
+                            "name": "table",
+                            "type": "?Pam\\Shared\\Table",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": null,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "rows",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 65536,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "idleTtlSeconds",
+                            "type": "float",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": 300.0,
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "name",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": "nimbus_rate_limit",
+                            "hasDefault": true
+                        }
+                    ]
+                },
+                "available": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
+                },
+                "consume": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "Nimbus\\RateLimit\\RateLimitDecision",
+                    "parameters": [
+                        {
+                            "name": "key",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "requestsPerSecond",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "capacity",
+                            "type": "int",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "now",
+                            "type": "float",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\Redis\\Connection": {
             "kind": "interface",
             "final": false,
@@ -34534,6 +34885,15 @@
                             "optional": false,
                             "default": null,
                             "hasDefault": false
+                        },
+                        {
+                            "name": "previousKeys",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [],
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -34595,6 +34955,14 @@
                     "abstract": false,
                     "returnsReference": false,
                     "return": "string",
+                    "parameters": []
+                },
+                "previousKeysFromEnvironment": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
                     "parameters": []
                 }
             }
@@ -37299,7 +37667,21 @@
             "abstract": false,
             "parent": null,
             "interfaces": [],
-            "constants": [],
+            "constants": {
+                "DEFAULT_INLINE_TYPES": [
+                    "image/png",
+                    "image/jpeg",
+                    "image/gif",
+                    "image/webp",
+                    "image/avif",
+                    "application/pdf",
+                    "audio/mpeg",
+                    "audio/ogg",
+                    "video/mp4",
+                    "video/webm",
+                    "text/plain"
+                ]
+            },
             "properties": [],
             "methods": {
                 "__construct": {
@@ -37317,6 +37699,36 @@
                             "optional": false,
                             "default": null,
                             "hasDefault": false
+                        },
+                        {
+                            "name": "inlineTypes",
+                            "type": "array",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": [
+                                "image/png",
+                                "image/jpeg",
+                                "image/gif",
+                                "image/webp",
+                                "image/avif",
+                                "application/pdf",
+                                "audio/mpeg",
+                                "audio/ogg",
+                                "video/mp4",
+                                "video/webm",
+                                "text/plain"
+                            ],
+                            "hasDefault": true
+                        },
+                        {
+                            "name": "allowActiveContent",
+                            "type": "bool",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": true,
+                            "default": false,
+                            "hasDefault": true
                         }
                     ]
                 },
@@ -42644,7 +43056,8 @@
             "parent": null,
             "interfaces": [],
             "constants": {
-                "EXTENSION": ".nim.php"
+                "EXTENSION": ".nim.php",
+                "INLINE_CACHE_LIMIT": 256
             },
             "properties": [],
             "methods": {
@@ -42825,6 +43238,14 @@
                             "hasDefault": false
                         }
                     ]
+                },
+                "inlineCacheSize": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "int",
+                    "parameters": []
                 },
                 "make": {
                     "static": false,

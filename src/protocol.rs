@@ -8,6 +8,37 @@ const MAX_NATIVE_HEADER_NAMES: usize = 256;
 const MAX_NATIVE_HEADER_VALUES: usize = 256;
 const MAX_NATIVE_RESPONSE_CHUNKS: usize = 4_096;
 
+/// Request headers for `pam_php_dispatch_http_native`: native-endian u32
+/// name count, then per name its length and bytes, value count and each
+/// value's length and bytes. Names are lowercase (`http` normalizes them);
+/// values that are not visible ASCII are skipped, as the JSON envelope did.
+pub fn encode_php_request_headers(headers: &http::HeaderMap) -> Vec<u8> {
+    fn push_bytes(output: &mut Vec<u8>, bytes: &[u8]) {
+        output.extend_from_slice(&u32::try_from(bytes.len()).unwrap_or(u32::MAX).to_ne_bytes());
+        output.extend_from_slice(bytes);
+    }
+    let mut output = Vec::with_capacity(512);
+    output.extend_from_slice(
+        &u32::try_from(headers.keys_len())
+            .unwrap_or(u32::MAX)
+            .to_ne_bytes(),
+    );
+    for name in headers.keys() {
+        push_bytes(&mut output, name.as_str().as_bytes());
+        let count_offset = output.len();
+        output.extend_from_slice(&0u32.to_ne_bytes());
+        let mut count = 0u32;
+        for value in headers.get_all(name) {
+            if let Ok(value) = value.to_str() {
+                push_bytes(&mut output, value.as_bytes());
+                count += 1;
+            }
+        }
+        output[count_offset..count_offset + 4].copy_from_slice(&count.to_ne_bytes());
+    }
+    output
+}
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(try_from = "u8")]

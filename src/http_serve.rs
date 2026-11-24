@@ -144,6 +144,30 @@ pub async fn close_when_draining(
 pub struct HttpSettings {
     pub header_read_timeout: Duration,
     pub graceful_timeout: Duration,
+    /// Connections served at once before the accept loop pauses.
+    pub max_connections: usize,
+}
+
+/// Descriptors kept free for PHP (files, database and Redis sockets, pipes).
+const RESERVED_DESCRIPTORS: usize = 256;
+
+/// The connection limit: the configured one, or what the soft open file
+/// limit leaves after [`RESERVED_DESCRIPTORS`] (at least 64).
+pub fn connection_limit(configured: usize) -> usize {
+    if configured != 0 {
+        return configured;
+    }
+    let mut limit = libc::rlimit {
+        rlim_cur: 0,
+        rlim_max: 0,
+    };
+    // SAFETY: getrlimit writes into the provided struct.
+    let soft = if unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut limit) } == 0 {
+        usize::try_from(limit.rlim_cur).unwrap_or(usize::MAX)
+    } else {
+        1024
+    };
+    soft.saturating_sub(RESERVED_DESCRIPTORS).clamp(64, 1 << 20)
 }
 
 /// Counts connections still being served so shutdown can wait for them.
@@ -164,6 +188,21 @@ impl ConnectionTracker {
         }
     }
 
+    /// Waits until fewer than `limit` connections are tracked.
+    pub async fn wait_below(&self, limit: usize) {
+        loop {
+            let notified = self.inner.1.notified();
+            if self.inner.0.load(Ordering::Acquire) < limit {
+                return;
+            }
+            notified.await;
+        }
+    }
+
+    pub fn active(&self) -> usize {
+        self.inner.0.load(Ordering::Acquire)
+    }
+
     /// Waits until every tracked connection finished or `timeout` elapses.
     pub async fn wait_idle(&self, timeout: Duration) {
         let _ = tokio::time::timeout(timeout, async {
@@ -181,9 +220,9 @@ impl ConnectionTracker {
 
 impl Drop for ActiveConnection {
     fn drop(&mut self) {
-        if self.inner.0.fetch_sub(1, Ordering::AcqRel) == 1 {
-            self.inner.1.notify_waiters();
-        }
+        self.inner.0.fetch_sub(1, Ordering::AcqRel);
+        // Wakes shutdown (waiting for zero) and a paused accept loop.
+        self.inner.1.notify_waiters();
     }
 }
 
@@ -375,13 +414,23 @@ pub async fn accept_loop<P, S, H, F, T>(
         let registration = crate::inline_serve::Registration::new(remote, fd);
         tokio::spawn(async move {
             let _active = active;
-            let _registration = registration;
             if let Ok(io) = handshake(stream).await {
-                serve_connection(io, remote, app, drain, http).await;
+                registration
+                    .scope(serve_connection(io, remote, app, drain, http))
+                    .await;
             }
         });
     };
     loop {
+        if tracker.active() >= http.max_connections {
+            // Out of connection slots: leave new connections in the kernel
+            // queue (or to sibling workers) until one closes.
+            tokio::select! {
+                biased;
+                _ = raised(&mut stop) => break,
+                () = tracker.wait_below(http.max_connections) => {}
+            }
+        }
         tokio::select! {
             biased;
             _ = raised(&mut stop) => break,

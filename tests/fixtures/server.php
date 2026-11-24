@@ -189,6 +189,13 @@ $app->post('/upload-block', static function (Request $request, Response $respons
 $app->get('/client-ip', static fn (Request $request, Response $response): Response => $response->json([
     'remoteAddress' => $_SERVER['REMOTE_ADDR'] ?? null,
 ]));
+$app->get('/server-headers', static fn (Request $request, Response $response): Response => $response->json([
+    'forwardedFor' => $_SERVER['HTTP_X_FORWARDED_FOR'] ?? null,
+    'custom' => $_SERVER['HTTP_X_CUSTOM_TRACE'] ?? null,
+    'userAgent' => $_SERVER['HTTP_USER_AGENT'] ?? null,
+    'displayErrors' => ini_get('display_errors'),
+    'exposePhp' => ini_get('expose_php'),
+]));
 $app->post('/async-body', static function (Request $request, Response $response): Response {
     \Pam\Async\delay(0.3);
 
@@ -424,7 +431,7 @@ $ws->on('connection', static function (Socket $socket) use ($ws): void {
 
 $options = [
     'corsOrigins' => ['https://app.example'],
-    'bodyReadTimeoutMs' => 100,
+    'bodyReadTimeoutMs' => (int) (getenv('PAM_TEST_BODY_READ_TIMEOUT') ?: 100),
     'headerReadTimeoutMs' => 100,
     'maxBodyBytes' => 1024,
     'maxHeaders' => 16,
@@ -442,6 +449,9 @@ $options = [
     'leakDetectionSampleRate' => 1,
     'trustedProxies' => array_values(array_filter(explode(',', (string) getenv('PAM_TEST_TRUSTED_PROXIES')))),
 ];
+if (getenv('PAM_TEST_MAX_CONNECTIONS') !== false) {
+    $options['maxConnections'] = (int) getenv('PAM_TEST_MAX_CONNECTIONS');
+}
 if (getenv('PAM_TEST_MAX_BODY_BYTES') !== false) {
     $options['maxBodyBytes'] = (int) getenv('PAM_TEST_MAX_BODY_BYTES');
 }

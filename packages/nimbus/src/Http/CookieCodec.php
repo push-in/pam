@@ -25,11 +25,11 @@ final readonly class CookieCodec
         $this->signingKey = hash_hmac('sha256', 'nimbus-cookie-signature', $key, true);
     }
 
-    /** Uses APP_KEY (`base64:...`). */
+    /** Uses APP_KEY (`base64:...`); encrypted cookies of APP_PREVIOUS_KEYS still decrypt. */
     public static function fromEnvironment(): self
     {
         $key = Crypt::keyFromEnvironment();
-        return new self(new Crypt($key), $key);
+        return new self(new Crypt($key, Crypt::previousKeysFromEnvironment()), $key);
     }
 
     public function encrypt(string $name, string $value): string

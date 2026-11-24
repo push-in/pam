@@ -58,6 +58,11 @@ pub struct UploadLimits {
     pub max_post_bytes: u64,
     /// `max_file_uploads`.
     pub max_files: usize,
+    /// `max_multipart_body_parts` (`-1` there: `max_input_vars` +
+    /// `max_file_uploads`); 0 disables the limit. Every part costs a
+    /// `$_POST`/`$_FILES` entry even when its file input is empty, so the
+    /// count is bounded like PHP does since CVE-2023-0662.
+    pub max_parts: usize,
     /// `upload_tmp_dir`, or the system temporary directory.
     pub temporary_directory: Option<String>,
 }
@@ -69,6 +74,7 @@ impl Default for UploadLimits {
             max_file_bytes: 2 * 1024 * 1024,
             max_post_bytes: 8 * 1024 * 1024,
             max_files: 20,
+            max_parts: 1_020,
             temporary_directory: None,
         }
     }
@@ -251,6 +257,7 @@ pub async fn read(
     let mut sink = Sink::Discard;
     let mut fields = Vec::<u8>::new();
     let mut form_max_file_size: Option<u64> = None;
+    let mut parts = 0_usize;
     let mut ended = body.is_end_stream();
 
     loop {
@@ -301,6 +308,10 @@ pub async fn read(
                         }
                         break;
                     };
+                    parts += 1;
+                    if limits.max_parts > 0 && parts > limits.max_parts {
+                        return Err(UploadError::Malformed("too many parts"));
+                    }
                     let headers = String::from_utf8_lossy(&buffer[..header_bytes]).into_owned();
                     buffer.advance(header_bytes + 2);
                     sink = start_part(
@@ -862,6 +873,7 @@ mod tests {
             max_file_bytes: 1024,
             max_post_bytes: 64 * 1024,
             max_files: 2,
+            max_parts: 8,
             temporary_directory: Some(directory.to_str().unwrap().to_owned()),
         }
     }
@@ -899,6 +911,33 @@ mod tests {
             boundary(r#"multipart/form-data; boundary="a b""#).as_deref(),
             Some("a b")
         );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn bounds_the_number_of_parts_like_max_multipart_body_parts() {
+        // Empty file inputs are not uploads, but each one is an entry: a body
+        // of thousands of them must stop at the part limit (CVE-2023-0662).
+        let directory = scratch("parts");
+        let mut body = Vec::new();
+        for _ in 0..9 {
+            body.extend_from_slice(
+                b"--XyZ\r\nContent-Disposition: form-data; name=\"f[]\"; filename=\"\"\r\n\r\n\r\n",
+            );
+        }
+        body.extend_from_slice(b"--XyZ--\r\n");
+        let result = read(
+            chunked(vec![body]),
+            "multipart/form-data; boundary=XyZ",
+            None,
+            &limits(&directory),
+            Duration::from_secs(5),
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(UploadError::Malformed("too many parts"))
+        ));
+        std::fs::remove_dir_all(directory).unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]

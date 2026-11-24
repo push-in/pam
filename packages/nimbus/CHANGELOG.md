@@ -5,6 +5,41 @@ Versioning; the 0.x line may still adjust public API between minor versions.
 
 ## Unreleased
 
+Second round of fixes from the 2026-11-20 security audit.
+
+### Security
+
+- `AuthRoutes` throttles through a PAM shared table by default (the new
+  `SharedTableRateLimitStore`), so every worker spends one budget and recycling a worker no longer
+  resets it. Outside PAM it falls back to a per-process store and warns once in production (M4).
+- `POST /auth/password/forgot` answers the same 202 whether or not the address exists, swallows
+  transport errors and pads the response to `forgotPasswordMinimumMilliseconds` (250 ms). Unknown
+  addresses do the same lookup and hashing work. `PasswordResets(queue: ...)` moves the whole
+  lookup-and-send to a `SendPasswordResetLink` job that carries only the address (M5).
+- **Breaking:** social login binds the OAuth state to the client that started it: the start route
+  sets an HttpOnly, SameSite=Lax `nimbus_oauth_state` cookie and the callback refuses a state
+  without it (login CSRF). `bindStateToClient: false` turns it off (M6).
+- **Breaking:** e-mail verification tokens are bound to the address they were sent to; a link sent
+  before the user changed the address no longer verifies the new one. Links sent before this
+  release stop working; users request a new one (M7).
+- Storage downloads carry `nosniff`, a sandboxing CSP and `Content-Disposition: attachment`,
+  except passive types (`StorageRoutes::DEFAULT_INLINE_TYPES`). Uploads of HTML, SVG, XML or script
+  types and extensions are refused with 415 unless `allowActiveContent: true`, and the declared
+  `Content-Length` is checked before the body is read (M8).
+- `ViewFactory::renderString()` keeps compiled sources in an LRU of 256 entries and documents that
+  the source must be trusted (M9).
+- `SecurityHeadersMiddleware` also sets its headers on error responses, honours
+  `X-Forwarded-Proto` from `trustedProxies` (or with `trustForwardedProto: true`) for HSTS, and
+  takes an optional `contentSecurityPolicy` (`DEFAULT_CSP`) that does not override a route's own (B5).
+- `Redirect::back()` falls back when the referer path starts with `//` or `/\` (B6).
+- `IdempotencyMiddleware` scopes keys by the authenticated principal (with the container) or the
+  `Authorization` header (B7).
+- Refresh token families have an absolute lifetime, `familyLifetimeSeconds` (30 days by default,
+  `null` for none); families issued before this release keep rotating without it (B7).
+- CSRF exceptions match whole path segments: `/webhooks*` matches `/webhooks` and `/webhooks/...`,
+  no longer `/webhooksX` (B7).
+- `Crypt` (and `CookieCodec::fromEnvironment()`) decrypt with `APP_PREVIOUS_KEYS`, so `APP_KEY`
+  can be rotated without invalidating encrypted values (B7).
 Productivity parity with Laravel. Every addition is optional: the production dependency set is
 still `php` and `pushinbr/pam-contracts`.
 

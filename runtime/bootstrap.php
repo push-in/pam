@@ -699,6 +699,8 @@ namespace Pam\Internal {
                 'maxHeaders' => self::integerOption($options, 'maxHeaders', 100),
                 'requestTimeoutMs' => self::integerOption($options, 'requestTimeoutMs', 30_000),
                 'maxConcurrentRequests' => self::integerOption($options, 'maxConcurrentRequests', 4096),
+                // 0: derived from the open file limit by the runtime.
+                'maxConnections' => self::integerOption($options, 'maxConnections', 0, true),
                 'maxInflightBodyBytes' => self::integerOption(
                     $options,
                     'maxInflightBodyBytes',
@@ -772,9 +774,27 @@ namespace Pam\Internal {
                 'uploads' => self::uploadLimits(),
             ];
             self::$requestConfig = null;
+            if (!self::$server['exposeErrors']) {
+                // Without php.ini (pam -n, a bare embed SDK) PHP displays
+                // errors, and in server mode they land in response bodies with
+                // file paths (audit B4). They still reach the error log.
+                ini_set('display_errors', '0');
+                ini_set('log_errors', '1');
+            }
         }
 
-        /** @return array{enabled: bool, maxFileBytes: int, maxPostBytes: int, maxFiles: int, temporaryDirectory: string} */
+        /** PHP's max_multipart_body_parts; -1 (the default) means max_input_vars + max_file_uploads. */
+        private static function multipartPartLimit(): int
+        {
+            $configured = ini_get('max_multipart_body_parts');
+            $parts = is_string($configured) && trim($configured) !== '' ? (int) $configured : -1;
+            if ($parts < 0) {
+                $parts = max(0, (int) ini_get('max_input_vars')) + max(0, (int) ini_get('max_file_uploads'));
+            }
+            return $parts;
+        }
+
+        /** @return array{enabled: bool, maxFileBytes: int, maxPostBytes: int, maxFiles: int, maxParts: int, temporaryDirectory: string} */
         private static function uploadLimits(): array
         {
             $bytes = static function (string $name): int {
@@ -792,6 +812,7 @@ namespace Pam\Internal {
                 'maxFileBytes' => $bytes('upload_max_filesize'),
                 'maxPostBytes' => $bytes('post_max_size'),
                 'maxFiles' => max(0, (int) ini_get('max_file_uploads')),
+                'maxParts' => self::multipartPartLimit(),
                 'temporaryDirectory' => is_string($directory) && $directory !== ''
                     ? $directory
                     : sys_get_temp_dir(),
@@ -1055,11 +1076,18 @@ namespace Pam\Internal {
             string $requestId = '',
             ?array $server = null,
         ): string {
+            // Protocol errors answer 500 instead of throwing: an exception
+            // escaping to the C boundary has no PHP frame to land in, turns
+            // into a fatal error and recycles the whole worker (audit A1).
             if ($requestId === '') {
-                throw new \InvalidArgumentException('HTTP dispatch request IDs cannot be empty.');
+                return self::internalDispatchError(
+                    new \InvalidArgumentException('HTTP dispatch request IDs cannot be empty.'),
+                );
             }
             if (isset(self::$httpDispatches[$requestId])) {
-                throw new \LogicException("HTTP dispatch {$requestId} already exists.");
+                return self::internalDispatchError(
+                    new \LogicException("HTTP dispatch {$requestId} already exists."),
+                );
             }
 
             /** @var \Fiber<\Throwable, mixed, string, \Pam\Async\Suspension|null> $fiber */
@@ -1094,22 +1122,32 @@ namespace Pam\Internal {
         {
             $dispatch = self::$httpDispatches[$requestId] ?? null;
             if ($dispatch === null) {
-                throw new \OutOfBoundsException("HTTP dispatch {$requestId} does not exist.");
+                return self::internalDispatchError(
+                    new \OutOfBoundsException("HTTP dispatch {$requestId} does not exist."),
+                );
             }
             if (!$dispatch->fiber->isSuspended()) {
-                throw new \LogicException("HTTP dispatch {$requestId} is not suspended.");
+                return self::internalDispatchError(
+                    new \LogicException("HTTP dispatch {$requestId} is not suspended."),
+                );
             }
 
             \Pam\Diagnostics\Channel::publish(
                 \Pam\Diagnostics\EventKind::FiberResume,
                 ['requestId' => $requestId],
             );
-            $result = match ($resultJson) {
-                // The answers to a stream wait, the most frequent resume.
-                '{"timedOut":false}' => ['timedOut' => false],
-                '{"timedOut":true}' => ['timedOut' => true],
-                default => json_decode($resultJson, true, 64, JSON_THROW_ON_ERROR),
-            };
+            try {
+                $result = match ($resultJson) {
+                    // The answers to a stream wait, the most frequent resume.
+                    '{"timedOut":false}' => ['timedOut' => false],
+                    '{"timedOut":true}' => ['timedOut' => true],
+                    default => json_decode($resultJson, true, 64, JSON_THROW_ON_ERROR),
+                };
+            } catch (\JsonException $error) {
+                // Hand the protocol error to the suspended request instead of
+                // throwing past the C boundary.
+                return self::advanceHttpDispatch($dispatch, $error);
+            }
             return self::advanceHttpDispatch($dispatch, resumeValue: $result);
         }
 
@@ -2116,6 +2154,10 @@ namespace Pam\Internal {
                 $_SERVER['PAM_TRACEPARENT'],
             );
             foreach ($headers as $name => $values) {
+                if (str_contains((string) $name, '_')) {
+                    // Would collide with the dashed name (audit M13).
+                    continue;
+                }
                 $serverName = match ($name) {
                     'content-type' => 'CONTENT_TYPE',
                     'content-length' => 'CONTENT_LENGTH',

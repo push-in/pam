@@ -44,10 +44,19 @@ pub fn engine_failed() -> bool {
 }
 
 fn track_engine_failure<T>(result: Result<T, String>) -> Result<T, String> {
-    if result.is_err() {
+    // SAFETY: reads a C flag on the owner thread, right after the dispatch.
+    let bailed_out = result.is_err() && unsafe { pam_php_engine_bailed_out() } != 0;
+    mark_engine_failure(bailed_out);
+    result
+}
+
+/// Only a bailout poisons the engine. A dispatch that failed without one
+/// (a protocol error, an allocation failure on the C side) keeps the worker
+/// and the requests in flight on it (audit A1).
+fn mark_engine_failure(bailed_out: bool) {
+    if bailed_out {
         ENGINE_FAILED.store(true, Ordering::Release);
     }
-    result
 }
 static OWNER: OnceLock<ThreadId> = OnceLock::new();
 static PROCESS_STARTED_AT_MILLIS: OnceLock<u64> = OnceLock::new();
@@ -86,6 +95,7 @@ fn epoch_millis() -> u64 {
 
 unsafe extern "C" {
     fn pam_native_abi_version() -> u32;
+    fn pam_php_engine_bailed_out() -> c_int;
     fn pam_php_init(argc: c_int, argv: *mut *mut c_char) -> c_int;
     fn pam_php_eval(
         source: *const c_char,
@@ -158,6 +168,12 @@ pub struct ServerConfig {
     pub request_timeout_ms: u64,
     #[serde(default = "default_max_concurrent_requests")]
     pub max_concurrent_requests: usize,
+    /// Open connections a worker serves at once; `0` derives it from the
+    /// descriptor limit. Past it the worker stops accepting, so the kernel
+    /// queue (and sibling workers) hold new connections instead of the
+    /// worker running out of descriptors (audit B2).
+    #[serde(default)]
+    pub max_connections: usize,
     /// Request body bytes PHP may hold at once (suspended requests keep
     /// theirs); 0 for no limit. Bodies count against the worker's single
     /// `memory_limit`, whose exhaustion recycles every request in flight.
@@ -754,7 +770,7 @@ pub struct HttpRequestMeta<'a> {
 }
 
 /// Dispatches an HTTP request without a JSON envelope: `headers` is the
-/// binary list built by `server::encode_php_request_headers`.
+/// binary list built by `protocol::encode_php_request_headers`.
 pub fn dispatch_http_native(
     method: &str,
     target: &str,

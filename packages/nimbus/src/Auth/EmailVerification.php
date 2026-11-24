@@ -11,6 +11,10 @@ use Nimbus\Notifications\NotificationDispatcher;
  * E-mail verification by API: `send()` mails a single-use link (`{token}` in the verification
  * URL) and `verify()` spends the token and marks the address verified. Sent synchronously so
  * the token never enters a job payload.
+ *
+ * Each token is bound to the address it was mailed to (its subject carries a hash of the
+ * address the user's `mail` route returned): after the user changes the address, an older link
+ * no longer verifies the new one.
  */
 final readonly class EmailVerification
 {
@@ -47,7 +51,7 @@ final readonly class EmailVerification
         if ($user->hasVerifiedEmail()) {
             return false;
         }
-        $subject = $user->authIdentifier();
+        $subject = self::subject($user);
         if ($this->tokens->createdWithin(self::PURPOSE, $subject, $this->throttleSeconds)) {
             return false;
         }
@@ -64,14 +68,31 @@ final readonly class EmailVerification
     public function verify(#[\SensitiveParameter] string $token): bool
     {
         $subject = $this->tokens->consume(self::PURPOSE, $token);
-        $user = $subject === null ? null : $this->users->findById($subject);
-        if ($user === null) {
+        $separator = $subject === null ? false : strrpos($subject, '|');
+        if ($subject === null || $separator === false) {
+            return false;
+        }
+        $user = $this->users->findById(substr($subject, 0, $separator));
+        // The address changed since the link was sent: the token does not verify the new one.
+        if ($user === null || !hash_equals(self::subject($user), $subject)) {
             return false;
         }
         if (!$user->hasVerifiedEmail()) {
             $this->users->markEmailAsVerified($user);
         }
         return true;
+    }
+
+    /** The token subject: the user's identifier and a hash of the address being verified. */
+    private static function subject(AuthUser $user): string
+    {
+        $route = $user->routeNotificationFor('mail', new VerifyEmailNotification('', 0));
+        if (is_array($route)) {
+            $first = array_key_first($route);
+            $route = is_string($first) ? $first : ($first === null ? '' : $route[$first]);
+        }
+        $address = is_string($route) ? strtolower(trim($route)) : '';
+        return $user->authIdentifier() . '|' . substr(hash('sha256', $address), 0, 32);
     }
 
     public function users(): AuthUserProvider
