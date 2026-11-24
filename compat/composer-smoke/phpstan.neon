@@ -9,6 +9,7 @@ parameters:
             path: ../../packages/nimbus/src/Broadcasting/PusherBroadcaster.php
     scanFiles:
         - native-shared-stubs.php
+        - ../../packages/nimbus/phpstan/stubs/pam-pg.php
     excludePaths:
         analyse:
             - ../../runtime/laravel.php
