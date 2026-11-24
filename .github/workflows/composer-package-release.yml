@@ -41,18 +41,23 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ inputs.source_ref }}
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
           tools: composer:v2
       - name: Require a source commit integrated into main
         id: source
+        env:
+          SOURCE_REF: ${{ inputs.source_ref }}
         run: |
           set -euo pipefail
+          # Only a commit already on main is checked out: the input is
+          # resolved and verified before any of its files are used.
           git fetch --no-tags origin main
-          source_sha=$(git rev-parse --verify 'HEAD^{commit}')
+          git fetch --tags origin
+          source_sha=$(git rev-parse --verify --end-of-options "${SOURCE_REF}^{commit}")
           git merge-base --is-ancestor "${source_sha}" origin/main
+          git checkout --quiet --detach "${source_sha}"
           printf 'sha=%s\n' "${source_sha}" >>"${GITHUB_OUTPUT}"
       - name: Validate package metadata and version
         env:
@@ -84,7 +89,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.source_sha }}
+      - name: Check out the verified source commit
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${SOURCE_SHA}" origin/main
+          git checkout --quiet --detach "${SOURCE_SHA}"
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
@@ -145,7 +157,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-          ref: ${{ needs.prepare.outputs.source_sha }}
+      - name: Check out the verified source commit
+        env:
+          SOURCE_SHA: ${{ needs.prepare.outputs.source_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          git merge-base --is-ancestor "${SOURCE_SHA}" origin/main
+          git checkout --quiet --detach "${SOURCE_SHA}"
       - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
         with:
           php-version: '8.4'
