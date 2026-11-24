@@ -270,99 +270,6 @@ namespace Pam\Internal {
     }
 }
 
-namespace Pam\Shared {
-    /**
-     * In-process stand-in for the runtime's shared-memory table: same API, one PHP array,
-     * and a fixed row count.
-     *
-     * @implements \IteratorAggregate<string, array<string, int|float|string>>
-     */
-    class Table implements \IteratorAggregate, \Countable
-    {
-        public const TYPE_INT = 1;
-        public const TYPE_FLOAT = 2;
-        public const TYPE_STRING = 3;
-
-        /** Whether available() reports a runtime; tests flip it. */
-        public static bool $runtime = false;
-
-        /** @var array<string, array<string, int|float|string>> */
-        private array $rows = [];
-
-        /** @var list<string> */
-        public array $columns = [];
-
-        public bool $created = false;
-
-        public function __construct(
-            private readonly int $size,
-            public readonly float $conflictProportion = 0.2,
-            public readonly string $name = '',
-            private readonly int $keySize = 64,
-        ) {
-        }
-
-        public static function available(): bool
-        {
-            return self::$runtime;
-        }
-
-        public function column(string $name, int $type, int $size = 0): bool
-        {
-            $this->columns[] = $name;
-            return $type > 0 && $size >= 0;
-        }
-
-        public function create(): bool
-        {
-            $this->created = true;
-            return true;
-        }
-
-        /** @param array<string, mixed> $values */
-        public function set(string $key, array $values): bool
-        {
-            if (strlen($key) >= $this->keySize || (!isset($this->rows[$key]) && count($this->rows) >= $this->size)) {
-                return false;
-            }
-            $row = [];
-            foreach ($values as $column => $value) {
-                $row[$column] = is_int($value) || is_float($value) || is_string($value) ? $value : 0;
-            }
-            $this->rows[$key] = $row;
-            return true;
-        }
-
-        /** @return array<string, int|float|string>|int|float|string|false */
-        public function get(string $key, ?string $field = null): array|int|float|string|false
-        {
-            $row = $this->rows[$key] ?? null;
-            if ($row === null) {
-                return false;
-            }
-            return $field === null ? $row : ($row[$field] ?? false);
-        }
-
-        public function del(string $key): bool
-        {
-            $exists = isset($this->rows[$key]);
-            unset($this->rows[$key]);
-            return $exists;
-        }
-
-        public function count(): int
-        {
-            return count($this->rows);
-        }
-
-        /** @return \ArrayIterator<string, array<string, int|float|string>> */
-        public function getIterator(): \ArrayIterator
-        {
-            return new \ArrayIterator($this->rows);
-        }
-    }
-}
-
 namespace Pam\WS {
     final class RoomEmitter
     {
@@ -411,6 +318,9 @@ namespace Pam\Shared {
 
         public static bool $available = false;
 
+        /** Alias of $available kept for the tests that flip it under that name. */
+        public static bool $runtime = false;
+
         /** @var array<string, int> */
         private array $types = [];
 
@@ -432,7 +342,7 @@ namespace Pam\Shared {
 
         public static function available(): bool
         {
-            return self::$available;
+            return self::$available || self::$runtime;
         }
 
         public function column(string $name, int $type, int $size = 0): bool
@@ -460,6 +370,23 @@ namespace Pam\Shared {
                 }
             }
             return true;
+        }
+
+        /** @return array<string, int|float|string>|int|float|string|false */
+        public function get(string $key, ?string $field = null): array|int|float|string|false
+        {
+            $row = $this->rows[$key] ?? null;
+            if ($row === null) {
+                return false;
+            }
+            return $field === null ? $row : ($row[$field] ?? false);
+        }
+
+        public function del(string $key): bool
+        {
+            $exists = isset($this->rows[$key]);
+            unset($this->rows[$key]);
+            return $exists;
         }
 
         public function incr(string $key, string $column, int|float $incrby = 1): int|float|false

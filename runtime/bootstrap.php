@@ -712,6 +712,10 @@ namespace Pam\Internal {
                 'maxResponseBytes' => $maxResponseBytes,
                 'maxResponseChunkBytes' => $maxResponseChunkBytes,
                 'headerReadTimeoutMs' => self::integerOption($options, 'headerReadTimeoutMs', 10_000),
+                // HTTP/2 (h2c and TLS ALPN): streams per connection and flow-control windows.
+                'http2MaxConcurrentStreams' => self::integerOption($options, 'http2MaxConcurrentStreams', 256),
+                'http2StreamWindowBytes' => self::integerOption($options, 'http2StreamWindowBytes', 1024 * 1024),
+                'http2ConnectionWindowBytes' => self::integerOption($options, 'http2ConnectionWindowBytes', 4 * 1024 * 1024),
                 'bodyReadTimeoutMs' => self::integerOption($options, 'bodyReadTimeoutMs', 30_000),
                 'rateLimitPerSecond' => self::integerOption($options, 'rateLimitPerSecond', 0, true),
                 'corsOrigins' => self::stringListOption($options, 'corsOrigins'),

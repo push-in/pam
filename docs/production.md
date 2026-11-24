@@ -681,6 +681,11 @@ segurança e o que configurar antes de expor a aplicação.
   com tudo o que está em voo. `maxInflightBodyBytes` (padrão: um quarto do `memory_limit`;
   `PAM_MAX_INFLIGHT_BODY_BYTES` sobrescreve, `0` desliga) limita os bytes de corpo que o PHP segura
   ao mesmo tempo; acima disso a requisição espera até `requestTimeoutMs` e recebe `503`.
+- HTTP/2 (h2c com prior knowledge e TLS com ALPN `h2`) usa `http2MaxConcurrentStreams` (padrão
+  256 streams por conexão), `http2StreamWindowBytes` (padrão 1 MiB por stream, contra 64 KiB do
+  protocolo, para corpos de upload não esperarem um `WINDOW_UPDATE` a cada 64 KiB) e
+  `http2ConnectionWindowBytes` (padrão 4 MiB, dividido entre os streams da conexão). Janelas
+  fora de 64 KiB a 2 GiB são ajustadas ao limite do protocolo.
 - Defina `maxResponseBytes` e `maxResponseChunkBytes` conforme os maiores downloads
   legítimos. O chunk não pode ser maior que o total. Streams acima do teto falham
   no transporte e desconexões cancelam a Fiber/cleanup.

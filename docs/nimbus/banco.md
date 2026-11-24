@@ -21,6 +21,7 @@ pam composer require pushinbr/arcano
 | `DB_TIMEZONE` | fuso da conexão; sem ele, `APP_TIMEZONE`; sem os dois, UTC |
 
 O `timezone` da conexão (`'timezone' => 'America/Sao_Paulo'` no array da conexão) define o fuso da sessão no pgsql (`TimeZone`, no connect) e no mysql (`SET time_zone`; nomes de fuso pedem as tabelas de fuso do MySQL, um deslocamento como `-03:00` sempre funciona). Também é o fuso em que o cast `datetime` do Arcano lê `timestamp without time zone` e grava parâmetros `DateTime`. Um banco que o Laravel gravou com `APP_TIMEZONE=America/Sao_Paulo` precisa do mesmo valor aqui; com UTC as datas saem deslocadas em 3 horas.
+| `DB_DRIVER` | `pdo` (padrão) ou `pam-pg`: cliente Postgres nativo do PAM |
 
 PostgreSQL é o padrão de produção; SQLite serve para testes e apps pequenos.
 
@@ -154,6 +155,27 @@ Dimensione `workers × maxIdleConnections` abaixo do `max_connections` do Postgr
 Com `DB_ASYNC=true` e a extensão `pgsql`, o `Nimbus\Database\Pgsql\AsyncPostgresDriver` substitui o PDO no Postgres: dentro do PAM, uma query suspende só a Fiber da requisição, e o worker atende outras requisições enquanto espera o banco. Um comando interrompido fecha a sessão em vez de devolvê-la ao pool.
 
 O PDO bloqueante continua sendo o padrão porque é mais rápido para queries curtas. O driver assíncrono compensa quando há queries longas ou latência de rede alta até o banco.
+
+## Cliente Postgres nativo (`DB_DRIVER=pam-pg`)
+
+Dentro do PAM, `DB_DRIVER=pam-pg` troca o PDO pelo `Nimbus\Database\Pgsql\NativePostgresDriver`, que usa o
+cliente Postgres do próprio runtime (Rust, codec do `postgres-protocol`):
+
+- cada statement é preparado uma vez por sessão e executado depois pelo nome, numa ida e volta;
+- os valores vão sempre como parâmetros do statement, nunca no texto do SQL;
+- o worker espera a resposta bloqueado, como no PDO, sem suspender a Fiber;
+- as linhas chegam como arrays PHP montados em C, com os mesmos tipos do pdo_pgsql (int, float, bool,
+  stream para bytea);
+- `BEGIN` vai junto com o primeiro comando da transação, e `BEGIN` + `COMMIT` sem nada no meio não vão ao banco;
+- o statement do servidor é fechado quando o objeto que o preparou é destruído, como no pdo_pgsql.
+
+Aceita `host` (TCP ou diretório do socket Unix), `port`, `dbname`, `sslmode` (`disable`, `allow`, `prefer`,
+`require`, `verify-ca`, `verify-full`) e `sslrootcert`; autenticação SCRAM-SHA-256, MD5 ou senha. Outras
+opções da DSN (certificado de cliente, GSSAPI) são recusadas na conexão: use o PDO. Fora do PAM, `pam-pg`
+cai no PDO.
+
+É opt-in: no nimbus-bench (2026-11-23) ficou no mesmo custo de CPU por request que o PDO e de 3 a 5% abaixo
+em requisições por segundo, então o PDO continua o padrão. Ver `nimbus-bench/results/2026-11-23_native-pg.md`.
 
 ## Migrations
 

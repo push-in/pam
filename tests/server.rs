@@ -935,6 +935,42 @@ fn interleaves_suspended_php_requests_without_context_leaks() {
 }
 
 #[test]
+fn serves_cleartext_http2_with_prior_knowledge_and_concurrent_streams() {
+    let server = ServerProcess::start();
+    let mut command = Command::new("curl");
+    command.args([
+        "--silent",
+        "--show-error",
+        "--http2-prior-knowledge",
+        "--parallel",
+        "--parallel-max",
+        "16",
+        "--write-out",
+        "%{http_version} %{response_code}\n",
+    ]);
+    for index in 0..32 {
+        // One --output per URL: older curl applies it to the next URL only.
+        command.args(["--output", "/dev/null"]);
+        command.arg(format!(
+            "http://127.0.0.1:{}/ping?query=h2c{index}",
+            server.port
+        ));
+    }
+    let output = command
+        .output()
+        .expect("curl should be installed for the HTTP/2 integration test");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let lines = String::from_utf8_lossy(&output.stdout);
+    let answers: Vec<&str> = lines.lines().collect();
+    assert_eq!(answers.len(), 32, "{lines}");
+    assert!(answers.iter().all(|line| *line == "2 200"), "{lines}");
+}
+
+#[test]
 fn serves_https_and_negotiates_http2_and_http3() {
     let server = ServerProcess::start_tls();
     let output = Command::new("curl")

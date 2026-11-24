@@ -42,6 +42,8 @@ final readonly class DatabaseConfig
             ] + self::optionalEnvironment([
                 'sslmode' => 'DB_SSLMODE',
                 'async' => 'DB_ASYNC',
+                // pgsql: `pam-pg` uses the PAM runtime's native Postgres client instead of PDO.
+                'client' => 'DB_DRIVER',
                 'unix_socket' => 'DB_SOCKET',
                 'trust_server_certificate' => 'DB_TRUST_SERVER_CERTIFICATE',
             ]) + self::timezoneEnvironment(),

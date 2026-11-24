@@ -42,10 +42,12 @@ mod inline_serve;
 #[cfg(target_os = "linux")]
 mod listener_registry;
 mod manager_dashboard;
+mod native_pg;
 mod native_shared;
 mod native_targets;
 mod otlp;
 mod page_cache;
+mod pg_client;
 mod php;
 mod prefork;
 mod process_manager;

@@ -12374,6 +12374,75 @@
                 }
             }
         },
+        "Nimbus\\Database\\Pgsql\\NativePostgresDriver": {
+            "kind": "class",
+            "final": false,
+            "readonly": false,
+            "abstract": false,
+            "parent": "Arcano\\Database\\Driver\\Postgres\\PostgresDriver",
+            "interfaces": [
+                "Arcano\\Database\\Driver\\CursorInterface",
+                "Arcano\\Database\\Driver\\DriverInterface",
+                "Arcano\\Database\\NamedInterface",
+                "Psr\\Log\\LoggerAwareInterface"
+            ],
+            "constants": [],
+            "properties": [],
+            "methods": {
+                "available": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
+                },
+                "healthy": {
+                    "static": false,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "bool",
+                    "parameters": []
+                },
+                "options": {
+                    "static": true,
+                    "final": false,
+                    "abstract": false,
+                    "returnsReference": false,
+                    "return": "array",
+                    "parameters": [
+                        {
+                            "name": "dsn",
+                            "type": "string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "username",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        },
+                        {
+                            "name": "password",
+                            "type": "?string",
+                            "byReference": false,
+                            "variadic": false,
+                            "optional": false,
+                            "default": null,
+                            "hasDefault": false
+                        }
+                    ]
+                }
+            }
+        },
         "Nimbus\\Database\\Pgsql\\PgsqlException": {
             "kind": "class",
             "final": true,

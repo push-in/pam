@@ -511,6 +511,7 @@ static PHP_FUNCTION(pam_native_utc_datetime)
 }
 
 #include "pam_shared_php.inc"
+#include "pam_pg_php.inc"
 
 static const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_cache_purge, arginfo_pam_cache_purge)
@@ -537,6 +538,7 @@ static const zend_function_entry pam_native_functions[] = {
  */
 static const zend_function_entry pam_shared_functions[] = {
     PAM_SHARED_FUNCTION_ENTRIES
+    PAM_PG_FUNCTION_ENTRIES
     PHP_FE_END
 };
 

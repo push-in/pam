@@ -105,6 +105,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Database\DatabaseHealthCheck`](#nimbusdatabasedatabasehealthcheck)
 - [`Nimbus\Database\Factory`](#nimbusdatabasefactory)
 - [`Nimbus\Database\Pgsql\AsyncPostgresDriver`](#nimbusdatabasepgsqlasyncpostgresdriver)
+- [`Nimbus\Database\Pgsql\NativePostgresDriver`](#nimbusdatabasepgsqlnativepostgresdriver)
 - [`Nimbus\Database\Pgsql\PgsqlException`](#nimbusdatabasepgsqlpgsqlexception)
 - [`Nimbus\Database\QueryBudget`](#nimbusdatabasequerybudget)
 - [`Nimbus\Database\QueryBudgetExceededException`](#nimbusdatabasequerybudgetexceededexception)
@@ -1949,6 +1950,18 @@ class Nimbus\Database\Pgsql\AsyncPostgresDriver extends Arcano\Database\Driver\P
 - `public static available(): bool`
 - `public static conninfo(string $dsn, ?string $username, ?string $password): string`
 - `public healthy(): bool`
+
+## `Nimbus\Database\Pgsql\NativePostgresDriver`
+
+```php
+class Nimbus\Database\Pgsql\NativePostgresDriver extends Arcano\Database\Driver\Postgres\PostgresDriver implements Arcano\Database\Driver\CursorInterface, Arcano\Database\Driver\DriverInterface, Arcano\Database\NamedInterface, Psr\Log\LoggerAwareInterface
+```
+
+### Methods
+
+- `public static available(): bool`
+- `public healthy(): bool`
+- `public static options(string $dsn, ?string $username, ?string $password): array`
 
 ## `Nimbus\Database\Pgsql\PgsqlException`
 

@@ -146,6 +146,29 @@ pub struct HttpSettings {
     pub graceful_timeout: Duration,
     /// Connections served at once before the accept loop pauses.
     pub max_connections: usize,
+    pub http2: Http2Settings,
+}
+
+/// HTTP/2 limits of the direct path (h2c with prior knowledge, and TLS with ALPN `h2`).
+#[derive(Clone, Copy, Debug)]
+pub struct Http2Settings {
+    pub max_concurrent_streams: u32,
+    /// Initial flow-control window per stream; the h2 default (64 KiB) makes a
+    /// request body wait for a WINDOW_UPDATE every 64 KiB.
+    pub stream_window: u32,
+    pub connection_window: u32,
+}
+
+impl Http2Settings {
+    /// Clamped to what the protocol allows (windows of 64 KiB - 1 to 2^31 - 1 bytes).
+    pub fn clamped(self) -> Self {
+        let window = |bytes: u32| bytes.clamp(65_535, (1 << 31) - 1);
+        Self {
+            max_concurrent_streams: self.max_concurrent_streams.max(1),
+            stream_window: window(self.stream_window),
+            connection_window: window(self.connection_window).max(window(self.stream_window)),
+        }
+    }
 }
 
 /// Descriptors kept free for PHP (files, database and Redis sockets, pipes).
@@ -353,11 +376,15 @@ pub async fn serve_connection<I>(
         .http1()
         .timer(TokioTimer::new())
         .header_read_timeout(http.header_read_timeout);
+    let h2 = http.http2.clamped();
     builder
         .http2()
         .timer(TokioTimer::new())
         .keep_alive_interval(Some(Duration::from_secs(15)))
-        .keep_alive_timeout(Duration::from_secs(10));
+        .keep_alive_timeout(Duration::from_secs(10))
+        .max_concurrent_streams(h2.max_concurrent_streams)
+        .initial_stream_window_size(h2.stream_window)
+        .initial_connection_window_size(h2.connection_window);
     let connection = builder.serve_connection_with_upgrades(TokioIo::new(io), service);
     tokio::pin!(connection);
     let mut draining = drain.subscribe();

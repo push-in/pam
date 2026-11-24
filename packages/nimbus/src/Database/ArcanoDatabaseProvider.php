@@ -20,6 +20,7 @@ use Arcano\Database\DatabaseInterface;
 use Arcano\Database\DatabaseManager;
 use Arcano\Database\Driver\Postgres\PostgresDriver;
 use Nimbus\Database\Pgsql\AsyncPostgresDriver;
+use Nimbus\Database\Pgsql\NativePostgresDriver;
 
 /**
  * Gives every PAM request Fiber its own Arcano connections. Released connections
@@ -138,7 +139,7 @@ final class ArcanoDatabaseProvider
 
         $reusable = count($this->idle) < $this->maxIdle;
         foreach ($manager->getDrivers() as $driver) {
-            if ($driver instanceof AsyncPostgresDriver && !$driver->healthy()) {
+            if (($driver instanceof AsyncPostgresDriver || $driver instanceof NativePostgresDriver) && !$driver->healthy()) {
                 $reusable = false;
                 continue;
             }
@@ -283,14 +284,7 @@ final class ArcanoDatabaseProvider
                 self::postgresConnection($connection, $database, $host, $user, $password, $options, $timezone),
                 timezone: $timezone,
                 schema: self::optional($connection, 'search_path') ?? self::optional($connection, 'schema') ?? 'public',
-                // Non-blocking sessions let a worker serve other requests while Postgres works.
-                // Opt-in (DB_ASYNC=true): on CPU-bound workers blocking PDO is still faster for
-                // short queries; each wait costs a Fiber suspend/resume through the server
-                // (nimbus-bench 2026-11-20: ~20 us more CPU per request than the blocked
-                // round trip, while blocking leaves only ~7% of the CPUs idle).
-                driver: self::optional($connection, 'async') === 'true' && AsyncPostgresDriver::available()
-                    ? AsyncPostgresDriver::class
-                    : PostgresDriver::class,
+                driver: self::postgresDriver($connection),
             ),
             'mysql' => new MySQLDriverConfig(($socket = self::optional($connection, 'unix_socket')) !== null
                 ? new MySQLSocketConnection(
@@ -322,6 +316,34 @@ final class ArcanoDatabaseProvider
             ), timezone: $timezone),
             default => throw new \InvalidArgumentException("The {$name} connection uses a driver Arcano does not support."),
         };
+    }
+
+    /**
+     * The Arcano driver class of a pgsql connection: `client` (DB_DRIVER) `pdo` (default) or
+     * `pam-pg` (the PAM runtime's native client), and `async` (DB_ASYNC) for ext-pgsql sessions
+     * that suspend the request Fiber. Outside the PAM runtime pam-pg falls back to PDO.
+     *
+     * Non-blocking sessions are opt-in: on CPU-bound workers blocking PDO is still faster for
+     * short queries; each wait costs a Fiber suspend/resume through the server (nimbus-bench
+     * 2026-11-20: ~20 us more CPU per request than the blocked round trip, while blocking leaves
+     * only ~7% of the CPUs idle).
+     *
+     * @param array<string, mixed> $connection
+     * @return class-string<PostgresDriver>
+     */
+    private static function postgresDriver(array $connection): string
+    {
+        $client = self::optional($connection, 'client') ?? 'pdo';
+        if (!in_array($client, ['pdo', 'pam-pg'], true)) {
+            throw new \InvalidArgumentException("Unsupported Postgres client \"{$client}\" (DB_DRIVER): use pdo or pam-pg.");
+        }
+        if ($client === 'pam-pg' && NativePostgresDriver::available()) {
+            return NativePostgresDriver::class;
+        }
+        if (self::optional($connection, 'async') === 'true' && AsyncPostgresDriver::available()) {
+            return AsyncPostgresDriver::class;
+        }
+        return PostgresDriver::class;
     }
 
     /**
