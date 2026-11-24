@@ -10,15 +10,21 @@ Cada seção mostra o código Laravel e o equivalente Nimbus lado a lado. O que 
 - **Sem fachadas**: dependências chegam pelo construtor ou pelos parâmetros da action. As poucas classes estáticas (`Http`, `Cache`, `Hash`) são por worker e não guardam estado da requisição.
 - **Data mapper**: entidades são classes simples; quem lê e grava é o `ArcanoManager`, não a própria entidade.
 - **Rotas num arquivo**: `routes.php` com `$router`, sem `Route::`. Grupos são closures ou registradores guardados em variável.
-- **Erros em problem+json** com `code` inteiro estável ([Erros](./erros.md)).
+- **Erros em problem+json** com `code` inteiro estável ([Erros](./erros.md)). Para manter os clientes do serviço Laravel, `$app->renderErrorsWith(new LaravelErrorRenderer())` devolve `{"message"}` e `$app->jsonEncoding(JsonEncoding::LARAVEL)` escreve os mesmos bytes do `JsonResponse`.
 - **Tudo é registrado no boot**: provider, container e rotas são montados uma vez por worker em `bootstrap/app.php`; depois o app congela.
 
 ## Conversão automática com Rector
 
-O pacote `pushinbr/nimbus-rector` (código em [`packages/nimbus-rector`](https://github.com/push-in/pam/tree/main/packages/nimbus-rector)) traz um conjunto de regras do [Rector](https://getrector.com) para a parte mecânica da migração. Enquanto não estiver no Packagist, instale pelo caminho do repositório:
+O pacote `pushinbr/nimbus-rector` (código em [`packages/nimbus-rector`](https://github.com/push-in/pam/tree/main/packages/nimbus-rector)) traz um conjunto de regras do [Rector](https://getrector.com) para a parte mecânica da migração:
 
 ```bash
-pam composer config repositories.nimbus-rector path /caminho/do/pam/packages/nimbus-rector
+pam composer require --dev pushinbr/nimbus-rector
+```
+
+Para testar uma mudança nas regras antes da release, instale pelo caminho do repositório com `symlink`, para o Composer não copiar o `vendor/` do pacote para o app:
+
+```bash
+pam composer config repositories.nimbus-rector '{"type": "path", "url": "/caminho/do/pam/packages/nimbus-rector", "options": {"symlink": true}}'
 pam composer require --dev pushinbr/nimbus-rector:@dev
 ```
 
@@ -48,7 +54,7 @@ O que o conjunto reescreve:
 | `RouteFacadeToRouterRector` | `Route::get(...)`, `Route::prefix('v1')->group(function () {...})`, `->middleware('auth:sanctum')` | `$router->get(...)`, `->group(function (RouteRegistrar $router) {...})`, `->auth()` |
 | `AbortToHttpExceptionRector` | `abort(404, 'x')`, `abort_if()`, `abort_unless()` | `throw new HttpException(404, ProblemCode::NotFound, 'x')` |
 
-Ficam para revisão manual: `response()->json()` com cabeçalhos ou opções, `response()` dentro de middleware do Laravel, `Route::group([...])` com array, `Route::controller()`, middlewares por nome (`throttle:...`), `abort()` com status sem `ProblemCode` (402, por exemplo), entidades, queries, jobs, validação e autenticação. O `routes/api.php` do Laravel ganha o prefixo `api` automaticamente e o Nimbus não: envolva o arquivo convertido em `$router->prefix('api')->group(...)`.
+Ficam para revisão manual: `response()->json()` com cabeçalhos ou opções, `response()` dentro de middleware do Laravel, `Route::group([...])` com array, `Route::controller()`, `abort()` com status sem `ProblemCode` (402, por exemplo), entidades, queries, jobs, validação e autenticação. O `routes/api.php` do Laravel ganha o prefixo `api` automaticamente e o Nimbus não: envolva o arquivo convertido em `$router->prefix('api')->group(...)`.
 
 No `buck-log-intelligence` (29 rotas, 11 controllers), o `--dry-run` altera 17 arquivos de `app/Http` e o `routes/api.php`.
 
@@ -108,7 +114,7 @@ $router->controller(ProductController::class, function (RouteRegistrar $router):
 - `resource()` registra `index`, `store`, `show`, `update` e `destroy` (sem `create` e `edit`) e aceita uma closure para rotas extras do recurso; `apiResource()` registra as mesmas cinco sem closure.
 - `whereNumber`, `whereUuid`, `whereUlid`, `whereAlpha`, `whereAlphaNumeric` viram `where('x', RouteConstraint::Integer|Uuid|Ulid|Alpha|AlphaNumeric)`; `RouteConstraint::Slug` também existe e `where()` aceita uma regex.
 - `->name()` existe por rota (vira o `operationId` do OpenAPI), mas não há `->name('v1.')` em grupo nem helper `route('nome')` para gerar URL.
-- `->middleware('signed')` vira `->signed()`; `ThrottleRequests` vira `RateLimitMiddleware` ([Redis](./redis.md#rate-limit)).
+- `->middleware('signed')` vira `->signed()`; `->middleware('throttle:buck')` e `throttle:3,1` funcionam como estão, sobre os limitadores de `$app->rateLimiter()->for()` ([Redis](./redis.md#limitadores-nomeados-throttle)).
 
 ### Route model binding
 
@@ -341,11 +347,10 @@ public function store(StoreOrderRequest $request): Response
 :::
 
 - Regras em atributos: `Min`, `Max`, `Email`, `Url`, `Uuid`, `Regex`, `In` e `Field` (nome da chave no payload). Tipos PHP fazem o papel de `string`, `integer`, `boolean`, `array`, `date` (`\DateTimeImmutable`) e `enum`. `Input` aninhado substitui as regras com ponto (`address.city`).
-- Não há `messages()`: as mensagens são as padrão em inglês. Para um texto próprio, escreva uma regra (`Nimbus\Validation\ValidationRule`, que devolve a mensagem) ou lance `new ValidationException(['campo' => ['mensagem']])`.
+- O `Input` não tem `messages()`: as mensagens são as padrão em inglês. Para um texto próprio, escreva uma regra (`Nimbus\Validation\ValidationRule`, que devolve a mensagem) ou lance `new ValidationException(['campo' => ['mensagem']])`.
 - `authorize()` do `Input` recebe o `Request`, que não tem `user()`; para checar permissão do usuário, use `->can()` na rota ou o `Gate` na action.
-- `unique:users,email`, `exists:` e as regras que consultam o banco não existem: confira no serviço e lance `ValidationException`.
-- `Nimbus\Validation\FormRequest` aceita só arrays de regras (sem a sintaxe `'a|b'`) e só `required`, `string`, `integer`, `boolean`, `array`, `email`, `Rule::enum()` e objetos `ValidationRule`; seu `authorize()` não recebe parâmetros. Serve para portar rápido; depois troque por `Input`.
-- O erro é `422` em problem+json com `errors` por campo, no mesmo formato de mapa do Laravel.
+- Para portar sem reescrever, `Nimbus\Validation\FormRequest` aceita o `rules()` do Laravel como está: strings `'a|b'`, `nullable`, `sometimes`, `date`, `numeric`, `min`/`max`/`between`, `in`, `exists`/`unique` sobre o Arcano, chaves `items.*.sku`, `messages()` e `attributes()` ([lista de regras](./validacao.md#formrequest-com-regras-do-laravel)). Seu `authorize()` não recebe parâmetros. Depois troque por `Input`.
+- O erro é `422` em problem+json com `errors` por campo, no mesmo formato de mapa do Laravel; com o `LaravelErrorRenderer`, o corpo é o do Laravel (`message` e `errors`).
 
 ## Eloquent para Arcano
 
@@ -412,6 +417,8 @@ class Order
 ```
 
 :::
+
+Um banco em que o Laravel gravou `timestamp without time zone` no `APP_TIMEZONE` precisa do mesmo fuso na conexão (`DB_TIMEZONE`, ou o próprio `APP_TIMEZONE`), senão o cast `datetime` lê as datas como UTC ([Conexão](./banco.md#conexao)).
 
 `$fillable` e `$casts` somem: as colunas são as propriedades com `#[Column]` e o tipo vem do atributo. Accessors e mutators viram métodos comuns da classe.
 
@@ -721,7 +728,8 @@ $api->get('products', [ProductController::class, 'index']);
 :::
 
 - O middleware recebe e devolve `Response`, e chama `$next->handle($request, $response)`.
-- Parâmetros (`team:catalog`) viram argumentos do construtor; não há aliases por string. Um nome de classe sem parâmetros é resolvido pelo container.
+- Parâmetros (`team:catalog`) viram argumentos do construtor; o único alias por string é `throttle:...`. Um nome de classe sem parâmetros é resolvido pelo container.
+- `$request->attributes->set('account', $account)` vira `RequestContext::put($account)` (ou `set('chave', $valor)`); a action recebe `Account $account` mesmo com `{account}` na rota ([Contexto da requisição](./controllers.md#contexto-da-requisicao)).
 - Globais: `$app->middleware(...)`. Grupos `web`/`api`: registradores em variável ou `group()`.
 - **Terminable**: não existe `terminate()`. O mais próximo é um `Nimbus\Lifecycle\RequestLifecycleObserver` (`starting()` e `finished($request, $response, $falha)`), registrado com `$app->observe()`. Ele roda no fim do processamento, dentro da requisição; trabalho demorado vai para a [fila](#filas).
 
@@ -1212,7 +1220,7 @@ $cache->tags(["user:{$id}"])->flush();
 - O TTL é em segundos ou um `\DateTimeInterface`; `forever()`, `rememberForever()`, `add()`, `pull()` e `decrement()` existem.
 - Sem `useRepository()`, o cache é um `MemoryStore` por worker: não é compartilhado entre workers.
 - O `RedisCacheStore` só reconstrói objetos das classes em `allowedClasses`; prefira guardar arrays e escalares.
-- Não há `Cache::lock()` nem `Cache::store('nome')`. Para cache de respostas HTTP inteiras, use `ResponseCacheMiddleware` ([Redis](./redis.md#cache-de-resposta)).
+- `Cache::lock('nome', 10)->get(fn () => ...)`, `block()`, `release()` e `restoreLock()` seguem o Laravel ([Locks](./cache.md#locks)). Não há `Cache::store('nome')`. Para cache de respostas HTTP inteiras, use `ResponseCacheMiddleware` ([Redis](./redis.md#cache-de-resposta)).
 
 ## Configuração e `.env`
 
@@ -1343,7 +1351,7 @@ $app->background()->scheduler(new Scheduler($schedule, new RedisSchedulerLock(Re
 :::
 
 - `onOneServer()` não existe como método: com um `SchedulerLock` compartilhado (`RedisSchedulerLock` ou `DatabaseSchedulerLock`), cada tarefa já roda uma vez por minuto em todo o cluster.
-- Não há `Schedule::command()`: agende um job ou uma closure.
+- `$schedule->command('reports:monthly')` roda um comando da aplicação ([Console](./console.md#agendar-um-comando)).
 - `job()` monta o job pelo container; a closure de `call()` não recebe parâmetros injetados, então busque o serviço no container dentro dela.
 - Requer `dragonmantank/cron-expression`.
 
@@ -1357,7 +1365,10 @@ $app->background()->scheduler(new Scheduler($schedule, new RedisSchedulerLock(Re
 | `php artisan route:list` | `pam routes` |
 | `php artisan test` | `pam test` |
 | `php artisan make:*` | `pam make:controller`, `make:model`, `make:request`, `make:resource`, `make:repository`, `make:job`, `make:factory`, `make:seeder`, `make:migration`, `make:test` |
-| comandos próprios (`Command`, `$signature`) | sem classe de comando no Nimbus: escreva um script em `bin/` que carrega `bootstrap/app.php` (como o `bin/migrate`) e rode com `pam exec bin/x` |
+| comandos próprios (`Command`, `$signature`, `handle()`) | `Nimbus\Console\Command` com a mesma `$signature`, em `app/Console/Commands`; `bin/nimbus buck:sync` (requer `symfony/console`) |
+| `php artisan migrate`, `migrate:status`, `migrate:rollback`, `db:seed` | `bin/nimbus migrate`, `migrate:status`, `migrate:rollback`, `db:seed` |
+| `php artisan schedule:list` | `bin/nimbus schedule:list` |
+| cache de schema | `bin/nimbus schema:cache` / `schema:clear` |
 | `composer require` | `pam composer require` |
 
 O `bin/nimbus tinker` carrega o mesmo `bootstrap/app.php` do `index.php` e dos testes; `--bootstrap=caminho` aponta outro arquivo.
@@ -1478,19 +1489,19 @@ No Laravel com PHP-FPM, cada requisição começa do zero. No Nimbus, o worker d
 ## Sem equivalente por enquanto
 
 - **Fachadas em geral** (`DB::`, `Auth::`, `Route::`, `Event::`, `Log::`): use injeção. Só `Http`, `Cache` e `Hash` têm classes estáticas.
-- **Validação**: `messages()` e `attributes()` do FormRequest, mensagens traduzidas por regra, regras com banco (`unique`, `exists`), regras condicionais (`required_if`, `sometimes`, `exclude_*`), regras com ponto e curinga (`items.*.sku`; use `Input` aninhado ou listas tipadas), `after()` e `prepareForValidation()`.
+- **Validação**: mensagens traduzidas por regra, `exclude_*`, `prohibited*`, regras de arquivo, `after()` e `prepareForValidation()` do FormRequest.
 - **Request**: `merge()`, `user()`, `file()` e `UploadedFile` (`input()`, `all()`, `only()` e `bearerToken()` existem como `Nimbus\Http\RequestData`). O `multipart/form-data` só entrega os campos de texto; para arquivos, use upload direto com `$disk->temporaryUploadUrl()` ([Storage](./storage.md)).
 - **Rotas**: helper `route('nome')` para gerar URL, prefixo de nome em grupo, aliases e grupos de middleware por nome, `Route::fallback()`, rotas `create`/`edit` no `resource()`, binding implícito sem `bindRoute()`.
 - **Middleware**: `terminate()` e trabalho depois do envio da resposta.
-- **Eloquent**: soft deletes, eventos e observers de model, `$fillable`/mass assignment, `firstOrCreate`/`updateOrCreate`, `firstOrFail`, relações polimórficas no estilo `morphTo` com a mesma API, `chunk()`/`lazy()` com a mesma API, `withCount()`, casts customizados de model.
+- **Eloquent**: soft deletes, eventos e observers de model, `$fillable`/mass assignment (`firstOrCreate`, `updateOrCreate` e `createOrFirst` existem no `ArcanoManager`), `firstOrFail`, relações polimórficas no estilo `morphTo` com a mesma API, `chunk()`/`lazy()` com a mesma API, `withCount()`, casts customizados de model.
 - **Filas**: método `failed()` no job, `Bus::chain()`, `Bus::batch()`, `ShouldBeUnique`, middleware de job (`RateLimited`, `WithoutOverlapping`), `dispatch()->afterResponse()`, `dispatchSync()`, filas por conexão no mesmo dispatcher (crie uma fila por `queue:`), Horizon.
 - **Eventos**: descoberta automática de listeners, `Event::subscribe()`, `$event->until()`.
 - **E-mail**: `Mailable`, templates Markdown de e-mail, `Mail::queue()`, anexos pela API do Nimbus (use um `Symfony\Component\Mime\Email` direto).
-- **Cache**: `Cache::lock()`, vários stores nomeados (`Cache::store()`), `flexible()`.
+- **Cache**: vários stores nomeados (`Cache::store()`), `flexible()`.
 - **Configuração**: `config()` global, `config:cache`, alterar configuração em tempo de execução.
-- **Agendador**: `Schedule::command()`, `->onOneServer()` como método (o lock compartilhado já cobre), `->runInBackground()`, saída para arquivo.
-- **Console**: classes de comando Artisan; só existe `bin/nimbus tinker`.
-- **Autenticação**: guards nomeados, `Auth::user()` devolvendo a entidade, `Auth::attempt()` (confira a senha com `Hash::check()` e emita o token), `RateLimiter::attempt()` fora do middleware.
+- **Agendador**: `->onOneServer()` como método (o lock compartilhado já cobre), `->runInBackground()`, saída para arquivo.
+- **Console**: comandos `make:*` dentro do `bin/nimbus` (use `pam make:*`), `$this->withProgressBar()`, comandos isolados (`Isolatable`).
+- **Autenticação**: guards nomeados, `Auth::user()` devolvendo a entidade, `Auth::attempt()` (confira a senha com `Hash::check()` e emita o token).
 - **Testes**: `Sanctum::actingAs($user)` com model, `Mail::assertSent(Classe::class)`, `Http::assertSent()` estático, `$this->travel()`/`freezeTime()`, `withoutMiddleware()`, `Bus::fake()`.
 - **Outros**: Livewire, Inertia, Horizon, Telescope, Pulse, Cashier e Scout.
 

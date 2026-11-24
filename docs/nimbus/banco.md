@@ -18,6 +18,9 @@ pam composer require pushinbr/arcano
 | `DB_USERNAME`, `DB_PASSWORD` | `pam`, vazio |
 | `DB_SSLMODE`, `DB_SOCKET`, `DB_TRUST_SERVER_CERTIFICATE` | opcionais |
 | `DB_ASYNC` | `true` liga o driver Postgres não bloqueante |
+| `DB_TIMEZONE` | fuso da conexão; sem ele, `APP_TIMEZONE`; sem os dois, UTC |
+
+O `timezone` da conexão (`'timezone' => 'America/Sao_Paulo'` no array da conexão) define o fuso da sessão no pgsql (`TimeZone`, no connect) e no mysql (`SET time_zone`; nomes de fuso pedem as tabelas de fuso do MySQL, um deslocamento como `-03:00` sempre funciona). Também é o fuso em que o cast `datetime` do Arcano lê `timestamp without time zone` e grava parâmetros `DateTime`. Um banco que o Laravel gravou com `APP_TIMEZONE=America/Sao_Paulo` precisa do mesmo valor aqui; com UTC as datas saem deslocadas em 3 horas.
 
 PostgreSQL é o padrão de produção; SQLite serve para testes e apps pequenos.
 
@@ -117,6 +120,20 @@ $arcano->transaction(function () use ($arcano, $order): void {
 ```
 
 Para envolver uma requisição inteira, use `TransactionalMiddleware` na rota ou no grupo.
+
+### `firstOrCreate` e `updateOrCreate`
+
+```php
+// cria na primeira requisição da conta; depois só lê
+$monitor = $arcano->firstOrCreate(AccountMonitor::class, ['accountId' => $id], ['status' => 'new']);
+
+$goal = $arcano->updateOrCreate(Goal::class, ['accountId' => $id, 'month' => '2026-11'], ['target' => 120]);
+
+// tenta inserir primeiro; se o índice único recusar, devolve a linha existente
+$monitor = $arcano->createOrFirst(AccountMonitor::class, ['accountId' => $id]);
+```
+
+As chaves são nomes de campo da entidade. Com um índice único sobre os campos de `$attributes`, chamadas concorrentes não duplicam a linha: o insert que perde a corrida falha no índice (num savepoint, se houver transação aberta) e a linha gravada pelo outro worker é devolvida, como o `createOrFirst()` do Laravel. Sem o índice, duas requisições simultâneas podem inserir duas linhas.
 
 ## Isolamento por requisição
 

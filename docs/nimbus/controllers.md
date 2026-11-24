@@ -89,6 +89,37 @@ public function show(Product $product): ProductResource
 
 O mesmo binding é usado por `can('update', 'product')` para carregar a entidade antes de chamar a policy.
 
+## Contexto da requisição
+
+O `$request->attributes->set()` do Laravel vira `Nimbus\Http\RequestContext`: um objeto por requisição, preenchido pelo middleware e lido pela action. Ele some quando a requisição termina.
+
+```php
+use Nimbus\Container\Container;
+use Nimbus\Http\RequestContext;
+
+final readonly class ResolveAccount implements MiddlewareInterface
+{
+    public function __construct(private Container $container, private Accounts $accounts)
+    {
+    }
+
+    public function process(Request $request, Response $response, RequestHandlerInterface $next): Response
+    {
+        $context = $this->container->get(RequestContext::class);
+        $context->put($this->accounts->fromToken($request));   // valor tipado
+        $context->set('monitor', $this->accounts->monitor());  // valor por chave
+        return $next->handle($request, $response);
+    }
+}
+
+public function show(Account $account, RequestContext $context): array
+{
+    return ['account' => $account->id, 'monitor' => $context->get('monitor')];
+}
+```
+
+Regra de resolução: um parâmetro tipado com uma classe recebe primeiro a instância que está no escopo da requisição (`RequestContext::put()` ou `scopedInstance()`), mesmo quando a rota tem um segmento com o mesmo nome (`{account}`). Sem essa instância, o segmento passa pelo route binding, e sem segmento o container monta o objeto.
+
 ## Container
 
 ```php

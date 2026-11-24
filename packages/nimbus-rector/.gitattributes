@@ -1,0 +1,4 @@
+# Kept out of the Composer dist archive.
+/.gitattributes export-ignore
+/phpunit.xml    export-ignore
+/tests          export-ignore

@@ -23,7 +23,7 @@ export default defineConfig({
           { text: 'Primeiros passos', link: '/primeiros-passos' },
           { text: 'Instalação e estrutura', link: '/instalacao' },
           { text: 'Configuração tipada', link: '/configuracao' },
-          { text: 'Console (tinker)', link: '/console' },
+          { text: 'Console e comandos', link: '/console' },
         ],
       },
       {

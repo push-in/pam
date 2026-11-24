@@ -13,7 +13,7 @@ Requisitos: PAM instalado (`curl -fsSL https://push-in.github.io/pam/install.sh 
 - [Primeiros passos](./primeiros-passos.md): `pam init --template api`, `/api/ping`, o primeiro teste, a primeira entidade e migration.
 - [Instalação e estrutura do app](./instalacao.md): templates, pastas, `routes.php`, rodar e testar.
 - [Configuração tipada](./configuracao.md): `Configuration`, `ConfigDefinition` e variáveis de ambiente.
-- [Console: `bin/nimbus tinker`](./console.md)
+- [Console: `bin/nimbus`, comandos e tinker](./console.md)
 
 **HTTP**
 

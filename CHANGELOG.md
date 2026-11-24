@@ -6,8 +6,11 @@
   without listening) and `bin/nimbus`; `index.php` and `tests/TestCase.php` require the bootstrap,
   so `bin/nimbus tinker` opens a shell over the same application. The api and web templates add
   `psy/psysh` to `require-dev`, and the web template also gets `bin/nimbus`.
-- New package `packages/nimbus-rector` (`pushinbr/nimbus-rector`, not yet published): Rector set
-  `NimbusSetList::LARAVEL_TO_NIMBUS` for the mechanical part of a Laravel to Nimbus port.
+- New package `packages/nimbus-rector` (`pushinbr/nimbus-rector`): Rector set
+  `NimbusSetList::LARAVEL_TO_NIMBUS` for the mechanical part of a Laravel to Nimbus port, split to
+  `push-in/nimbus-rector` by the independent package release (`v0.1.0`) (#224).
+- Nimbus: Laravel parity gaps from the `buck-log-intelligence` pilot (#213 to #223), see
+  `packages/nimbus/CHANGELOG.md`.
 - CI: `Nimbus backward compatibility` runs `roave/backward-compatibility-check` against the newest
   tag of `push-in/nimbus`; `Nimbus Rector` runs the rule fixtures.
 

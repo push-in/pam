@@ -104,7 +104,11 @@ last-50 query walks the primary key backwards and discards about 19,800 rows
 for a busy account. That index is worth adding to the Laravel service
 regardless of Nimbus.
 
-## What Nimbus is missing for this service
+## What Nimbus was missing for this service
+
+Closed in Nimbus `Unreleased` (see `packages/nimbus/CHANGELOG.md`): the pilot can drop its
+encoder, error middleware, typecasts, `CurrentAccount` wrapper, `bin/cache-schema` and path
+repository workarounds, and port the commands, schedule and write endpoints as written.
 
 | Gap | Impact on the pilot | Issue |
 | --- | --- | --- |
