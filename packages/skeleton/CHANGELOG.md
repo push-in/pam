@@ -4,6 +4,8 @@ All notable changes to the Nimbus skeleton are documented in this file.
 
 ## Unreleased
 
+## 0.4.0 - 2026-11-24
+
 ### Added
 - `bootstrap/app.php` builds the `Nimbus\App` without listening; `index.php` requires it and
   `bin/nimbus tinker` (or `composer tinker`) opens a PsySH shell over the same application.

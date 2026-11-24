@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3a98be639cca23689ac8448da13ce8d9",
+    "content-hash": "b249e18ea3e24bd987d3818159cb6635",
     "packages": [
         {
             "name": "amphp/amp",
@@ -2725,7 +2725,7 @@
             "dist": {
                 "type": "path",
                 "url": "../../packages/nimbus",
-                "reference": "304aee2c02e67ee6815cf8f5d65b43b202614a1a"
+                "reference": "81ec525c23c5eee35870d566e9d7b464fb6c2df5"
             },
             "require": {
                 "php": "^8.4",
@@ -2748,8 +2748,9 @@
                 "psr/http-message": "^2.0",
                 "psy/psysh": "^0.12",
                 "pusher/pusher-php-server": "^7.2",
-                "pushinbr/arcano": "^0.2.8",
+                "pushinbr/arcano": "^0.2.9",
                 "sentry/sentry": "^4.0",
+                "symfony/console": "^7.4 || ^8.0",
                 "symfony/http-client": "^7.3",
                 "symfony/mailer": "^7.3",
                 "symfony/mime": "^7.3",
@@ -2775,6 +2776,8 @@
                 "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
                 "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets.",
                 "sentry/sentry": "Exception reporting with worker-safe scopes (Nimbus\\Sentry\\SentryReporter).",
+                "symfony/console": "Application console commands and the migrate, db:seed and schema:cache commands of bin/nimbus (Nimbus\\Console\\Command, Kernel).",
+                "symfony/deprecation-contracts": "Deprecation notices of Nimbus through trigger_deprecation() (otherwise E_USER_DEPRECATED with the same message).",
                 "symfony/http-client": "Nimbus\\Http\\Client outside the PAM runtime (inside PAM it uses the non-blocking runtime client).",
                 "symfony/mailer": "Required by the mail notification channel (Nimbus\\Notifications\\Mail\\MailChannel).",
                 "symfony/translation": "Translations from lang/ directories (Nimbus\\Translation\\Translator, __() and trans())."
@@ -2806,6 +2809,17 @@
                 },
                 "files": [
                     "tests/bootstrap.php"
+                ]
+            },
+            "archive": {
+                "exclude": [
+                    "/.build",
+                    "/.github",
+                    "/benchmarks",
+                    "/phpstan.neon",
+                    "/phpunit.xml",
+                    "/tests",
+                    "/vendor"
                 ]
             },
             "scripts": {
@@ -8017,16 +8031,16 @@
         },
         {
             "name": "pushinbr/arcano",
-            "version": "v0.2.8",
+            "version": "v0.2.9",
             "source": {
                 "type": "git",
                 "url": "https://github.com/push-in/arcano.git",
-                "reference": "ab23a4d8eb505e480a1e8a393b84052ec63f919e"
+                "reference": "3fe6f316be215b3ff3c862716d8a56dac28e15bf"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/push-in/arcano/zipball/ab23a4d8eb505e480a1e8a393b84052ec63f919e",
-                "reference": "ab23a4d8eb505e480a1e8a393b84052ec63f919e",
+                "url": "https://api.github.com/repos/push-in/arcano/zipball/3fe6f316be215b3ff3c862716d8a56dac28e15bf",
+                "reference": "3fe6f316be215b3ff3c862716d8a56dac28e15bf",
                 "shasum": ""
             },
             "require": {
@@ -8078,9 +8092,9 @@
             "description": "Arcano: a fast data mapper ORM for PHP and the PAM runtime, with attribute entities, schema builder and migrations. Derived from Cycle ORM.",
             "support": {
                 "issues": "https://github.com/push-in/arcano/issues",
-                "source": "https://github.com/push-in/arcano/tree/v0.2.8"
+                "source": "https://github.com/push-in/arcano/tree/v0.2.9"
             },
-            "time": "2026-11-21T13:27:06+00:00"
+            "time": "2026-11-24T01:20:33+00:00"
         },
         {
             "name": "pushinbr/pam-http-testing",
