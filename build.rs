@@ -35,6 +35,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=PAM_UPDATE_NEXT_SIGNING_IDENTITY_SHA256");
 
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not set OUT_DIR"));
+    write_local_package_versions(&out_dir);
     let target_os = env::var("CARGO_CFG_TARGET_OS").expect("Cargo did not set target OS");
     let target_env = env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
     let includes = php_includes(&target_os);
@@ -65,6 +66,58 @@ fn main() {
         PhpLibrary::Dynamic { directory, name } => link_dynamic_php(&directory, &name, &target_os),
         PhpLibrary::Static { archive } => link_static_php(&archive),
     }
+}
+
+/// Composer packages the source checkout offers through its local path
+/// repository, with the directory under `packages/` that holds each one.
+const LOCAL_PACKAGES: &[(&str, &str)] = &[
+    ("pushinbr/pam-contracts", "contracts"),
+    ("pushinbr/nimbus", "nimbus"),
+    ("pushinbr/pam-http-psr", "http-psr"),
+    ("pushinbr/pam-socket", "socket"),
+    ("pushinbr/pam-http-testing", "http-testing"),
+];
+
+/// Writes `local_package_versions.rs`: the version the local path repository
+/// offers for each package, read from the first released `## X.Y.Z` header of
+/// its CHANGELOG.md. A checkout without `packages/` (crate tarball, image
+/// build) gets an empty list; a changelog without a released header fails the
+/// build, because Composer would then resolve a stale or dev version.
+fn write_local_package_versions(out_dir: &Path) {
+    let root = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("no CARGO_MANIFEST_DIR"));
+    let mut entries = String::new();
+    for (name, directory) in LOCAL_PACKAGES {
+        let changelog = root.join("packages").join(directory).join("CHANGELOG.md");
+        if !changelog.is_file() {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", changelog.display());
+        let text = fs::read_to_string(&changelog)
+            .unwrap_or_else(|error| panic!("cannot read {}: {error}", changelog.display()));
+        let version = latest_released_version(&text)
+            .unwrap_or_else(|| panic!("{} has no released `## X.Y.Z` header", changelog.display()));
+        entries.push_str(&format!("    ({name:?}, {version:?}),\n"));
+    }
+    fs::write(
+        out_dir.join("local_package_versions.rs"),
+        format!("&[\n{entries}]\n"),
+    )
+    .expect("cannot write local_package_versions.rs");
+}
+
+/// First `## X.Y.Z` (optionally `## [X.Y.Z]` or `## vX.Y.Z`) header, skipping
+/// `## Unreleased`.
+fn latest_released_version(changelog: &str) -> Option<String> {
+    changelog.lines().find_map(|line| {
+        let heading = line.strip_prefix("## ")?.trim_start_matches('[');
+        let heading = heading.strip_prefix('v').unwrap_or(heading);
+        let version: String = heading
+            .chars()
+            .take_while(|c| c.is_ascii_digit() || *c == '.')
+            .collect();
+        let parts: Vec<&str> = version.split('.').collect();
+        (parts.len() == 3 && parts.iter().all(|part| !part.is_empty())).then_some(version)
+    })
 }
 
 fn link_dynamic_php(php_lib_dir: &Path, php_lib_name: &str, target_os: &str) {

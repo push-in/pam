@@ -90,7 +90,7 @@ distribution mirrors place each package's `composer.json` at the repository root
 
 | Package | Distribution mirror |
 | --- | --- |
-| `pushinbr/pam-contracts` | `push-in/pam-core-api` |
+| `pushinbr/pam-contracts` | `push-in/pam-contracts` |
 | `pushinbr/nimbus` | `push-in/nimbus` |
 | `pushinbr/pam-socket` | `push-in/pam-socket` |
 | `pushinbr/pam-http-psr` | `push-in/pam-http-psr` |
