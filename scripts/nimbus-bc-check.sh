@@ -41,6 +41,8 @@ fi
 test -n "${from}" || { echo "The mirror has no v* tag to compare against." >&2; exit 1; }
 git checkout --quiet -b bc-candidate "${from}"
 rsync -a --delete --exclude .git --exclude vendor "${repository_root}/packages/nimbus/" ./
+# Accepted 0.x breaks; roave reads the baseline from the working directory.
+cp "${repository_root}/scripts/nimbus-bc-baseline.xml" .roave-backward-compatibility-check.xml
 git add -A
 git -c user.name=bc-check -c user.email=bc-check@localhost commit --quiet --allow-empty -m "packages/nimbus candidate"
 

@@ -160,6 +160,8 @@ Vulnerabilities are reported as described in [SECURITY.md](../SECURITY.md).
   [`roave/backward-compatibility-check`](https://github.com/Roave/BackwardCompatibilityCheck)
   against the newest `v*` tag of the split repository `push-in/nimbus` on
   every pull request that touches `packages/nimbus`. A reported break blocks
-  the merge unless the pull request targets a major-version branch.
+  the merge unless the pull request targets a major-version branch. During
+  0.x, an accepted break is listed in `scripts/nimbus-bc-baseline.xml` and in
+  the changelog, and the list is emptied after the next tag.
 - A release follows [RELEASE.md](../RELEASE.md); a major release also fills
   in [UPGRADE.md](../UPGRADE.md) from its template.
