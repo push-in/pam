@@ -28,7 +28,7 @@ final readonly class DatabaseConfig
                 'database' => self::environment('DB_DATABASE', ':memory:'),
                 'prefix' => '',
                 'foreign_key_constraints' => true,
-            ],
+            ] + self::timezoneEnvironment(),
             'pgsql', 'mysql', 'sqlsrv' => [
                 'driver' => $driver,
                 'host' => self::environment('DB_HOST', '127.0.0.1'),
@@ -44,11 +44,28 @@ final readonly class DatabaseConfig
                 'async' => 'DB_ASYNC',
                 'unix_socket' => 'DB_SOCKET',
                 'trust_server_certificate' => 'DB_TRUST_SERVER_CERTIFICATE',
-            ]),
+            ]) + self::timezoneEnvironment(),
             default => throw new \InvalidArgumentException("Unsupported DB_CONNECTION: {$driver}."),
         };
 
         return new self('default', ['default' => $connection]);
+    }
+
+    /**
+     * `timezone` from DB_TIMEZONE, else APP_TIMEZONE (the zone a Laravel app wrote naive
+     * timestamps in); absent means UTC.
+     *
+     * @return array{timezone?: string}
+     */
+    private static function timezoneEnvironment(): array
+    {
+        foreach (['DB_TIMEZONE', 'APP_TIMEZONE'] as $key) {
+            $value = getenv($key);
+            if (is_string($value) && $value !== '') {
+                return ['timezone' => $value];
+            }
+        }
+        return [];
     }
 
     private static function environment(string $key, string $default): string

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Nimbus\Redis;
 
+use Nimbus\Cache\Lock;
+use Nimbus\Cache\LockProvider;
 use Nimbus\Cache\Store;
 
 /**
@@ -11,7 +13,7 @@ use Nimbus\Cache\Store;
  * atomic); other values are PHP-serialized. Objects are restored only for the classes in
  * `$allowedClasses` (none by default), so a written cache entry cannot instantiate code.
  */
-final readonly class RedisCacheStore implements Store
+final readonly class RedisCacheStore implements Store, LockProvider
 {
     /** @param bool|list<class-string> $allowedClasses Passed to unserialize(). */
     public function __construct(
@@ -86,6 +88,17 @@ final readonly class RedisCacheStore implements Store
                 $this->redis->command(['UNLINK', ...$keys]);
             }
         } while ($cursor !== '0');
+    }
+
+    /** A `RedisLock` under this store's prefix (`{prefix}lock:{name}`). */
+    public function lock(string $name, int $seconds = 0, ?string $owner = null): Lock
+    {
+        return new RedisLock($this->redis, $name, $seconds, $owner, $this->prefix . 'lock:');
+    }
+
+    public function restoreLock(string $name, string $owner): Lock
+    {
+        return $this->lock($name, 0, $owner);
     }
 
     private static function encode(mixed $value): string|int

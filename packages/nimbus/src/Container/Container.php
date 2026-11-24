@@ -230,11 +230,19 @@ final class Container
     private function resolveParameters(array $parameters, array $named = [], array $provided = []): array
     {
         $arguments = [];
+        $scope = null;
         foreach ($parameters as $parameter) {
             if (array_key_exists($parameter->name, $named)) {
                 $value = $named[$parameter->name];
                 $class = $parameter->class;
                 if ($class !== null) {
+                    // An instance a middleware put in the request scope (RequestContext::put())
+                    // wins over the route segment of the same name.
+                    $scope ??= $this->currentScope() ?? [];
+                    if (isset($scope[$class]) && $scope[$class] instanceof $class) {
+                        $arguments[] = $scope[$class];
+                        continue;
+                    }
                     $arguments[] = $this->bindRouteValue($class, $value, $parameter->name);
                 } else {
                     $arguments[] = $value;

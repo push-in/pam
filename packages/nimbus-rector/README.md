@@ -8,11 +8,16 @@ entities, middleware, service providers, config) is manual and described in the
 ## Start here
 
 Install PAM first (`curl -fsSL https://push-in.github.io/pam/install.sh | sh`), then
-add the rules to the application being ported. Until the package is published on
-Packagist, point Composer at this directory:
+add the rules to the application being ported:
 
 ```bash
-pam composer config repositories.nimbus-rector path /path/to/pam/packages/nimbus-rector
+pam composer require --dev pushinbr/nimbus-rector
+```
+
+To try unreleased rules, point Composer at this directory with a symlink:
+
+```bash
+pam composer config repositories.nimbus-rector '{"type": "path", "url": "/path/to/pam/packages/nimbus-rector", "options": {"symlink": true}}'
 pam composer require --dev pushinbr/nimbus-rector:@dev
 ```
 
@@ -54,7 +59,7 @@ vendor/bin/rector process
 Left untouched, for review: `response()->json()` with headers or options,
 `response()` inside Laravel middleware (`handle($request, Closure $next)`),
 array-style `Route::group([...], fn)`, `Route::controller()`, named middleware
-strings other than `auth*` (`throttle:…`), `abort()` with a status that has no
+strings other than `auth*` and `throttle:…` (Nimbus accepts `throttle:` aliases as they are), `abort()` with a status that has no
 `ProblemCode` (for example 402) or a non-literal status.
 
 Laravel prefixes `routes/api.php` with `api`; Nimbus does not, so wrap the

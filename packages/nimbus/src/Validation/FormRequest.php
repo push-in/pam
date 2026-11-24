@@ -16,8 +16,33 @@ abstract class FormRequest
         $this->validated = $this->validate();
     }
 
-    /** @return array<string, list<string|ValidationRule>> */
+    /**
+     * Laravel rules: pipe strings (`'nullable|integer|between:1,720'`) or lists of strings and
+     * `ValidationRule` objects; keys take dot paths and `*` wildcards (`items.*.sku`).
+     *
+     * @return array<string, string|list<string|ValidationRule>>
+     */
     abstract public function rules(): array;
+
+    /**
+     * Custom messages by `field.rule`, `field` or `rule`: `['since.date' => 'Use YYYY-MM-DD.']`.
+     *
+     * @return array<string, string>
+     */
+    public function messages(): array
+    {
+        return [];
+    }
+
+    /**
+     * Display names of fields in messages (`:attribute`): `['since' => 'start date']`.
+     *
+     * @return array<string, string>
+     */
+    public function attributes(): array
+    {
+        return [];
+    }
 
     public function authorize(): bool
     {
@@ -65,41 +90,8 @@ abstract class FormRequest
         if (!is_array($decoded)) {
             throw new ValidationException(['body' => ['The request body must be a JSON object.']]);
         }
-        $errors = [];
-        $validated = [];
-        foreach ($this->rules() as $field => $rules) {
-            $exists = array_key_exists($field, $decoded);
-            $value = $decoded[$field] ?? null;
-            foreach ($rules as $rule) {
-                $message = $rule instanceof ValidationRule
-                    ? $rule->validate($field, $value)
-                    : $this->validateBuiltin($field, $value, $exists, $rule);
-                if ($message !== null) {
-                    $errors[$field][] = $message;
-                }
-            }
-            if ($exists && !isset($errors[$field])) {
-                $validated[$field] = $value;
-            }
-        }
-        if ($errors !== []) {
-            throw new ValidationException($errors);
-        }
-        return $validated;
-    }
-
-    private function validateBuiltin(string $field, mixed $value, bool $exists, string $rule): ?string
-    {
-        return match ($rule) {
-            'required' => !$exists || $value === null || $value === '' ? "The {$field} field is required." : null,
-            'string' => $exists && !is_string($value) ? "The {$field} field must be a string." : null,
-            'integer' => $exists && !is_int($value) ? "The {$field} field must be an integer." : null,
-            'boolean' => $exists && !is_bool($value) ? "The {$field} field must be a boolean." : null,
-            'array' => $exists && !is_array($value) ? "The {$field} field must be an array." : null,
-            'email' => $exists && (!is_string($value) || filter_var($value, FILTER_VALIDATE_EMAIL) === false)
-                ? "The {$field} field must be a valid email address."
-                : null,
-            default => throw new \InvalidArgumentException("Unknown validation rule {$rule}."),
-        };
+        // As in Laravel, query parameters are validated with the body (the body wins).
+        $data = [...$this->request->query(), ...$decoded];
+        return Validator::make($data, $this->rules(), $this->messages(), $this->attributes())->validate();
     }
 }

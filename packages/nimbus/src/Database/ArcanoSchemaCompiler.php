@@ -105,6 +105,12 @@ final readonly class ArcanoSchemaCompiler
         ]);
     }
 
+    /** The PHP file the compiled schema is cached in, null when it is not cached. */
+    public function cacheFile(): ?string
+    {
+        return $this->cacheFile;
+    }
+
     public function clear(): void
     {
         if ($this->cacheFile !== null && is_file($this->cacheFile)) {

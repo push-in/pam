@@ -102,10 +102,23 @@ final class FormRequestReturnTypeExtension implements DynamicMethodReturnTypeExt
         }
         $fields = [];
         foreach ($rules as $field => $fieldRules) {
-            $names = array_values(array_filter($fieldRules, is_string(...)));
+            if (str_contains($field, '.')) {
+                // Nested and wildcard paths live inside their parent field's array.
+                continue;
+            }
+            $fieldRules = \Nimbus\Validation\Validator::parse($fieldRules);
+            $names = [];
+            foreach ($fieldRules as $rule) {
+                if (is_string($rule)) {
+                    $names[] = explode(':', $rule, 2)[0];
+                }
+            }
             $custom = count($names) !== count($fieldRules);
             $required = in_array('required', $names, true);
             $type = $custom ? new MixedType() : self::type($names, $required);
+            if (in_array('nullable', $names, true)) {
+                $type = TypeCombinator::addNull($type);
+            }
             $fields[$field] = [$type, $required];
         }
         return $this->fields[$class] = $fields;
@@ -116,6 +129,7 @@ final class FormRequestReturnTypeExtension implements DynamicMethodReturnTypeExt
     {
         return match (true) {
             in_array('integer', $rules, true) => new IntegerType(),
+            in_array('numeric', $rules, true) => TypeCombinator::union(new IntegerType(), new \PHPStan\Type\FloatType()),
             in_array('boolean', $rules, true) => new BooleanType(),
             in_array('array', $rules, true) => new ArrayType(new MixedType(), new MixedType()),
             in_array('string', $rules, true), in_array('email', $rules, true) => $required

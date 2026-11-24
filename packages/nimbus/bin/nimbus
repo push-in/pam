@@ -3,7 +3,9 @@
 
 declare(strict_types=1);
 
-// Usage: nimbus tinker [--bootstrap=bootstrap/app.php] [--execute=code]
+// Usage: nimbus <command> [--bootstrap=bootstrap/app.php]; `nimbus list` shows the commands.
+// Built-in: migrate, migrate:status, migrate:rollback, db:seed, schema:cache, schema:clear,
+// schedule:list and tinker; application commands come from app/Console/Commands.
 
 $root = getcwd() ?: '.';
 $autoloaders = [
@@ -26,17 +28,23 @@ if (!class_exists(\Nimbus\Console\Tinker::class)) {
 $arguments = array_values(array_filter(is_array($argv ?? null) ? $argv : [], is_string(...)));
 $command = $arguments[1] ?? 'help';
 try {
-    $status = match ($command) {
-        'tinker' => \Nimbus\Console\Tinker::main(array_slice($arguments, 2), $root),
-        'help', '--help', '-h' => (static function (): int {
-            fwrite(STDOUT, "Usage: nimbus tinker [--bootstrap=bootstrap/app.php] [--execute=code]\n");
-            return 0;
-        })(),
-        default => (static function () use ($command): int {
-            fwrite(STDERR, "Unknown command {$command}. Usage: nimbus tinker [--bootstrap=path] [--execute=code]\n");
-            return 2;
-        })(),
-    };
+    if (class_exists(\Symfony\Component\Console\Application::class)) {
+        $status = \Nimbus\Console\Kernel::main($arguments, $root);
+    } else {
+        // Without symfony/console only tinker is available.
+        $status = match ($command) {
+            'tinker' => \Nimbus\Console\Tinker::main(array_slice($arguments, 2), $root),
+            'help', '--help', '-h', 'list' => (static function (): int {
+                fwrite(STDOUT, "Usage: nimbus tinker [--bootstrap=bootstrap/app.php] [--execute=code]\n"
+                    . "Install symfony/console for migrate, db:seed, schema:cache and application commands.\n");
+                return 0;
+            })(),
+            default => (static function () use ($command): int {
+                fwrite(STDERR, "Command {$command} requires symfony/console: composer require symfony/console.\n");
+                return 2;
+            })(),
+        };
+    }
 } catch (\Throwable $error) {
     fwrite(STDERR, $error->getMessage() . "\n");
     $status = 1;

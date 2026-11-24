@@ -14,6 +14,7 @@ lifecycle and diagnostics. Composer owns every optional application feature.
 | `pushinbr/pam-http-psr` | PSR-7, PSR-15 and PSR-17 implementations and adapters |
 | `pushinbr/pam-http-testing` | In-memory HTTP client and fluent response assertions |
 | `pushinbr/nimbus-skeleton` | Starter API application for Nimbus |
+| `pushinbr/nimbus-rector` | Rector rules that port the mechanical parts of a Laravel app to Nimbus |
 
 Applications should depend on packages directly. There is no hidden dependency
 lockfile or alternative package format. The optional signed PAM catalog
@@ -95,6 +96,7 @@ distribution mirrors place each package's `composer.json` at the repository root
 | `pushinbr/pam-http-psr` | `push-in/pam-http-psr` |
 | `pushinbr/pam-http-testing` | `push-in/pam-http-testing` |
 | `pushinbr/nimbus-skeleton` | `push-in/nimbus-skeleton` |
+| `pushinbr/nimbus-rector` | `push-in/nimbus-rector` |
 
 Do not commit directly to a mirror. Package changes, issues and pull requests
 belong in `push-in/pam`.

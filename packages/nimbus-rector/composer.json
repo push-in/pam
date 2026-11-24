@@ -10,11 +10,11 @@
         "pam",
         "rector"
     ],
-    "homepage": "https://github.com/push-in/pam/tree/main/packages/nimbus-rector",
+    "homepage": "https://github.com/push-in/nimbus-rector",
     "support": {
         "docs": "https://github.com/push-in/pam/blob/main/docs/nimbus/migracao-laravel.md",
         "issues": "https://github.com/push-in/pam/issues",
-        "source": "https://github.com/push-in/pam"
+        "source": "https://github.com/push-in/nimbus-rector"
     },
     "require": {
         "php": "^8.2",

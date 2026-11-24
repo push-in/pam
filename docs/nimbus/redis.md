@@ -34,6 +34,34 @@ Os stores em memória (`MemoryRateLimitStore`, `MemoryResponseCacheStore`, `Memo
 
 ## Rate limit
 
+### Limitadores nomeados (`throttle`)
+
+Para portar o `RateLimiter::for()` e o middleware `throttle` do Laravel: janelas fixas por segundo, minuto, hora ou dia, chave por `by()`, e os cabeçalhos `X-RateLimit-Limit`, `X-RateLimit-Remaining`, e no `429` também `Retry-After` e `X-RateLimit-Reset`.
+
+```php
+use Nimbus\RateLimit\Limit;
+use Pam\Http\Request;
+
+$app->rateLimiter()
+    ->for('buck', fn (Request $request) => Limit::perMinute(120)->by($request->getHeader('x-account') ?? ''))
+    ->for('buck-ask', fn (Request $request) => [
+        Limit::perMinute(10)->by($request->getHeader('x-account') ?? ''),
+        Limit::perDay(500)->by($request->getHeader('x-account') ?? ''),
+    ]);
+
+$router->post('ask', AskController::class)->rateLimit('buck-ask');   // throttle:buck-ask
+$router->post('login', LoginController::class)->throttle(3, 1);      // throttle:3,1
+$router->middleware('throttle:buck')->group(function ($router) { ... });
+```
+
+- `throttle($tentativas, $minutos)` conta por principal autenticado ou IP do cliente, separado por rota.
+- `Limit::none()` libera a requisição; `->response(fn (Request $r, Response $res, array $headers) => ...)` troca a resposta do `429`.
+- Acima do limite sai um `HttpException` `429` (`RateLimited`), no formato do renderer do app (`{"message": "Too Many Attempts."}` com o `LaravelErrorRenderer`).
+- Os contadores ficam no `Repository` de cache que o container tiver (`instance(Repository::class, ...)`), senão no `Cache::repository()`. Com `RedisCacheStore`, o limite vale para todos os workers e servidores.
+- Fora do HTTP, o mesmo `RateLimiter` tem `attempt()`, `hit()`, `tooManyAttempts()`, `remaining()`, `availableIn()` e `clear()`.
+
+### Token bucket
+
 `RateLimitMiddleware` aplica token bucket por chave e responde `429` em problem+json (`RateLimited`), com cabeçalhos de limite, restante e espera.
 
 ```php

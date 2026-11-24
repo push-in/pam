@@ -259,6 +259,7 @@ final class ArcanoDatabaseProvider
             $database = self::optional($connection, 'database') ?? ':memory:';
             return new SQLiteDriverConfig(
                 connection: $database === ':memory:' ? new MemoryConnectionConfig() : new FileConnectionConfig($database),
+                timezone: self::timezone($connection),
             );
         }
 
@@ -269,10 +270,18 @@ final class ArcanoDatabaseProvider
         $password = self::optional($connection, 'password');
 
         $options = self::pdoOptions($connection);
+        $timezone = self::timezone($connection);
+        $mysqlInit = 'PDO::MYSQL_ATTR_INIT_COMMAND';
+        if ($driver === 'mysql' && $timezone !== 'UTC' && defined($mysqlInit) && !isset($options[constant($mysqlInit)])) {
+            // The session zone of NOW() and TIMESTAMP columns; named zones need MySQL's tz tables
+            // (an offset such as -03:00 always works).
+            $options[constant($mysqlInit)] = "SET time_zone = '" . str_replace("'", '', $timezone) . "'";
+        }
 
         return match ($driver) {
             'pgsql' => new PostgresDriverConfig(
-                self::postgresConnection($connection, $database, $host, $user, $password, $options),
+                self::postgresConnection($connection, $database, $host, $user, $password, $options, $timezone),
+                timezone: $timezone,
                 schema: self::optional($connection, 'search_path') ?? self::optional($connection, 'schema') ?? 'public',
                 // Non-blocking sessions let a worker serve other requests while Postgres works.
                 // Opt-in (DB_ASYNC=true): on CPU-bound workers blocking PDO is still faster for
@@ -300,7 +309,7 @@ final class ArcanoDatabaseProvider
                     user: $user,
                     password: $password,
                     options: $options,
-                )),
+                ), timezone: $timezone),
             'sqlsrv' => new SQLServerDriverConfig(new SQLServerConnection(
                 database: $database,
                 host: $host,
@@ -310,7 +319,7 @@ final class ArcanoDatabaseProvider
                 user: $user,
                 password: $password,
                 options: $options,
-            )),
+            ), timezone: $timezone),
             default => throw new \InvalidArgumentException("The {$name} connection uses a driver Arcano does not support."),
         };
     }
@@ -330,18 +339,51 @@ final class ArcanoDatabaseProvider
         ?string $user,
         ?string $password,
         array $options,
+        string $timezone = 'UTC',
     ): PostgresConnection|PostgresDsnConnection {
         $port = self::port($connection, 5432);
         $sslmode = self::optional($connection, 'sslmode');
-        if ($sslmode === null) {
+        if ($sslmode === null && $timezone === 'UTC') {
             return new PostgresConnection($database, $host, $port, $user, $password, $options);
         }
+        $dsn = "pgsql:host={$host};port={$port};dbname={$database}";
+        if ($sslmode !== null) {
+            $dsn .= ";sslmode={$sslmode}";
+        }
+        if ($timezone !== 'UTC') {
+            // The session TimeZone, set by the server at connect time (no extra round trip).
+            // Postgres reads a bare offset as POSIX (sign inverted): -03:00 becomes UTC+03:00.
+            $dsn .= ';options=--TimeZone=' . (preg_match('/^([+-])(\d\d:\d\d)$/D', $timezone, $offset) === 1
+                ? 'UTC' . ($offset[1] === '-' ? '+' : '-') . $offset[2]
+                : $timezone);
+        }
         return new PostgresDsnConnection(
-            "pgsql:host={$host};port={$port};dbname={$database};sslmode={$sslmode}",
+            $dsn,
             $user,
             $password,
             $options,
         );
+    }
+
+    /**
+     * The `timezone` of the connection: the session time zone of pgsql/mysql and the zone
+     * naive timestamps are read in and DateTime parameters written in. UTC by default.
+     *
+     * @param array<string, mixed> $connection
+     * @return non-empty-string
+     */
+    private static function timezone(array $connection): string
+    {
+        $timezone = self::optional($connection, 'timezone') ?? 'UTC';
+        try {
+            $name = (new \DateTimeZone($timezone))->getName();
+        } catch (\Exception $error) {
+            throw new \InvalidArgumentException("Unknown database timezone {$timezone}.", 0, $error);
+        }
+        if (preg_match('#^[A-Za-z0-9_/+:-]+$#D', $name) !== 1) {
+            throw new \InvalidArgumentException("Unsupported database timezone {$timezone}.");
+        }
+        return $name === 'Z' || $name === '+00:00' ? 'UTC' : $name;
     }
 
     /**

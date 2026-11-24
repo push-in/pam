@@ -132,6 +132,18 @@ pam test
 
 O `pam test` roda o PHPUnit (ou Pest) dentro do PAM. Os testes estendem `Nimbus\Testing\TestCase` e mandam requisições para a aplicação em memória, sem abrir porta. Veja [Testes](./testes.md).
 
+## Nimbus local pelo caminho
+
+Para testar uma mudança do framework num app antes da release, aponte o Composer para `packages/nimbus` do repositório com `symlink`:
+
+```json
+"repositories": [
+    {"type": "path", "url": "../pam/packages/nimbus", "options": {"symlink": true}}
+]
+```
+
+Com `"symlink": false` o Composer copia a pasta; o `.gitattributes` do Nimbus (`export-ignore`) tira da cópia `vendor/`, `.build/`, `tests/` e `benchmarks/`, que levaram o `vendor/` do app do piloto a 221 MB.
+
 ## Verificar o projeto
 
 ```bash

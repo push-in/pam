@@ -60,7 +60,9 @@ final class App implements ApplicationInterface
     /** @var list<object> */
     private array $psrMiddleware = [];
 
-    private \Closure $errorHandler;
+    private ?\Closure $errorHandler = null;
+
+    private \Nimbus\Http\ErrorRenderer $errorRenderer;
 
     private bool $frozen = false;
 
@@ -68,6 +70,9 @@ final class App implements ApplicationInterface
     private array $observers = [];
 
     private ?Background $background = null;
+
+    /** @var list<class-string> */
+    private array $commands = [];
 
     public function __construct(bool $discoverPackages = true, ?Container $container = null)
     {
@@ -87,20 +92,28 @@ final class App implements ApplicationInterface
             \Nimbus\Security\UrlSigner::class,
             static fn (): \Nimbus\Security\UrlSigner => \Nimbus\Security\UrlSigner::fromEnvironment(),
         );
-        $this->errorHandler = static function (\Throwable $error, Response $response): Response {
-            \Pam\Observability\Telemetry::log('error', 'Unhandled Nimbus exception', [
-                'exception' => $error::class,
-                'message' => $error->getMessage(),
-                'file' => $error->getFile(),
-                'line' => $error->getLine(),
-            ]);
-            return self::problemResponse(
-                $response,
-                500,
-                \Nimbus\Http\ProblemCode::InternalError,
-                'Internal Server Error',
-            );
-        };
+        $this->errorRenderer = new \Nimbus\Http\ProblemDetailsRenderer();
+        $this->container->singleton(
+            \Nimbus\Http\ErrorRenderer::class,
+            fn (): \Nimbus\Http\ErrorRenderer => $this->errorRenderer,
+        );
+        // Named limiters and throttle() counters, in the app's cache repository when it binds one.
+        $this->container->singleton(
+            \Nimbus\RateLimit\RateLimiter::class,
+            static fn (Container $container): \Nimbus\RateLimit\RateLimiter => new \Nimbus\RateLimit\RateLimiter(
+                $container->has(\Nimbus\Cache\Repository::class)
+                && ($repository = $container->get(\Nimbus\Cache\Repository::class)) instanceof \Nimbus\Cache\Repository
+                    ? $repository
+                    : \Nimbus\Cache\Cache::repository(),
+            ),
+        );
+        // bin/nimbus and Schedule::command() run the application's console commands through it.
+        $this->container->singleton(
+            \Nimbus\Console\Kernel::class,
+            fn (): \Nimbus\Console\Kernel => new \Nimbus\Console\Kernel($this, getcwd() ?: '.'),
+        );
+        // One request context per request, filled by middleware and read by actions.
+        $this->container->scoped(\Nimbus\Http\RequestContext::class);
 
         if ($discoverPackages) {
             $root = getcwd();
@@ -325,6 +338,61 @@ final class App implements ApplicationInterface
         return $this;
     }
 
+    /**
+     * Replaces the body of HTTP errors (problem+json by default), router 404/405 and
+     * validation 422 included. `LaravelErrorRenderer` writes Laravel's `{"message"}` bodies.
+     */
+    public function renderErrorsWith(\Nimbus\Http\ErrorRenderer $renderer): self
+    {
+        $this->assertMutable();
+        $this->errorRenderer = $renderer;
+        return $this;
+    }
+
+    /**
+     * The `json_encode()` flags of the JSON responses Nimbus writes for this worker,
+     * for example `JsonEncoding::LARAVEL` for the bytes a Laravel service sent.
+     */
+    public function jsonEncoding(int $flags): self
+    {
+        $this->assertMutable();
+        \Nimbus\Http\JsonEncoding::use($flags);
+        return $this;
+    }
+
+    /**
+     * Console commands of the application besides those discovered in `app/Console/Commands`
+     * (symfony/console commands, usually `Nimbus\Console\Command`).
+     *
+     * @param list<class-string> $commands
+     */
+    public function commands(array $commands): self
+    {
+        $this->assertMutable();
+        foreach ($commands as $command) {
+            if (!class_exists($command) || !is_subclass_of($command, \Symfony\Component\Console\Command\Command::class)) {
+                throw new \InvalidArgumentException("{$command} is not a console command class.");
+            }
+            $this->commands[] = $command;
+        }
+        return $this;
+    }
+
+    /** @return list<class-string> The commands registered with `commands()`. */
+    public function commandClasses(): array
+    {
+        return $this->commands;
+    }
+
+    /** The named rate limiters used by `rateLimit()` routes (`RateLimiter::for()`). */
+    public function rateLimiter(): \Nimbus\RateLimit\RateLimiter
+    {
+        $limiter = $this->container->get(\Nimbus\RateLimit\RateLimiter::class);
+        return $limiter instanceof \Nimbus\RateLimit\RateLimiter
+            ? $limiter
+            : throw new \LogicException('The container binds another RateLimiter.');
+    }
+
     public function observe(RequestLifecycleObserver $observer): self
     {
         $this->assertMutable();
@@ -389,15 +457,22 @@ final class App implements ApplicationInterface
                 }
             }
             if ($error instanceof HttpException) {
-                return $this->finalizeResponse($request, self::problemResponse(
-                    $response,
-                    $error->status,
-                    $error->problemCode,
-                    $error->getMessage(),
-                    $error->details,
-                ));
+                return $this->finalizeResponse($request, $this->errorRenderer->render($error, $request, $response));
             }
             $handler = $this->errorHandler;
+            if ($handler === null) {
+                \Pam\Observability\Telemetry::log('error', 'Unhandled Nimbus exception', [
+                    'exception' => $error::class,
+                    'message' => $error->getMessage(),
+                    'file' => $error->getFile(),
+                    'line' => $error->getLine(),
+                ]);
+                return $this->finalizeResponse($request, $this->errorRenderer->render(
+                    new HttpException(500, \Nimbus\Http\ProblemCode::InternalError, 'Internal Server Error', [], $error),
+                    $request,
+                    $response,
+                ));
+            }
             $result = $handler($error, $response);
             if (!$result instanceof Response) {
                 throw new \UnexpectedValueException('The Pam error handler must return Response.');
@@ -422,25 +497,6 @@ final class App implements ApplicationInterface
     private function finalizeResponse(Request $request, Response $response): Response
     {
         return $request->method === 'HEAD' ? $response->send(null) : $response;
-    }
-
-    /** @param array<string, mixed> $details */
-    private static function problemResponse(
-        Response $response,
-        int $status,
-        \Nimbus\Http\ProblemCode $code,
-        string $title,
-        array $details = [],
-    ): Response {
-        return $response
-            ->json([
-                ...$details,
-                'type' => 'https://pam.dev/problems/' . $code->value,
-                'title' => $title,
-                'status' => $status,
-                'code' => $code->value,
-            ], $status)
-            ->header('content-type', 'application/problem+json; charset=utf-8');
     }
 
     private function dispatchRoute(Request $request, Response $response): Response

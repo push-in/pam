@@ -32,6 +32,12 @@ final readonly class CallableRequestHandler implements RequestHandlerInterface
         if ($result instanceof Responsable) {
             return $result->toResponse($request, $response);
         }
+        if ((is_array($result) || $result instanceof \JsonSerializable) && $response->isEmpty()) {
+            // The status the action or a middleware set is kept.
+            return $response
+                ->header('content-type', 'application/json; charset=utf-8')
+                ->send(\Nimbus\Http\JsonEncoding::encode($result));
+        }
         if ($result !== null && $response->isEmpty()) {
             $response->send($result);
         }

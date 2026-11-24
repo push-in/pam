@@ -102,6 +102,7 @@ jobs:
           scripts/package-release.sh validate
           scripts/package-release.sh validate-package-tag pushinbr/nimbus v0.1.0
           scripts/package-release.sh validate-package-tag pushinbr/nimbus-skeleton v0.1.0
+          scripts/package-release.sh validate-package-tag pushinbr/nimbus-rector v0.1.0
           test "$(scripts/package-release.sh package-matrix pushinbr/nimbus | jq 'length')" -eq 1
           ! scripts/package-release.sh package-matrix pushinbr/not-a-package
       - name: Remove regenerable build artifacts
