@@ -40,8 +40,8 @@ RUN set -eu; \
     rm -f "${archive}" "${archive}.sha256"; \
     /opt/pam/bin/pam --version
 
-FROM ${DEBIAN_IMAGE} AS vendor
-COPY --from=pam /opt/pam /opt/pam
+# `pam composer` fetches and verifies Composer with the curl of the previous stage.
+FROM pam AS vendor
 ENV PAM_HOME=/opt/pam/share/pam \
     PAM_EXTENSION_DIR=/opt/pam/lib/php/extensions \
     PHPRC=/opt/pam/etc/php.ini \
