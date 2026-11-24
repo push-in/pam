@@ -35,6 +35,10 @@ $app->get('/ping', static fn (Request $request, Response $response) => $response
 $app->get('/managed-env', static fn (Request $request, Response $response) => $response->json([
     'value' => getenv('PAM_TEST_MANAGED_ENV') ?: null,
 ]));
+$app->get('/drain-slow', static function (Request $request, Response $response): Response {
+    \Pam\Async\delay(0.4);
+    return $response->json(['draining' => function_exists('pam_draining') && pam_draining()]);
+});
 $app->get('/disconnect-cancel', static function (Request $request, Response $response): Response {
     \Pam\Async\delay(60.0);
     return $response->send('should-have-been-cancelled');

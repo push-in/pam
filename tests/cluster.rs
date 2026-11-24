@@ -824,6 +824,99 @@ fn watchdog_replaces_a_worker_stuck_inside_php() {
 }
 
 #[test]
+fn sigterm_finishes_in_flight_requests_and_reports_draining() {
+    let mut cluster = ClusterProcess::start(1_000);
+    let port = cluster.port;
+    let slow = thread::spawn(move || {
+        let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .write_all(b"GET /drain-slow HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+            .unwrap();
+        let mut response = String::new();
+        stream.read_to_string(&mut response).unwrap();
+        response
+    });
+    // The request is inside PHP (sleeping 400 ms) when the master is told to stop.
+    thread::sleep(Duration::from_millis(150));
+    cluster.signal(SIGTERM);
+    let response = slow.join().unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK"), "{response}");
+    // PHP saw the drain through pam_draining(), so readiness can answer 503.
+    assert!(response.contains(r#""draining":true"#), "{response}");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let status = loop {
+        if let Some(status) = cluster.child.try_wait().unwrap() {
+            break status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the master did not exit after draining"
+        );
+        thread::sleep(Duration::from_millis(20));
+    };
+    assert!(status.success(), "graceful shutdown exited with {status}");
+}
+
+#[test]
+fn reloads_under_load_without_failed_requests() {
+    // Clients send without retrying while the cluster reloads three times:
+    // every single request must succeed.
+    let cluster = std::sync::Arc::new(ClusterProcess::start_with_env(
+        1_000_000,
+        2,
+        None,
+        None,
+        &[("PAM_TEST_RATE_LIMIT", "0")],
+    ));
+    let original = cluster.children();
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let clients: Vec<_> = (0..4)
+        .map(|_| {
+            let cluster = cluster.clone();
+            let stop = stop.clone();
+            thread::spawn(move || {
+                let (mut sent, mut failures) = (0_u64, Vec::new());
+                while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                    sent += 1;
+                    if let Err(error) = cluster.request() {
+                        failures.push(error.lines().next().unwrap_or_default().to_owned());
+                    }
+                }
+                (sent, failures)
+            })
+        })
+        .collect();
+    for _ in 0..3 {
+        thread::sleep(Duration::from_millis(700));
+        cluster.signal(SIGHUP);
+    }
+    thread::sleep(Duration::from_millis(1_000));
+    stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    let (mut sent, mut failures) = (0, Vec::new());
+    for client in clients {
+        let (client_sent, client_failures) = client.join().unwrap();
+        sent += client_sent;
+        failures.extend(client_failures);
+    }
+    assert!(
+        failures.is_empty(),
+        "{} of {sent} requests failed: {failures:?}",
+        failures.len()
+    );
+    assert!(sent > 200, "the load generator sent only {sent} requests");
+    assert!(
+        cluster.children().is_disjoint(&original),
+        "the reloads did not replace the workers"
+    );
+    let mut cluster = std::sync::Arc::into_inner(cluster).unwrap();
+    cluster.stop();
+}
+
+#[test]
 fn failed_reload_keeps_the_healthy_generation() {
     let mut cluster = ClusterProcess::start_with(1_000, 2, None, Some(2));
     let original = cluster.children();

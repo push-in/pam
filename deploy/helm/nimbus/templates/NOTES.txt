@@ -1,0 +1,11 @@
+{{ include "nimbus.fullname" . }} runs {{ .Values.pam.workers }} PAM workers per pod.
+
+  Liveness:  GET {{ .Values.probes.liveness.path }}
+  Readiness: GET {{ .Values.probes.readiness.path }} (503 while a pod drains)
+{{- if .Values.metrics.enabled }}
+  Metrics:   GET {{ .Values.metrics.path }} on port {{ .Values.port }} (private peers only)
+{{- end }}
+
+Try it:
+  kubectl port-forward svc/{{ include "nimbus.fullname" . }} 8080:{{ .Values.service.port }}
+  curl http://127.0.0.1:8080/ready

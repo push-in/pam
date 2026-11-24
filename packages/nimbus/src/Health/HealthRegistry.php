@@ -18,13 +18,21 @@ final class HealthRegistry
         return $this;
     }
 
-    /** @return array{state: int, checks: array<string, array{state: int, details: array<string, scalar|null>}>} */
+    /**
+     * A check that throws counts as unhealthy instead of failing the probe.
+     *
+     * @return array{state: int, checks: array<string, array{state: int, details: array<string, scalar|null>}>}
+     */
     public function run(): array
     {
         $state = HealthState::Healthy;
         $checks = [];
         foreach ($this->checks as $name => $check) {
-            $result = $check->check();
+            try {
+                $result = $check->check();
+            } catch (\Throwable $error) {
+                $result = new HealthResult(HealthState::Unhealthy, ['error' => $error::class]);
+            }
             if ($result->state->value > $state->value) {
                 $state = $result->state;
             }
@@ -33,4 +41,3 @@ final class HealthRegistry
         return ['state' => $state->value, 'checks' => $checks];
     }
 }
-

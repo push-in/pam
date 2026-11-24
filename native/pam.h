@@ -109,6 +109,8 @@ int pam_php_dispatch_ws(
 );
 typedef int64_t (*pam_cache_purge_handler)(const char *lines, size_t length);
 void pam_php_set_cache_purge_handler(pam_cache_purge_handler handler);
+/* Marks this worker as draining: PHP pam_draining() returns true from then on. */
+void pam_php_set_draining(int draining);
 void pam_php_string_free(char *value);
 void pam_php_shutdown(void);
 /* Resets process-bound engine state in a worker forked from a booted zygote. */

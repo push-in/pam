@@ -1,0 +1,7 @@
+.git
+.env
+.pam
+vendor
+var
+storage/*.sqlite
+node_modules

@@ -62,7 +62,8 @@ final class PackageDiscovery
         }
         $providers = self::validateProviders($providers);
 
-        if (!is_dir($cacheDirectory) && !mkdir($cacheDirectory, 0755, true) && !is_dir($cacheDirectory)) {
+        // Workers booting together race to create it: losing the race is not an error.
+        if (!is_dir($cacheDirectory) && !@mkdir($cacheDirectory, 0755, true) && !is_dir($cacheDirectory)) {
             throw new \RuntimeException("Unable to create Pam package cache at {$cacheDirectory}.");
         }
         $temporary = $cache . '.' . getmypid() . '.tmp';

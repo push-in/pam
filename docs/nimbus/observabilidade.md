@@ -149,18 +149,23 @@ Com o container, `route` é o padrão da rota casada, o que mantém baixa a card
 ## Health checks
 
 ```php
+use Nimbus\Database\ArcanoManager;
 use Nimbus\Database\DatabaseHealthCheck;
+use Nimbus\Health\HealthEndpoints;
 use Nimbus\Health\HealthRegistry;
 
-$health = (new HealthRegistry())
-    ->add('database', $app->container()->get(DatabaseHealthCheck::class));
+$readiness = (new HealthRegistry())
+    ->add('database', new DatabaseHealthCheck($app->container()->get(ArcanoManager::class)));
 
-$router->get('health', static function (Request $request, Response $response) use ($health): Response {
-    $report = $health->run();   // ['state' => 1|2|3, 'checks' => ['database' => ['state' => ..., 'details' => [...]]]]
-    return $response->json($report, $report['state'] === 3 ? 503 : 200);
-});
+(new HealthEndpoints($readiness))->register($app);   // GET /health e GET /ready
 ```
 
-`HealthState`: `Healthy = 1`, `Degraded = 2`, `Unhealthy = 3`; o estado geral é o pior entre as verificações.
+`/health` (liveness) só prova que o worker responde e nunca consulta dependências. `/ready` (readiness) roda o registro: 503 quando algum check está `Unhealthy`, lança exceção, ou quando o worker está drenando (`pam_draining()` do PAM ou o arquivo `NIMBUS_DRAIN_FILE`). `Nimbus\Redis\RedisHealthCheck` manda `PING`.
+
+`HealthState`: `Healthy = 1`, `Degraded = 2`, `Unhealthy = 3`; o estado geral é o pior entre as verificações. `HealthRegistry::run()` devolve `['state' => ..., 'checks' => [...]]` para quem quiser montar outra rota.
 
 Uma verificação própria implementa `Nimbus\Health\HealthCheck` (`check(): HealthResult`). O `pam deploy` usa a URL de health (`--health-check-url`) para só trocar de release quando a nova responde.
+
+## Métricas, traces e Sentry
+
+`Nimbus\Telemetry\Telemetry::fromEnvironment()->install($app)` liga, conforme o ambiente, métricas Prometheus (`NIMBUS_METRICS=1`, rota `/metrics/app`), spans OpenTelemetry por requisição, query, job e chamada HTTP de saída (com o SDK `open-telemetry/sdk` configurado) e nada quando tudo está desligado. `Nimbus\Sentry\SentryReporter` reporta exceções ao Sentry com escopo isolado por requisição. Configuração, séries e alertas em [Operação em produção](./operacao.md#metricas-e-traces).

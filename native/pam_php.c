@@ -296,6 +296,28 @@ void pam_php_set_cache_purge_handler(pam_cache_purge_handler handler)
     pam_cache_purge_callback = handler;
 }
 
+static volatile int pam_worker_draining = 0;
+
+void pam_php_set_draining(int draining)
+{
+    pam_worker_draining = draining != 0;
+}
+
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_pam_draining, 0, 0, _IS_BOOL, 0)
+ZEND_END_ARG_INFO()
+
+/*
+ * pam_draining(): bool
+ * True once this worker started draining (SIGTERM, reload, recycle): it
+ * finishes the requests it holds and takes no new work. Application readiness
+ * endpoints answer 503 from then on.
+ */
+static PHP_FUNCTION(pam_draining)
+{
+    ZEND_PARSE_PARAMETERS_NONE();
+    RETURN_BOOL(pam_worker_draining != 0);
+}
+
 static bool pam_cache_purge_append(smart_str *lines, zend_string *value, const char *prefix)
 {
     if (ZSTR_LEN(value) == 0 || memchr(ZSTR_VAL(value), '\n', ZSTR_LEN(value)) != NULL
@@ -492,6 +514,7 @@ static PHP_FUNCTION(pam_native_utc_datetime)
 
 static const zend_function_entry pam_native_functions[] = {
     PHP_FE(pam_cache_purge, arginfo_pam_cache_purge)
+    PHP_FE(pam_draining, arginfo_pam_draining)
     PHP_FE(pam_native_abi_version, arginfo_pam_native_abi_version)
     PHP_FE(pam_native_fiber_stack_reuses, arginfo_pam_native_fiber_stack_reuses)
     PHP_FE(pam_native_stream_fd, arginfo_pam_native_stream_fd)

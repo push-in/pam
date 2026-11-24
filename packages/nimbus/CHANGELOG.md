@@ -104,6 +104,22 @@ still `php` and `pushinbr/pam-contracts`.
   1.x LTS (security fixes for 18 months after 2.0); `UPGRADE.md` gains a template for majors.
 - CI: `scripts/nimbus-bc-check.sh` runs `roave/backward-compatibility-check` against the newest
   tag of `push-in/nimbus` on every pull request that changes the package.
+- `Nimbus\Health\HealthEndpoints`: `GET /health` (liveness, never checks dependencies) and
+  `GET /ready` (readiness checks; 503 while the worker drains). `DrainState` reads PAM's
+  `pam_draining()` and an optional `NIMBUS_DRAIN_FILE`; `Nimbus\Redis\RedisHealthCheck` pings
+  Redis. A health check that throws now counts as unhealthy instead of failing the probe.
+- `Nimbus\Metrics`: dependency-free Prometheus registry (counters, gauges, histograms,
+  callback gauges). Inside a PAM cluster the series live in a shared table, so one scrape
+  returns the totals of every worker. `RequestMetrics` records
+  `http_server_request_duration_seconds` by method, route template and status, worker memory
+  and count; `MetricsEndpoint` serves them at `/metrics/app` to private peers or a bearer token.
+- `Nimbus\Telemetry\Telemetry`: one switch for metrics (`NIMBUS_METRICS=1`) and OpenTelemetry
+  (an installed and configured `open-telemetry/sdk`): spans per request, database query, job
+  (`job()`) and outgoing HTTP call (`httpClient()`, W3C `traceparent` injected), queue depth
+  gauges (`queueDepth()`). Disabled parts install nothing.
+- `Nimbus\Sentry\SentryReporter` and `SentryJobHandler` (`sentry/sentry`): reports 5xx
+  failures and failed jobs, and restores the boot-time scope between requests so breadcrumbs,
+  users and tags never leak from one request to the next.
 
 ### Changed
 

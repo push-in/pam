@@ -303,3 +303,131 @@ namespace Pam\WS {
         }
     }
 }
+
+namespace Pam\Shared {
+    /**
+     * In-process stand-in with the row semantics of the runtime's shared table.
+     *
+     * @implements \Iterator<string, array<string, int|float|string>>
+     */
+    class Table implements \Iterator, \Countable
+    {
+        public const TYPE_INT = 1;
+        public const TYPE_FLOAT = 2;
+        public const TYPE_STRING = 3;
+
+        public static bool $available = false;
+
+        /** @var array<string, int> */
+        private array $types = [];
+
+        /** @var array<string, array<string, int|float|string>> */
+        private array $rows = [];
+
+        /** @var list<string> */
+        private array $keys = [];
+
+        private int $position = 0;
+
+        public function __construct(
+            private readonly int $size,
+            public readonly float $conflictProportion = 0.2,
+            public readonly string $name = '',
+            public readonly int $keySize = 64,
+        ) {
+        }
+
+        public static function available(): bool
+        {
+            return self::$available;
+        }
+
+        public function column(string $name, int $type, int $size = 0): bool
+        {
+            unset($size);
+            $this->types[$name] = $type;
+            return true;
+        }
+
+        /** @phpstan-impure */
+        public function create(): bool
+        {
+            return true;
+        }
+
+        /** @param array<string, mixed> $values */
+        public function set(string $key, array $values): bool
+        {
+            if (!$this->reserve($key)) {
+                return false;
+            }
+            foreach ($values as $column => $value) {
+                if (is_int($value) || is_float($value) || is_string($value)) {
+                    $this->rows[$key][$column] = $value;
+                }
+            }
+            return true;
+        }
+
+        public function incr(string $key, string $column, int|float $incrby = 1): int|float|false
+        {
+            if (!$this->reserve($key)) {
+                return false;
+            }
+            $current = $this->rows[$key][$column];
+            $next = (is_string($current) ? 0 : $current) + $incrby;
+            return $this->rows[$key][$column] = $this->types[$column] === self::TYPE_INT ? (int) $next : (float) $next;
+        }
+
+        public function count(): int
+        {
+            return count($this->rows);
+        }
+
+        public function rewind(): void
+        {
+            $this->keys = array_keys($this->rows);
+            $this->position = 0;
+        }
+
+        public function valid(): bool
+        {
+            return isset($this->keys[$this->position]);
+        }
+
+        /** @return array<string, int|float|string>|null */
+        public function current(): ?array
+        {
+            return $this->rows[$this->keys[$this->position] ?? ''] ?? null;
+        }
+
+        public function key(): ?string
+        {
+            return $this->keys[$this->position] ?? null;
+        }
+
+        public function next(): void
+        {
+            ++$this->position;
+        }
+
+        private function reserve(string $key): bool
+        {
+            if (isset($this->rows[$key])) {
+                return true;
+            }
+            if (count($this->rows) >= $this->size) {
+                return false;
+            }
+            $this->rows[$key] = [];
+            foreach ($this->types as $column => $type) {
+                $this->rows[$key][$column] = match ($type) {
+                    self::TYPE_INT => 0,
+                    self::TYPE_FLOAT => 0.0,
+                    default => '',
+                };
+            }
+            return true;
+        }
+    }
+}

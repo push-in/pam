@@ -14,7 +14,15 @@ $config = Configuration::fromEnvironment([
         required: false,
         default: 3000,
     ),
+    new ConfigDefinition(
+        key: 'app.host',
+        environment: 'PAM_HOST',
+        type: ConfigType::String,
+        required: false,
+        // Containers set PAM_HOST=0.0.0.0; a laptop keeps the API on loopback.
+        default: '127.0.0.1',
+    ),
 ]);
 /** @var \Nimbus\App $app */
 $app = require __DIR__ . '/bootstrap/app.php';
-$app->listen($config->integer('app.port'));
+$app->listen($config->integer('app.port'), $config->string('app.host'));

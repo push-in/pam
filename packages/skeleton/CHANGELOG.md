@@ -8,6 +8,14 @@ All notable changes to the Nimbus skeleton are documented in this file.
 - `bootstrap/app.php` builds the `Nimbus\App` without listening; `index.php` requires it and
   `bin/nimbus tinker` (or `composer tinker`) opens a PsySH shell over the same application.
   `psy/psysh` is a dev dependency.
+- `GET /health` and `GET /ready` (database check, 503 while draining), telemetry and Sentry
+  switched on by environment (`NIMBUS_METRICS`, `OTEL_*`, `SENTRY_DSN`).
+- `PAM_HOST` selects the listen address (containers use `0.0.0.0`).
+- Production `Dockerfile`: official PAM release, Composer install without dev packages,
+  distroless non-root runtime with a health check.
+
+### Changed
+- Requires `pushinbr/nimbus` `^0.7`.
 
 ## 0.3.2 - 2026-11-21
 

@@ -117,7 +117,9 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Events\EventFake`](#nimbuseventseventfake)
 - [`Nimbus\Events\ShouldQueue`](#nimbuseventsshouldqueue)
 - [`Nimbus\Events\SyncEventDispatcher`](#nimbuseventssynceventdispatcher)
+- [`Nimbus\Health\DrainState`](#nimbushealthdrainstate)
 - [`Nimbus\Health\HealthCheck`](#nimbushealthhealthcheck)
+- [`Nimbus\Health\HealthEndpoints`](#nimbushealthhealthendpoints)
 - [`Nimbus\Health\HealthRegistry`](#nimbushealthhealthregistry)
 - [`Nimbus\Health\HealthResult`](#nimbushealthhealthresult)
 - [`Nimbus\Health\HealthState`](#nimbushealthhealthstate)
@@ -180,6 +182,15 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Mail\MailFake`](#nimbusmailmailfake)
 - [`Nimbus\Mail\Mailer`](#nimbusmailmailer)
 - [`Nimbus\Mail\PendingMail`](#nimbusmailpendingmail)
+- [`Nimbus\Metrics\Counter`](#nimbusmetricscounter)
+- [`Nimbus\Metrics\Gauge`](#nimbusmetricsgauge)
+- [`Nimbus\Metrics\Histogram`](#nimbusmetricshistogram)
+- [`Nimbus\Metrics\MemoryMetricStore`](#nimbusmetricsmemorymetricstore)
+- [`Nimbus\Metrics\MetricStore`](#nimbusmetricsmetricstore)
+- [`Nimbus\Metrics\MetricsEndpoint`](#nimbusmetricsmetricsendpoint)
+- [`Nimbus\Metrics\MetricsRegistry`](#nimbusmetricsmetricsregistry)
+- [`Nimbus\Metrics\RequestMetrics`](#nimbusmetricsrequestmetrics)
+- [`Nimbus\Metrics\SharedTableMetricStore`](#nimbusmetricssharedtablemetricstore)
 - [`Nimbus\Middleware\ArcanoLifecycleMiddleware`](#nimbusmiddlewarearcanolifecyclemiddleware)
 - [`Nimbus\Middleware\AuthenticateMiddleware`](#nimbusmiddlewareauthenticatemiddleware)
 - [`Nimbus\Middleware\AuthorizeMiddleware`](#nimbusmiddlewareauthorizemiddleware)
@@ -261,6 +272,7 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Redis\Connection`](#nimbusredisconnection)
 - [`Nimbus\Redis\PamConnection`](#nimbusredispamconnection)
 - [`Nimbus\Redis\RedisCacheStore`](#nimbusredisrediscachestore)
+- [`Nimbus\Redis\RedisHealthCheck`](#nimbusredisredishealthcheck)
 - [`Nimbus\Redis\RedisIdempotencyStore`](#nimbusredisredisidempotencystore)
 - [`Nimbus\Redis\RedisLock`](#nimbusredisredislock)
 - [`Nimbus\Redis\RedisOAuthStateStore`](#nimbusredisredisoauthstatestore)
@@ -295,6 +307,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Security\Hash`](#nimbussecurityhash)
 - [`Nimbus\Security\UrlSignatureState`](#nimbussecurityurlsignaturestate)
 - [`Nimbus\Security\UrlSigner`](#nimbussecurityurlsigner)
+- [`Nimbus\Sentry\SentryJobHandler`](#nimbussentrysentryjobhandler)
+- [`Nimbus\Sentry\SentryReporter`](#nimbussentrysentryreporter)
 - [`Nimbus\Session\DatabaseSessionStore`](#nimbussessiondatabasesessionstore)
 - [`Nimbus\Session\ErrorBag`](#nimbussessionerrorbag)
 - [`Nimbus\Session\FileSessionStore`](#nimbussessionfilesessionstore)
@@ -312,6 +326,8 @@ Every symbol below is protected by the Nimbus Semantic Versioning gate.
 - [`Nimbus\Storage\StorageRoutes`](#nimbusstoragestorageroutes)
 - [`Nimbus\Storage\StorageServiceProvider`](#nimbusstoragestorageserviceprovider)
 - [`Nimbus\Storage\UploadUrlGenerator`](#nimbusstorageuploadurlgenerator)
+- [`Nimbus\Telemetry\Telemetry`](#nimbustelemetrytelemetry)
+- [`Nimbus\Telemetry\TracingHttpClient`](#nimbustelemetrytracinghttpclient)
 - [`Nimbus\Tenancy\Tenant`](#nimbustenancytenant)
 - [`Nimbus\Tenancy\TenantContext`](#nimbustenancytenantcontext)
 - [`Nimbus\Tenancy\TenantResolver`](#nimbustenancytenantresolver)
@@ -2098,6 +2114,18 @@ final class Nimbus\Events\SyncEventDispatcher implements Nimbus\Events\EventDisp
 - `public listen(string $event, callable|string $listener): self`
 - `public listeners(string $event): array`
 
+## `Nimbus\Health\DrainState`
+
+```php
+final readonly class Nimbus\Health\DrainState
+```
+
+### Methods
+
+- `public __construct(?string $drainFile = null, ?Closure $runtime = null): mixed`
+- `public draining(): bool`
+- `public static fromEnvironment(): self`
+
 ## `Nimbus\Health\HealthCheck`
 
 ```php
@@ -2107,6 +2135,19 @@ abstract interface Nimbus\Health\HealthCheck
 ### Methods
 
 - `public check(): Nimbus\Health\HealthResult`
+
+## `Nimbus\Health\HealthEndpoints`
+
+```php
+final readonly class Nimbus\Health\HealthEndpoints
+```
+
+### Methods
+
+- `public __construct(Nimbus\Health\HealthRegistry $readiness = {"@object":"Nimbus\\Health\\HealthRegistry","properties":[]}, ?Nimbus\Health\DrainState $drain = null, ?Nimbus\Health\HealthRegistry $liveness = null): mixed`
+- `public live(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public ready(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public register(Nimbus\App|Nimbus\RouteRegistrar $router, string $livePath = "/health", string $readyPath = "/ready"): self`
 
 ## `Nimbus\Health\HealthRegistry`
 
@@ -3139,6 +3180,150 @@ final readonly class Nimbus\Mail\PendingMail
 
 - `public __construct(Nimbus\Mail\Mailer $mailer, array $to): mixed`
 - `public send(Nimbus\Notifications\Mail\MailMessage|Symfony\Component\Mime\Email $message): void`
+
+## `Nimbus\Metrics\Counter`
+
+```php
+final readonly class Nimbus\Metrics\Counter
+```
+
+### Properties
+
+- `public readonly string $name`
+
+### Methods
+
+- `public __construct(Nimbus\Metrics\MetricsRegistry $registry, string $name): mixed`
+- `public inc(array $labels = [], float|int $by = 1): void`
+
+## `Nimbus\Metrics\Gauge`
+
+```php
+final readonly class Nimbus\Metrics\Gauge
+```
+
+### Properties
+
+- `public readonly string $name`
+
+### Methods
+
+- `public __construct(Nimbus\Metrics\MetricsRegistry $registry, string $name): mixed`
+- `public set(float $value, array $labels = []): void`
+
+## `Nimbus\Metrics\Histogram`
+
+```php
+final readonly class Nimbus\Metrics\Histogram
+```
+
+### Properties
+
+- `public readonly string $name`
+
+### Methods
+
+- `public __construct(Nimbus\Metrics\MetricsRegistry $registry, string $name): mixed`
+- `public observe(float $value, array $labels = []): void`
+
+## `Nimbus\Metrics\MemoryMetricStore`
+
+```php
+final class Nimbus\Metrics\MemoryMetricStore implements Nimbus\Metrics\MetricStore
+```
+
+### Methods
+
+- `public __construct(int $maximumSeries = 4096): mixed`
+- `public add(string $key, string $column, float|int $amount): void`
+- `public describe(string $key, string $name, string $labels): void`
+- `public put(string $key, array $values): void`
+- `public rows(): iterable`
+
+## `Nimbus\Metrics\MetricStore`
+
+```php
+abstract interface Nimbus\Metrics\MetricStore
+```
+
+### Methods
+
+- `public add(string $key, string $column, float|int $amount): void`
+- `public describe(string $key, string $name, string $labels): void`
+- `public put(string $key, array $values): void`
+- `public rows(): iterable`
+
+## `Nimbus\Metrics\MetricsEndpoint`
+
+```php
+final readonly class Nimbus\Metrics\MetricsEndpoint
+```
+
+### Methods
+
+- `public __construct(Nimbus\Metrics\MetricsRegistry $metrics, ?string $token = null): mixed`
+- `public static fromEnvironment(Nimbus\Metrics\MetricsRegistry $metrics): self`
+- `public handle(Pam\Http\Request $request, Pam\Http\Response $response): Pam\Http\Response`
+- `public register(Nimbus\App|Nimbus\RouteRegistrar $router, string $path = "/metrics/app"): self`
+
+## `Nimbus\Metrics\MetricsRegistry`
+
+```php
+final class Nimbus\Metrics\MetricsRegistry
+```
+
+### Constants
+
+- `DEFAULT_BUCKETS = [0.005,0.01,0.025,0.05,0.075,0.1,0.25,0.5,0.75,1,2.5,5,7.5,10]`
+- `MAXIMUM_BUCKETS = 16`
+
+### Methods
+
+- `public __construct(Nimbus\Metrics\MetricStore $store = {"@object":"Nimbus\\Metrics\\MemoryMetricStore","properties":[]}): mixed`
+- `public callbackGauge(string $name, string $help, Closure $sample, ?string $labelName = null): self`
+- `public counter(string $name, string $help, array $labelNames = []): Nimbus\Metrics\Counter`
+- `public freshSeries(string $name): int`
+- `public gauge(string $name, string $help, array $labelNames = [], int $ttlSeconds = 0): Nimbus\Metrics\Gauge`
+- `public histogram(string $name, string $help, array $labelNames = [], array $buckets = [0.005,0.01,0.025,0.05,0.075,0.1,0.25,0.5,0.75,1,2.5,5,7.5,10]): Nimbus\Metrics\Histogram`
+- `public increment(string $name, array $labels, string $column, float|int $amount): void`
+- `public observe(string $name, array $labels, float $value): void`
+- `public render(): string`
+- `public set(string $name, array $labels, float $value): void`
+- `public static shared(): self`
+
+## `Nimbus\Metrics\RequestMetrics`
+
+```php
+final class Nimbus\Metrics\RequestMetrics implements Nimbus\Lifecycle\RequestLifecycleObserver
+```
+
+### Methods
+
+- `public __construct(Nimbus\Metrics\MetricsRegistry $metrics, ?Nimbus\Container\Container $container = null, ?OpenTelemetry\API\Metrics\HistogramInterface $otelDuration = null, int $memoryIntervalSeconds = 5): mixed`
+- `public finished(Pam\Http\Request $request, Pam\Http\Response $response, ?Throwable $failure): void`
+- `public static route(?Nimbus\Container\Container $container): string`
+- `public starting(Pam\Http\Request $request): void`
+- `public static status(Pam\Http\Response $response, ?Throwable $failure): int`
+
+## `Nimbus\Metrics\SharedTableMetricStore`
+
+```php
+final class Nimbus\Metrics\SharedTableMetricStore implements Nimbus\Metrics\MetricStore
+```
+
+### Constants
+
+- `LABEL_BYTES = 512`
+- `NAME_BYTES = 128`
+
+### Methods
+
+- `public __construct(string $tableName = "nimbus.metrics", int $maximumSeries = 4096): mixed`
+- `public add(string $key, string $column, float|int $amount): void`
+- `public static available(): bool`
+- `public describe(string $key, string $name, string $labels): void`
+- `public put(string $key, array $values): void`
+- `public rows(): iterable`
 
 ## `Nimbus\Middleware\ArcanoLifecycleMiddleware`
 
@@ -4383,6 +4568,17 @@ final readonly class Nimbus\Redis\RedisCacheStore implements Nimbus\Cache\LockPr
 - `public put(string $key, mixed $value, ?int $seconds = null): void`
 - `public restoreLock(string $name, string $owner): Nimbus\Cache\Lock`
 
+## `Nimbus\Redis\RedisHealthCheck`
+
+```php
+final readonly class Nimbus\Redis\RedisHealthCheck implements Nimbus\Health\HealthCheck
+```
+
+### Methods
+
+- `public __construct(Nimbus\Redis\Connection $redis): mixed`
+- `public check(): Nimbus\Health\HealthResult`
+
 ## `Nimbus\Redis\RedisIdempotencyStore`
 
 ```php
@@ -4933,6 +5129,32 @@ final readonly class Nimbus\Security\UrlSigner
 - `public temporary(string $path, int $ttl, array $query = []): string`
 - `public verify(string $path, array $query, ?int $now = null): bool`
 
+## `Nimbus\Sentry\SentryJobHandler`
+
+```php
+final readonly class Nimbus\Sentry\SentryJobHandler implements Nimbus\Jobs\JobHandler
+```
+
+### Methods
+
+- `public __construct(Nimbus\Jobs\JobHandler|callable $handler, Nimbus\Sentry\SentryReporter $reporter): mixed`
+- `public handle(object $job): Nimbus\Jobs\JobOutcome`
+
+## `Nimbus\Sentry\SentryReporter`
+
+```php
+final class Nimbus\Sentry\SentryReporter implements Nimbus\Lifecycle\RequestLifecycleObserver
+```
+
+### Methods
+
+- `public __construct(?Nimbus\Container\Container $container = null): mixed`
+- `public capture(Throwable $error, array $tags = []): void`
+- `public finished(Pam\Http\Request $request, Pam\Http\Response $response, ?Throwable $failure): void`
+- `public static fromEnvironment(?Nimbus\Container\Container $container = null): ?self`
+- `public install(Nimbus\App $app): self`
+- `public starting(Pam\Http\Request $request): void`
+
 ## `Nimbus\Session\DatabaseSessionStore`
 
 ```php
@@ -5201,6 +5423,37 @@ abstract interface Nimbus\Storage\UploadUrlGenerator
 ### Methods
 
 - `public temporaryUploadUrl(string $path, DateTimeImmutable $expiresAt, int $maxBytes, ?string $contentType = null): string`
+
+## `Nimbus\Telemetry\Telemetry`
+
+```php
+final class Nimbus\Telemetry\Telemetry
+```
+
+### Methods
+
+- `public static create(?Nimbus\Metrics\MetricsRegistry $metrics = null, ?OpenTelemetry\API\Trace\TracerProviderInterface $tracerProvider = null, ?OpenTelemetry\API\Metrics\MeterProviderInterface $meterProvider = null, string $metricsPath = "/metrics/app", ?string $metricsToken = null, ?bool $childOfRuntimeSpan = null): self`
+- `public static disabled(): self`
+- `public enabled(): bool`
+- `public static fromEnvironment(): self`
+- `public httpClient(Nimbus\Notifications\Http\HttpClient $client): Nimbus\Notifications\Http\HttpClient`
+- `public httpTransport(Nimbus\Http\Client\Transport $transport): Nimbus\Http\Client\Transport`
+- `public install(Nimbus\App $app): self`
+- `public job(Nimbus\Jobs\JobHandler|callable $handler): Nimbus\Jobs\JobHandler|callable`
+- `public metrics(): ?Nimbus\Metrics\MetricsRegistry`
+- `public queueDepth(string $queue, Closure $size): self`
+- `public tracer(): ?OpenTelemetry\API\Trace\TracerInterface`
+
+## `Nimbus\Telemetry\TracingHttpClient`
+
+```php
+final readonly class Nimbus\Telemetry\TracingHttpClient implements Nimbus\Notifications\Http\HttpClient
+```
+
+### Methods
+
+- `public __construct(Nimbus\Notifications\Http\HttpClient $client, OpenTelemetry\API\Trace\TracerInterface $tracer): mixed`
+- `public send(Nimbus\Notifications\Http\HttpRequest $request): Nimbus\Notifications\Http\HttpResponse`
 
 ## `Nimbus\Tenancy\Tenant`
 

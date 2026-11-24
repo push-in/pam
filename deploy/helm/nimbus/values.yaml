@@ -1,0 +1,164 @@
+# Image built from packages/skeleton/Dockerfile (or your own image derived from it).
+image:
+  repository: ghcr.io/push-in/nimbus-skeleton
+  # Defaults to the chart appVersion (the PAM release the image runs on).
+  tag: ""
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+nameOverride: ""
+fullnameOverride: ""
+
+replicaCount: 2
+
+# How PAM runs the application (pam start ENTRYPOINT ...).
+pam:
+  entrypoint: index.php
+  # PHP workers per pod. Each one is a process with its own memory_limit; see docs/nimbus/operacao.md.
+  workers: 4
+  # Recycle a worker after this many requests (make-before-break, nothing is dropped).
+  maxRequests: 100000
+  # How long SIGTERM waits for in-flight requests before killing a worker. Keep it below
+  # terminationGracePeriodSeconds minus preStop.sleepSeconds.
+  gracefulTimeoutMs: 25000
+  # Task workers run queue workers and the scheduler (Nimbus Background). 0 disables them.
+  taskWorkers: 0
+  extraArgs: []
+
+port: 3000
+
+# Plain environment variables.
+env:
+  APP_ENV: production
+  DB_CONNECTION: pgsql
+
+# Secret environment variables, stored in a Secret this chart creates. Prefer existingSecret
+# (managed by External Secrets, Sealed Secrets, Vault...) in production.
+secretEnv: {}
+# Name of a Secret whose keys all become environment variables.
+existingSecret: ""
+extraEnvFrom: []
+extraEnv: []
+
+metrics:
+  # Sets NIMBUS_METRICS=1 and annotates pods for Prometheus scraping of /metrics/app.
+  enabled: true
+  path: /metrics/app
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    labels: {}
+
+# Kubernetes stops sending traffic to a terminating pod a moment after SIGTERM; the sleep keeps
+# the pod serving until endpoints are updated everywhere (native sleep action, Kubernetes 1.30+).
+preStop:
+  sleepSeconds: 5
+terminationGracePeriodSeconds: 40
+
+probes:
+  startup:
+    path: /health
+    periodSeconds: 2
+    failureThreshold: 60
+    timeoutSeconds: 2
+  liveness:
+    path: /health
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 2
+  readiness:
+    path: /ready
+    periodSeconds: 5
+    failureThreshold: 2
+    timeoutSeconds: 3
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 768Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  # Optional; memory grows with workers, not with load, so CPU is the better signal.
+  targetMemoryUtilizationPercentage: null
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+
+podDisruptionBudget:
+  enabled: true
+  # Exactly one of minAvailable or maxUnavailable.
+  minAvailable: 1
+  maxUnavailable: null
+
+strategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 25%
+    maxUnavailable: 0
+
+# Runs `pam bin/migrate` as a pre-install/pre-upgrade hook Job.
+migrations:
+  enabled: false
+  command: ["bin/migrate"]
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: api.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  automountServiceAccountToken: false
+
+podAnnotations: {}
+podLabels: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# Writable scratch space: PAM keeps its runtime sockets and uploads in /tmp.
+tmpSizeLimit: 512Mi
+# /app/storage (SQLite, local files). Use object storage or a PVC for data that must survive pods.
+storage:
+  existingClaim: ""
+  sizeLimit: 1Gi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
