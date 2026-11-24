@@ -9,6 +9,11 @@ use Pam\Contracts\Http\RequestHandlerInterface;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
+/**
+ * Runs the middleware stack of App::handle().
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
+ */
 final class Pipeline implements RequestHandlerInterface
 {
     private RequestHandlerInterface $compiled;

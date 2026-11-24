@@ -1,0 +1,51 @@
+name: Nimbus backward compatibility
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: Released tag of pushinbr/nimbus to compare against (default the newest v* tag)
+        required: false
+        type: string
+  pull_request:
+    paths:
+      - packages/nimbus/**
+      - scripts/nimbus-bc-check.sh
+      - .github/workflows/nimbus-bc.yml
+  push:
+    branches:
+      - main
+    paths:
+      - packages/nimbus/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nimbus-bc-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bc:
+    name: Nimbus BC check against the last tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: roave/backward-compatibility-check against the newest pushinbr/nimbus tag
+        env:
+          FROM_TAG: ${{ inputs.from }}
+        run: |
+          set -euo pipefail
+          if [ -n "${FROM_TAG:-}" ]; then
+            scripts/nimbus-bc-check.sh --from "${FROM_TAG}" --format github-actions
+          else
+            scripts/nimbus-bc-check.sh --format github-actions
+          fi

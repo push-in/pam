@@ -71,6 +71,8 @@ app/
 └── Services/
 database/{migrations,factories,seeders}/
 tests/{ApplicationTest.php,bootstrap.php}
+bootstrap/app.php               # builds and returns the App (no listen)
+bin/nimbus                      # bin/nimbus tinker
 routes.php                      # every route, in one file
 index.php
 ```
@@ -86,8 +88,11 @@ $router->controller(ProductController::class, function (RouteRegistrar $router):
 });
 ```
 
-`index.php` validates typed configuration before listening, installs secure
-response headers, and boots Arcano from environment configuration (`DB_*`).
+`bootstrap/app.php` installs secure response headers and boots Arcano from
+environment configuration (`DB_*`); `index.php` validates typed configuration
+and listens. `bin/nimbus tinker` opens a PsySH shell with `$app`, `$container`,
+`$arcano` and `$orm` over the same application
+(`bin/nimbus tinker --execute='$orm->getRepository(App\Models\Product::class)->findAll()'`).
 The entities in `app/Models` are compiled into `var/cache/arcano-schema.php`;
 the cache is rebuilt when an entity changes, except with `PAM_ENV=production`.
 

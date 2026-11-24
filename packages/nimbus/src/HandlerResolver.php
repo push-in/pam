@@ -8,6 +8,11 @@ use Nimbus\Container\Container;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
+/**
+ * Turns a route handler declaration into a callable.
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
+ */
 final readonly class HandlerResolver
 {
     public function __construct(private Container $container)

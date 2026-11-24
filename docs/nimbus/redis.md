@@ -20,6 +20,7 @@ Stores Redis disponíveis:
 
 | Classe | Para |
 | --- | --- |
+| `RedisCacheStore` | cache da aplicação com tags ([Cache](./cache.md)) |
 | `RedisRateLimitStore` | `RateLimitMiddleware` |
 | `RedisResponseCacheStore` | `ResponseCacheMiddleware` |
 | `RedisIdempotencyStore` | `IdempotencyMiddleware` |
@@ -27,6 +28,7 @@ Stores Redis disponíveis:
 | `RedisTokenRevocationStore` | revogação de tokens ([Autenticação](./autenticacao.md)) |
 | `RedisOAuthStateStore` | estado do login social |
 | `Nimbus\Jobs\RedisJobQueue`, `Nimbus\Scheduling\RedisSchedulerLock` | [Filas e agendador](./filas.md) |
+| `Nimbus\Broadcasting\RedisBroadcaster` | broadcasting por pub/sub ([Eventos](./eventos.md#drivers)) |
 
 Os stores em memória (`MemoryRateLimitStore`, `MemoryResponseCacheStore`, `MemoryIdempotencyStore`) têm tamanho limitado e valem só dentro de um worker: servem para desenvolvimento e testes. Com mais de um worker ou servidor, use Redis.
 
@@ -84,4 +86,16 @@ $router->post('payments', [PaymentController::class, 'store'])
     ->middleware(new IdempotencyMiddleware(new RedisIdempotencyStore($redis), ttlSeconds: 86_400));
 ```
 
-Com `required: true` (padrão), a falta do cabeçalho responde `422`.
+Com `required: true` (padrão), a falta do cabeçalho responde `422`. A resposta repetida traz o cabeçalho `idempotency-replayed: true`. A mesma chave com outro método, caminho ou corpo responde `409` (`Conflict`), para que um cliente não reaproveite uma chave em outra operação.
+
+## Stores próprios
+
+Os três middlewares recebem o store por interface. Para guardar em outro lugar, implemente:
+
+| Interface | Métodos |
+| --- | --- |
+| `Nimbus\RateLimit\RateLimitStore` | `consume(string $key, int $requestsPerSecond, int $capacity, float $now): RateLimitDecision` |
+| `Nimbus\Cache\ResponseCacheStore` | `get(string $key, int $now): ?CacheRecord`, `put(string $key, CacheRecord $record)`, `forget(string $key)` |
+| `Nimbus\Idempotency\IdempotencyStore` | `get(string $key, int $now): ?IdempotencyRecord`, `put(string $key, IdempotencyRecord $record)` |
+
+`RateLimitDecision` traz `allowed`, `limit`, `remaining` e `retryAfterSeconds`, que viram os cabeçalhos da resposta. `consume()` precisa ser atômico entre workers; um `get` seguido de `put` deixa passar requisições a mais sob concorrência. `get()` dos outros dois devolve `null` para registros vencidos (`expiresAt` menor que `$now`).

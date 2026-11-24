@@ -4,6 +4,11 @@ declare(strict_types=1);
 
 namespace Nimbus\Validation;
 
+/**
+ * Builds Input objects from validated arrays.
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
+ */
 final class DtoHydrator
 {
     /**

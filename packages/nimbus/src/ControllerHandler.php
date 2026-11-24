@@ -8,6 +8,11 @@ use Nimbus\Container\Container;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
+/**
+ * Invokes a controller action with resolved parameters.
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
+ */
 final readonly class ControllerHandler
 {
     /** @param class-string $controller */

@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `pam init --template api` writes `bootstrap/app.php` (builds and returns the `Nimbus\App`
+  without listening) and `bin/nimbus`; `index.php` and `tests/TestCase.php` require the bootstrap,
+  so `bin/nimbus tinker` opens a shell over the same application. The api and web templates add
+  `psy/psysh` to `require-dev`, and the web template also gets `bin/nimbus`.
+- New package `packages/nimbus-rector` (`pushinbr/nimbus-rector`, not yet published): Rector set
+  `NimbusSetList::LARAVEL_TO_NIMBUS` for the mechanical part of a Laravel to Nimbus port.
+- CI: `Nimbus backward compatibility` runs `roave/backward-compatibility-check` against the newest
+  tag of `push-in/nimbus`; `Nimbus Rector` runs the rule fixtures.
+
 ## 2.2.26 - 2026-11-21
 
 Security hardening. `pam init` requires `pushinbr/arcano` `^0.2.8` and `pushinbr/nimbus` `^0.6`.

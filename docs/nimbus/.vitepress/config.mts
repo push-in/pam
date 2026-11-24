@@ -11,7 +11,7 @@ export default defineConfig({
   lastUpdated: true,
   themeConfig: {
     nav: [
-      { text: 'Guia', link: '/instalacao' },
+      { text: 'Guia', link: '/primeiros-passos' },
       { text: 'API pública', link: 'https://github.com/push-in/pam/blob/main/packages/nimbus/docs/PUBLIC-API.md' },
       { text: 'Changelog', link: 'https://github.com/push-in/pam/blob/main/packages/nimbus/CHANGELOG.md' },
     ],
@@ -20,7 +20,10 @@ export default defineConfig({
         text: 'Começo',
         items: [
           { text: 'Índice', link: '/' },
+          { text: 'Primeiros passos', link: '/primeiros-passos' },
           { text: 'Instalação e estrutura', link: '/instalacao' },
+          { text: 'Configuração tipada', link: '/configuracao' },
+          { text: 'Console (tinker)', link: '/console' },
         ],
       },
       {
@@ -32,6 +35,7 @@ export default defineConfig({
           { text: 'Recursos JSON e paginação', link: '/respostas' },
           { text: 'Erros (problem+json)', link: '/erros' },
           { text: 'OpenAPI e clientes', link: '/openapi' },
+          { text: 'Cliente HTTP', link: '/http-client' },
         ],
       },
       {
@@ -39,7 +43,9 @@ export default defineConfig({
         items: [
           { text: 'Banco de dados (Arcano)', link: '/banco' },
           { text: 'Factories e seeders', link: '/factories' },
+          { text: 'Cache e tags', link: '/cache' },
           { text: 'Redis, cache e rate limit', link: '/redis' },
+          { text: 'Multi-tenant', link: '/tenancy' },
           { text: 'Storage e URLs assinadas', link: '/storage' },
         ],
       },
@@ -55,7 +61,9 @@ export default defineConfig({
         text: 'Trabalho em segundo plano',
         items: [
           { text: 'Filas e agendador', link: '/filas' },
+          { text: 'Eventos e broadcasting', link: '/eventos' },
           { text: 'Notificações', link: '/notificacoes' },
+          { text: 'E-mail', link: '/email' },
         ],
       },
       {
@@ -72,9 +80,11 @@ export default defineConfig({
         items: [
           { text: 'Testes', link: '/testes' },
           { text: 'Logs e observabilidade', link: '/observabilidade' },
+          { text: 'Resiliência e transações', link: '/resiliencia' },
           { text: 'Deploy', link: '/deploy' },
           { text: 'Desempenho', link: '/desempenho' },
           { text: 'Migração do Laravel', link: '/migracao-laravel' },
+          { text: 'Regras Rector', link: 'https://github.com/push-in/pam/tree/main/packages/nimbus-rector' },
         ],
       },
     ],

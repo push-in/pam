@@ -43,6 +43,7 @@
         "pushinbr/arcano": "Required by the Arcano ORM integration (ArcanoServiceProvider, ArcanoManager).",
         "pushinbr/pam-http-psr": "PSR-7, PSR-15 and PSR-17 interoperability.",
         "pushinbr/pam-socket": "High-level event and room APIs for Pam WebSockets.",
+        "symfony/deprecation-contracts": "Deprecation notices of Nimbus through trigger_deprecation() (otherwise E_USER_DEPRECATED with the same message).",
         "symfony/http-client": "Nimbus\\Http\\Client outside the PAM runtime (inside PAM it uses the non-blocking runtime client).",
         "symfony/mailer": "Required by the mail notification channel (Nimbus\\Notifications\\Mail\\MailChannel).",
         "symfony/translation": "Translations from lang/ directories (Nimbus\\Translation\\Translator, __() and trans())."

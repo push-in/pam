@@ -18,10 +18,12 @@ pam composer require pushinbr/arcano   # só se o app usar banco
 
 ### Template `api`
 
-Gera um app mínimo com uma rota e um teste:
+Gera um app mínimo com uma rota e um teste. O passo a passo até a primeira entidade está em [Primeiros passos](./primeiros-passos.md).
 
 ```text
 app/Controllers/PingController.php
+bootstrap/app.php
+bin/nimbus
 database/{factories,migrations,seeders}/
 tests/TestCase.php
 tests/ApplicationTest.php
@@ -32,13 +34,26 @@ phpunit.xml
 ```
 
 ```php
-// index.php
+// bootstrap/app.php: monta o App sem listen(); index.php, testes e tinker carregam este arquivo
 use Nimbus\App;
 
+$root = dirname(__DIR__);
+
 $app = new App();
-$app->routes(__DIR__ . '/routes.php');
+$app->routes($root . '/routes.php');
+
+return $app;
+```
+
+```php
+// index.php
+/** @var \Nimbus\App $app */
+$app = require __DIR__ . '/bootstrap/app.php';
+
 $app->listen((int) (getenv('PAM_PORT') ?: 3000));
 ```
+
+`bin/nimbus tinker` abre um shell PsySH sobre a mesma aplicação ([Console](./console.md)).
 
 ```php
 // routes.php
@@ -54,7 +69,7 @@ $router->get('api/ping', [PingController::class, 'show']);
 
 Gera um app com sessão em arquivo (`storage/sessions`), CSRF em todo formulário, views `resources/views/**/*.nim.php` com o layout como componente `<x-layout>`, login, cadastro, logout, reset de senha por e-mail e um dashboard só para usuários logados. O usuário é uma entidade Arcano (`app/Models/User.php`) com senha em `Nimbus\Security\Hash`; os textos vêm de `lang/pt_BR` e `lang/en`.
 
-`bootstrap/app.php` monta a aplicação para o `index.php`, o `bin/migrate` e os testes, e lê o `.env`, que o `pam init` cria com um `APP_KEY` aleatório. Não precisa de JavaScript.
+`bootstrap/app.php` monta a aplicação para o `index.php`, o `bin/migrate`, o `bin/nimbus tinker` e os testes, e lê o `.env`, que o `pam init` cria com um `APP_KEY` aleatório. Não precisa de JavaScript.
 
 ```bash
 cd meu-site

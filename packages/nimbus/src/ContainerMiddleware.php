@@ -10,6 +10,11 @@ use Pam\Contracts\Http\RequestHandlerInterface;
 use Pam\Http\Request;
 use Pam\Http\Response;
 
+/**
+ * Opens the request scope of the container around the pipeline.
+ *
+ * @internal Implementation detail of Nimbus, excluded from the semver promise; use the public API that wraps it.
+ */
 final readonly class ContainerMiddleware implements MiddlewareInterface
 {
     /** @param class-string $middleware */
