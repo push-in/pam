@@ -189,6 +189,15 @@ pub struct ServerConfig {
     pub max_response_chunk_bytes: usize,
     #[serde(default = "default_header_read_timeout_ms")]
     pub header_read_timeout_ms: u64,
+    /// HTTP/2: concurrent streams a client may open on one connection.
+    #[serde(default = "default_http2_max_concurrent_streams")]
+    pub http2_max_concurrent_streams: u32,
+    /// HTTP/2: initial flow-control window of each stream (request bodies).
+    #[serde(default = "default_http2_stream_window_bytes")]
+    pub http2_stream_window_bytes: u32,
+    /// HTTP/2: flow-control window shared by the streams of a connection.
+    #[serde(default = "default_http2_connection_window_bytes")]
+    pub http2_connection_window_bytes: u32,
     #[serde(default = "default_body_read_timeout_ms")]
     pub body_read_timeout_ms: u64,
     #[serde(default)]
@@ -339,6 +348,15 @@ fn default_response_cache_tag_header() -> String {
 }
 fn default_header_read_timeout_ms() -> u64 {
     10_000
+}
+fn default_http2_max_concurrent_streams() -> u32 {
+    256
+}
+fn default_http2_stream_window_bytes() -> u32 {
+    1024 * 1024
+}
+fn default_http2_connection_window_bytes() -> u32 {
+    4 * 1024 * 1024
 }
 fn default_body_read_timeout_ms() -> u64 {
     30_000
@@ -605,6 +623,7 @@ impl PhpEngine {
         // SAFETY: Argument buffers are writable and NUL-terminated, and remain owned
         // by PhpRuntime until shutdown.
         crate::native_shared::register();
+        crate::native_pg::register();
         let status = unsafe { pam_php_init(argc, pointers.as_mut_ptr()) };
 
         if status != 0 {

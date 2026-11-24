@@ -36,6 +36,7 @@ final class ArcanoTestDatabase
                 'prefix' => '',
                 'trust_server_certificate' => true,
                 'async' => getenv('ARCANO_TEST_ASYNC') ?: '',
+                'client' => getenv('ARCANO_TEST_CLIENT') ?: 'pdo',
             ];
         return new DatabaseConfig('default', ['default' => $connection]);
     }

@@ -50,6 +50,14 @@ Security hardening, second part (audit of 2026-11-20).
   reader, dispatch envelope, page cache policy, shared table) and ASan + UBSan integration tests on
   every PR; CodeQL for C/C++, Rust and workflows; an advisory throughput gate against the base
   branch; a nightly RSS soak and Valgrind run. See `docs/security-checklist.md`.
+- Native Postgres client for PHP (`pam_pg_connect`, `pam_pg_execute`, `pam_pg_transaction`, ...;
+  `native/pam_pg_php.inc`, `src/pg_client.rs`): a blocking client on the worker thread over the
+  `postgres-protocol` codec. Extended protocol only with bound parameters, statements prepared once
+  per session (named, closed with their PHP statement), text results converted like pdo_pgsql,
+  SCRAM-SHA-256/MD5, TLS through rustls (`sslmode` up to `verify-full`), sessions unusable in a
+  forked child. Used by Nimbus's opt-in `DB_DRIVER=pam-pg`.
+- HTTP/2 tuning on the direct path: `http2MaxConcurrentStreams` (256), `http2StreamWindowBytes`
+  (1 MiB) and `http2ConnectionWindowBytes` (4 MiB), applied to h2c and TLS ALPN `h2` connections.
 
 ## 2.2.26 - 2026-11-21
 

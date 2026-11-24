@@ -785,6 +785,11 @@ mod tests {
                 header_read_timeout: std::time::Duration::from_secs(5),
                 graceful_timeout: std::time::Duration::from_secs(5),
                 max_connections: 64,
+                http2: crate::http_serve::Http2Settings {
+                    max_concurrent_streams: 256,
+                    stream_window: 1024 * 1024,
+                    connection_window: 4 * 1024 * 1024,
+                },
             },
             tracker.clone(),
         );

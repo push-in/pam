@@ -9,6 +9,8 @@ parameters:
         - phpstan/src
         - src
         - tests
+    scanFiles:
+        - phpstan/stubs/pam-pg.php
     excludePaths:
         - tests/PHPStan/data/*
     tmpDir: .build/phpstan

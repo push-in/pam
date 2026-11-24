@@ -1439,6 +1439,11 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
     let address = format!("{}:{}", config.host, config.port);
     let header_read_timeout = config.header_read_timeout_ms;
     let max_connections = config.max_connections;
+    let http2_settings = crate::http_serve::Http2Settings {
+        max_concurrent_streams: config.http2_max_concurrent_streams,
+        stream_window: config.http2_stream_window_bytes,
+        connection_window: config.http2_connection_window_bytes,
+    };
     let tls_files = match (&config.tls_cert, &config.tls_key) {
         (Some(certificate), Some(key)) => Some((certificate.clone(), key.clone())),
         (None, None) => None,
@@ -1516,6 +1521,7 @@ async fn run_async(mut config: ServerConfig) -> Result<(), ServerError> {
         header_read_timeout: Duration::from_millis(header_read_timeout),
         graceful_timeout: Duration::from_secs(30),
         max_connections: crate::http_serve::connection_limit(max_connections),
+        http2: http2_settings,
     };
     let tracker = crate::http_serve::ConnectionTracker::default();
     let (stop_accepting, stop_accepting_receiver) = watch::channel(false);

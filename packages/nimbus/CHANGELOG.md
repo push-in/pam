@@ -95,6 +95,12 @@ still `php` and `pushinbr/pam-contracts`.
 
 ### Added
 
+- `NativePostgresDriver` (opt-in, `DB_DRIVER=pam-pg`): Arcano's Postgres driver on the PAM runtime's
+  native client (`pam_pg_*`). Statements are prepared once per session and run in one round trip,
+  values are always bound, rows arrive as PHP arrays with pdo_pgsql's types, and `BEGIN` travels with
+  the transaction's first statement. Outside PAM it falls back to PDO. Not the default: on
+  nimbus-bench it matches PDO's CPU per request and is 3-5% below it in throughput.
+
 - `Nimbus\Http\Client`: a fluent HTTP client (`Http::withToken()->timeout()->retry()->get()`,
   `asForm()`, `withBody()`, `baseUrl()`, `pool()`, `Response::throw()`/`json('a.b')`). Inside PAM
   it sends through `Pam\Http\Client`, suspending only the request Fiber, and pools run in sibling
