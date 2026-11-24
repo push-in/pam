@@ -5,7 +5,8 @@ name: PHP packages
 # Composer advisory audit. Nimbus (Required PAM HTTP) and the Octane bridge
 # (Required Octane) keep their own jobs in required-gates.yml; their audit
 # lives in security.yml. The skeleton is analysed and tested against Nimbus in
-# Required PAM HTTP, so here it only gets the audit.
+# Required PAM HTTP, so here it only gets the audit. pam-psr and pam-testing
+# are code-less compatibility aliases: manifest, resolution and audit only.
 #
 # The PAM runtime classes (Pam\Http\Request, Pam\WS\Server, Pam\Native\...)
 # come from runtime/*.php, which PHPStan scans but does not analyse.
@@ -49,10 +50,10 @@ jobs:
             analyse: true
           - package: psr
             php: '8.4'
-            analyse: true
+            analyse: false
           - package: testing
             php: '8.4'
-            analyse: true
+            analyse: false
           - package: nimbus-rector
             php: '8.4'
             analyse: true
@@ -102,6 +103,10 @@ jobs:
           fi
       - name: Composer audit
         run: |
+          if ! test -f composer.lock; then
+            echo "No dependencies to audit."
+            exit 0
+          fi
           for attempt in 1 2 3; do
             if composer audit --locked --abandoned=report; then
               exit 0

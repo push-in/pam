@@ -10,5 +10,8 @@
     <baseline>
         <!-- 0.7: implementation classes marked @internal (not documented, not in a public signature). -->
         <ignored-regex>#Nimbus\\(CallableRequestHandler|ContainerMiddleware|ControllerHandler|HandlerResolver|Pipeline|PackageDiscovery|View\\Compiler|View\\CompiledTemplate|Validation\\DtoHydrator) was marked "@internal"#</ignored-regex>
+        <!-- Nimbus' PHPStan extension (phpstan/src) implements interfaces that ship only
+             inside phpstan.phar, which BetterReflection cannot read. Not public API. -->
+        <ignored-regex>#"PHPStan\\[A-Za-z\\]+" could not be found in the located source#</ignored-regex>
     </baseline>
 </roave-bc-check>
