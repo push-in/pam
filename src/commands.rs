@@ -3766,7 +3766,7 @@ fn local_packages_repository() -> Option<serde_json::Value> {
                     "symlink": false,
                     "versions": {
                         "pushinbr/pam-contracts": "1.1.0",
-                        "pushinbr/nimbus": "0.6.0",
+                        "pushinbr/nimbus": "0.7.0",
                         "pushinbr/pam-http-psr": "1.0.0",
                         "pushinbr/pam-socket": "1.1.0",
                         "pushinbr/pam-http-testing": "1.0.0"
