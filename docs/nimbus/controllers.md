@@ -152,7 +152,7 @@ $config = Configuration::fromEnvironment([
 $port = $config->integer('app.port');
 ```
 
-Para diagnóstico, use `$config->redacted()`, que mascara os valores sensíveis. As mensagens de erro citam a variável e o tipo esperado, nunca o valor recebido.
+Para diagnóstico, use `$config->redacted()`, que mascara os valores sensíveis. As mensagens de erro citam a variável e o tipo esperado, nunca o valor recebido. Tipos, valores padrão e as variáveis lidas por cada módulo estão em [Configuração tipada](./configuracao.md).
 
 ## Tratamento de erros
 

@@ -1,0 +1,13 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Usage: bin/nimbus tinker [--execute=code]. Loads bootstrap/app.php of this project.
+chdir(dirname(__DIR__));
+$_composer_autoload_path = dirname(__DIR__) . '/vendor/autoload.php';
+if (!is_file($_composer_autoload_path)) {
+    fwrite(STDERR, "Composer dependencies are missing; run pam composer install.\n");
+    exit(2);
+}
+require dirname(__DIR__) . '/vendor/pushinbr/nimbus/bin/nimbus';

@@ -4155,6 +4155,20 @@ fn initializes_a_project_without_overwriting_files() {
     );
     assert!(directory.join("tests/TestCase.php").is_file());
     assert!(directory.join("database/migrations").is_dir());
+    assert_eq!(manifest_json["require-dev"]["psy/psysh"], "^0.12");
+    let bootstrap = fs::read_to_string(directory.join("bootstrap/app.php")).unwrap();
+    assert!(bootstrap.contains("return $app;"));
+    assert!(!bootstrap.contains("listen("));
+    assert!(
+        fs::read_to_string(directory.join("index.php"))
+            .unwrap()
+            .contains("require __DIR__ . '/bootstrap/app.php'")
+    );
+    assert!(
+        fs::read_to_string(directory.join("bin/nimbus"))
+            .unwrap()
+            .contains("vendor/pushinbr/nimbus/bin/nimbus")
+    );
 
     let repeated = run_pam(&["init", directory.to_str().unwrap()]);
     assert!(!repeated.status.success());

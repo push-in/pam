@@ -1198,7 +1198,8 @@ fn nimbus_composer_manifest(socket: bool, extra: &[(&str, &str)]) -> serde_json:
         "require-dev": {
             "fakerphp/faker": "^1.24",
             "laravel/pint": "^1.30",
-            "phpunit/phpunit": "^12.5"
+            "phpunit/phpunit": "^12.5",
+            "psy/psysh": "^0.12"
         },
         "autoload": {"psr-4": {
             "App\\": "app/",
@@ -1270,6 +1271,7 @@ fn init_web(directory: &Path) -> Result<(), String> {
         )
         .map_err(|error| format!("cannot make bin/migrate executable: {error}"))?;
     }
+    write_nimbus_bin(directory)?;
     fs::create_dir_all(directory.join("storage"))
         .map_err(|error| format!("cannot create storage: {error}"))?;
     let example = crate::web_starter::FILES
@@ -1293,6 +1295,54 @@ fn app_key() -> Result<String, String> {
         "base64:{}",
         base64::Engine::encode(&base64::engine::general_purpose::STANDARD, bytes)
     ))
+}
+
+/// `bootstrap/app.php` of the api starter: builds the `Nimbus\App` without listening, so
+/// `index.php`, the tests and `bin/nimbus tinker` share one application.
+const API_BOOTSTRAP: &str = r#"<?php
+
+declare(strict_types=1);
+
+use Nimbus\App;
+
+$root = dirname(__DIR__);
+
+$app = new App();
+$app->routes($root . '/routes.php');
+
+return $app;
+"#;
+
+/// `bin/nimbus`: runs the Nimbus console (`bin/nimbus tinker`) from the project root.
+const NIMBUS_BIN: &str = r#"#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+// Usage: bin/nimbus tinker [--execute=code]. Loads bootstrap/app.php of this project.
+chdir(dirname(__DIR__));
+$_composer_autoload_path = dirname(__DIR__) . '/vendor/autoload.php';
+if (!is_file($_composer_autoload_path)) {
+    fwrite(STDERR, "Composer dependencies are missing; run pam composer install.\n");
+    exit(2);
+}
+require dirname(__DIR__) . '/vendor/pushinbr/nimbus/bin/nimbus';
+"#;
+
+fn write_nimbus_bin(directory: &Path) -> Result<(), String> {
+    fs::create_dir_all(directory.join("bin"))
+        .map_err(|error| format!("cannot create bin: {error}"))?;
+    write_new(&directory.join("bin/nimbus"), NIMBUS_BIN)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            directory.join("bin/nimbus"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .map_err(|error| format!("cannot make bin/nimbus executable: {error}"))?;
+    }
+    Ok(())
 }
 
 fn init_api(directory: &Path, socket: bool) -> Result<(), String> {
@@ -1331,15 +1381,17 @@ $socket->on('connection', static function (\Pam\WS\Socket $client): void {
 
 declare(strict_types=1);
 
-use Nimbus\App;
-
-$app = new App();
+/** @var \Nimbus\App $app */
+$app = require __DIR__ . '/bootstrap/app.php';
 {socket_setup}
-$app->routes(__DIR__ . '/routes.php');
 $app->listen((int) (getenv('PAM_PORT') ?: 3000));
 "#
         ),
     )?;
+    fs::create_dir_all(directory.join("bootstrap"))
+        .map_err(|error| format!("cannot create bootstrap: {error}"))?;
+    write_new(&directory.join("bootstrap/app.php"), API_BOOTSTRAP)?;
+    write_nimbus_bin(directory)?;
     write_new(
         &directory.join("routes.php"),
         r#"<?php
@@ -1402,8 +1454,7 @@ abstract class TestCase extends \Nimbus\Testing\TestCase
 {
     protected function createApplication(): App
     {
-        $app = new App(discoverPackages: false);
-        $app->routes(dirname(__DIR__) . '/routes.php');
+        $app = require dirname(__DIR__) . '/bootstrap/app.php';
 
         return $app;
     }

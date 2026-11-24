@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `pam init --template api` writes `bootstrap/app.php` (builds and returns the `Nimbus\App`
+  without listening) and `bin/nimbus`; `index.php` and `tests/TestCase.php` require the bootstrap,
+  so `bin/nimbus tinker` opens a shell over the same application. The api and web templates add
+  `psy/psysh` to `require-dev`, and the web template also gets `bin/nimbus`.
+- New package `packages/nimbus-rector` (`pushinbr/nimbus-rector`, not yet published): Rector set
+  `NimbusSetList::LARAVEL_TO_NIMBUS` for the mechanical part of a Laravel to Nimbus port.
+- CI: `Nimbus backward compatibility` runs `roave/backward-compatibility-check` against the newest
+  tag of `push-in/nimbus`; `Nimbus Rector` runs the rule fixtures.
+
 Security hardening, second part (audit of 2026-11-20).
 
 - A dispatch protocol error (empty, duplicate or unknown request id, malformed resume payload) now

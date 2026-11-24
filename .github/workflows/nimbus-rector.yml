@@ -1,0 +1,42 @@
+name: Nimbus Rector
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - packages/nimbus-rector/**
+      - .github/workflows/nimbus-rector.yml
+  push:
+    branches:
+      - main
+    paths:
+      - packages/nimbus-rector/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nimbus-rector-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Nimbus Rector rules
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: packages/nimbus-rector
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+      - name: Install dependencies
+        run: composer update --no-interaction --prefer-dist --no-progress
+      - name: Fixture tests
+        run: vendor/bin/phpunit

@@ -80,6 +80,22 @@ still `php` and `pushinbr/pam-contracts`.
   over the entity, FormRequest `input()`/`validated()` are typed from `rules()`, and a rule checks
   route closure parameters against the path placeholders. `composer analyse` (level 9, in CI)
   covers the extension.
+- `Http\RequestData`: Laravel-style input reads for ported code (`input()` with dot notation,
+  `all()`, `has()`, `filled()`, `only()`, `bearerToken()`); body fields win over the query
+  string. The `pushinbr/nimbus-rector` set rewrites `$request->input()` and friends to it.
+- `Deprecation::trigger()` (internal): deprecation notices in the `symfony/deprecation-contracts`
+  format, through `trigger_deprecation()` when installed (now suggested).
+- `docs/VERSIONING.md`: semver scope, public API inventory, one-minor deprecation cycle and
+  1.x LTS (security fixes for 18 months after 2.0); `UPGRADE.md` gains a template for majors.
+- CI: `scripts/nimbus-bc-check.sh` runs `roave/backward-compatibility-check` against the newest
+  tag of `push-in/nimbus` on every pull request that changes the package.
+
+### Changed
+
+- Marked `@internal` and removed from `api-surface.json` (none is documented or reachable from
+  a public signature): `CallableRequestHandler`, `ContainerMiddleware`, `ControllerHandler`,
+  `HandlerResolver`, `Pipeline`, `PackageDiscovery`, `View\Compiler`, `View\CompiledTemplate`,
+  `Validation\DtoHydrator`. The public surface is 333 symbols.
 
 ## 0.6.0 - 2026-11-21
 
