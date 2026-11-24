@@ -1,0 +1,156 @@
+name: PHP packages
+
+# Every Composer package in packages/ that has no dedicated gate gets the same
+# three checks here: its own tests, PHPStan at the maximum level and a
+# Composer advisory audit. Nimbus (Required PAM HTTP) and the Octane bridge
+# (Required Octane) keep their own jobs in required-gates.yml; their audit
+# lives in security.yml. The skeleton is analysed and tested against Nimbus in
+# Required PAM HTTP, so here it only gets the audit. pam-psr and pam-testing
+# are code-less compatibility aliases: manifest, resolution and audit only.
+#
+# The PAM runtime classes (Pam\Http\Request, Pam\WS\Server, Pam\Native\...)
+# come from runtime/*.php, which PHPStan scans but does not analyse.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '41 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: php-packages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  package:
+    name: ${{ matrix.package }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - package: contracts
+            php: '8.4'
+            analyse: true
+          - package: http-psr
+            php: '8.4'
+            analyse: true
+          - package: http-testing
+            php: '8.4'
+            analyse: true
+          - package: socket
+            php: '8.4'
+            analyse: true
+          - package: psr
+            php: '8.4'
+            analyse: false
+          - package: testing
+            php: '8.4'
+            analyse: false
+          - package: nimbus-rector
+            php: '8.4'
+            analyse: true
+          - package: skeleton
+            php: '8.5'
+            analyse: false
+    defaults:
+      run:
+        working-directory: packages/${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@eb7c497e18156a6bbabfef1d3a82760b9eda3962 # 2.40.0
+        with:
+          php-version: ${{ matrix.php }}
+          tools: composer:v2, phpstan:2.1.33
+          coverage: none
+      - name: Validate the manifest
+        run: composer validate --strict --no-check-publish $(test -f composer.lock || echo --no-check-lock)
+      - name: Offer the monorepo packages through a local path repository
+        # Same rule as build.rs: each package is offered at the first released
+        # `## X.Y.Z` header of its CHANGELOG.md, so a release PR that bumps a
+        # constraint resolves before the new version reaches Packagist.
+        run: |
+          versions=$(python3 - <<'EOF'
+          import json, pathlib, re
+          root = pathlib.Path("..")
+          versions = {}
+          for manifest in sorted(root.glob("*/composer.json")):
+              changelog = manifest.parent / "CHANGELOG.md"
+              if not changelog.is_file():
+                  continue
+              match = re.search(r"^## \[?v?(\d+\.\d+\.\d+)", changelog.read_text(), re.M)
+              if match:
+                  versions[json.loads(manifest.read_text())["name"]] = match.group(1)
+          print(json.dumps({"type": "path", "url": "../*", "options": {"symlink": False, "versions": versions}}))
+          EOF
+          )
+          composer config repositories.monorepo --json "${versions}"
+      - name: Resolve dependencies
+        run: |
+          if test -f composer.lock; then
+            composer install --no-interaction --prefer-dist --no-progress
+          else
+            composer update --no-interaction --prefer-dist --no-progress
+          fi
+      - name: Composer audit
+        run: |
+          if ! test -f composer.lock ||
+            test "$(jq '(.packages | length) + (."packages-dev" | length)' composer.lock)" -eq 0; then
+            echo "No dependencies to audit."
+            exit 0
+          fi
+          for attempt in 1 2 3; do
+            if composer audit --locked --abandoned=report; then
+              exit 0
+            fi
+            test "${attempt}" -lt 3 || exit 1
+            echo "Composer advisory audit attempt ${attempt} failed; retrying."
+            sleep 5
+          done
+      - name: Tests
+        if: matrix.analyse
+        run: |
+          if composer run-script --list 2>/dev/null | grep -Eq '^ *test( |$)'; then
+            composer test
+          elif test -f phpunit.xml; then
+            vendor/bin/phpunit
+          else
+            find src -name '*.php' -print0 | xargs -0 -n1 php -l
+          fi
+      - name: PHPStan (level max)
+        if: matrix.analyse
+        run: |
+          cat > "${RUNNER_TEMP}/phpstan.neon" <<EOF
+          parameters:
+            level: max
+            paths:
+              - ${PWD}/src
+            scanDirectories:
+              - ${GITHUB_WORKSPACE}/runtime
+            excludePaths:
+              analyseAndScan:
+                - ${GITHUB_WORKSPACE}/runtime/android
+            tmpDir: ${RUNNER_TEMP}/phpstan
+          EOF
+          phpstan analyse --configuration="${RUNNER_TEMP}/phpstan.neon" \
+            --autoload-file=vendor/autoload.php --no-progress --memory-limit=1G
+
+  required:
+    name: Required PHP packages
+    if: always()
+    needs: package
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every package passed
+        env:
+          RESULT: ${{ needs.package.result }}
+        run: test "${RESULT}" = success

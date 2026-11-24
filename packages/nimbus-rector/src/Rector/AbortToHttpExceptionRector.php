@@ -6,7 +6,6 @@ namespace Nimbus\Rector\Rector;
 
 use PhpParser\Node;
 use PhpParser\Node\Arg;
-use PhpParser\Node\Expr;
 use PhpParser\Node\Expr\BooleanNot;
 use PhpParser\Node\Expr\ClassConstFetch;
 use PhpParser\Node\Expr\FuncCall;
@@ -76,7 +75,7 @@ final class AbortToHttpExceptionRector extends AbstractRector
         if (!$call instanceof FuncCall || $call->isFirstClassCallable()) {
             return null;
         }
-        $arguments = $call->getArgs();
+        $arguments = array_values($call->getArgs());
         if ($this->isName($call, 'abort')) {
             $throw = $this->throw($arguments);
             return $throw === null ? null : new Expression($throw);
@@ -106,11 +105,11 @@ final class AbortToHttpExceptionRector extends AbstractRector
             return null;
         }
         [$case, $message] = self::STATUSES[$status];
-        $messageExpr = $arguments[1]->value ?? new String_($message);
+        $messageExpr = isset($arguments[1]) ? $arguments[1]->value : new String_($message);
         return new Throw_(new New_(new FullyQualified('Nimbus\Http\HttpException'), [
             new Arg(new Int_($status)),
             new Arg(new ClassConstFetch(new FullyQualified('Nimbus\Http\ProblemCode'), $case)),
-            new Arg($messageExpr instanceof Expr ? $messageExpr : new String_($message)),
+            new Arg($messageExpr),
         ]));
     }
 }
